@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Mozillazg's Blog - Tag: django</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link href="../theme/css/bootstrap.css" rel="stylesheet" type="text/css"/>
+  <link href="../theme/css/bootstrap-responsive.css" rel="stylesheet" type="text/css"/>
+  <link href="../theme/css/main.css" rel="stylesheet" type="text/css"/>
+  <link href="../theme/css/pygment.css" rel="stylesheet" type="text/css"/>
+  <link href="http://fonts.googleapis.com/css?family=Chelsea+Market" rel="stylesheet" type="text/css"/>
+    
+               <link href="../2013/01/django-variables-and-attributes-may-not-begin-with-underscores.html" rel="bookmark"/>
+      
+
+  
+  <!--[if lt IE 9]>
+    <script src="https://raw.github.com/aFarkas/html5shiv/master/dist/html5shiv.js"></script>
+  <![endif]-->
+</head>
+
+<!--
+relapse - a Pelican theme using Bootstrap 
+Copyright (c) 2012 Warren Moore
+https://github.com/wamonite/relapse
+-->
+<body>
+  <a href="http://github.com/mozillazg/mozillazg.github.com">
+<img style="position: absolute; top: 0; right: 0; border: 0;" src="http://s3.amazonaws.com/github/ribbons/forkme_right_white_ffffff.png" alt="Fork me on GitHub" />
+</a>
+<!-- Header -->
+<header><div class="container">
+<h1 class="page-header"><a href="../index.html">Mozillazg's Blog</a>
+</h1>
+</div></header>
+<!-- /Header -->
+
+<!-- Body -->
+<section id="body"><div class="container">
+
+<!-- Nav bar -->
+<div class="row"><div class="span12">
+<nav class="navbar"><div class="navbar-inner">
+<ul class="nav">
+  <li><a href="../index.html">Home</a></li>
+  
+    
+  
+  <li><a href="http://mozillazg.github.com/archives.html">Archives</a></li>
+</ul>
+</div></nav>
+</div></div>
+<!-- /Nav bar -->
+
+<!-- Main block -->
+<div class="row">
+
+<!-- Content --> 
+<div class="span9">
+<h3 class="well well-small">Tag: django</h3>
+
+
+            <article>
+      <h1><a href="../2013/01/django-variables-and-attributes-may-not-begin-with-underscores.html" rel="bookmark">[django] Variables and attributes may not begin with underscores</a></h1>
+      
+      <p>当尝试在模板中<strong>调用以下划线开头的对象时</strong>，会报类似如下错误：</p>
+<blockquote>
+<p>TemplateSyntaxError at /
+Variables and attributes may not begin with underscores: 'user._meta.get_field('name').help_text'</p>
+</blockquote>
+<p>解决方法就是，将调用以下划线开头的对象的操作封装到模板过滤器中。</p>
+<h2>如何创建自定义模板过滤器</h2>
+<p>在 models.py 文件所在目录新建一个 templatetags 目录:</p>
+<div class="codehilite"><pre><span class="n">hello</span><span class="o">/</span>
+    <span class="n">models</span><span class="p">.</span><span class="n">py</span>
+    <span class="n">templatetags</span><span class="o">/</span>
+        <span class="n">hello_extras</span><span class="p">.</span><span class="n">py</span>
+        <span class="n">__init__</span><span class="p">.</span><span class="n">py</span>
+    <span class="n">views</span><span class="p">.</span><span class="n">py</span>
+</pre></div>
+
+
+<p>hello_extras.py 中保存着我们自定义的模板过滤器。</p>
+<p>在 hello_extras.py 文件的开头需要包含如下代码：</p>
+<div class="codehilite"><pre><span class="n">from</span> <span class="n">django</span> <span class="n">import</span> <span class="n">template</span>
+
+<span class="k">register</span> <span class="o">=</span> <span class="n">template</span><span class="p">.</span><span class="n">Library</span><span class="p">()</span>
+</pre></div>
+
+
+<p>本例中我们将定义一个 help_text 过滤器，用于获取 models 中字段的 help_text 的值，所以 hello_extras.py 的内容为：</p>
+<div class="codehilite"><pre><span class="n">from</span> <span class="n">django</span> <span class="n">import</span> <span class="n">template</span>
+
+<span class="k">register</span> <span class="o">=</span> <span class="n">template</span><span class="p">.</span><span class="n">Library</span><span class="p">()</span>
+
+<span class="err">@</span><span class="k">register</span><span class="p">.</span><span class="n">filter</span>
+<span class="n">def</span> <span class="n">help_text</span><span class="p">(</span><span class="n">value</span><span class="p">,</span> <span class="n">arg</span><span class="p">)</span><span class="o">:</span>
+    <span class="k">return</span> <span class="n">value</span><span class="p">.</span><span class="n">_meta</span><span class="p">.</span><span class="n">get_field</span><span class="p">(</span><span class="n">arg</span><span class="p">).</span><span class="n">help_text</span>
+</pre></div>
+
+
+<p>在模板中使用自定义过滤器时，要记得导入过滤器：</p>
+<div class="codehilite"><pre><span class="p">{</span><span class="o">%</span> <span class="n">load</span> <span class="n">hello_extras</span> <span class="o">%</span><span class="p">}</span>
+</pre></div>
+
+
+<p>本例的模板文件：</p>
+<div class="codehilite"><pre><span class="p">{</span><span class="o">%</span> <span class="nx">load</span> <span class="nx">hello_extras</span> <span class="o">%</span><span class="p">}</span>
+
+<span class="p">{</span><span class="o">%</span> <span class="nb">for</span> <span class="n">user</span> <span class="k">in</span> <span class="nx">users</span> <span class="o">%</span><span class="p">}</span>
+  <span class="o">&lt;</span><span class="nx">p</span><span class="o">&gt;</span><span class="p">{{</span> <span class="nb">user</span><span class="o">|</span><span class="nx">help_text</span><span class="p">:</span><span class="s2">&quot;name&quot;</span> <span class="p">}}</span><span class="err">：</span> <span class="p">{{</span> <span class="nx">user.name</span> <span class="p">}}</span><span class="o">&lt;/</span><span class="nx">p</span><span class="o">&gt;</span>
+<span class="p">{</span><span class="o">%</span> <span class="nx">endfor</span> <span class="o">%</span><span class="p">}</span>
+</pre></div>
+
+
+<p>models 文件节选：</p>
+<div class="codehilite"><pre><span class="n">class</span> <span class="n">User</span><span class="p">(</span><span class="n">models</span><span class="p">.</span><span class="n">Model</span><span class="p">)</span><span class="o">:</span>
+    <span class="n">name</span> <span class="o">=</span> <span class="n">models</span><span class="p">.</span><span class="n">CharField</span><span class="p">(</span><span class="n">max_length</span><span class="o">=</span><span class="mi">50</span><span class="p">,</span> <span class="n">help_text</span><span class="o">=</span><span class="n">u</span><span class="err">&#39;姓名&#39;</span><span class="p">)</span>
+</pre></div>
+
+
+<p>模板渲染结果：</p>
+<blockquote>
+<p>姓名：tom</p>
+<p>姓名：jim</p>
+<p>姓名：eric</p>
+</blockquote>
+<p>测试项目下载：<a href="/static/downloads/2013.01.17.mysite.tar.gz">mysite.tar.gz</a> ，测试环境：django 1.4.3。</p>
+<h2>参考</h2>
+<ul>
+<li><a href="http://stackoverflow.com/questions/4279905/access-django-model-fields-label-and-help-text">http://stackoverflow.com/questions/4279905/access-django-model-fields-label-and-help-text</a></li>
+<li><a href="http://stackoverflow.com/questions/6571649/model-name-of-objects-in-django-templates">http://stackoverflow.com/questions/6571649/model-name-of-objects-in-django-templates</a></li>
+<li><a href="https://docs.djangoproject.com/en/dev/howto/custom-template-tags/">https://docs.djangoproject.com/en/dev/howto/custom-template-tags/</a></li>
+</ul>
+      
+      <p class="info">
+      Posted 周四 17 一月 2013
+ by <a class="url fn" href="../author/mozillazg.html">mozillazg</a>
+in <a href="../category/django.html">django</a>
+(<a href="../tag/python.html">python</a>, <a href="../tag/django.html">django</a>)      </p>
+      
+            </article>
+      
+            
+      
+
+</div>
+<!-- /Content -->
+
+<!-- Side bar -->
+<nav class="span3">
+
+<h2>Categories</h2>
+<ul class="nav nav-pills nav-stacked">
+  <li ><a href="../category/django.html">django</a></li>
+</ul>
+
+<h2>Links</h2>
+<ul class="nav nav-pills nav-stacked">
+  <li><a href="http://docs.notmyidea.org/alexis/pelican/">Pelican</a></li>
+  <li><a href="http://python.org">Python.org</a></li>
+  <li><a href="http://jinja.pocoo.org">Jinja2</a></li>
+  <li><a href="https://github.com">GitHub</a></li>
+</ul>
+
+<h2>Social</h2>
+<ul class="nav nav-pills nav-stacked">
+    
+    <li><a href="https://github.com/mozillazg">Fork me on GitHub</a></li>
+  </ul>
+
+</nav>
+<!-- /Side bar -->
+
+</div>
+<!-- /Main block -->
+
+<!-- Footer -->
+<div class="row"><div class="span12">
+<footer><small>
+Built using <a href="http://pelican.notmyidea.org/">Pelican</a>, the 
+<a href="https://github.com/wamonite/relapse">relapse</a> theme and 
+<a href="http://twitter.github.com/bootstrap">Bootstrap</a>.
+</small></footer>
+</div></div>
+<!-- /Footer -->
+
+</div></section>
+<!-- /Body -->
+
+<script src="../theme/js/jquery.js"></script>
+<script src="../theme/js/bootstrap.js"></script>
+  
+
+</body>
+</html>
