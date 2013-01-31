@@ -25,9 +25,13 @@
         <header id="banner" class="body">
                 <h1><a href="../">Mozillazg's Blog </a></h1>
                 <nav><ul>
-                                    <li><a href="http://mozillazg.com/archives.html">Archives</a></li>
+                                    <li><a href="/index.html">Home</a></li>
+                                    <li><a href="/archives.html">Archives</a></li>
                                                                                                     <li ><a href="../category/django.html">django</a></li>
                                     <li ><a href="../category/firefox.html">firefox</a></li>
+                                    <li ><a href="../category/linux.html">linux</a></li>
+                                    <li ><a href="../category/others.html">others</a></li>
+                                    <li ><a href="../category/ying-yu.html">英语</a></li>
                                 </ul></nav>
         </header><!-- /#banner -->
                 
@@ -35,8 +39,179 @@
 
                             <aside id="featured" class="body">
                 <article>
-                    <h1 class="entry-title"><a href="../2013/01/django-built-in-comments-framework.html">[django]使用内置的 comments 实现评论功能</a></h1> 
+                    <h1 class="entry-title"><a href="../2013/01/django-deploying-with-apache-mode-wsgi.html">[django]使用 apache + mod_wsgi 部署 django</a></h1> 
                     <footer class="post-info">
+        <abbr class="published" title="2013-01-31T00:00:00">
+                周四 31 一月 2013
+        </abbr>
+
+                <address class="vcard author">
+                By <a class="url fn" href="../author/mozillazg.html">mozillazg</a>
+        </address>
+        <p>In <a href="../category/django.html">django</a>. </p>
+<p>tags: <a href="../tag/python.html">python</a><a href="../tag/django.html">django</a><a href="../tag/apache.html">apache</a><a href="../tag/mod_wsgi.html">mod_wsgi</a></p>
+</footer><!-- /.post-info --><p>本文测试环境：linux mint，python 2.7，django 1.4</p>
+<h2>安装依赖</h2>
+<div class="codehilite"><pre><span class="err">$</span> <span class="n">sudo</span> <span class="n">apt</span><span class="o">-</span><span class="n">get</span> <span class="n">install</span> <span class="n">apache2</span>
+<span class="err">$</span> <span class="n">sudo</span> <span class="n">apt</span><span class="o">-</span><span class="n">get</span> <span class="n">install</span> <span class="n">libapache2</span><span class="o">-</span><span class="n">mod</span><span class="o">-</span><span class="n">wsgi</span>
+</pre></div>
+
+
+<h2>设置 django</h2>
+<p>本例中项目名为 bbs:</p>
+<div class="codehilite"><pre><span class="err">$</span> <span class="n">pwd</span>
+<span class="o">/</span><span class="n">var</span><span class="o">/</span><span class="n">www</span><span class="o">/</span><span class="n">bbs</span>
+
+<span class="err">$</span> <span class="n">tree</span> <span class="p">.</span> <span class="o">-</span><span class="n">d</span>
+<span class="p">.</span>
+<span class="o">|--</span> <span class="n">bb</span>  <span class="err">#</span> <span class="err">应用</span>
+<span class="o">|--</span> <span class="n">bbs</span>  <span class="err">#</span> <span class="n">settings</span><span class="p">.</span><span class="n">py</span> <span class="n">wsgi</span><span class="p">.</span><span class="n">py</span>
+<span class="o">|--</span> <span class="k">static</span>  <span class="err">#</span> <span class="err">静态文件</span>
+<span class="o">|</span>   <span class="o">|--</span> <span class="n">admin</span>
+<span class="o">|</span>   <span class="o">|</span>   <span class="o">|--</span> <span class="n">css</span>
+<span class="o">|</span>   <span class="o">|</span>   <span class="o">|--</span> <span class="n">img</span>
+<span class="o">|</span>   <span class="o">|</span>   <span class="o">|</span>   <span class="err">`</span><span class="o">--</span> <span class="n">gis</span>
+<span class="o">|</span>   <span class="o">|</span>   <span class="err">`</span><span class="o">--</span> <span class="n">js</span>
+<span class="o">|</span>   <span class="o">|</span>       <span class="err">`</span><span class="o">--</span> <span class="n">admin</span>
+<span class="o">|</span>   <span class="err">`</span><span class="o">--</span> <span class="n">css</span>
+<span class="err">`</span><span class="o">--</span> <span class="n">templates</span>  <span class="err">#</span> <span class="n">TEMPLATE_DIRS</span>
+</pre></div>
+
+
+<p>配置 settings：</p>
+<div class="codehilite"><pre><span class="n">TEMPLATE_DIRS</span> <span class="o">=</span> <span class="p">(</span>
+    <span class="err">&#39;</span><span class="o">/</span><span class="n">var</span><span class="o">/</span><span class="n">www</span><span class="o">/</span><span class="n">bbs</span><span class="o">/</span><span class="n">templates</span><span class="err">&#39;</span><span class="p">,</span>  <span class="err">#</span> <span class="err">这里要是绝对路径</span>
+<span class="p">)</span>
+</pre></div>
+
+
+<p>本例中使用 /var/www/bbs/static/ 保存静态文件，使用命令
+<code>python manage.py collectstatic</code> 收集静态文件，然后将输出的静态文件保存到
+ /var/www/bbs/static/ 目录下。</p>
+<p>最终 /var/www/bbs/static/ 目录结构应该类似（admin 目录及其目录下文件一定要有）：</p>
+<div class="codehilite"><pre><span class="err">$</span> <span class="n">tree</span> <span class="k">static</span> <span class="o">-</span><span class="n">d</span>
+<span class="k">static</span>
+<span class="o">|--</span> <span class="n">admin</span>
+<span class="o">|</span>   <span class="o">|--</span> <span class="n">css</span>
+<span class="o">|</span>   <span class="o">|--</span> <span class="n">img</span>
+<span class="o">|</span>   <span class="o">|</span>   <span class="err">`</span><span class="o">--</span> <span class="n">gis</span>
+<span class="o">|</span>   <span class="err">`</span><span class="o">--</span> <span class="n">js</span>
+<span class="o">|</span>       <span class="err">`</span><span class="o">--</span> <span class="n">admin</span>
+<span class="err">`</span><span class="o">--</span> <span class="n">css</span>
+</pre></div>
+
+
+<h2>配置 apache</h2>
+<div class="codehilite"><pre><span class="err">$</span> <span class="nx">sudo</span> <span class="nx">vim</span> <span class="p">/</span><span class="nx">etc</span><span class="p">/</span><span class="nx">apache2</span><span class="p">/</span><span class="nx">conf.d</span><span class="p">/</span><span class="nx">bbs.conf</span>
+
+<span class="nx">WSGIPythonPath</span> <span class="p">/</span><span class="nb">var</span><span class="p">/</span><span class="nx">www</span><span class="p">/</span><span class="nx">bbs</span>
+<span class="o">&lt;</span><span class="nx">VirtualHost</span> <span class="o">*</span><span class="p">:</span><span class="mi">80</span><span class="o">&gt;</span>
+    <span class="nb">ServerName</span> <span class="nx">bbs.com</span>
+
+    <span class="nx">Alias</span> <span class="p">/</span><span class="nx">static</span><span class="o">/</span> <span class="p">/</span><span class="nb">var</span><span class="p">/</span><span class="nx">www</span><span class="p">/</span><span class="nx">bbs</span><span class="p">/</span><span class="nx">static</span><span class="o">/</span>
+
+    <span class="o">&lt;</span><span class="nx">Directory</span> <span class="p">/</span><span class="nb">var</span><span class="p">/</span><span class="nx">www</span><span class="p">/</span><span class="nx">bbs</span><span class="p">/</span><span class="nx">static</span><span class="o">&gt;</span>
+    <span class="k">Order</span> <span class="nx">deny</span><span class="p">,</span><span class="nx">allow</span>
+    <span class="nx">Allow</span> <span class="nb">from</span> <span class="kc">all</span>
+    <span class="o">&lt;/</span><span class="nx">Directory</span><span class="o">&gt;</span>
+
+    <span class="nx">WSGIScriptAlias</span> <span class="o">/</span> <span class="p">/</span><span class="nb">var</span><span class="p">/</span><span class="nx">www</span><span class="p">/</span><span class="nx">bbs</span><span class="p">/</span><span class="nx">bbs</span><span class="p">/</span><span class="nx">wsgi.py</span>
+    <span class="o">&lt;</span><span class="nx">Directory</span> <span class="p">/</span><span class="nb">var</span><span class="p">/</span><span class="nx">www</span><span class="p">/</span><span class="nx">bbs</span><span class="p">/</span><span class="nx">bbs</span><span class="o">&gt;</span>
+    <span class="o">&lt;</span><span class="nx">Files</span> <span class="nx">wsgi.py</span><span class="o">&gt;</span>
+    <span class="k">Order</span> <span class="nx">allow</span><span class="p">,</span><span class="nx">deny</span>
+    <span class="nx">Allow</span> <span class="nb">from</span> <span class="kc">all</span>
+    <span class="o">&lt;/</span><span class="nx">Files</span><span class="o">&gt;</span>
+    <span class="o">&lt;/</span><span class="nx">Directory</span><span class="o">&gt;</span>
+<span class="o">&lt;/</span><span class="nx">VirtualHost</span><span class="o">&gt;</span>
+</pre></div>
+
+
+<p>启动 apache 服务</p>
+<div class="codehilite"><pre><span class="err">$</span> <span class="n">service</span> <span class="n">apache2</span> <span class="n">restart</span>
+</pre></div>
+
+
+<p>结果：</p>
+<p><img alt="前台" src="/static/images/2013-1-django-deploying-apache-01.png" /></p>
+<p><img alt="后台" src="/static/images/2013-1-django-deploying-apache-02.png" /></p>
+<p>后续 linux 相关的工作暂且不表：</p>
+<ul>
+<li>配置项目目录访问权限</li>
+<li>配置 iptables ，开放 80 端口</li>
+</ul>
+<p>测试项目及配置文件可以从 <a href="https://github.com/mozillazg/django-simple-projects/tree/master/projects/bbs">这个代码仓库</a> 中获取。</p>
+<h2>参考</h2>
+<ul>
+<li><a href="https://docs.djangoproject.com/en/dev/howto/deployment/wsgi/modwsgi/">How to use Django with Apache and mod_wsgi | Django documentation</a></li>
+<li><a href="http://code.google.com/p/modwsgi/wiki/IntegrationWithDjango">IntegrationWithDjango - modwsgi - How to use Django with mod_wsgi. - Python WSGI adapter module for Apache.</a></li>
+</ul><p>There are <a href="../2013/01/django-deploying-with-apache-mode-wsgi.html#disqus_thread">comments</a>.</p>                </article>
+                            </aside><!-- /#featured -->
+                            <section id="content" class="body">
+                    <h1>Other articles</h1>
+                    <hr />
+                    <ol id="posts-list" class="hfeed">
+                                                
+
+                 
+                        <li><article class="hentry">    
+                <header>
+                    <h1><a href="../2013/01/django-deploying-with-fastcgi-nginx.html" rel="bookmark"
+                           title="Permalink to [django]使用 nginx + fastcgi 部署 django">[django]使用 nginx + fastcgi 部署 django</a></h1>
+                </header>
+                
+                <div class="entry-content">
+                <footer class="post-info">
+        <abbr class="published" title="2013-01-31T00:00:00">
+                周四 31 一月 2013
+        </abbr>
+
+                <address class="vcard author">
+                By <a class="url fn" href="../author/mozillazg.html">mozillazg</a>
+        </address>
+        <p>In <a href="../category/django.html">django</a>. </p>
+<p>tags: <a href="../tag/python.html">python</a><a href="../tag/django.html">django</a><a href="../tag/nginx.html">nginx</a><a href="../tag/fastcgi.html">fastcgi</a></p>
+</footer><!-- /.post-info -->                <p>本文测试环境：linux mint，python 2.7，django 1.4</p>
+<h2>安装依赖</h2>
+<p>安装 nginx</p>
+<p>$ sudo apt-get install nginx</p>
+<h2>设置 django</h2>
+<p>本例中项目名为 bbs:</p>
+<div class="codehilite"><pre><span class="err">$</span> <span class="n">pwd</span>
+<span class="o">/</span><span class="n">var</span><span class="o">/</span><span class="n">www</span><span class="o">/</span><span class="n">bbs</span>
+
+<span class="err">$</span> <span class="n">tree</span> <span class="p">.</span> <span class="o">-</span><span class="n">d</span>
+<span class="p">.</span>
+<span class="o">|--</span> <span class="n">bb</span>  <span class="err">#</span> <span class="err">应用</span>
+<span class="o">|--</span> <span class="n">bbs</span>  <span class="err">#</span> <span class="n">settings</span><span class="p">.</span><span class="n">py</span> <span class="n">wsgi</span><span class="p">.</span><span class="n">py</span>
+<span class="o">|--</span> <span class="k">static</span>  <span class="err">#</span> <span class="err">静态文件</span>
+<span class="o">|</span>   <span class="o">|--</span> <span class="n">admin</span>
+<span class="o">|</span>   <span class="o">|</span>   <span class="o">|--</span> <span class="n">css</span>
+<span class="o">|</span>   <span class="o">|</span>   <span class="o">|--</span> <span class="n">img</span>
+<span class="o">|</span>   <span class="o">|</span>   <span class="o">|</span>   <span class="err">`</span><span class="o">--</span> <span class="n">gis</span>
+<span class="o">|</span>   <span class="o">|</span>   <span class="err">`</span><span class="o">--</span> <span class="n">js</span>
+<span class="o">|</span>   <span class="o">|</span>       <span class="err">`</span><span class="o">--</span> <span class="n">admin</span>
+<span class="o">|</span>   <span class="err">`</span><span class="o">--</span> <span class="n">css</span>
+<span class="err">`</span><span class="o">--</span> <span class="n">templates</span>  <span class="err">#</span> <span class="n">TEMPLATE_DIRS</span>
+</pre></div>
+
+
+<p>配置 settings：</p>
+<div class="codehilite"><pre><span class="n">TEMPLATE_DIRS</span> <span class="o">=</span> <span class="p">(</span>
+    <span class="err">&#39;</span><span class="o">/</span><span class="n">var</span><span class="o">/</span><span class="n">www</span><span class="o">/</span><span class="n">bbs ...</span></pre></div>
+                <a class="readmore" href="../2013/01/django-deploying-with-fastcgi-nginx.html">read more</a>
+                <p>There are <a href="../2013/01/django-deploying-with-fastcgi-nginx.html#disqus_thread">comments</a>.</p>                </div><!-- /.entry-content -->
+            </article></li>
+                            
+
+                 
+                        <li><article class="hentry">    
+                <header>
+                    <h1><a href="../2013/01/django-built-in-comments-framework.html" rel="bookmark"
+                           title="Permalink to [django]使用内置的 comments 实现评论功能">[django]使用内置的 comments 实现评论功能</a></h1>
+                </header>
+                
+                <div class="entry-content">
+                <footer class="post-info">
         <abbr class="published" title="2013-01-27T00:00:00">
                 周日 27 一月 2013
         </abbr>
@@ -46,7 +221,7 @@
         </address>
         <p>In <a href="../category/django.html">django</a>. </p>
 <p>tags: <a href="../tag/python.html">python</a><a href="../tag/django.html">django</a></p>
-</footer><!-- /.post-info --><h2>安装 comments 应用</h2>
+</footer><!-- /.post-info -->                <h2>安装 comments 应用</h2>
 <ol>
 <li>
 <p>编辑 settings 文件，<code>INSTALLED_APPS</code> 项添加 <code>'django.contrib.comments',</code>：</p>
@@ -77,230 +252,9 @@
 <h2>示例 views</h2>
 <div class="codehilite"><pre><span class="n">def</span> <span class="n">display_topic</span><span class="p">(</span><span class="n">request</span><span class="p">,</span> <span class="n">topic_id</span><span class="p">)</span><span class="o">:</span>
     <span class="n">topic</span> <span class="o">=</span> <span class="n">Topic</span><span class="p">.</span><span class="n">objects</span><span class="p">.</span><span class="n">get</span><span class="p">(</span><span class="n">id</span><span class="o">=</span><span class="n">topic_id</span><span class="p">)</span>
-    <span class="k">return</span> <span class="n">render_to_response</span><span class="p">(</span><span class="err">&#39;</span><span class="n">topic</span><span class="p">.</span><span class="n">html</span><span class="err">&#39;</span><span class="p">,</span> <span class="p">{</span><span class="err">&#39;</span><span class="n">topic</span><span class="err">&#39;</span><span class="o">:</span> <span class="n">topic</span><span class="p">},</span>
-                              <span class="n">RequestContext</span><span class="p">(</span><span class="n">request</span><span class="p">))</span>
-</pre></div>
-
-
-<h2>基本使用</h2>
-<p>首先要导入 comments 模板标签：</p>
-<div class="codehilite"><pre><span class="p">{</span><span class="o">%</span> <span class="n">load</span> <span class="n">comments</span> <span class="o">%</span><span class="p">}</span>
-</pre></div>
-
-
-<p>模板标签的使用（基于上面的 views）：</p>
-<h3>获取评论数</h3>
-<p>获取 topic 对象的评论数：</p>
-<div class="codehilite"><pre><span class="p">{</span><span class="o">%</span> <span class="nx">get_comment_count</span> <span class="nb">for</span> <span class="nx">topic</span> <span class="nx">as</span> <span class="nx">comment_count</span> <span class="o">%</span><span class="p">}</span>
-<span class="o">&lt;</span><span class="nx">p</span><span class="o">&gt;</span><span class="nb">Comments</span><span class="p">({{</span> <span class="nx">comment_count</span> <span class="p">}}):</span><span class="o">&lt;/</span><span class="nx">p</span><span class="o">&gt;</span>
-</pre></div>
-
-
-<h3>显示评论：</h3>
-<ul>
-<li>
-<p>使用默认的显示方式：</p>
-<div class="codehilite"><pre><span class="p">{</span><span class="o">%</span> <span class="n">render_comment_list</span> <span class="k">for</span> <span class="n">topic</span> <span class="o">%</span><span class="p">}</span>
-</pre></div>
-
-
-<p>效果：</p>
-<p><img alt="django-comments-01" src="/static/images/2013-1-27-django-comments-01.png" /></p>
-</li>
-<li>
-<p>自定义显示：</p>
-<div class="codehilite"><pre><span class="p">{</span><span class="o">%</span> <span class="nx">get_comment_list</span> <span class="nb">for</span> <span class="nx">topic</span> <span class="nx">as</span> <span class="nx">comment_list</span> <span class="o">%</span><span class="p">}</span>
-<span class="p">{</span><span class="o">%</span> <span class="nb">for</span> <span class="n">comment</span> <span class="k">in</span> <span class="nx">comment_list</span> <span class="o">%</span><span class="p">}</span>
-  <span class="o">&lt;</span><span class="nx">p</span><span class="o">&gt;</span><span class="nx">Posted</span> <span class="k">by</span><span class="p">:</span> <span class="p">{{</span> <span class="nx">comment.user_name</span> <span class="p">}}</span> <span class="k">on</span> <span class="p">{{</span> <span class="nx">comment.submit_date</span> <span class="p">}}</span><span class="o">&lt;/</span><span class="nx">p</span><span class="o">&gt;</span>
-  <span class="o">&lt;</span><span class="nx">p</span><span class="o">&gt;</span><span class="p">{{</span> <span class="nx">comment.comment</span> <span class="p">}}</span><span class="o">&lt;/</span><span class="nx">p</span><span class="o">&gt;</span>
-<span class="p">{</span><span class="o">%</span> <span class="nx">endfor</span> <span class="o">%</span><span class="p">}</span>
-</pre></div>
-
-
-<p>效果：</p>
-<p><img alt="django-comments-01" src="/static/images/2013-1-27-django-comments-02.png" /></p>
-</li>
-</ul>
-<h3>评论链接</h3>
-<p>要使用自带的评论链接功能需要在 models 中定义 get_absolute_url 方法（请参考 <a href="https://docs.djangoproject.com/en/dev/ref/models/instances/#get-absolute-url">get_absolute_url</a>）：</p>
-<p>urls.py：</p>
-<div class="codehilite"><pre><span class="nb">url</span><span class="p">(</span><span class="nb">r</span><span class="s1">&#39;^topic/(?P&lt;topic_id&gt;\d+)/$&#39;</span><span class="p">,</span> <span class="s1">&#39;hello.views.display_topic&#39;</span><span class="p">,</span>
-    <span class="n">name</span><span class="o">=</span><span class="s2">&quot;display_topic&quot;</span><span class="p">),</span>
-</pre></div>
-
-
-<p>models.py：</p>
-<div class="codehilite"><pre><span class="n">class</span> <span class="n">Topic</span><span class="p">(</span><span class="n">models</span><span class="p">.</span><span class="n">Model</span><span class="p">)</span><span class="o">:</span>
-    <span class="n">title</span> <span class="o">=</span> <span class="n">models</span><span class="p">.</span><span class="n">CharField</span><span class="p">(</span><span class="n">max_length</span><span class="o">=</span><span class="mi">200</span><span class="p">)</span>
-    <span class="n">content</span> <span class="o">=</span> <span class="n">models</span><span class="p">.</span><span class="n">TextField</span><span class="p">()</span>
-
-    <span class="err">@</span><span class="n">models</span><span class="p">.</span><span class="n">permalink</span>
-    <span class="n">def</span> <span class="n">get_absolute_url</span><span class="p">(</span><span class="n">self</span><span class="p">)</span><span class="o">:</span>
-        <span class="k">return</span> <span class="p">(</span><span class="err">&#39;</span><span class="n">display_topic</span><span class="err">&#39;</span><span class="p">,</span> <span class="p">(),</span> <span class="p">{</span><span class="err">&#39;</span><span class="n">topic_id</span><span class="err">&#39;</span><span class="o">:</span> <span class="n">self</span><span class="p">.</span><span class="n">id</span><span class="p">})</span>
-</pre></div>
-
-
-<p>模板中显示评论链接：</p>
-<div class="codehilite"><pre><span class="p">{</span><span class="o">%</span> <span class="nb">for</span> <span class="n">comment</span> <span class="k">in</span> <span class="nx">comment_list</span> <span class="o">%</span><span class="p">}</span>
-
-  <span class="o">&lt;</span><span class="nx">p</span><span class="o">&gt;</span>
-  <span class="p">{</span><span class="err">#</span> <span class="err">显示评论链接</span> <span class="err">#</span><span class="p">}</span>
-  <span class="o">&lt;</span><span class="nx">a</span> <span class="n">name</span><span class="o">=</span><span class="s2">&quot;c{{ comment.id }}&quot;</span><span class="o">&gt;&lt;/</span><span class="nx">a</span><span class="o">&gt;</span>
-  <span class="o">&lt;</span><span class="nx">a</span> <span class="n">href</span><span class="o">=</span><span class="s2">&quot;{% get_comment_permalink comment %}&quot;</span><span class="o">&gt;</span>
-      <span class="err">#</span><span class="p">{{</span> <span class="nx">forloop.counter</span> <span class="p">}}</span>
-  <span class="o">&lt;/</span><span class="nx">a</span><span class="o">&gt;</span>
-  <span class="p">{</span><span class="err">#</span> <span class="nb">end</span> <span class="err">#</span><span class="p">}</span>
-
-  <span class="nx">Posted</span> <span class="k">by</span><span class="p">:</span> <span class="p">{{</span> <span class="nx">comment.user_name</span> <span class="p">}}</span> <span class="k">on</span> <span class="p">{{</span> <span class="nx">comment.submit_date</span> <span class="p">}}</span><span class="o">&lt;/</span><span class="nx">p</span><span class="o">&gt;</span>
-  <span class="o">&lt;</span><span class="nx">p</span><span class="o">&gt;</span><span class="p">{{</span> <span class="nx">comment.comment</span> <span class="p">}}</span><span class="o">&lt;/</span><span class="nx">p</span><span class="o">&gt;</span>
-<span class="p">{</span><span class="o">%</span> <span class="nx">endfor</span> <span class="o">%</span><span class="p">}</span>
-</pre></div>
-
-
-<p>效果：</p>
-<p><img alt="django-comments-permalink" src="/static/images/2013-1-28-django-comments-permalink.png" /></p>
-<h3>用于发表评论的表单</h3>
-<h4>默认显示方式：</h4>
-<div class="codehilite"><pre><span class="p">{</span><span class="o">%</span> <span class="nx">get_comment_form</span> <span class="nb">for</span> <span class="nx">topic</span> <span class="nx">as</span> <span class="nb">form</span> <span class="o">%</span><span class="p">}</span>
-<span class="o">&lt;</span><span class="nb">form</span> <span class="n">action</span><span class="o">=</span><span class="s2">&quot;{% comment_form_target %}&quot;</span> <span class="n">method</span><span class="o">=</span><span class="s2">&quot;post&quot;</span><span class="o">&gt;</span>
-  <span class="p">{</span><span class="o">%</span> <span class="nx">csrf_token</span> <span class="o">%</span><span class="p">}</span>
-  <span class="p">{{</span> <span class="nx">form.as_p</span> <span class="p">}}</span>
-  <span class="o">&lt;</span><span class="nb">input</span> <span class="k">type</span><span class="o">=</span><span class="s2">&quot;submit&quot;</span> <span class="n">value</span><span class="o">=</span><span class="s2">&quot;Comment&quot;</span> <span class="o">/&gt;</span>
-<span class="o">&lt;/</span><span class="nb">form</span><span class="o">&gt;</span>
-</pre></div>
-
-
-<p>效果：</p>
-<p><img alt="django-comments-form-01" src="/static/images/2013-1-28-django-comments-form-01.png" /></p>
-<p>comments form 包含如下字段：</p>
-<ul>
-<li>name ——名称</li>
-<li>email ——邮箱</li>
-<li>url ——网址</li>
-<li>comment ——内容</li>
-<li>honeypot ——防止机器乱填垃圾信息</li>
-<li>content_type ——与后台有关，可以去后台 Comments 应用中看看</li>
-<li>object_pk ——对应的帖子 id</li>
-<li>timestamp ——时间戳</li>
-<li>security_hash ——用于安全检测</li>
-</ul>
-<h4>自定义显示</h4>
-<p>由于默认生成的表单一般让人不太满意，所以就需要通过自定义来调整一下：</p>
-<div class="codehilite"><pre><span class="p">{</span><span class="o">%</span> <span class="nx">get_comment_form</span> <span class="nb">for</span> <span class="nx">topic</span> <span class="nx">as</span> <span class="nb">form</span> <span class="o">%</span><span class="p">}</span>
-<span class="o">&lt;</span><span class="nb">form</span> <span class="n">action</span><span class="o">=</span><span class="s2">&quot;{% comment_form_target %}&quot;</span> <span class="n">method</span><span class="o">=</span><span class="s2">&quot;post&quot;</span><span class="o">&gt;</span>
-  <span class="p">{</span><span class="o">%</span> <span class="nx">csrf_token</span> <span class="o">%</span><span class="p">}</span>
-
-  <span class="o">&lt;</span><span class="nx">p</span><span class="o">&gt;&lt;</span><span class="nb">label</span> <span class="n">for</span><span class="o">=</span><span class="s2">&quot;id_name&quot;</span><span class="o">&gt;</span><span class="nb">Name</span><span class="p">:</span> <span class="o">&lt;/</span><span class="nb">label</span><span class="o">&gt;</span><span class="p">{{</span> <span class="nx">form.name</span> <span class="p">}}</span><span class="o">&lt;/</span><span class="nx">p</span><span class="o">&gt;</span>
-  <span class="o">&lt;</span><span class="nx">p</span><span class="o">&gt;&lt;</span><span class="nb">label</span> <span class="n">for</span><span class="o">=</span><span class="s2">&quot;id_email&quot;</span><span class="o">&gt;</span><span class="nx">E</span><span class="na">-mail</span><span class="p">:</span> <span class="o">&lt;/</span><span class="nb">label</span><span class="o">&gt;</span><span class="p">{{</span> <span class="nx">form.email</span> <span class="p">}}</span><span class="o">&lt;/</span><span class="nx">p</span><span class="o">&gt;</span>
-  <span class="o">&lt;</span><span class="nx">p</span><span class="o">&gt;&lt;</span><span class="nb">label</span> <span class="n">for</span><span class="o">=</span><span class="s2">&quot;id_url&quot;</span><span class="o">&gt;</span><span class="nx">Web</span> <span class="nx">Site</span><span class="p">:</span> <span class="o">&lt;/</span><span class="nb">label</span><span class="o">&gt;</span><span class="p">{{</span> <span class="nx">form.url</span> <span class="p">}}</span><span class="o">&lt;/</span><span class="nx">p</span><span class="o">&gt;</span>
-  <span class="o">&lt;</span><span class="nx">p</span><span class="o">&gt;&lt;</span><span class="nb">label</span> <span class="n">for</span><span class="o">=</span><span class="s2">&quot;id_comment&quot;</span><span class="o">&gt;</span><span class="nx">Comment</span><span class="p">:</span> <span class="o">&lt;/</span><span class="nb">label</span><span class="o">&gt;</span><span class="p">{{</span> <span class="nx">form.comment</span> <span class="p">}}</span><span class="o">&lt;/</span><span class="nx">p</span><span class="o">&gt;</span>
-  <span class="p">{{</span> <span class="nx">form.content_type</span> <span class="p">}}</span>
-  <span class="p">{{</span> <span class="nx">form.object_pk</span> <span class="p">}}</span>
-  <span class="p">{{</span> <span class="nx">form.timestamp</span> <span class="p">}}</span>
-  <span class="p">{{</span> <span class="nx">form.security_hash</span> <span class="p">}}</span>
-  <span class="o">&lt;</span><span class="nx">span</span> <span class="n">style</span><span class="o">=</span><span class="s2">&quot;display: none;&quot;</span><span class="o">&gt;</span><span class="p">{{</span> <span class="nx">form.honeypot</span> <span class="p">}}</span><span class="o">&lt;/</span><span class="nx">span</span><span class="o">&gt;</span>
-
-  <span class="o">&lt;</span><span class="nb">input</span> <span class="k">type</span><span class="o">=</span><span class="s2">&quot;submit&quot;</span> <span class="n">value</span><span class="o">=</span><span class="s2">&quot;Comment&quot;</span> <span class="o">/&gt;</span>
-<span class="o">&lt;/</span><span class="nb">form</span><span class="o">&gt;</span>
-</pre></div>
-
-
-<p>效果：</p>
-<p><img alt="django-comments-form-02" src="/static/images/2013-1-28-django-comments-form-02.png" /></p>
-<h3>发表评论后的跳转回当前页面</h3>
-<p>只需在 form 中包含字段 "next" 即可：</p>
-<div class="codehilite"><pre><span class="o">&lt;</span><span class="n">input</span> <span class="n">type</span><span class="o">=</span><span class="s">&quot;hidden&quot;</span> <span class="n">name</span><span class="o">=</span><span class="s">&quot;next&quot;</span> <span class="n">value</span><span class="o">=</span><span class="s">&quot;/topic/{{ topic.id }}&quot;</span><span class="o">/&gt;</span>
-<span class="o">&lt;</span><span class="n">input</span> <span class="n">type</span><span class="o">=</span><span class="s">&quot;submit&quot;</span> <span class="n">value</span><span class="o">=</span><span class="s">&quot;Comment&quot;</span> <span class="o">/&gt;</span>
-</pre></div>
-
-
-<p>基于 django 1.4.3 的示例项目：<a href="https://github.com/mozillazg/django-simple-projects/tree/master/projects/comments">仓库</a> &amp;&amp; <a href="/static/downloads/django-comments.tar.gz">下载</a> 。</p>
-<h2>参考</h2>
-<ul>
-<li><a href="http://newliu.com/post/11/">Django学习笔记—Comments库的使用方法小记 | NewLiu.com</a></li>
-<li><a href="https://docs.djangoproject.com/en/dev/ref/contrib/comments/">Django’s comments framework | Django documentation | Django</a></li>
-<li><a href="https://github.com/django/django/blob/master/django/contrib/comments/forms.py">django/contrib/comments/forms.py ·GitHub</a></li>
-<li><a href="https://docs.djangoproject.com/en/1.4/topics/forms/#customizing-the-form-template">Working with forms | Django documentation</a></li>
-</ul><p>There are <a href="../2013/01/django-built-in-comments-framework.html#disqus_thread">comments</a>.</p>                </article>
-                            </aside><!-- /#featured -->
-                            <section id="content" class="body">
-                    <h1>Other articles</h1>
-                    <hr />
-                    <ol id="posts-list" class="hfeed">
-                                                
-
-                 
-                        <li><article class="hentry">    
-                <header>
-                    <h1><a href="../2013/01/django-pagination-by-use-paginator.html" rel="bookmark"
-                           title="Permalink to [django]使用 Paginator 实现分页功能">[django]使用 Paginator 实现分页功能</a></h1>
-                </header>
-                
-                <div class="entry-content">
-                <footer class="post-info">
-        <abbr class="published" title="2013-01-26T00:00:00">
-                周六 26 一月 2013
-        </abbr>
-
-                <address class="vcard author">
-                By <a class="url fn" href="../author/mozillazg.html">mozillazg</a>
-        </address>
-        <p>In <a href="../category/django.html">django</a>. </p>
-<p>tags: <a href="../tag/python.html">python</a><a href="../tag/django.html">django</a></p>
-</footer><!-- /.post-info -->                <p>在 django 中使用 Paginator 可以很方便的实现分页功能，下面就通过一个具体的例子来讲讲如何使用 Paginator。</p>
-<h2>在 view 中使用 Paginator</h2>
-<div class="codehilite"><pre><span class="n">from</span> <span class="n">django</span><span class="p">.</span><span class="n">core</span><span class="p">.</span><span class="n">paginator</span> <span class="n">import</span> <span class="n">Paginator</span>
-<span class="n">from</span> <span class="n">django</span><span class="p">.</span><span class="n">core</span><span class="p">.</span><span class="n">paginator</span> <span class="n">import</span> <span class="n">EmptyPage</span>
-<span class="n">from</span> <span class="n">django</span><span class="p">.</span><span class="n">core</span><span class="p">.</span><span class="n">paginator</span> <span class="n">import</span> <span class="n">PageNotAnInteger</span>
-<span class="n">from</span> <span class="n">hello</span><span class="p">.</span><span class="n">models</span> <span class="n">import</span> <span class="n">Topic</span>
-
-<span class="n">def</span> <span class="n">index</span><span class="p">(</span><span class="n">request</span><span class="p">)</span><span class="o">:</span>
-    <span class="n">limit</span> <span class="o">=</span> <span class="mi">3</span>  <span class="err">#</span> <span class="err">每页显示的记录数</span>
-    <span class="n">topics</span> <span class="o">=</span> <span class="n">Topic</span><span class="p">.</span><span class="n">objects</span><span class="p">.</span><span class="n">all</span><span class="p">()</span>
-    <span class="n">paginator</span> <span class="o">=</span> <span class="n">Paginator</span><span class="p">(</span><span class="n">topics</span><span class="p">,</span> <span class="n">limit</span><span class="p">)</span>  <span class="err">#</span> <span class="err">实例化一个分页对象</span>
-
-    <span class="n">page ...</span></pre></div>
-                <a class="readmore" href="../2013/01/django-pagination-by-use-paginator.html">read more</a>
-                <p>There are <a href="../2013/01/django-pagination-by-use-paginator.html#disqus_thread">comments</a>.</p>                </div><!-- /.entry-content -->
-            </article></li>
-                            
-
-                 
-                        <li><article class="hentry">    
-                <header>
-                    <h1><a href="../2013/01/django-global-template-variable-by-use-custom-context-processor.html" rel="bookmark"
-                           title="Permalink to [django]使用自定义 context processor 实现模板全局变量">[django]使用自定义 context processor 实现模板全局变量</a></h1>
-                </header>
-                
-                <div class="entry-content">
-                <footer class="post-info">
-        <abbr class="published" title="2013-01-23T00:00:00">
-                周三 23 一月 2013
-        </abbr>
-
-                <address class="vcard author">
-                By <a class="url fn" href="../author/mozillazg.html">mozillazg</a>
-        </address>
-        <p>In <a href="../category/django.html">django</a>. </p>
-<p>tags: <a href="../tag/python.html">python</a><a href="../tag/django.html">django</a></p>
-</footer><!-- /.post-info -->                <p>本文使用的是 django 1.4.3。</p>
-<h2>写一个 context processor 函数</h2>
-<p>可以把这个函数放在项目的任何地方，本文是放在应用目录下的 context_processors.py 文件中：</p>
-<div class="codehilite"><pre><span class="n">from</span> <span class="n">hello</span><span class="p">.</span><span class="n">models</span> <span class="n">import</span> <span class="n">Category</span>
-
-<span class="n">def</span> <span class="n">categories</span><span class="p">(</span><span class="n">request</span><span class="p">)</span><span class="o">:</span>  <span class="err">#</span> <span class="err">只有一个参数（</span><span class="n">HttpRequeset</span> <span class="err">对象）</span>
-    <span class="n">all_categories</span> <span class="o">=</span> <span class="n">Category</span><span class="p">.</span><span class="n">objects</span><span class="p">.</span><span class="n">all</span><span class="p">()</span>
-    <span class="n">context</span> <span class="o">=</span> <span class="p">{</span><span class="err">&#39;</span><span class="n">categories</span><span class="err">&#39;</span><span class="o">:</span> <span class="n">all_categories</span><span class="p">}</span>
-
-    <span class="k">return</span> <span class="n">context</span>  <span class="err">#</span> <span class="err">返回值必须是个字典</span>
-</pre></div>
-
-
-<p>注意：context processor 函数只有一个参数，即 HttpRequest 对象，并且函数的返回值必须是个字典。</p>
-<h2>修改 settings 文件</h2>
-<p>修改 TEMPLATE_CONTEXT_PROCESSORS 选项值，添加新建的 ...</p>
-                <a class="readmore" href="../2013/01/django-global-template-variable-by-use-custom-context-processor.html">read more</a>
-                <p>There are <a href="../2013/01/django-global-template-variable-by-use-custom-context-processor.html#disqus_thread">comments</a>.</p>                </div><!-- /.entry-content -->
+    <span class="k">return ...</span></pre></div>
+                <a class="readmore" href="../2013/01/django-built-in-comments-framework.html">read more</a>
+                <p>There are <a href="../2013/01/django-built-in-comments-framework.html#disqus_thread">comments</a>.</p>                </div><!-- /.entry-content -->
             </article></li>
                             </ol><!-- /#posts-list -->
                             <p class="paginator">
@@ -315,7 +269,6 @@
                                                     <li><a href="http://docs.notmyidea.org/alexis/pelican/">Pelican</a></li>
                                                     <li><a href="http://python.org">Python.org</a></li>
                                                     <li><a href="http://jinja.pocoo.org">Jinja2</a></li>
-                                                    <li><a href="https://github.com">GitHub</a></li>
                                                 </ul>
                 </div><!-- /.blogroll -->
                                 <div class="social">
@@ -323,7 +276,6 @@
                         <ul>
                             <li><a href="http://mozillazg.com/feeds/all.atom.xml" type="application/atom+xml" rel="alternate">atom feed</a></li>
                             
-                                                    <li><a href="http://mozillazg.com/feeds/all.atom.xml">Atom Feed</a></li>
                                                     <li><a href="http://about.me/mozillazg">About Me</a></li>
                                                     <li><a href="https://github.com/mozillazg">Fork me on GitHub</a></li>
                                                 </ul>
