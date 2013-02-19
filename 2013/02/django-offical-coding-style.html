@@ -207,6 +207,32 @@
 </ul>
 <h3>django.conf.settings 的使用</h3>
 <p>模块不常用的设置项被储存在 <code>django.conf.settings</code> 中</p>
+<p>Modules should not in general use settings stored in <code>django.conf.settings</code> at the top level (i.e. evaluated when the module is imported). The explanation for this is as follows:</p>
+<p>Manual configuration of settings (i.e. not relying on the <code>DJANGO_SETTINGS_MODULE</code> environment variable) is allowed and possible as follows:</p>
+<div class="codehilite"><pre><span class="n">from</span> <span class="n">django</span><span class="p">.</span><span class="n">conf</span> <span class="n">import</span> <span class="n">settings</span>
+
+<span class="n">settings</span><span class="p">.</span><span class="n">configure</span><span class="p">({},</span> <span class="n">SOME_SETTING</span><span class="o">=</span><span class="err">&#39;</span><span class="n">foo</span><span class="err">&#39;</span><span class="p">)</span>
+</pre></div>
+
+
+<p>However, if any setting is accessed before the settings.configure line, this will not work. (Internally, <code>settings</code> is a <code>LazyObject</code> which configures itself automatically when the settings are accessed if it has not already been configured).</p>
+<p>So, if there is a module containing some code as follows:</p>
+<div class="codehilite"><pre><span class="n">from</span> <span class="n">django</span><span class="p">.</span><span class="n">conf</span> <span class="n">import</span> <span class="n">settings</span>
+<span class="n">from</span> <span class="n">django</span><span class="p">.</span><span class="n">core</span><span class="p">.</span><span class="n">urlresolvers</span> <span class="n">import</span> <span class="n">get_callable</span>
+
+<span class="n">default_foo_view</span> <span class="o">=</span> <span class="n">get_callable</span><span class="p">(</span><span class="n">settings</span><span class="p">.</span><span class="n">FOO_VIEW</span><span class="p">)</span>
+</pre></div>
+
+
+<p>...then importing this module will cause the settings object to be configured. That means that the ability for third parties to import the module at the top level is incompatible with the ability to configure the settings object manually, or makes it very difficult in some circumstances.</p>
+<p>Instead of the above code, a level of laziness or indirection must be used, such as <code>django.utils.functional.LazyObject</code>, <code>django.utils.functional.lazy()</code> or <code>lambda</code>.</p>
+<h3>Miscellaneous</h3>
+<ul>
+<li>Mark all strings for internationalization; see the i18n documentation for details.</li>
+<li>Remove import statements that are no longer used when you change code. The most common tools for this task are pyflakes and pylint.</li>
+<li>Systematically remove all trailing whitespaces from your code as those add unnecessary bytes, add visual clutter to the patches and can also occasionally cause unnecessary merge conflicts. Some IDE’s can be configured to automatically remove them and most VCS tools can be set to highlight them in diff outputs. Note, however, that patches which only remove whitespace (or only make changes for nominal PEP 8 conformance) are likely to be rejected, since they only introduce noise rather than code improvement. Tidy up when you’re next changing code in the area.</li>
+<li>Please don’t put your name in the code you contribute. Our policy is to keep contributors’ names in the AUTHORS file distributed with Django – not scattered throughout the codebase itself. Feel free to include a change to the AUTHORS file in your patch if you make more than a single trivial change.</li>
+</ul>
     </div><!-- /.entry-content -->
         <div class="comments">
       <h2>Comments !</h2>

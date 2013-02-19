@@ -275,7 +275,33 @@ TypeError: decode() argument 1 must be string, not None
 &lt;/li&gt;
 &lt;/ul&gt;
 &lt;h3&gt;django.conf.settings 的使用&lt;/h3&gt;
-&lt;p&gt;模块不常用的设置项被储存在 &lt;code&gt;django.conf.settings&lt;/code&gt; 中&lt;/p&gt;</summary><category term="django"></category><category term="python"></category></entry><entry><title>[django]使用 apache + mod_wsgi 部署 django</title><link href="http://mozillazg.com/2013/01/django-deploying-with-apache-mode-wsgi.html" rel="alternate"></link><updated>2013-01-31T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2013-01-31:2013/01/django-deploying-with-apache-mode-wsgi.html</id><summary type="html">&lt;p&gt;本文测试环境：linux mint，python 2.7，django 1.4&lt;/p&gt;
+&lt;p&gt;模块不常用的设置项被储存在 &lt;code&gt;django.conf.settings&lt;/code&gt; 中&lt;/p&gt;
+&lt;p&gt;Modules should not in general use settings stored in &lt;code&gt;django.conf.settings&lt;/code&gt; at the top level (i.e. evaluated when the module is imported). The explanation for this is as follows:&lt;/p&gt;
+&lt;p&gt;Manual configuration of settings (i.e. not relying on the &lt;code&gt;DJANGO_SETTINGS_MODULE&lt;/code&gt; environment variable) is allowed and possible as follows:&lt;/p&gt;
+&lt;div class="codehilite"&gt;&lt;pre&gt;&lt;span class="n"&gt;from&lt;/span&gt; &lt;span class="n"&gt;django&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="n"&gt;conf&lt;/span&gt; &lt;span class="n"&gt;import&lt;/span&gt; &lt;span class="n"&gt;settings&lt;/span&gt;
+
+&lt;span class="n"&gt;settings&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="n"&gt;configure&lt;/span&gt;&lt;span class="p"&gt;({},&lt;/span&gt; &lt;span class="n"&gt;SOME_SETTING&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="err"&gt;&amp;#39;&lt;/span&gt;&lt;span class="n"&gt;foo&lt;/span&gt;&lt;span class="err"&gt;&amp;#39;&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+&lt;/pre&gt;&lt;/div&gt;
+
+
+&lt;p&gt;However, if any setting is accessed before the settings.configure line, this will not work. (Internally, &lt;code&gt;settings&lt;/code&gt; is a &lt;code&gt;LazyObject&lt;/code&gt; which configures itself automatically when the settings are accessed if it has not already been configured).&lt;/p&gt;
+&lt;p&gt;So, if there is a module containing some code as follows:&lt;/p&gt;
+&lt;div class="codehilite"&gt;&lt;pre&gt;&lt;span class="n"&gt;from&lt;/span&gt; &lt;span class="n"&gt;django&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="n"&gt;conf&lt;/span&gt; &lt;span class="n"&gt;import&lt;/span&gt; &lt;span class="n"&gt;settings&lt;/span&gt;
+&lt;span class="n"&gt;from&lt;/span&gt; &lt;span class="n"&gt;django&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="n"&gt;core&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="n"&gt;urlresolvers&lt;/span&gt; &lt;span class="n"&gt;import&lt;/span&gt; &lt;span class="n"&gt;get_callable&lt;/span&gt;
+
+&lt;span class="n"&gt;default_foo_view&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;get_callable&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;settings&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="n"&gt;FOO_VIEW&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+&lt;/pre&gt;&lt;/div&gt;
+
+
+&lt;p&gt;...then importing this module will cause the settings object to be configured. That means that the ability for third parties to import the module at the top level is incompatible with the ability to configure the settings object manually, or makes it very difficult in some circumstances.&lt;/p&gt;
+&lt;p&gt;Instead of the above code, a level of laziness or indirection must be used, such as &lt;code&gt;django.utils.functional.LazyObject&lt;/code&gt;, &lt;code&gt;django.utils.functional.lazy()&lt;/code&gt; or &lt;code&gt;lambda&lt;/code&gt;.&lt;/p&gt;
+&lt;h3&gt;Miscellaneous&lt;/h3&gt;
+&lt;ul&gt;
+&lt;li&gt;Mark all strings for internationalization; see the i18n documentation for details.&lt;/li&gt;
+&lt;li&gt;Remove import statements that are no longer used when you change code. The most common tools for this task are pyflakes and pylint.&lt;/li&gt;
+&lt;li&gt;Systematically remove all trailing whitespaces from your code as those add unnecessary bytes, add visual clutter to the patches and can also occasionally cause unnecessary merge conflicts. Some IDE’s can be configured to automatically remove them and most VCS tools can be set to highlight them in diff outputs. Note, however, that patches which only remove whitespace (or only make changes for nominal PEP 8 conformance) are likely to be rejected, since they only introduce noise rather than code improvement. Tidy up when you’re next changing code in the area.&lt;/li&gt;
+&lt;li&gt;Please don’t put your name in the code you contribute. Our policy is to keep contributors’ names in the AUTHORS file distributed with Django – not scattered throughout the codebase itself. Feel free to include a change to the AUTHORS file in your patch if you make more than a single trivial change.&lt;/li&gt;
+&lt;/ul&gt;</summary><category term="django"></category><category term="python"></category></entry><entry><title>[django]使用 apache + mod_wsgi 部署 django</title><link href="http://mozillazg.com/2013/01/django-deploying-with-apache-mode-wsgi.html" rel="alternate"></link><updated>2013-01-31T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2013-01-31:2013/01/django-deploying-with-apache-mode-wsgi.html</id><summary type="html">&lt;p&gt;本文测试环境：linux mint，python 2.7，django 1.4&lt;/p&gt;
 &lt;h2&gt;安装依赖&lt;/h2&gt;
 &lt;div class="codehilite"&gt;&lt;pre&gt;&lt;span class="err"&gt;$&lt;/span&gt; &lt;span class="n"&gt;sudo&lt;/span&gt; &lt;span class="n"&gt;apt&lt;/span&gt;&lt;span class="o"&gt;-&lt;/span&gt;&lt;span class="n"&gt;get&lt;/span&gt; &lt;span class="n"&gt;install&lt;/span&gt; &lt;span class="n"&gt;apache2&lt;/span&gt;
 &lt;span class="err"&gt;$&lt;/span&gt; &lt;span class="n"&gt;sudo&lt;/span&gt; &lt;span class="n"&gt;apt&lt;/span&gt;&lt;span class="o"&gt;-&lt;/span&gt;&lt;span class="n"&gt;get&lt;/span&gt; &lt;span class="n"&gt;install&lt;/span&gt; &lt;span class="n"&gt;libapache2&lt;/span&gt;&lt;span class="o"&gt;-&lt;/span&gt;&lt;span class="n"&gt;mod&lt;/span&gt;&lt;span class="o"&gt;-&lt;/span&gt;&lt;span class="n"&gt;wsgi&lt;/span&gt;
