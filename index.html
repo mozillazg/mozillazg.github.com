@@ -40,8 +40,134 @@
 
                             <aside id="featured" class="body">
                 <article>
-                    <h1 class="entry-title"><a href="./2013/02/linux-fix-sendmail-configuration-error-feature-should-be-before-mailer.html">[linux]解决 sendmail 错误： FEATURE() should be before MAILER()</a></h1> 
+                    <h1 class="entry-title"><a href="./2013/02/django-custom-decorators-optional-keyword-arguments-for-views.html">[django]编写作用于视图（view）的装饰器（Decorator）</a></h1> 
                     <footer class="post-info">
+        <abbr class="published" title="2013-02-23T00:00:00">
+                周六 23 二月 2013
+        </abbr>
+
+                <address class="vcard author">
+                By <a class="url fn" href="./author/mozillazg.html">mozillazg</a>
+        </address>
+        <p>In <a href="./category/django.html">django</a>. </p>
+<p>tags: <a href="./tag/python.html">python</a><a href="./tag/django.html">django</a><a href="./tag/decorator.html">decorator</a><a href="./tag/zhuang-shi-qi.html">装饰器</a></p>
+</footer><!-- /.post-info --><p>本文假设读者已经知道如何编写基本的装饰器代码，否则请自行 google：“python 装饰器”and/or “python decorator”。</p>
+<h2>不带参数的装饰器</h2>
+<!--分两种情况：-->
+
+<!--* 视图函数只有一个 request 参数-->
+
+<div class="codehilite"><pre><span class="n">def</span> <span class="n">object_does_not_exist</span><span class="p">(</span><span class="n">func</span><span class="p">)</span><span class="o">:</span>
+    <span class="n">def</span> <span class="n">returned_wrapper</span><span class="p">(</span><span class="n">request</span><span class="p">,</span> <span class="o">*</span><span class="n">args</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span><span class="o">:</span>
+        <span class="nl">try:</span>
+            <span class="k">return</span> <span class="n">func</span><span class="p">(</span><span class="n">request</span><span class="p">,</span> <span class="o">*</span><span class="n">args</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span>
+        <span class="n">except</span> <span class="n">ObjectDoesNotExist</span><span class="o">:</span>
+            <span class="n">raise</span> <span class="n">Http404</span><span class="p">()</span>
+    <span class="k">return</span> <span class="n">returned_wrapper</span>
+</pre></div>
+
+
+<p>用法：</p>
+<div class="codehilite"><pre><span class="err">@</span><span class="n">object_does_not_exist</span>
+<span class="n">def</span> <span class="n">detail</span><span class="p">(</span><span class="n">request</span><span class="p">)</span><span class="o">:</span>
+    <span class="n">pass</span>
+</pre></div>
+
+
+<h2>带参数的装饰器</h2>
+<ul>
+<li>
+<p>第一种写法：</p>
+<div class="codehilite"><pre><span class="n">def</span> <span class="n">object_does_not_exist</span><span class="p">(</span><span class="n">redirect</span><span class="o">=</span><span class="n">None</span><span class="p">)</span><span class="o">:</span>
+    <span class="n">def</span> <span class="n">decorator</span><span class="p">(</span><span class="n">func</span><span class="p">)</span><span class="o">:</span>
+        <span class="n">def</span> <span class="n">returned_wrapper</span><span class="p">(</span><span class="n">request</span><span class="p">,</span> <span class="o">*</span><span class="n">args</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span><span class="o">:</span>
+            <span class="nl">try:</span>
+                <span class="k">return</span> <span class="n">func</span><span class="p">(</span><span class="n">request</span><span class="p">,</span> <span class="o">*</span><span class="n">args</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span>
+            <span class="n">except</span> <span class="n">ObjectDoesNotExist</span><span class="o">:</span>
+                <span class="k">if</span> <span class="n">redirect</span><span class="o">:</span>
+                    <span class="k">return</span> <span class="n">HttpResponseRedirect</span><span class="p">(</span><span class="n">redirect</span><span class="p">)</span>
+                <span class="nl">else:</span>
+                    <span class="n">raise</span> <span class="n">Http404</span><span class="p">()</span>
+        <span class="k">return</span> <span class="n">returned_wrapper</span>
+    <span class="k">return</span> <span class="n">decorator</span>
+</pre></div>
+
+
+<p>用法：</p>
+<div class="codehilite"><pre><span class="err">@</span><span class="n">object_does_not_exist</span><span class="p">(</span><span class="n">redirect</span><span class="o">=</span><span class="sc">&#39;/&#39;</span><span class="p">)</span>
+<span class="n">def</span> <span class="n">detail</span><span class="p">(</span><span class="n">request</span><span class="p">)</span><span class="o">:</span>
+    <span class="n">pass</span>
+
+<span class="cp"># 记得加个闭合括号，否则会出现类似 takes exactly 1 argument (0 given) 的错误</span>
+<span class="err">@</span><span class="n">object_does_not_exist</span><span class="p">()</span>
+<span class="n">def</span> <span class="n">foo</span><span class="p">(</span><span class="n">request</span><span class="p">)</span><span class="o">:</span>
+    <span class="n">pass</span>
+</pre></div>
+
+
+</li>
+<li>
+<p>第二种写法：</p>
+<div class="codehilite"><pre><span class="n">def</span> <span class="n">object_does_not_exist</span><span class="p">(</span><span class="n">func</span><span class="o">=</span><span class="n">None</span><span class="p">,</span> <span class="n">redirect</span><span class="o">=</span><span class="n">None</span><span class="p">)</span><span class="o">:</span>
+    <span class="n">def</span> <span class="n">decorator</span><span class="p">(</span><span class="n">func</span><span class="p">)</span><span class="o">:</span>
+        <span class="n">def</span> <span class="n">returned_wrapper</span><span class="p">(</span><span class="n">request</span><span class="p">,</span> <span class="o">*</span><span class="n">args</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span><span class="o">:</span>
+            <span class="nl">try:</span>
+                <span class="k">return</span> <span class="n">func</span><span class="p">(</span><span class="n">request</span><span class="p">,</span> <span class="o">*</span><span class="n">args</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span>
+            <span class="n">except</span> <span class="n">ObjectDoesNotExist</span><span class="o">:</span>
+                <span class="k">if</span> <span class="n">redirect</span><span class="o">:</span>
+                    <span class="k">return</span> <span class="n">HttpResponseRedirect</span><span class="p">(</span><span class="n">redirect</span><span class="p">)</span>
+                <span class="nl">else:</span>
+                    <span class="n">raise</span> <span class="n">Http404</span><span class="p">()</span>
+        <span class="k">return</span> <span class="n">returned_wrapper</span>
+
+    <span class="k">if</span> <span class="n">not</span> <span class="n">func</span><span class="o">:</span>
+        <span class="n">def</span> <span class="n">foo</span><span class="p">(</span><span class="n">func</span><span class="p">)</span><span class="o">:</span>
+            <span class="k">return</span> <span class="n">decorator</span><span class="p">(</span><span class="n">func</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">foo</span>
+
+    <span class="nl">else:</span>
+        <span class="k">return</span> <span class="n">decorator</span><span class="p">(</span><span class="n">func</span><span class="p">)</span>
+</pre></div>
+
+
+<p>用法：</p>
+<div class="codehilite"><pre><span class="err">@</span><span class="n">object_does_not_exist</span><span class="p">(</span><span class="n">redirect</span><span class="o">=</span><span class="sc">&#39;/&#39;</span><span class="p">)</span>
+<span class="n">def</span> <span class="n">detail</span><span class="p">(</span><span class="n">request</span><span class="p">)</span><span class="o">:</span>
+    <span class="n">pass</span>
+
+<span class="err">@</span><span class="n">object_does_not_exist</span>
+<span class="n">def</span> <span class="n">foo</span><span class="p">(</span><span class="n">request</span><span class="p">)</span><span class="o">:</span>
+    <span class="n">pass</span>
+</pre></div>
+
+
+</li>
+</ul>
+<p>第二种方法可以解决 <code>got an unexpected keyword argument</code> 错误。</p>
+<h2>参考</h2>
+<ul>
+<li><a href="http://typeandflow.blogspot.com/2011/06/python-decorator-with-optional-keyword.html">Type and Flow: Python Decorator with Optional Keyword Arguments</a></li>
+<li><a href="https://github.com/django/django/blob/master/django/contrib/auth/decorators.py">https://github.com/django/django/blob/master/django/contrib/auth/decorators.py</a></li>
+<li><a href="https://github.com/django/django/blob/master/django/utils/http.py">https://github.com/django/django/blob/master/django/utils/http.py</a></li>
+<li><a href="http://numericalrecipes.wordpress.com/2009/05/25/signature-preserving-function-decorators/">Signature Preserving Function Decorators | Numerical Recipes</a></li>
+<li><a href="http://helpful.knobs-dials.com/index.php/Python_decorator_notes#To_the_decorated_function">Python decorator notes - Helpful</a></li>
+</ul><p>There are <a href="./2013/02/django-custom-decorators-optional-keyword-arguments-for-views.html#disqus_thread">comments</a>.</p>                </article>
+                            </aside><!-- /#featured -->
+                            <section id="content" class="body">
+                    <h1>Other articles</h1>
+                    <hr />
+                    <ol id="posts-list" class="hfeed">
+                                                
+
+                 
+                        <li><article class="hentry">    
+                <header>
+                    <h1><a href="./2013/02/linux-fix-sendmail-configuration-error-feature-should-be-before-mailer.html" rel="bookmark"
+                           title="Permalink to [linux]解决 sendmail 错误： FEATURE() should be before MAILER()">[linux]解决 sendmail 错误： FEATURE() should be before MAILER()</a></h1>
+                </header>
+                
+                <div class="entry-content">
+                <footer class="post-info">
         <abbr class="published" title="2013-02-22T00:00:00">
                 周五 22 二月 2013
         </abbr>
@@ -51,7 +177,7 @@
         </address>
         <p>In <a href="./category/linux.html">linux</a>. </p>
 <p>tags: <a href="./tag/linux.html">linux</a><a href="./tag/ubuntu.html">ubuntu</a><a href="./tag/sendmail.html">sendmail</a></p>
-</footer><!-- /.post-info --><p>错误详情：</p>
+</footer><!-- /.post-info -->                <p>错误详情：</p>
 <div class="codehilite"><pre><span class="cp"># m4 /etc/mail/sendmail.mc &gt; /etc/mail/sendmail.cf</span>
 <span class="o">***</span> <span class="n">ERROR</span><span class="o">:</span> <span class="n">FEATURE</span><span class="p">()</span> <span class="n">should</span> <span class="n">be</span> <span class="n">before</span> <span class="n">MAILER</span><span class="p">()</span>
 <span class="o">***</span> <span class="n">MAILER</span><span class="p">(</span><span class="err">`</span><span class="n">local</span><span class="err">&#39;</span><span class="p">)</span> <span class="n">must</span> <span class="n">appear</span> <span class="n">after</span> <span class="n">FEATURE</span><span class="p">(</span><span class="err">`</span><span class="n">always_add_domain</span><span class="err">&#39;</span><span class="p">)</span><span class="o">***</span> <span class="n">ERROR</span><span class="o">:</span> <span class="n">FEATURE</span><span class="p">()</span> <span class="n">should</span> <span class="n">be</span> <span class="n">before</span> <span class="n">MAILER</span><span class="p">()</span>
@@ -60,42 +186,11 @@
 
 
 <p>解决办法：</p>
-<p>按照提示，编辑 /etc/mail/sendmail.mc 文件，将 FEATURE() 放到 MAILER() 之前：</p>
-<p>更改</p>
-<div class="codehilite"><pre><span class="n">dnl</span> <span class="err">#</span>
-<span class="n">dnl</span> <span class="err">#</span> <span class="n">Default</span> <span class="n">Mailer</span> <span class="n">setup</span>
-<span class="n">MAILER_DEFINITIONS</span>
-<span class="n">MAILER</span><span class="p">(</span><span class="err">`</span><span class="n">local</span><span class="err">&#39;</span><span class="p">)</span><span class="n">dnl</span>
-<span class="n">MAILER</span><span class="p">(</span><span class="err">`</span><span class="n">smtp</span><span class="err">&#39;</span><span class="p">)</span><span class="n">dnl</span>
-
-<span class="n">dnl</span> <span class="err">#</span> <span class="n">Masquerading</span> <span class="n">options</span>
-<span class="n">FEATURE</span><span class="p">(</span><span class="err">`</span><span class="n">always_add_domain</span><span class="err">&#39;</span><span class="p">)</span><span class="n">dnl</span>
-<span class="n">MASQUERADE_AS</span><span class="p">(</span><span class="err">`</span><span class="n">tumblr</span><span class="mf">.3</span><span class="n">sd</span><span class="p">.</span><span class="n">me</span><span class="err">&#39;</span><span class="p">)</span><span class="n">dnl</span>
-<span class="n">FEATURE</span><span class="p">(</span><span class="err">`</span><span class="n">allmasquerade</span><span class="err">&#39;</span><span class="p">)</span><span class="n">dnl</span>
-<span class="n">FEATURE</span><span class="p">(</span><span class="err">`</span><span class="n">masquerade_envelope</span><span class="err">&#39;</span><span class="p">)</span><span class="n">dnl</span>
-</pre></div>
-
-
-<p>为</p>
-<div class="codehilite"><pre><span class="n">dnl</span> <span class="err">#</span>
-
-<span class="n">dnl</span> <span class="err">#</span> <span class="n">Masquerading</span> <span class="n">options</span>
-<span class="n">FEATURE</span><span class="p">(</span><span class="err">`</span><span class="n">always_add_domain</span><span class="err">&#39;</span><span class="p">)</span><span class="n">dnl</span>
-<span class="n">MASQUERADE_AS</span><span class="p">(</span><span class="err">`</span><span class="n">tumblr</span><span class="mf">.3</span><span class="n">sd</span><span class="p">.</span><span class="n">me</span><span class="err">&#39;</span><span class="p">)</span><span class="n">dnl</span>
-<span class="n">FEATURE</span><span class="p">(</span><span class="err">`</span><span class="n">allmasquerade</span><span class="err">&#39;</span><span class="p">)</span><span class="n">dnl</span>
-<span class="n">FEATURE</span><span class="p">(</span><span class="err">`</span><span class="n">masquerade_envelope</span><span class="err">&#39;</span><span class="p">)</span><span class="n">dnl</span>
-
-<span class="n">dnl</span> <span class="err">#</span> <span class="n">Default</span> <span class="n">Mailer</span> <span class="n">setup</span>
-<span class="n">MAILER_DEFINITIONS</span>
-<span class="n">MAILER</span><span class="p">(</span><span class="err">`</span><span class="n">local</span><span class="err">&#39;</span><span class="p">)</span><span class="n">dnl</span>
-<span class="n">MAILER</span><span class="p">(</span><span class="err">`</span><span class="n">smtp</span><span class="err">&#39;</span><span class="p">)</span><span class="n">dnl</span>
-</pre></div><p>There are <a href="./2013/02/linux-fix-sendmail-configuration-error-feature-should-be-before-mailer.html#disqus_thread">comments</a>.</p>                </article>
-                            </aside><!-- /#featured -->
-                            <section id="content" class="body">
-                    <h1>Other articles</h1>
-                    <hr />
-                    <ol id="posts-list" class="hfeed">
-                                                
+<p>按照提示，编辑 /etc/mail/sendmail.mc 文件 ...</p>
+                <a class="readmore" href="./2013/02/linux-fix-sendmail-configuration-error-feature-should-be-before-mailer.html">read more</a>
+                <p>There are <a href="./2013/02/linux-fix-sendmail-configuration-error-feature-should-be-before-mailer.html#disqus_thread">comments</a>.</p>                </div><!-- /.entry-content -->
+            </article></li>
+                            
 
                  
                         <li><article class="hentry">    
@@ -132,39 +227,9 @@
                 <a class="readmore" href="./2013/02/django-online-server-admin-doesnotexist-at-admin.html">read more</a>
                 <p>There are <a href="./2013/02/django-online-server-admin-doesnotexist-at-admin.html#disqus_thread">comments</a>.</p>                </div><!-- /.entry-content -->
             </article></li>
-                            
-
-                 
-                        <li><article class="hentry">    
-                <header>
-                    <h1><a href="./2013/02/django-typeerror-decod-argument-1-must-be-string-not-none.html" rel="bookmark"
-                           title="Permalink to [django] 创建后台超级用户时出现 TypeError: decode() argument 1 must be string, not None 错误">[django] 创建后台超级用户时出现 TypeError: decode() argument 1 must be string, not None 错误</a></h1>
-                </header>
-                
-                <div class="entry-content">
-                <footer class="post-info">
-        <abbr class="published" title="2013-02-19T00:00:00">
-                周二 19 二月 2013
-        </abbr>
-
-                <address class="vcard author">
-                By <a class="url fn" href="./author/mozillazg.html">mozillazg</a>
-        </address>
-        <p>In <a href="./category/django.html">django</a>. </p>
-<p>tags: <a href="./tag/python.html">python</a><a href="./tag/django.html">django</a></p>
-</footer><!-- /.post-info -->                <p>错误信息如下：</p>
-<div class="codehilite"><pre><span class="nx">You</span> <span class="nx">just</span> <span class="nx">installed</span> <span class="nx">Django</span><span class="s1">&#39;s auth system, which means you don&#39;</span><span class="nb">t</span> <span class="nx">have</span> <span class="nb">any</span> <span class="nx">superusers</span> <span class="nx">defined.</span>
-<span class="nx">Would</span> <span class="nx">you</span> <span class="nx">like</span> <span class="k">to</span> <span class="nb">create</span> <span class="nx">one</span> <span class="nx">now</span><span class="o">?</span> <span class="p">(</span><span class="nx">yes</span><span class="p">/</span><span class="nx">no</span><span class="p">):</span> <span class="nx">yes</span>
-<span class="nx">Traceback</span> <span class="p">(</span><span class="nx">most</span> <span class="nx">recent</span> <span class="nb">call</span> <span class="nb">last</span><span class="p">):</span>
-  <span class="nb">File</span> <span class="s2">&quot;manage.py&quot;</span><span class="p">,</span> <span class="nb">line</span> <span class="mi">10</span><span class="p">,</span> <span class="k">in</span> <span class="o">&lt;</span><span class="nx">module</span><span class="o">&gt;</span>
-    <span class="nx">execute_from_command_line</span><span class="p">(</span><span class="nx">sys.argv</span><span class="p">)</span>
-  <span class="nb">File</span> <span class="s2">&quot;/usr/local/lib/python2.7/dist-packages/django ...</span></pre></div>
-                <a class="readmore" href="./2013/02/django-typeerror-decod-argument-1-must-be-string-not-none.html">read more</a>
-                <p>There are <a href="./2013/02/django-typeerror-decod-argument-1-must-be-string-not-none.html#disqus_thread">comments</a>.</p>                </div><!-- /.entry-content -->
-            </article></li>
                             </ol><!-- /#posts-list -->
                             <p class="paginator">
-        Page 1 / 6
+        Page 1 / 7
             <a href="./index2.html">&raquo;</a>
     </p>
                         </section><!-- /#content -->
