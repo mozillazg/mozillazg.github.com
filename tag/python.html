@@ -41,8 +41,110 @@
 
                             <aside id="featured" class="body">
                 <article>
-                    <h1 class="entry-title"><a href="../2013/02/django-bad-character-range.html">[django]修复 bad character range 异常</a></h1> 
+                    <h1 class="entry-title"><a href="../2013/02/django-add-extra-error-messages.html">[django]添加额外的 form 错误信息</a></h1> 
                     <footer class="post-info">
+        <abbr class="published" title="2013-02-27T00:00:00">
+                周三 27 二月 2013
+        </abbr>
+
+                <address class="vcard author">
+                By <a class="url fn" href="../author/mozillazg.html">mozillazg</a>
+        </address>
+        <p>In <a href="../category/django.html">django</a>. </p>
+<p>tags: <a href="../tag/django.html">django</a><a href="../tag/form.html">form</a><a href="../tag/python.html">python</a></p>
+</footer><!-- /.post-info --><p>通过两种方法给 Django 表单添加额外的错误信息。</p>
+<p>第一种方法，使用 form 自定义校验（更详细的请查看 <a href="https://docs.djangoproject.com/en/dev/ref/forms/validation/">django 官方文档</a>）：</p>
+<div class="codehilite"><pre><span class="n">class</span> <span class="n">SendForm</span><span class="p">(</span><span class="n">forms</span><span class="p">.</span><span class="n">Form</span><span class="p">)</span><span class="o">:</span>
+    <span class="err">#</span> <span class="p">...</span>
+
+    <span class="n">def</span> <span class="n">clean_recipient</span><span class="p">(</span><span class="n">self</span><span class="p">)</span><span class="o">:</span>
+        <span class="n">data</span> <span class="o">=</span> <span class="n">self</span><span class="p">.</span><span class="n">cleaned_data</span><span class="p">[</span><span class="err">&#39;</span><span class="n">recipient</span><span class="err">&#39;</span><span class="p">]</span>
+        <span class="k">if</span> <span class="n">not</span> <span class="n">User</span><span class="p">.</span><span class="n">objects</span><span class="p">.</span><span class="n">filter</span><span class="p">(</span><span class="n">username</span><span class="o">=</span><span class="n">data</span><span class="p">).</span><span class="n">exists</span><span class="p">()</span><span class="o">:</span>
+            <span class="n">raise</span> <span class="n">forms</span><span class="p">.</span><span class="n">ValidationError</span><span class="p">(</span><span class="s">&quot;This user doesn&#39;t exists!&quot;</span><span class="p">)</span>
+
+        <span class="k">return</span> <span class="n">data</span>
+
+
+<span class="n">def</span> <span class="n">send</span><span class="p">(</span><span class="n">request</span><span class="p">,</span> <span class="n">template_name</span><span class="o">=</span><span class="err">&#39;</span><span class="n">message</span><span class="o">/</span><span class="n">send</span><span class="p">.</span><span class="n">html</span><span class="err">&#39;</span><span class="p">,</span> <span class="n">extra_context</span><span class="o">=</span><span class="n">None</span><span class="p">)</span><span class="o">:</span>
+    <span class="k">if</span> <span class="n">request</span><span class="p">.</span><span class="n">method</span> <span class="o">==</span> <span class="err">&#39;</span><span class="n">POST</span><span class="err">&#39;</span><span class="o">:</span>
+        <span class="n">form</span> <span class="o">=</span> <span class="n">SendForm</span><span class="p">(</span><span class="n">request</span><span class="p">.</span><span class="n">POST</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">form</span><span class="p">.</span><span class="n">is_valid</span><span class="p">()</span><span class="o">:</span>
+            <span class="err">#</span> <span class="p">....</span>
+            <span class="n">recipient</span> <span class="o">=</span> <span class="n">form</span><span class="p">.</span><span class="n">cleaned_data</span><span class="p">[</span><span class="err">&#39;</span><span class="n">recipient</span><span class="err">&#39;</span><span class="p">]</span>
+
+            <span class="n">recipient</span> <span class="o">=</span> <span class="n">User</span><span class="p">.</span><span class="n">objects</span><span class="p">.</span><span class="n">get</span><span class="p">(</span><span class="n">username</span><span class="o">=</span><span class="n">recipient</span><span class="p">)</span>
+            <span class="err">#</span> <span class="p">...</span>
+            <span class="k">return</span> <span class="n">HttpResponseRedirect</span><span class="p">(</span><span class="n">reverse_lazy</span><span class="p">(</span><span class="err">&#39;</span><span class="n">inbox</span><span class="err">&#39;</span><span class="p">))</span>
+    <span class="nl">else:</span>
+        <span class="n">form</span> <span class="o">=</span> <span class="n">SendForm</span><span class="p">()</span>
+
+    <span class="n">context</span> <span class="o">=</span> <span class="p">{</span>
+        <span class="err">&#39;</span><span class="n">form</span><span class="err">&#39;</span><span class="o">:</span> <span class="n">form</span><span class="p">,</span>
+    <span class="p">}</span>
+    <span class="k">if</span> <span class="n">extra_context</span><span class="o">:</span>
+        <span class="n">context</span><span class="p">.</span><span class="n">update</span><span class="p">(</span><span class="n">extra_context</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">render_to_response</span><span class="p">(</span><span class="n">template_name</span><span class="p">,</span> <span class="n">context</span><span class="p">,</span>
+                              <span class="n">context_instance</span><span class="o">=</span><span class="n">RequestContext</span><span class="p">(</span><span class="n">request</span><span class="p">))</span>
+</pre></div>
+
+
+<p>第二种方法，更新 form.errors 字典：</p>
+<div class="codehilite"><pre><span class="n">from</span> <span class="n">django</span><span class="p">.</span><span class="n">forms</span><span class="p">.</span><span class="n">util</span> <span class="n">import</span> <span class="n">ErrorList</span>
+
+
+<span class="n">def</span> <span class="n">send</span><span class="p">(</span><span class="n">request</span><span class="p">,</span> <span class="n">template_name</span><span class="o">=</span><span class="err">&#39;</span><span class="n">message</span><span class="o">/</span><span class="n">send</span><span class="p">.</span><span class="n">html</span><span class="err">&#39;</span><span class="p">,</span> <span class="n">extra_context</span><span class="o">=</span><span class="n">None</span><span class="p">)</span><span class="o">:</span>
+    <span class="k">if</span> <span class="n">request</span><span class="p">.</span><span class="n">method</span> <span class="o">==</span> <span class="err">&#39;</span><span class="n">POST</span><span class="err">&#39;</span><span class="o">:</span>
+        <span class="n">form</span> <span class="o">=</span> <span class="n">SendForm</span><span class="p">(</span><span class="n">request</span><span class="p">.</span><span class="n">POST</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">form</span><span class="p">.</span><span class="n">is_valid</span><span class="p">()</span><span class="o">:</span>
+            <span class="err">#</span> <span class="p">....</span>
+            <span class="n">recipient</span> <span class="o">=</span> <span class="n">form</span><span class="p">.</span><span class="n">cleaned_data</span><span class="p">[</span><span class="err">&#39;</span><span class="n">recipient</span><span class="err">&#39;</span><span class="p">]</span>
+
+            <span class="nl">try:</span>
+                <span class="n">recipient</span> <span class="o">=</span> <span class="n">User</span><span class="p">.</span><span class="n">objects</span><span class="p">.</span><span class="n">get</span><span class="p">(</span><span class="n">username</span><span class="o">=</span><span class="n">recipient</span><span class="p">)</span>
+            <span class="n">except</span> <span class="n">ObjectDoesNotExist</span><span class="o">:</span>
+                <span class="n">request</span><span class="p">.</span><span class="n">method</span> <span class="o">=</span> <span class="err">&#39;</span><span class="n">GET</span><span class="err">&#39;</span>
+                <span class="n">error_msg</span> <span class="o">=</span> <span class="p">[</span><span class="s">&quot;This user doesn&#39;t exists!&quot;</span><span class="p">]</span>
+                <span class="n">form</span><span class="p">.</span><span class="n">errors</span><span class="p">[</span><span class="err">&#39;</span><span class="n">recipient</span><span class="err">&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">ErrorList</span><span class="p">(</span><span class="n">error_msg</span><span class="p">)</span>
+                <span class="n">extra_context</span> <span class="o">=</span> <span class="p">{</span><span class="err">&#39;</span><span class="n">form</span><span class="err">&#39;</span><span class="o">:</span> <span class="n">form</span><span class="p">}</span>
+                <span class="k">return</span> <span class="n">send</span><span class="p">(</span><span class="n">request</span><span class="p">,</span> <span class="n">template_name</span><span class="p">,</span> <span class="n">extra_context</span><span class="p">)</span>
+
+            <span class="err">#</span> <span class="p">...</span>
+            <span class="k">return</span> <span class="n">HttpResponseRedirect</span><span class="p">(</span><span class="n">reverse_lazy</span><span class="p">(</span><span class="err">&#39;</span><span class="n">inbox</span><span class="err">&#39;</span><span class="p">))</span>
+    <span class="nl">else:</span>
+        <span class="n">form</span> <span class="o">=</span> <span class="n">SendForm</span><span class="p">()</span>
+
+    <span class="n">context</span> <span class="o">=</span> <span class="p">{</span>
+        <span class="err">&#39;</span><span class="n">form</span><span class="err">&#39;</span><span class="o">:</span> <span class="n">form</span><span class="p">,</span>
+    <span class="p">}</span>
+    <span class="k">if</span> <span class="n">extra_context</span><span class="o">:</span>
+        <span class="n">context</span><span class="p">.</span><span class="n">update</span><span class="p">(</span><span class="n">extra_context</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">render_to_response</span><span class="p">(</span><span class="n">template_name</span><span class="p">,</span> <span class="n">context</span><span class="p">,</span>
+                              <span class="n">context_instance</span><span class="o">=</span><span class="n">RequestContext</span><span class="p">(</span><span class="n">request</span><span class="p">))</span>
+</pre></div>
+
+
+<h2>参考</h2>
+<ul>
+<li><a href="https://docs.djangoproject.com/en/dev/ref/forms/validation/">Form and field validation | Django documentation | Django</a></li>
+<li><a href="https://github.com/django/django/blob/master/django/forms/forms.py">django/django/forms/forms.py at master · django/django · GitHub</a></li>
+<li><a href="https://github.com/django/django/blob/master/django/forms/util.py">django/django/forms/util.py at master · django/django · GitHub</a></li>
+</ul><p>There are <a href="../2013/02/django-add-extra-error-messages.html#disqus_thread">comments</a>.</p>                </article>
+                            </aside><!-- /#featured -->
+                            <section id="content" class="body">
+                    <h1>Other articles</h1>
+                    <hr />
+                    <ol id="posts-list" class="hfeed">
+                                                
+
+                 
+                        <li><article class="hentry">    
+                <header>
+                    <h1><a href="../2013/02/django-bad-character-range.html" rel="bookmark"
+                           title="Permalink to [django]修复 bad character range 异常">[django]修复 bad character range 异常</a></h1>
+                </header>
+                
+                <div class="entry-content">
+                <footer class="post-info">
         <abbr class="published" title="2013-02-26T00:00:00">
                 周二 26 二月 2013
         </abbr>
@@ -52,20 +154,18 @@
         </address>
         <p>In <a href="../category/django.html">django</a>. </p>
 <p>tags: <a href="../tag/python.html">python</a><a href="../tag/django.html">django</a></p>
-</footer><!-- /.post-info --><p>出现 bad character range 异常， 是因为程序某个地方的正则表达式写错了，
+</footer><!-- /.post-info -->                <p>出现 bad character range 异常， 是因为程序某个地方的正则表达式写错了，
 不是一个有效的正则表达式。</p>
 <p>比如正则 <code>[_-\d]</code> 就是一个无效的正则，会报 <code>bad character range</code> 异常。
 将正则修改为 <code>[-_\d]</code> 使之成为一个有效的正则，就可以修复该异常。</p>
 <h2>参考</h2>
 <ul>
 <li><a href="http://stackoverflow.com/questions/1526137/bad-character-range-exception">django - "bad character range" exception? - Stack Overflow</a></li>
-</ul><p>There are <a href="../2013/02/django-bad-character-range.html#disqus_thread">comments</a>.</p>                </article>
-                            </aside><!-- /#featured -->
-                            <section id="content" class="body">
-                    <h1>Other articles</h1>
-                    <hr />
-                    <ol id="posts-list" class="hfeed">
-                                                
+</ul>
+                <a class="readmore" href="../2013/02/django-bad-character-range.html">read more</a>
+                <p>There are <a href="../2013/02/django-bad-character-range.html#disqus_thread">comments</a>.</p>                </div><!-- /.entry-content -->
+            </article></li>
+                            
 
                  
                         <li><article class="hentry">    
@@ -102,47 +202,9 @@
                 <a class="readmore" href="../2013/02/django-variable-subtraction-in-django-templates.html">read more</a>
                 <p>There are <a href="../2013/02/django-variable-subtraction-in-django-templates.html#disqus_thread">comments</a>.</p>                </div><!-- /.entry-content -->
             </article></li>
-                            
-
-                 
-                        <li><article class="hentry">    
-                <header>
-                    <h1><a href="../2013/02/django-copy-or-clone-a-query-result-and-insert-it-into-database.html" rel="bookmark"
-                           title="Permalink to [django]复制/克隆一条查询结果">[django]复制/克隆一条查询结果</a></h1>
-                </header>
-                
-                <div class="entry-content">
-                <footer class="post-info">
-        <abbr class="published" title="2013-02-24T00:00:00">
-                周日 24 二月 2013
-        </abbr>
-
-                <address class="vcard author">
-                By <a class="url fn" href="../author/mozillazg.html">mozillazg</a>
-        </address>
-        <p>In <a href="../category/django.html">django</a>. </p>
-<p>tags: <a href="../tag/python.html">python</a><a href="../tag/django.html">django</a></p>
-</footer><!-- /.post-info -->                <p>复制/克隆一条查询结果，并将它插入到数据库中：</p>
-<p>将 pk 值设为 None 即可：</p>
-<div class="codehilite"><pre><span class="n">blog</span> <span class="o">=</span> <span class="n">Blog</span><span class="p">(</span><span class="n">name</span><span class="o">=</span><span class="err">&#39;</span><span class="n">My</span> <span class="n">blog</span><span class="err">&#39;</span><span class="p">,</span> <span class="n">tagline</span><span class="o">=</span><span class="err">&#39;</span><span class="n">Blogging</span> <span class="n">is</span> <span class="n">easy</span><span class="err">&#39;</span><span class="p">)</span>
-<span class="n">blog</span><span class="p">.</span><span class="n">save</span><span class="p">()</span> <span class="err">#</span> <span class="n">post</span><span class="p">.</span><span class="n">pk</span> <span class="o">==</span> <span class="mi">1</span>
-
-<span class="n">blog</span><span class="p">.</span><span class="n">pk</span> <span class="o">=</span> <span class="n">None</span>
-<span class="n">blog</span><span class="p">.</span><span class="n">save</span><span class="p">()</span> <span class="err">#</span> <span class="n">post</span><span class="p">.</span><span class="n">pk</span> <span class="o">==</span> <span class="mi">2</span>
-</pre></div>
-
-
-<p>如果该 model 继承于另一个 model 的话，必须将 <code>pk</code> 和 <code>id</code> 的值都设为 None:</p>
-<div class="codehilite"><pre><span class="n">class</span> <span class="n">ThemeBlog</span><span class="p">(</span><span class="n">Blog</span><span class="p">)</span><span class="o">:</span>
-    <span class="n">theme</span> <span class="o">=</span> <span class="n">models</span><span class="p">.</span><span class="n">CharField</span><span class="p">(</span><span class="n">max_length</span><span class="o">=</span><span class="mi">200</span><span class="p">)</span>
-
-<span class="n">django_blog ...</span></pre></div>
-                <a class="readmore" href="../2013/02/django-copy-or-clone-a-query-result-and-insert-it-into-database.html">read more</a>
-                <p>There are <a href="../2013/02/django-copy-or-clone-a-query-result-and-insert-it-into-database.html#disqus_thread">comments</a>.</p>                </div><!-- /.entry-content -->
-            </article></li>
                             </ol><!-- /#posts-list -->
                             <p class="paginator">
-        Page 1 / 5
+        Page 1 / 6
             <a href="../tag/python2.html">&raquo;</a>
     </p>
                         </section><!-- /#content -->
