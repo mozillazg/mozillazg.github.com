@@ -41,41 +41,72 @@
 
                             <aside id="featured" class="body">
                 <article>
-                    <h1 class="entry-title"><a href="./2013/03/python-fix-zmysqlda-2.0.8-no-module-named-imagefile.html">[python]修复 ZMySQLDA-2.0.8 出现的“ImportError: No module named ImageFile”错误</a></h1> 
+                    <h1 class="entry-title"><a href="./2013/03/django-merge-queryset-then-sort.html">[django]合并多个查询结果集(queryset)并按字段排序</a></h1> 
                     <footer class="post-info">
-        <abbr class="published" title="2013-03-08T00:00:00">
-                周五 08 三月 2013
+        <abbr class="published" title="2013-03-28T00:00:00">
+                周四 28 三月 2013
         </abbr>
 
                 <address class="vcard author">
                 By <a class="url fn" href="./author/mozillazg.html">mozillazg</a>
         </address>
-        <p>In <a href="./category/python.html">python</a>. </p>
-<p>tags: <a href="./tag/python.html">python</a><a href="./tag/zope.html">zope</a><a href="./tag/mysql.html">mysql</a></p>
-</footer><!-- /.post-info --><p>修改 ZMySQLDA 文件夹内的 DA.py、DABase.py 文件，将</p>
-<div class="codehilite"><pre><span class="kn">from</span> <span class="nn">ImageFile</span> <span class="kn">import</span> <span class="n">ImageFile</span>
+        <p>In <a href="./category/django.html">django</a>. </p>
+<p>tags: <a href="./tag/django.html">django</a><a href="./tag/python.html">python</a><a href="./tag/queryset.html">queryset</a><a href="./tag/sort.html">sort</a><a href="./tag/merge.html">merge</a></p>
+</footer><!-- /.post-info --><h2>需求</h2>
+<p>合并博文的喜爱及转发信息，并按时间排序。</p>
+<p>相关 models :</p>
+<div class="codehilite"><pre><span class="k">class</span> <span class="nc">Post</span><span class="p">(</span><span class="n">models</span><span class="o">.</span><span class="n">Model</span><span class="p">):</span>
+    <span class="c">#...</span>
+
+    <span class="n">created_at</span> <span class="o">=</span> <span class="n">models</span><span class="o">.</span><span class="n">DateTimeField</span><span class="p">(</span><span class="n">auto_now_add</span><span class="o">=</span><span class="bp">True</span><span class="p">)</span>
+    <span class="n">reblog_from</span> <span class="o">=</span> <span class="n">models</span><span class="o">.</span><span class="n">ForeignKey</span><span class="p">(</span><span class="s">&#39;self&#39;</span><span class="p">,</span> <span class="n">null</span><span class="o">=</span><span class="bp">True</span><span class="p">,</span> <span class="n">blank</span><span class="o">=</span><span class="bp">True</span><span class="p">)</span>
+
+    <span class="c">#...</span>
+
+
+<span class="k">class</span> <span class="nc">Like</span><span class="p">(</span><span class="n">models</span><span class="o">.</span><span class="n">Model</span><span class="p">):</span>
+    <span class="c">#...</span>
+
+    <span class="n">post</span> <span class="o">=</span> <span class="n">models</span><span class="o">.</span><span class="n">ForeignKey</span><span class="p">(</span><span class="n">Post</span><span class="p">)</span>
+    <span class="n">created_at</span> <span class="o">=</span> <span class="n">models</span><span class="o">.</span><span class="n">DateTimeField</span><span class="p">(</span><span class="n">auto_now_add</span><span class="o">=</span><span class="bp">True</span><span class="p">)</span>
+
+    <span class="c">#...</span>
 </pre></div>
 
 
-<p>改为</p>
-<div class="codehilite"><pre><span class="kn">from</span> <span class="nn">App.ImageFile</span> <span class="kn">import</span> <span class="n">ImageFile</span>
+<h2>解决方案</h2>
+<div class="codehilite"><pre><span class="kn">from</span> <span class="nn">itertools</span> <span class="kn">import</span> <span class="n">chain</span>
+<span class="kn">from</span> <span class="nn">operator</span> <span class="kn">import</span> <span class="n">attrgetter</span>
+
+<span class="c">#...</span>
+
+<span class="n">post</span> <span class="o">=</span> <span class="n">Post</span><span class="o">.</span><span class="n">objects</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">pk</span><span class="o">=</span><span class="n">post_id</span><span class="p">)</span>  <span class="c"># 获取博文</span>
+<span class="n">likes</span> <span class="o">=</span> <span class="n">likes</span> <span class="o">=</span> <span class="n">post</span><span class="o">.</span><span class="n">like_set</span><span class="o">.</span><span class="n">all</span><span class="p">()</span>  <span class="c"># 获取喜爱信息</span>
+<span class="c"># likes = Like.objects.filter(post=post)</span>
+<span class="n">reblogs</span> <span class="o">=</span> <span class="n">Post</span><span class="o">.</span><span class="n">objects</span><span class="o">.</span><span class="n">filter</span><span class="p">(</span><span class="n">reblog_from</span><span class="o">=</span><span class="n">post</span><span class="p">)</span>  <span class="c"># 获取转发信息</span>
+
+<span class="c"># 合并喜爱及转发信息，并按时间逆序排序</span>
+<span class="n">notes</span> <span class="o">=</span> <span class="nb">sorted</span><span class="p">(</span><span class="n">chain</span><span class="p">(</span><span class="n">likes</span><span class="p">,</span> <span class="n">reblogs</span><span class="p">),</span> <span class="n">key</span><span class="o">=</span><span class="n">attrgetter</span><span class="p">(</span><span class="s">&#39;created_at&#39;</span><span class="p">),</span>
+               <span class="n">reverse</span><span class="o">=</span><span class="bp">True</span><span class="p">)</span>
+
+<span class="c">#...</span>
 </pre></div>
 
 
-<p>即可。</p>
-<div class="codehilite"><pre><span class="go">[zope@localhost ZMySQLDA]$ cat DA.py | grep App.Image -n</span>
-<span class="go">96:from App.ImageFile import ImageFile</span>
-
-<span class="go">[zope@localhost ZMySQLDA]$ cat DABase.py | grep App.Image -n</span>
-<span class="go">92:from App.ImageFile import ImageFile</span>
+<p><strong>使用 itertools.chain 函数合并可迭代对象</strong>：</p>
+<div class="codehilite"><pre><span class="o">&gt;&gt;&gt;</span> <span class="nb">list</span><span class="p">(</span><span class="n">chain</span><span class="p">([</span><span class="mi">1</span><span class="p">,</span> <span class="mi">2</span><span class="p">,</span> <span class="mi">3</span><span class="p">],</span> <span class="s">&#39;abc&#39;</span><span class="p">))</span>
+<span class="o">&gt;&gt;&gt;</span> <span class="p">[</span><span class="mi">1</span><span class="p">,</span> <span class="mi">2</span><span class="p">,</span> <span class="mi">3</span><span class="p">,</span> <span class="s">&#39;a&#39;</span><span class="p">,</span> <span class="s">&#39;b&#39;</span><span class="p">,</span> <span class="s">&#39;c&#39;</span><span class="p">]</span>
 </pre></div>
 
 
+<p><strong>使用 sorted 函数排序（按对象属性排序）</strong>。
+关于排序请参考博文：
+<a href="http://mozillazg.com/2013/03/python-sorting-how-to.html">[python]排序（Sorting Mini-HOW TO）</a></p>
 <h2>参考</h2>
 <ul>
-<li><a href="http://rescue.unchor.com/4">zope の version up で Products "COREBlog" "EPos" でエラー</a></li>
-<li><a href="http://mxm-mad-science.blogspot.com/2008/01/installing-zmysqlda-in-zope-using.html">Installing ZMySQLDA in Zope using buildout on Ubuntu and perhaps Debian in general</a></li>
-</ul><p>There are <a href="./2013/03/python-fix-zmysqlda-2.0.8-no-module-named-imagefile.html#disqus_thread">comments</a>.</p>                </article>
+<li><a href="http://docs.python.org/2/library/itertools.html#itertools.chain">itertools — Functions creating iterators for efficient looping — Python v2.7.3 documentation</a></li>
+<li><a href="http://mozillazg.com/2013/03/python-sorting-how-to.html">[python]排序（Sorting Mini-HOW TO）</a></li>
+</ul><p>There are <a href="./2013/03/django-merge-queryset-then-sort.html#disqus_thread">comments</a>.</p>                </article>
                             </aside><!-- /#featured -->
                             <section id="content" class="body">
                     <h1>Other articles</h1>
@@ -86,86 +117,86 @@
                  
                         <li><article class="hentry">    
                 <header>
-                    <h1><a href="./2013/03/firefox-disable-pdf-js.html" rel="bookmark"
-                           title="Permalink to [firefox]禁用在线查看 PDF 文件的功能">[firefox]禁用在线查看 PDF 文件的功能</a></h1>
+                    <h1><a href="./2013/03/python-zope2-datetime.html" rel="bookmark"
+                           title="Permalink to [python]在 zope2 中获取当前时间及格式化输出">[python]在 zope2 中获取当前时间及格式化输出</a></h1>
                 </header>
                 
                 <div class="entry-content">
                 <footer class="post-info">
-        <abbr class="published" title="2013-03-06T00:00:00">
-                周三 06 三月 2013
+        <abbr class="published" title="2013-03-18T00:00:00">
+                周一 18 三月 2013
         </abbr>
 
                 <address class="vcard author">
                 By <a class="url fn" href="./author/mozillazg.html">mozillazg</a>
         </address>
-        <p>In <a href="./category/firefox.html">firefox</a>. </p>
-<p>tags: <a href="./tag/firefox.html">firefox</a><a href="./tag/pdfjs.html">pdf.js</a></p>
-</footer><!-- /.post-info -->                <p>最近更新了 firefox 后发现没法下载 PDF 文件了，因为默认情况下 firefox 会直接在浏览器中打开 PDF 文件。问题是，有的 PDF 文件很大啊，你也给我直接打开，我的网速受不了啊。有时我就是想保存 PDF 文件，不想直接打开。</p>
-<p>下面说一下如何禁用这个功能，恢复保存 PDF 文件的功能。</p>
-<p>打开 <a href="about:config">about:config</a> 输入 <code>pdfjs.disabled</code> 双击它，将它的值改为 true：</p>
-<p><img alt="set pdfjs.disabled to true" src="/static/images/2013-03-06-firefox-pdf-js.jpg" /></p>
-                <a class="readmore" href="./2013/03/firefox-disable-pdf-js.html">read more</a>
-                <p>There are <a href="./2013/03/firefox-disable-pdf-js.html#disqus_thread">comments</a>.</p>                </div><!-- /.entry-content -->
+        <p>In <a href="./category/python.html">python</a>. </p>
+<p>tags: <a href="./tag/python.html">python</a><a href="./tag/zope2.html">zope2</a></p>
+</footer><!-- /.post-info -->                <p>可以使用 Zope2 内置的 <code>DateTime()</code> 获取当前时间。</p>
+<h2>Script(Python)</h2>
+<p>新建 Script(Python) 文件：</p>
+<div class="codehilite"><pre><span class="k">return</span> <span class="n">DateTime</span><span class="p">()</span>
+</pre></div>
+
+
+<p>结果：</p>
+<div class="codehilite"><pre><span class="mi">2013</span><span class="o">/</span><span class="mo">03</span><span class="o">/</span><span class="mi">18</span> <span class="mi">12</span><span class="o">:</span><span class="mi">38</span><span class="o">:</span><span class="mf">22.825950</span> <span class="n">GMT</span><span class="o">-</span><span class="mi">4</span>
+</pre></div>
+
+
+<p>格式输出：</p>
+<p>return DateTime().strftime('%Y-%m-%d %H:%M:%S')
+结果：</p>
+<div class="codehilite"><pre><span class="mi">2013</span><span class="o">/</span><span class="mo">03</span><span class="o">/</span><span class="mi">18</span> <span class="mi">12</span><span class="o">:</span><span class="mi">38</span>
+</pre></div>
+
+
+<h2>DTML</h2>
+<p>新建 DTML 文件：</p>
+<div class="codehilite"><pre><span class="o">&lt;</span><span class="n">dtml</span><span class="o">-</span><span class="n">var</span> <span class="n">expr</span><span class="o">=</span><span class="s">&quot;DateTime()&quot;</span> <span class="n">fmt</span><span class="o">=</span><span class="s">&quot;%Y/%m ...</span></pre></div>
+                <a class="readmore" href="./2013/03/python-zope2-datetime.html">read more</a>
+                <p>There are <a href="./2013/03/python-zope2-datetime.html#disqus_thread">comments</a>.</p>                </div><!-- /.entry-content -->
             </article></li>
                             
 
                  
                         <li><article class="hentry">    
                 <header>
-                    <h1><a href="./2013/03/pelican-notes.html" rel="bookmark"
-                           title="Permalink to pelican 使用笔记">pelican 使用笔记</a></h1>
+                    <h1><a href="./2013/03/python-zope2-download-file-and-generator-csv-file.html" rel="bookmark"
+                           title="Permalink to [python]zope2 文件下载及导出为 csv 文件">[python]zope2 文件下载及导出为 csv 文件</a></h1>
                 </header>
                 
                 <div class="entry-content">
                 <footer class="post-info">
-        <abbr class="published" title="2013-03-04T00:00:00">
-                周一 04 三月 2013
+        <abbr class="published" title="2013-03-18T00:00:00">
+                周一 18 三月 2013
         </abbr>
 
                 <address class="vcard author">
                 By <a class="url fn" href="./author/mozillazg.html">mozillazg</a>
         </address>
-        <p>In <a href="./category/others.html">others</a>. </p>
-<p>tags: <a href="./tag/pelican.html">pelican</a><a href="./tag/markdown.html">markdown</a><a href="./tag/pygments.html">pygments</a><a href="./tag/python-markdown.html">python-markdown</a></p>
-</footer><!-- /.post-info -->                <p>记录一些使用 Pelican 写博客的经验。</p>
-<h2>Markdown</h2>
-<h3>多级列表</h3>
-<p>官方的 Markdown 语法：</p>
-<div class="codehilite"><pre>* list
-  * sublist
-  * sublist
-* list
+        <p>In <a href="./category/python.html">python</a>. </p>
+<p>tags: <a href="./tag/python.html">python</a><a href="./tag/zope2.html">zope2</a><a href="./tag/csv.html">csv</a></p>
+</footer><!-- /.post-info -->                <p>本文将简单实现 zope2 导出数据库数据为 csv 文件并提供下载链接。</p>
+<p>先建一个 <strong>Z SQL Method</strong>，ID 为 <strong>query_sql</strong>，内容就是查询所有结果的 sql 语句 ：</p>
+<div class="codehilite"><pre><span class="n">select</span> <span class="o">*</span> <span class="n">from</span> <span class="n">user</span>
 </pre></div>
 
 
-<p>pelican 使用的是 python-markdown 来解析 markdown 文件，
-而 python-markdown 的关于多级列表的语法跟官方的有点不一样：</p>
-<div class="codehilite"><pre>* list
-    * sublist
-    * sublist
-* list
-</pre></div>
+<p>再建一个 <strong>Script (Python)</strong> ID 为 <strong>hello_py</strong>, 内容是调用上面定义的 Z SQL Method，并将结果转换为<strong>逗号分隔</strong>的 cvs 格式，下面将详细说明：</p>
+<div class="codehilite"><pre><span class="n">request</span> <span class="o">=</span> <span class="n">container</span><span class="o">.</span><span class="n">REQUEST</span>
+<span class="n">response</span> <span class="o">=</span>  <span class="n">request</span><span class="o">.</span><span class="n">response</span>
 
+<span class="n">query_result</span> <span class="o">=</span> <span class="n">context</span><span class="o">.</span><span class="n">query_sql</span><span class="p">()</span>  <span class="c"># 获取数据库查询结果</span>
+<span class="n">dics</span> <span class="o">=</span> <span class="n">query_result</span><span class="o">.</span><span class="n">dictionaries</span><span class="p">()</span>  <span class="c"># 将查询结果转换为一个字典</span>
 
-<p>子列表与父列表之间的对齐方式是：至少空出4个空格或1一个 Tab 键。
-官方的语法兼容 python-markdown 的语法，所以不要担心兼容性。</p>
-<h3>语法高亮</h3>
-<p>python-markdown 使用 pygments 来实现语法高亮的功能，并且支持指定编程语言。</p>
-<p>比如，指定代码用的是 Python 编程语言：</p>
-<div class="codehilite"><pre>:::python
-print &#39;hello, world&#39;
-</pre></div>
-
-
-<p>效果：</p>
-<div class="codehilite"><pre><span class="k">print</span> <span class="s">&#39;hello ...</span></pre></div>
-                <a class="readmore" href="./2013/03/pelican-notes.html">read more</a>
-                <p>There are <a href="./2013/03/pelican-notes.html#disqus_thread">comments</a>.</p>                </div><!-- /.entry-content -->
+<span class="c"># 输出查询结果包含的字段名称，也就是 ...</span></pre></div>
+                <a class="readmore" href="./2013/03/python-zope2-download-file-and-generator-csv-file.html">read more</a>
+                <p>There are <a href="./2013/03/python-zope2-download-file-and-generator-csv-file.html#disqus_thread">comments</a>.</p>                </div><!-- /.entry-content -->
             </article></li>
                             </ol><!-- /#posts-list -->
                             <p class="paginator">
-        Page 1 / 10
+        Page 1 / 12
             <a href="./index2.html">&raquo;</a>
     </p>
                         </section><!-- /#content -->

@@ -41,8 +41,88 @@
 
                             <aside id="featured" class="body">
                 <article>
-                    <h1 class="entry-title"><a href="../2013/03/python-sorting-how-to.html">[python]排序（Sorting Mini-HOW TO）</a></h1> 
+                    <h1 class="entry-title"><a href="../2013/03/django-merge-queryset-then-sort.html">[django]合并多个查询结果集(queryset)并按字段排序</a></h1> 
                     <footer class="post-info">
+        <abbr class="published" title="2013-03-28T00:00:00">
+                周四 28 三月 2013
+        </abbr>
+
+                <address class="vcard author">
+                By <a class="url fn" href="../author/mozillazg.html">mozillazg</a>
+        </address>
+        <p>In <a href="../category/django.html">django</a>. </p>
+<p>tags: <a href="../tag/django.html">django</a><a href="../tag/python.html">python</a><a href="../tag/queryset.html">queryset</a><a href="../tag/sort.html">sort</a><a href="../tag/merge.html">merge</a></p>
+</footer><!-- /.post-info --><h2>需求</h2>
+<p>合并博文的喜爱及转发信息，并按时间排序。</p>
+<p>相关 models :</p>
+<div class="codehilite"><pre><span class="k">class</span> <span class="nc">Post</span><span class="p">(</span><span class="n">models</span><span class="o">.</span><span class="n">Model</span><span class="p">):</span>
+    <span class="c">#...</span>
+
+    <span class="n">created_at</span> <span class="o">=</span> <span class="n">models</span><span class="o">.</span><span class="n">DateTimeField</span><span class="p">(</span><span class="n">auto_now_add</span><span class="o">=</span><span class="bp">True</span><span class="p">)</span>
+    <span class="n">reblog_from</span> <span class="o">=</span> <span class="n">models</span><span class="o">.</span><span class="n">ForeignKey</span><span class="p">(</span><span class="s">&#39;self&#39;</span><span class="p">,</span> <span class="n">null</span><span class="o">=</span><span class="bp">True</span><span class="p">,</span> <span class="n">blank</span><span class="o">=</span><span class="bp">True</span><span class="p">)</span>
+
+    <span class="c">#...</span>
+
+
+<span class="k">class</span> <span class="nc">Like</span><span class="p">(</span><span class="n">models</span><span class="o">.</span><span class="n">Model</span><span class="p">):</span>
+    <span class="c">#...</span>
+
+    <span class="n">post</span> <span class="o">=</span> <span class="n">models</span><span class="o">.</span><span class="n">ForeignKey</span><span class="p">(</span><span class="n">Post</span><span class="p">)</span>
+    <span class="n">created_at</span> <span class="o">=</span> <span class="n">models</span><span class="o">.</span><span class="n">DateTimeField</span><span class="p">(</span><span class="n">auto_now_add</span><span class="o">=</span><span class="bp">True</span><span class="p">)</span>
+
+    <span class="c">#...</span>
+</pre></div>
+
+
+<h2>解决方案</h2>
+<div class="codehilite"><pre><span class="kn">from</span> <span class="nn">itertools</span> <span class="kn">import</span> <span class="n">chain</span>
+<span class="kn">from</span> <span class="nn">operator</span> <span class="kn">import</span> <span class="n">attrgetter</span>
+
+<span class="c">#...</span>
+
+<span class="n">post</span> <span class="o">=</span> <span class="n">Post</span><span class="o">.</span><span class="n">objects</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">pk</span><span class="o">=</span><span class="n">post_id</span><span class="p">)</span>  <span class="c"># 获取博文</span>
+<span class="n">likes</span> <span class="o">=</span> <span class="n">likes</span> <span class="o">=</span> <span class="n">post</span><span class="o">.</span><span class="n">like_set</span><span class="o">.</span><span class="n">all</span><span class="p">()</span>  <span class="c"># 获取喜爱信息</span>
+<span class="c"># likes = Like.objects.filter(post=post)</span>
+<span class="n">reblogs</span> <span class="o">=</span> <span class="n">Post</span><span class="o">.</span><span class="n">objects</span><span class="o">.</span><span class="n">filter</span><span class="p">(</span><span class="n">reblog_from</span><span class="o">=</span><span class="n">post</span><span class="p">)</span>  <span class="c"># 获取转发信息</span>
+
+<span class="c"># 合并喜爱及转发信息，并按时间逆序排序</span>
+<span class="n">notes</span> <span class="o">=</span> <span class="nb">sorted</span><span class="p">(</span><span class="n">chain</span><span class="p">(</span><span class="n">likes</span><span class="p">,</span> <span class="n">reblogs</span><span class="p">),</span> <span class="n">key</span><span class="o">=</span><span class="n">attrgetter</span><span class="p">(</span><span class="s">&#39;created_at&#39;</span><span class="p">),</span>
+               <span class="n">reverse</span><span class="o">=</span><span class="bp">True</span><span class="p">)</span>
+
+<span class="c">#...</span>
+</pre></div>
+
+
+<p><strong>使用 itertools.chain 函数合并可迭代对象</strong>：</p>
+<div class="codehilite"><pre><span class="o">&gt;&gt;&gt;</span> <span class="nb">list</span><span class="p">(</span><span class="n">chain</span><span class="p">([</span><span class="mi">1</span><span class="p">,</span> <span class="mi">2</span><span class="p">,</span> <span class="mi">3</span><span class="p">],</span> <span class="s">&#39;abc&#39;</span><span class="p">))</span>
+<span class="o">&gt;&gt;&gt;</span> <span class="p">[</span><span class="mi">1</span><span class="p">,</span> <span class="mi">2</span><span class="p">,</span> <span class="mi">3</span><span class="p">,</span> <span class="s">&#39;a&#39;</span><span class="p">,</span> <span class="s">&#39;b&#39;</span><span class="p">,</span> <span class="s">&#39;c&#39;</span><span class="p">]</span>
+</pre></div>
+
+
+<p><strong>使用 sorted 函数排序（按对象属性排序）</strong>。
+关于排序请参考博文：
+<a href="http://mozillazg.com/2013/03/python-sorting-how-to.html">[python]排序（Sorting Mini-HOW TO）</a></p>
+<h2>参考</h2>
+<ul>
+<li><a href="http://docs.python.org/2/library/itertools.html#itertools.chain">itertools — Functions creating iterators for efficient looping — Python v2.7.3 documentation</a></li>
+<li><a href="http://mozillazg.com/2013/03/python-sorting-how-to.html">[python]排序（Sorting Mini-HOW TO）</a></li>
+</ul><p>There are <a href="../2013/03/django-merge-queryset-then-sort.html#disqus_thread">comments</a>.</p>                </article>
+                            </aside><!-- /#featured -->
+                            <section id="content" class="body">
+                    <h1>Other articles</h1>
+                    <hr />
+                    <ol id="posts-list" class="hfeed">
+                                                
+
+                 
+                        <li><article class="hentry">    
+                <header>
+                    <h1><a href="../2013/03/python-sorting-how-to.html" rel="bookmark"
+                           title="Permalink to [python]排序（Sorting Mini-HOW TO）">[python]排序（Sorting Mini-HOW TO）</a></h1>
+                </header>
+                
+                <div class="entry-content">
+                <footer class="post-info">
         <abbr class="published" title="2013-03-03T00:00:00">
                 周日 03 三月 2013
         </abbr>
@@ -52,7 +132,7 @@
         </address>
         <p>In <a href="../category/python.html">python</a>. </p>
 <p>tags: <a href="../tag/python.html">python</a><a href="../tag/sorting.html">sorting</a><a href="../tag/sort.html">sort</a><a href="../tag/sorted.html">sorted</a></p>
-</footer><!-- /.post-info --><p>本文整理自 <a href="http://wiki.python.org/moin/HowTo/Sorting/">HowTo/Sorting - Python Wiki</a>，如有不妥之处，请翻阅英文原文。</p>
+</footer><!-- /.post-info -->                <p>本文整理自 <a href="http://wiki.python.org/moin/HowTo/Sorting/">HowTo/Sorting - Python Wiki</a>，如有不妥之处，请翻阅英文原文。</p>
 <p>Python 内置的 <code>sort()</code> 方法可以实现对列表的原地排序功能。内置的 <code>sorted()</code> 函数则不会修改原列表，而是生成一个经过排序的新列表。</p>
 <p>下面总结一些常用的排序方法。</p>
 <h2>基本排序</h2>
@@ -63,267 +143,14 @@
 
 
 <p>你也可以使用 <code>list.sort()</code> 方法， 但是它会修改原列表，所以一般使用 <code>sorted()</code>。如果你不再需要原始列表的话，用用 <code>list.sort()</code> 也无妨。</p>
-<div class="codehilite"><pre><span class="o">&gt;&gt;&gt;</span> <span class="n">a</span> <span class="o">=</span> <span class="p">[</span><span class="mi">5</span><span class="p">,</span> <span class="mi">2</span><span class="p">,</span> <span class="mi">3</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="mi">4</span><span class="p">]</span>
-<span class="o">&gt;&gt;&gt;</span> <span class="n">a</span><span class="o">.</span><span class="n">sort</span><span class="p">()</span>
-<span class="o">&gt;&gt;&gt;</span> <span class="n">a</span>
-<span class="p">[</span><span class="mi">1</span><span class="p">,</span> <span class="mi">2</span><span class="p">,</span> <span class="mi">3</span><span class="p">,</span> <span class="mi">4</span><span class="p">,</span> <span class="mi">5</span><span class="p">]</span>
-</pre></div>
-
-
-<p>另一个不同点是，<code>list.sort()</code> 方法只能作用于列表，而 <code>sorted()</code> 函数则接受任何可迭代对象。</p>
-<div class="codehilite"><pre><span class="o">&gt;&gt;&gt;</span> <span class="nb">sorted</span><span class="p">({</span><span class="mi">1</span><span class="p">:</span> <span class="s">&#39;D&#39;</span><span class="p">,</span> <span class="mi">2</span><span class="p">:</span> <span class="s">&#39;B&#39;</span><span class="p">,</span> <span class="mi">3</span><span class="p">:</span> <span class="s">&#39;B&#39;</span><span class="p">,</span> <span class="mi">4</span><span class="p">:</span> <span class="s">&#39;E&#39;</span><span class="p">,</span> <span class="mi">5</span><span class="p">:</span> <span class="s">&#39;A&#39;</span><span class="p">})</span>
-<span class="p">[</span><span class="mi">1</span><span class="p">,</span> <span class="mi">2</span><span class="p">,</span> <span class="mi">3</span><span class="p">,</span> <span class="mi">4</span><span class="p">,</span> <span class="mi">5</span><span class="p">]</span>
-</pre></div>
-
-
-<h2>Key 函数</h2>
-<p>从 Python 2.4 开始， <code>list.sort()</code> 及 <code>sorted()</code> 增加了一个 <code>key</code> 参数，该参数接受一个函数作为它的值，可以通过那个函数定义排序应该遵循的规则。</p>
-<p>比如，对字符串做不区分大小写的排序：</p>
-<div class="codehilite"><pre><span class="o">&gt;&gt;&gt;</span> <span class="nb">sorted</span><span class="p">(</span><span class="s">&quot;This is a test string from Andrew&quot;</span><span class="o">.</span><span class="n">split</span><span class="p">(),</span> <span class="n">key</span><span class="o">=</span><span class="nb">str</span><span class="o">.</span><span class="n">lower</span><span class="p">)</span>
-<span class="p">[</span><span class="s">&#39;a&#39;</span><span class="p">,</span> <span class="s">&#39;Andrew&#39;</span><span class="p">,</span> <span class="s">&#39;from&#39;</span><span class="p">,</span> <span class="s">&#39;is&#39;</span><span class="p">,</span> <span class="s">&#39;string&#39;</span><span class="p">,</span> <span class="s">&#39;test&#39;</span><span class="p">,</span> <span class="s">&#39;This&#39;</span><span class="p">]</span>
-
-<span class="o">&gt;&gt;&gt;</span> <span class="c"># 对照</span>
-<span class="o">&gt;&gt;&gt;</span> <span class="nb">sorted</span><span class="p">(</span><span class="s">&quot;This is a test string from Andrew&quot;</span><span class="o">.</span><span class="n">split</span><span class="p">())</span>
-<span class="p">[</span><span class="s">&#39;Andrew&#39;</span><span class="p">,</span> <span class="s">&#39;This&#39;</span><span class="p">,</span> <span class="s">&#39;a&#39;</span><span class="p">,</span> <span class="s">&#39;from&#39;</span><span class="p">,</span> <span class="s">&#39;is&#39;</span><span class="p">,</span> <span class="s">&#39;string&#39;</span><span class="p">,</span> <span class="s">&#39;test&#39;</span><span class="p">]</span>
-</pre></div>
-
-
-<p><code>key</code> 参数的值必须是个函数，该函数有一个参数（列表元素）并且返回一个用来排序的 key（按这个 key 进行排序）。</p>
-<p>一般通过使用对象的某个索引作为 key 的值来对复杂对象进行排序。比如对一个多维数组进行排序：</p>
-<div class="codehilite"><pre><span class="o">&gt;&gt;&gt;</span> <span class="n">student_tuples</span> <span class="o">=</span> <span class="p">[</span>
-        <span class="p">(</span><span class="s">&#39;john&#39;</span><span class="p">,</span> <span class="s">&#39;A&#39;</span><span class="p">,</span> <span class="mi">15</span><span class="p">),</span>
-        <span class="p">(</span><span class="s">&#39;jane&#39;</span><span class="p">,</span> <span class="s">&#39;B&#39;</span><span class="p">,</span> <span class="mi">12</span><span class="p">),</span>
-        <span class="p">(</span><span class="s">&#39;dave&#39;</span><span class="p">,</span> <span class="s">&#39;B&#39;</span><span class="p">,</span> <span class="mi">10</span><span class="p">),</span>
-<span class="p">]</span>
-<span class="c"># 按列表元素（元组）的第3个值排序</span>
-<span class="o">&gt;&gt;&gt;</span> <span class="nb">sorted</span><span class="p">(</span><span class="n">student_tuples</span><span class="p">,</span> <span class="n">key</span><span class="o">=</span><span class="k">lambda</span> <span class="n">student</span><span class="p">:</span> <span class="n">student</span><span class="p">[</span><span class="mi">2</span><span class="p">])</span>   <span class="c"># sort by age</span>
-<span class="p">[(</span><span class="s">&#39;dave&#39;</span><span class="p">,</span> <span class="s">&#39;B&#39;</span><span class="p">,</span> <span class="mi">10</span><span class="p">),</span> <span class="p">(</span><span class="s">&#39;jane&#39;</span><span class="p">,</span> <span class="s">&#39;B&#39;</span><span class="p">,</span> <span class="mi">12</span><span class="p">),</span> <span class="p">(</span><span class="s">&#39;john&#39;</span><span class="p">,</span> <span class="s">&#39;A&#39;</span><span class="p">,</span> <span class="mi">15</span><span class="p">)]</span>
-</pre></div>
-
-
-<p>这个技术也可以用来按对象的属性值进行排序。比如：</p>
-<div class="codehilite"><pre><span class="o">&gt;&gt;&gt;</span> <span class="k">class</span> <span class="nc">Student</span><span class="p">:</span>
-        <span class="k">def</span> <span class="nf">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">name</span><span class="p">,</span> <span class="n">grade</span><span class="p">,</span> <span class="n">age</span><span class="p">):</span>
-                <span class="bp">self</span><span class="o">.</span><span class="n">name</span> <span class="o">=</span> <span class="n">name</span>
-                <span class="bp">self</span><span class="o">.</span><span class="n">grade</span> <span class="o">=</span> <span class="n">grade</span>
-                <span class="bp">self</span><span class="o">.</span><span class="n">age</span> <span class="o">=</span> <span class="n">age</span>
-        <span class="k">def</span> <span class="nf">__repr__</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
-                <span class="k">return</span> <span class="nb">repr</span><span class="p">((</span><span class="bp">self</span><span class="o">.</span><span class="n">name</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">grade</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">age</span><span class="p">))</span>
-
-<span class="o">&gt;&gt;&gt;</span> <span class="n">student_objects</span> <span class="o">=</span> <span class="p">[</span>
-        <span class="n">Student</span><span class="p">(</span><span class="s">&#39;john&#39;</span><span class="p">,</span> <span class="s">&#39;A&#39;</span><span class="p">,</span> <span class="mi">15</span><span class="p">),</span>
-        <span class="n">Student</span><span class="p">(</span><span class="s">&#39;jane&#39;</span><span class="p">,</span> <span class="s">&#39;B&#39;</span><span class="p">,</span> <span class="mi">12</span><span class="p">),</span>
-        <span class="n">Student</span><span class="p">(</span><span class="s">&#39;dave&#39;</span><span class="p">,</span> <span class="s">&#39;B&#39;</span><span class="p">,</span> <span class="mi">10</span><span class="p">),</span>
-<span class="p">]</span>
-<span class="c"># 按 age 属性的值排序</span>
-<span class="o">&gt;&gt;&gt;</span> <span class="nb">sorted</span><span class="p">(</span><span class="n">student_objects</span><span class="p">,</span> <span class="n">key</span><span class="o">=</span><span class="k">lambda</span> <span class="n">student</span><span class="p">:</span> <span class="n">student</span><span class="o">.</span><span class="n">age</span><span class="p">)</span>   <span class="c"># sort by age</span>
-<span class="p">[(</span><span class="s">&#39;dave&#39;</span><span class="p">,</span> <span class="s">&#39;B&#39;</span><span class="p">,</span> <span class="mi">10</span><span class="p">),</span> <span class="p">(</span><span class="s">&#39;jane&#39;</span><span class="p">,</span> <span class="s">&#39;B&#39;</span><span class="p">,</span> <span class="mi">12</span><span class="p">),</span> <span class="p">(</span><span class="s">&#39;john&#39;</span><span class="p">,</span> <span class="s">&#39;A&#39;</span><span class="p">,</span> <span class="mi">15</span><span class="p">)]</span>
-</pre></div>
-
-
-<h2>Operator 模块函数</h2>
-<p>由于 key 参数比较常用，所以 Python 内置了一些用来简单、快速生成相关函数的方法。
-<a href="http://docs.python.org/library/operator.html#module-operator">operator 模块</a> 提供了 <a href="http://docs.python.org/2/library/operator.html#operator.itemgetter">itemgetter</a>，<a href="http://docs.python.org/2/library/operator.html#operator.attrgetter">attrgetter</a>，
-以及从 Python 2.6 开始提供的 <a href="http://docs.python.org/2/library/operator.html#operator.methodcaller">methodcaller</a> 函数。</p>
-<p>使用这些函数，上面的例子将变得更简单、更快速：</p>
-<div class="codehilite"><pre><span class="o">&gt;&gt;&gt;</span> <span class="kn">from</span> <span class="nn">operator</span> <span class="kn">import</span> <span class="n">itemgetter</span><span class="p">,</span> <span class="n">attrgetter</span>
-
-<span class="o">&gt;&gt;&gt;</span> <span class="n">student_tuples</span> <span class="o">=</span> <span class="p">[</span>
-        <span class="p">(</span><span class="s">&#39;john&#39;</span><span class="p">,</span> <span class="s">&#39;A&#39;</span><span class="p">,</span> <span class="mi">15</span><span class="p">),</span>
-        <span class="p">(</span><span class="s">&#39;jane&#39;</span><span class="p">,</span> <span class="s">&#39;B&#39;</span><span class="p">,</span> <span class="mi">12</span><span class="p">),</span>
-        <span class="p">(</span><span class="s">&#39;dave&#39;</span><span class="p">,</span> <span class="s">&#39;B&#39;</span><span class="p">,</span> <span class="mi">10</span><span class="p">),</span>
-<span class="p">]</span>
-<span class="o">&gt;&gt;&gt;</span> <span class="nb">sorted</span><span class="p">(</span><span class="n">student_tuples</span><span class="p">,</span> <span class="n">key</span><span class="o">=</span><span class="n">itemgetter</span><span class="p">(</span><span class="mi">2</span><span class="p">))</span>  <span class="c"># 按元素索引排序</span>
-<span class="p">[(</span><span class="s">&#39;dave&#39;</span><span class="p">,</span> <span class="s">&#39;B&#39;</span><span class="p">,</span> <span class="mi">10</span><span class="p">),</span> <span class="p">(</span><span class="s">&#39;jane&#39;</span><span class="p">,</span> <span class="s">&#39;B&#39;</span><span class="p">,</span> <span class="mi">12</span><span class="p">),</span> <span class="p">(</span><span class="s">&#39;john&#39;</span><span class="p">,</span> <span class="s">&#39;A&#39;</span><span class="p">,</span> <span class="mi">15</span><span class="p">)]</span>
-
-<span class="o">&gt;&gt;&gt;</span> <span class="k">class</span> <span class="nc">Student</span><span class="p">:</span>
-        <span class="k">def</span> <span class="nf">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">name</span><span class="p">,</span> <span class="n">grade</span><span class="p">,</span> <span class="n">age</span><span class="p">):</span>
-                <span class="bp">self</span><span class="o">.</span><span class="n">name</span> <span class="o">=</span> <span class="n">name</span>
-                <span class="bp">self</span><span class="o">.</span><span class="n">grade</span> <span class="o">=</span> <span class="n">grade</span>
-                <span class="bp">self</span><span class="o">.</span><span class="n">age</span> <span class="o">=</span> <span class="n">age</span>
-        <span class="k">def</span> <span class="nf">__repr__</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
-                <span class="k">return</span> <span class="nb">repr</span><span class="p">((</span><span class="bp">self</span><span class="o">.</span><span class="n">name</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">grade</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">age</span><span class="p">))</span>
-
-<span class="o">&gt;&gt;&gt;</span> <span class="n">student_objects</span> <span class="o">=</span> <span class="p">[</span>
-        <span class="n">Student</span><span class="p">(</span><span class="s">&#39;john&#39;</span><span class="p">,</span> <span class="s">&#39;A&#39;</span><span class="p">,</span> <span class="mi">15</span><span class="p">),</span>
-        <span class="n">Student</span><span class="p">(</span><span class="s">&#39;jane&#39;</span><span class="p">,</span> <span class="s">&#39;B&#39;</span><span class="p">,</span> <span class="mi">12</span><span class="p">),</span>
-        <span class="n">Student</span><span class="p">(</span><span class="s">&#39;dave&#39;</span><span class="p">,</span> <span class="s">&#39;B&#39;</span><span class="p">,</span> <span class="mi">10</span><span class="p">),</span>
-<span class="p">]</span>
-<span class="o">&gt;&gt;&gt;</span> <span class="nb">sorted</span><span class="p">(</span><span class="n">student_objects</span><span class="p">,</span> <span class="n">key</span><span class="o">=</span><span class="n">attrgetter</span><span class="p">(</span><span class="s">&#39;age&#39;</span><span class="p">))</span>  <span class="c"># 按对象属性排序</span>
-<span class="p">[(</span><span class="s">&#39;dave&#39;</span><span class="p">,</span> <span class="s">&#39;B&#39;</span><span class="p">,</span> <span class="mi">10</span><span class="p">),</span> <span class="p">(</span><span class="s">&#39;jane&#39;</span><span class="p">,</span> <span class="s">&#39;B&#39;</span><span class="p">,</span> <span class="mi">12</span><span class="p">),</span> <span class="p">(</span><span class="s">&#39;john&#39;</span><span class="p">,</span> <span class="s">&#39;A&#39;</span><span class="p">,</span> <span class="mi">15</span><span class="p">)]</span>
-</pre></div>
-
-
-<p>通过 operator 模块提供的函数还可以实现多重排序的功能。比如，先按 grade 排序再按 age 排序：</p>
-<div class="codehilite"><pre><span class="o">&gt;&gt;&gt;</span> <span class="nb">sorted</span><span class="p">(</span><span class="n">student_tuples</span><span class="p">,</span> <span class="n">key</span><span class="o">=</span><span class="n">itemgetter</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span><span class="mi">2</span><span class="p">))</span>
-<span class="p">[(</span><span class="s">&#39;john&#39;</span><span class="p">,</span> <span class="s">&#39;A&#39;</span><span class="p">,</span> <span class="mi">15</span><span class="p">),</span> <span class="p">(</span><span class="s">&#39;dave&#39;</span><span class="p">,</span> <span class="s">&#39;B&#39;</span><span class="p">,</span> <span class="mi">10</span><span class="p">),</span> <span class="p">(</span><span class="s">&#39;jane&#39;</span><span class="p">,</span> <span class="s">&#39;B&#39;</span><span class="p">,</span> <span class="mi">12</span><span class="p">)]</span>
-
-<span class="o">&gt;&gt;&gt;</span> <span class="nb">sorted</span><span class="p">(</span><span class="n">student_objects</span><span class="p">,</span> <span class="n">key</span><span class="o">=</span><span class="n">attrgetter</span><span class="p">(</span><span class="s">&#39;grade&#39;</span><span class="p">,</span> <span class="s">&#39;age&#39;</span><span class="p">))</span>
-<span class="p">[(</span><span class="s">&#39;john&#39;</span><span class="p">,</span> <span class="s">&#39;A&#39;</span><span class="p">,</span> <span class="mi">15</span><span class="p">),</span> <span class="p">(</span><span class="s">&#39;dave&#39;</span><span class="p">,</span> <span class="s">&#39;B&#39;</span><span class="p">,</span> <span class="mi">10</span><span class="p">),</span> <span class="p">(</span><span class="s">&#39;jane&#39;</span><span class="p">,</span> <span class="s">&#39;B&#39;</span><span class="p">,</span> <span class="mi">12</span><span class="p">)]</span>
-</pre></div>
-
-
-<p><a href="http://docs.python.org/2/library/operator.html#operator.methodcaller">methodcaller</a>
-函数可以让元素调用一个方法，然后按方法的返回值进行排序：</p>
-<div class="codehilite"><pre><span class="o">&gt;&gt;&gt;</span> <span class="n">words</span> <span class="o">=</span> <span class="p">[</span><span class="s">&#39;b&#39;</span><span class="p">,</span> <span class="s">&#39;a&#39;</span><span class="p">,</span> <span class="s">&#39;abase&#39;</span><span class="p">,</span> <span class="s">&#39;alfalfa&#39;</span><span class="p">]</span>
-<span class="o">&gt;&gt;&gt;</span> <span class="nb">sorted</span><span class="p">(</span><span class="n">words</span><span class="p">,</span> <span class="n">key</span><span class="o">=</span><span class="n">methodcaller</span><span class="p">(</span><span class="s">&#39;count&#39;</span><span class="p">,</span> <span class="s">&#39;a&#39;</span><span class="p">))</span>  <span class="c"># word.count(&#39;a&#39;)</span>
-<span class="p">[</span><span class="s">&#39;b&#39;</span><span class="p">,</span> <span class="s">&#39;a&#39;</span><span class="p">,</span> <span class="s">&#39;abase&#39;</span><span class="p">,</span> <span class="s">&#39;alfalfa&#39;</span><span class="p">]</span>
-
-<span class="c"># 等价于</span>
-<span class="o">&gt;&gt;&gt;</span> <span class="nb">sorted</span><span class="p">(</span><span class="n">words</span><span class="p">,</span> <span class="n">key</span><span class="o">=</span><span class="k">lambda</span> <span class="n">word</span><span class="p">:</span> <span class="n">word</span><span class="o">.</span><span class="n">count</span><span class="p">(</span><span class="s">&#39;a&#39;</span><span class="p">))</span>
-<span class="p">[</span><span class="s">&#39;b&#39;</span><span class="p">,</span> <span class="s">&#39;a&#39;</span><span class="p">,</span> <span class="s">&#39;abase&#39;</span><span class="p">,</span> <span class="s">&#39;alfalfa&#39;</span><span class="p">]</span>
-<span class="o">&gt;&gt;&gt;</span>
-</pre></div>
-
-
-<h2>升序和降序</h2>
-<p><code>list.sort()</code> 和 <code>sorted()</code> 都接受一个布尔类型的 <code>reverse</code> 参数。这个参数用来标记是否使用降序排序。比如获取按 age 降序排序的 student 数据：</p>
-<div class="codehilite"><pre><span class="o">&gt;&gt;&gt;</span> <span class="nb">sorted</span><span class="p">(</span><span class="n">student_tuples</span><span class="p">,</span> <span class="n">key</span><span class="o">=</span><span class="n">itemgetter</span><span class="p">(</span><span class="mi">2</span><span class="p">),</span> <span class="n">reverse</span><span class="o">=</span><span class="bp">True</span><span class="p">)</span>
-<span class="p">[(</span><span class="s">&#39;john&#39;</span><span class="p">,</span> <span class="s">&#39;A&#39;</span><span class="p">,</span> <span class="mi">15</span><span class="p">),</span> <span class="p">(</span><span class="s">&#39;jane&#39;</span><span class="p">,</span> <span class="s">&#39;B&#39;</span><span class="p">,</span> <span class="mi">12</span><span class="p">),</span> <span class="p">(</span><span class="s">&#39;dave&#39;</span><span class="p">,</span> <span class="s">&#39;B&#39;</span><span class="p">,</span> <span class="mi">10</span><span class="p">)]</span>
-
-<span class="o">&gt;&gt;&gt;</span> <span class="nb">sorted</span><span class="p">(</span><span class="n">student_objects</span><span class="p">,</span> <span class="n">key</span><span class="o">=</span><span class="n">attrgetter</span><span class="p">(</span><span class="s">&#39;age&#39;</span><span class="p">),</span> <span class="n">reverse</span><span class="o">=</span><span class="bp">True</span><span class="p">)</span>
-<span class="p">[(</span><span class="s">&#39;john&#39;</span><span class="p">,</span> <span class="s">&#39;A&#39;</span><span class="p">,</span> <span class="mi">15</span><span class="p">),</span> <span class="p">(</span><span class="s">&#39;jane&#39;</span><span class="p">,</span> <span class="s">&#39;B&#39;</span><span class="p">,</span> <span class="mi">12</span><span class="p">),</span> <span class="p">(</span><span class="s">&#39;dave&#39;</span><span class="p">,</span> <span class="s">&#39;B&#39;</span><span class="p">,</span> <span class="mi">10</span><span class="p">)]</span>
-</pre></div>
-
-
-<h2>平衡（Stability）排序和复杂排序</h2>
-<p>从 Python 2.2 开始，排序将保证能够 <a href="http://en.wikipedia.org/wiki/Sorting_algorithm#Stability">stable</a>。
-这意味着当多个记录拥有相同的 key 时，它们的原始顺序将被保留。</p>
-<div class="codehilite"><pre><span class="o">&gt;&gt;&gt;</span> <span class="n">data</span> <span class="o">=</span> <span class="p">[(</span><span class="s">&#39;red&#39;</span><span class="p">,</span> <span class="mi">1</span><span class="p">),</span> <span class="p">(</span><span class="s">&#39;blue&#39;</span><span class="p">,</span> <span class="mi">1</span><span class="p">),</span> <span class="p">(</span><span class="s">&#39;red&#39;</span><span class="p">,</span> <span class="mi">2</span><span class="p">),</span> <span class="p">(</span><span class="s">&#39;blue&#39;</span><span class="p">,</span> <span class="mi">2</span><span class="p">)]</span>
-<span class="o">&gt;&gt;&gt;</span> <span class="nb">sorted</span><span class="p">(</span><span class="n">data</span><span class="p">,</span> <span class="n">key</span><span class="o">=</span><span class="n">itemgetter</span><span class="p">(</span><span class="mi">0</span><span class="p">))</span>
-<span class="p">[(</span><span class="s">&#39;blue&#39;</span><span class="p">,</span> <span class="mi">1</span><span class="p">),</span> <span class="p">(</span><span class="s">&#39;blue&#39;</span><span class="p">,</span> <span class="mi">2</span><span class="p">),</span> <span class="p">(</span><span class="s">&#39;red&#39;</span><span class="p">,</span> <span class="mi">1</span><span class="p">),</span> <span class="p">(</span><span class="s">&#39;red&#39;</span><span class="p">,</span> <span class="mi">2</span><span class="p">)]</span>
-</pre></div>
-
-
-<p>这里有两条记录都包含 'blue' 并且原列表中 ('blue', 1) 排在 ('blue', 2) 之前，排序后这个顺序依旧被保留。</p>
-<p>这个非常有用的特性可以用来实现包含多重排序（一会升序，一会降序）的复杂排序。比如，目标是实现 student 数据先以 grade 降序排序再以 age 升序排序：</p>
-<div class="codehilite"><pre><span class="o">&gt;&gt;&gt;</span> <span class="k">class</span> <span class="nc">Student</span><span class="p">:</span>
-        <span class="k">def</span> <span class="nf">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">name</span><span class="p">,</span> <span class="n">grade</span><span class="p">,</span> <span class="n">age</span><span class="p">):</span>
-                <span class="bp">self</span><span class="o">.</span><span class="n">name</span> <span class="o">=</span> <span class="n">name</span>
-                <span class="bp">self</span><span class="o">.</span><span class="n">grade</span> <span class="o">=</span> <span class="n">grade</span>
-                <span class="bp">self</span><span class="o">.</span><span class="n">age</span> <span class="o">=</span> <span class="n">age</span>
-        <span class="k">def</span> <span class="nf">__repr__</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
-                <span class="k">return</span> <span class="nb">repr</span><span class="p">((</span><span class="bp">self</span><span class="o">.</span><span class="n">name</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">grade</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">age</span><span class="p">))</span>
-
-<span class="o">&gt;&gt;&gt;</span> <span class="n">student_objects</span> <span class="o">=</span> <span class="p">[</span>
-        <span class="n">Student</span><span class="p">(</span><span class="s">&#39;john&#39;</span><span class="p">,</span> <span class="s">&#39;A&#39;</span><span class="p">,</span> <span class="mi">15</span><span class="p">),</span>
-        <span class="n">Student</span><span class="p">(</span><span class="s">&#39;jane&#39;</span><span class="p">,</span> <span class="s">&#39;B&#39;</span><span class="p">,</span> <span class="mi">12</span><span class="p">),</span>
-        <span class="n">Student</span><span class="p">(</span><span class="s">&#39;dave&#39;</span><span class="p">,</span> <span class="s">&#39;B&#39;</span><span class="p">,</span> <span class="mi">10</span><span class="p">),</span>
-<span class="p">]</span>
-
-<span class="o">&gt;&gt;&gt;</span> <span class="n">s</span> <span class="o">=</span> <span class="nb">sorted</span><span class="p">(</span><span class="n">student_objects</span><span class="p">,</span> <span class="n">key</span><span class="o">=</span><span class="n">attrgetter</span><span class="p">(</span><span class="s">&#39;age&#39;</span><span class="p">))</span>     <span class="c"># sort on secondary key</span>
-<span class="o">&gt;&gt;&gt;</span> <span class="n">s</span>
-<span class="p">[(</span><span class="s">&#39;dave&#39;</span><span class="p">,</span> <span class="s">&#39;B&#39;</span><span class="p">,</span> <span class="mi">10</span><span class="p">),</span> <span class="p">(</span><span class="s">&#39;jane&#39;</span><span class="p">,</span> <span class="s">&#39;B&#39;</span><span class="p">,</span> <span class="mi">12</span><span class="p">),</span> <span class="p">(</span><span class="s">&#39;john&#39;</span><span class="p">,</span> <span class="s">&#39;A&#39;</span><span class="p">,</span> <span class="mi">15</span><span class="p">)]</span>
-
-<span class="o">&gt;&gt;&gt;</span> <span class="nb">sorted</span><span class="p">(</span><span class="n">s</span><span class="p">,</span> <span class="n">key</span><span class="o">=</span><span class="n">attrgetter</span><span class="p">(</span><span class="s">&#39;grade&#39;</span><span class="p">),</span> <span class="n">reverse</span><span class="o">=</span><span class="bp">True</span><span class="p">)</span>       <span class="c"># now sort on primary key, descending</span>
-<span class="p">[(</span><span class="s">&#39;dave&#39;</span><span class="p">,</span> <span class="s">&#39;B&#39;</span><span class="p">,</span> <span class="mi">10</span><span class="p">),</span> <span class="p">(</span><span class="s">&#39;jane&#39;</span><span class="p">,</span> <span class="s">&#39;B&#39;</span><span class="p">,</span> <span class="mi">12</span><span class="p">),</span> <span class="p">(</span><span class="s">&#39;john&#39;</span><span class="p">,</span> <span class="s">&#39;A&#39;</span><span class="p">,</span> <span class="mi">15</span><span class="p">)]</span>
-</pre></div>
-
-
-<p>Python 使用的 <a href="http://en.wikipedia.org/wiki/Timsort">Timsort</a> 排序算法能够高效的实现多重排序。</p>
-<h2>以前的实现方式(Decorate-Sort-Undecorate)</h2>
-<p>Python 2.4 之前的惯用方法之一是使用 Decorate-Sort-Undecorate，比如将 student 数据按 grade 排序：</p>
-<div class="codehilite"><pre><span class="o">&gt;&gt;&gt;</span> <span class="n">decorated</span> <span class="o">=</span> <span class="p">[(</span><span class="n">student</span><span class="o">.</span><span class="n">grade</span><span class="p">,</span> <span class="n">i</span><span class="p">,</span> <span class="n">student</span><span class="p">)</span> <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="n">student</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">student_objects</span><span class="p">)]</span>
-<span class="o">&gt;&gt;&gt;</span> <span class="n">decorated</span><span class="o">.</span><span class="n">sort</span><span class="p">()</span>
-<span class="o">&gt;&gt;&gt;</span> <span class="p">[</span><span class="n">student</span> <span class="k">for</span> <span class="n">grade</span><span class="p">,</span> <span class="n">i</span><span class="p">,</span> <span class="n">student</span> <span class="ow">in</span> <span class="n">decorated</span><span class="p">]</span>               <span class="c"># undecorate</span>
-<span class="p">[(</span><span class="s">&#39;john&#39;</span><span class="p">,</span> <span class="s">&#39;A&#39;</span><span class="p">,</span> <span class="mi">15</span><span class="p">),</span> <span class="p">(</span><span class="s">&#39;jane&#39;</span><span class="p">,</span> <span class="s">&#39;B&#39;</span><span class="p">,</span> <span class="mi">12</span><span class="p">),</span> <span class="p">(</span><span class="s">&#39;dave&#39;</span><span class="p">,</span> <span class="s">&#39;B&#39;</span><span class="p">,</span> <span class="mi">10</span><span class="p">)]</span>
-</pre></div>
-
-
-<p>这种方法的另一个名字是 <a href="http://en.wikipedia.org/wiki/Schwartzian_transform">Schwartzian transform</a>，有兴趣的可以去了解一下。</p>
-<h2>以前的实现方式(使用 cmp 参数)</h2>
-<p>Python 2.4 之前惯用的另一种方法是使用 cmp 参数：</p>
-<div class="codehilite"><pre><span class="o">&gt;&gt;&gt;</span> <span class="k">def</span> <span class="nf">numeric_compare</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">y</span><span class="p">):</span>
-        <span class="k">return</span> <span class="n">x</span> <span class="o">-</span> <span class="n">y</span>
-<span class="o">&gt;&gt;&gt;</span> <span class="nb">sorted</span><span class="p">([</span><span class="mi">5</span><span class="p">,</span> <span class="mi">2</span><span class="p">,</span> <span class="mi">4</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="mi">3</span><span class="p">],</span> <span class="nb">cmp</span><span class="o">=</span><span class="n">numeric_compare</span><span class="p">)</span>
-<span class="p">[</span><span class="mi">1</span><span class="p">,</span> <span class="mi">2</span><span class="p">,</span> <span class="mi">3</span><span class="p">,</span> <span class="mi">4</span><span class="p">,</span> <span class="mi">5</span><span class="p">]</span>
-</pre></div>
-
-
-<p>倒序：</p>
-<div class="codehilite"><pre><span class="o">&gt;&gt;&gt;</span> <span class="k">def</span> <span class="nf">reverse_numeric</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">y</span><span class="p">):</span>
-        <span class="k">return</span> <span class="n">y</span> <span class="o">-</span> <span class="n">x</span>
-<span class="o">&gt;&gt;&gt;</span> <span class="nb">sorted</span><span class="p">([</span><span class="mi">5</span><span class="p">,</span> <span class="mi">2</span><span class="p">,</span> <span class="mi">4</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="mi">3</span><span class="p">],</span> <span class="nb">cmp</span><span class="o">=</span><span class="n">reverse_numeric</span><span class="p">)</span>
-<span class="p">[</span><span class="mi">5</span><span class="p">,</span> <span class="mi">4</span><span class="p">,</span> <span class="mi">3</span><span class="p">,</span> <span class="mi">2</span><span class="p">,</span> <span class="mi">1</span><span class="p">]</span>
-</pre></div>
-
-
-<p>Python 3 不再支持 cmp 参数，那么如果转换之前的程序呢？可以使用下面的代码：</p>
-<div class="codehilite"><pre><span class="k">def</span> <span class="nf">cmp_to_key</span><span class="p">(</span><span class="n">mycmp</span><span class="p">):</span>
-    <span class="s">&#39;Convert a cmp= function into a key= function&#39;</span>
-    <span class="k">class</span> <span class="nc">K</span><span class="p">(</span><span class="nb">object</span><span class="p">):</span>
-        <span class="k">def</span> <span class="nf">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">obj</span><span class="p">,</span> <span class="o">*</span><span class="n">args</span><span class="p">):</span>
-            <span class="bp">self</span><span class="o">.</span><span class="n">obj</span> <span class="o">=</span> <span class="n">obj</span>
-        <span class="k">def</span> <span class="nf">__lt__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">other</span><span class="p">):</span>
-            <span class="k">return</span> <span class="n">mycmp</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">obj</span><span class="p">,</span> <span class="n">other</span><span class="o">.</span><span class="n">obj</span><span class="p">)</span> <span class="o">&lt;</span> <span class="mi">0</span>
-        <span class="k">def</span> <span class="nf">__gt__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">other</span><span class="p">):</span>
-            <span class="k">return</span> <span class="n">mycmp</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">obj</span><span class="p">,</span> <span class="n">other</span><span class="o">.</span><span class="n">obj</span><span class="p">)</span> <span class="o">&gt;</span> <span class="mi">0</span>
-        <span class="k">def</span> <span class="nf">__eq__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">other</span><span class="p">):</span>
-            <span class="k">return</span> <span class="n">mycmp</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">obj</span><span class="p">,</span> <span class="n">other</span><span class="o">.</span><span class="n">obj</span><span class="p">)</span> <span class="o">==</span> <span class="mi">0</span>
-        <span class="k">def</span> <span class="nf">__le__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">other</span><span class="p">):</span>
-            <span class="k">return</span> <span class="n">mycmp</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">obj</span><span class="p">,</span> <span class="n">other</span><span class="o">.</span><span class="n">obj</span><span class="p">)</span> <span class="o">&lt;=</span> <span class="mi">0</span>
-        <span class="k">def</span> <span class="nf">__ge__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">other</span><span class="p">):</span>
-            <span class="k">return</span> <span class="n">mycmp</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">obj</span><span class="p">,</span> <span class="n">other</span><span class="o">.</span><span class="n">obj</span><span class="p">)</span> <span class="o">&gt;=</span> <span class="mi">0</span>
-        <span class="k">def</span> <span class="nf">__ne__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">other</span><span class="p">):</span>
-            <span class="k">return</span> <span class="n">mycmp</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">obj</span><span class="p">,</span> <span class="n">other</span><span class="o">.</span><span class="n">obj</span><span class="p">)</span> <span class="o">!=</span> <span class="mi">0</span>
-    <span class="k">return</span> <span class="n">K</span>
-</pre></div>
-
-
-<p>用法：</p>
-<div class="codehilite"><pre><span class="o">&gt;&gt;&gt;</span> <span class="nb">sorted</span><span class="p">([</span><span class="mi">5</span><span class="p">,</span> <span class="mi">2</span><span class="p">,</span> <span class="mi">4</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="mi">3</span><span class="p">],</span> <span class="n">key</span><span class="o">=</span><span class="n">cmp_to_key</span><span class="p">(</span><span class="n">reverse_numeric</span><span class="p">))</span>
-<span class="p">[</span><span class="mi">5</span><span class="p">,</span> <span class="mi">4</span><span class="p">,</span> <span class="mi">3</span><span class="p">,</span> <span class="mi">2</span><span class="p">,</span> <span class="mi">1</span><span class="p">]</span>
-</pre></div>
-
-
-<p>在 Python 2.7 中，<code>cmp_to_key()</code> 工具已经被内置到 <a href="http://docs.python.org/2/library/functools.html#functools.cmp_to_key">functools</a> 模块中。</p>
-<h2>其他</h2>
-<ul>
-<li>
-<p>对于本地化排序，可以使用 <a href="http://docs.python.org/2/library/locale.html#locale.strxfrm">locale.strxfrm()</a> 作为 key 函数或使用 <a href="http://docs.python.org/2/library/locale.html#locale.strcoll">locale.strcoll()</a> 作为比较函数。</p>
-</li>
-<li>
-<p><code>reverse</code> 参数依然能够保存排序的稳定性（比如，拥有相同记录的 keys 依旧保留了原来的顺序），有趣的是，就算是不使用该参数也可以通过使用两次 <code>reversed</code> 函数来实现这种效果：</p>
-<div class="codehilite"><pre><span class="o">&gt;&gt;&gt;</span> <span class="n">data</span> <span class="o">=</span> <span class="p">[(</span><span class="s">&#39;red&#39;</span><span class="p">,</span> <span class="mi">1</span><span class="p">),</span> <span class="p">(</span><span class="s">&#39;blue&#39;</span><span class="p">,</span> <span class="mi">1</span><span class="p">),</span> <span class="p">(</span><span class="s">&#39;red&#39;</span><span class="p">,</span> <span class="mi">2</span><span class="p">),</span> <span class="p">(</span><span class="s">&#39;blue&#39;</span><span class="p">,</span> <span class="mi">2</span><span class="p">)]</span>
-<span class="o">&gt;&gt;&gt;</span> <span class="k">assert</span> <span class="nb">sorted</span><span class="p">(</span><span class="n">data</span><span class="p">,</span> <span class="n">reverse</span><span class="o">=</span><span class="bp">True</span><span class="p">)</span> <span class="o">==</span> <span class="nb">list</span><span class="p">(</span><span class="nb">reversed</span><span class="p">(</span><span class="nb">sorted</span><span class="p">(</span><span class="nb">reversed</span><span class="p">(</span><span class="n">data</span><span class="p">))))</span>
-</pre></div>
-
-
-</li>
-<li>
-<p>如果想给类排序的话，只需添加相关的比较方法：</p>
-<div class="codehilite"><pre><span class="o">&gt;&gt;&gt;</span> <span class="n">Student</span><span class="o">.</span><span class="n">__eq__</span> <span class="o">=</span> <span class="k">lambda</span> <span class="bp">self</span><span class="p">,</span> <span class="n">other</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">age</span> <span class="o">==</span> <span class="n">other</span><span class="o">.</span><span class="n">age</span>
-<span class="o">&gt;&gt;&gt;</span> <span class="n">Student</span><span class="o">.</span><span class="n">__ne__</span> <span class="o">=</span> <span class="k">lambda</span> <span class="bp">self</span><span class="p">,</span> <span class="n">other</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">age</span> <span class="o">!=</span> <span class="n">other</span><span class="o">.</span><span class="n">age</span>
-<span class="o">&gt;&gt;&gt;</span> <span class="n">Student</span><span class="o">.</span><span class="n">__lt__</span> <span class="o">=</span> <span class="k">lambda</span> <span class="bp">self</span><span class="p">,</span> <span class="n">other</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">age</span> <span class="o">&lt;</span> <span class="n">other</span><span class="o">.</span><span class="n">age</span>
-<span class="o">&gt;&gt;&gt;</span> <span class="n">Student</span><span class="o">.</span><span class="n">__le__</span> <span class="o">=</span> <span class="k">lambda</span> <span class="bp">self</span><span class="p">,</span> <span class="n">other</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">age</span> <span class="o">&lt;=</span> <span class="n">other</span><span class="o">.</span><span class="n">age</span>
-<span class="o">&gt;&gt;&gt;</span> <span class="n">Student</span><span class="o">.</span><span class="n">__gt__</span> <span class="o">=</span> <span class="k">lambda</span> <span class="bp">self</span><span class="p">,</span> <span class="n">other</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">age</span> <span class="o">&gt;</span> <span class="n">other</span><span class="o">.</span><span class="n">age</span>
-<span class="o">&gt;&gt;&gt;</span> <span class="n">Student</span><span class="o">.</span><span class="n">__ge__</span> <span class="o">=</span> <span class="k">lambda</span> <span class="bp">self</span><span class="p">,</span> <span class="n">other</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">age</span> <span class="o">&gt;=</span> <span class="n">other</span><span class="o">.</span><span class="n">age</span>
-<span class="o">&gt;&gt;&gt;</span> <span class="nb">sorted</span><span class="p">(</span><span class="n">student_objects</span><span class="p">)</span>
-<span class="p">[(</span><span class="s">&#39;dave&#39;</span><span class="p">,</span> <span class="s">&#39;B&#39;</span><span class="p">,</span> <span class="mi">10</span><span class="p">),</span> <span class="p">(</span><span class="s">&#39;jane&#39;</span><span class="p">,</span> <span class="s">&#39;B&#39;</span><span class="p">,</span> <span class="mi">12</span><span class="p">),</span> <span class="p">(</span><span class="s">&#39;john&#39;</span><span class="p">,</span> <span class="s">&#39;A&#39;</span><span class="p">,</span> <span class="mi">15</span><span class="p">)]</span>
-</pre></div>
-
-
-<p>一般情况下，只需定义上面6个比较操作就可以了。<a href="http://docs.python.org/2/library/functools.html#functools.total_ordering">functools.total_ordering</a> 类装饰器可以很方便就实现这个需求。</p>
-</li>
-<li>
-<p>key 函数也可以不访问要排序对象的相关数据，访问外部资源也是可以的。比如，学生成绩存储在一个字典中，这个字典可以用来对学生名字进行排序：</p>
-<div class="codehilite"><pre><span class="o">&gt;&gt;&gt;</span> <span class="n">students</span> <span class="o">=</span> <span class="p">[</span><span class="s">&#39;dave&#39;</span><span class="p">,</span> <span class="s">&#39;john&#39;</span><span class="p">,</span> <span class="s">&#39;jane&#39;</span><span class="p">]</span>
-<span class="o">&gt;&gt;&gt;</span> <span class="n">newgrades</span> <span class="o">=</span> <span class="p">{</span><span class="s">&#39;john&#39;</span><span class="p">:</span> <span class="s">&#39;F&#39;</span><span class="p">,</span> <span class="s">&#39;jane&#39;</span><span class="p">:</span><span class="s">&#39;A&#39;</span><span class="p">,</span> <span class="s">&#39;dave&#39;</span><span class="p">:</span> <span class="s">&#39;C&#39;</span><span class="p">}</span>
-<span class="o">&gt;&gt;&gt;</span> <span class="nb">sorted</span><span class="p">(</span><span class="n">students</span><span class="p">,</span> <span class="n">key</span><span class="o">=</span><span class="n">newgrades</span><span class="o">.</span><span class="n">__getitem__</span><span class="p">)</span>
-<span class="p">[</span><span class="s">&#39;jane&#39;</span><span class="p">,</span> <span class="s">&#39;dave&#39;</span><span class="p">,</span> <span class="s">&#39;john&#39;</span><span class="p">]</span>
-</pre></div>
-
-
-</li>
-</ul>
-<!--## 参考-->
-
-<!--* [TimSort 中的核心过程 - YD Blog - ITeye技术网站](http://yangdong.iteye.com/blog/1170214)--><p>There are <a href="../2013/03/python-sorting-how-to.html#disqus_thread">comments</a>.</p>                </article>
-                                    <p class="paginator">
+<div class="codehilite"><pre><span class="o">&gt;&gt;&gt;</span> <span class="n">a</span> <span class="o">=</span> <span class="p">[</span><span class="mi">5</span><span class="p">,</span> <span class="mi">2</span><span class="p">,</span> <span class="mi">3</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="mi">4 ...</span></pre></div>
+                <a class="readmore" href="../2013/03/python-sorting-how-to.html">read more</a>
+                <p>There are <a href="../2013/03/python-sorting-how-to.html#disqus_thread">comments</a>.</p>                </div><!-- /.entry-content -->
+            </article></li>
+                            </ol><!-- /#posts-list -->
+                            <p class="paginator">
         Page 1 / 1
     </p>
-                            </aside><!-- /#featured -->
-                                                </ol><!-- /#posts-list -->
                         </section><!-- /#content -->
                     <section id="extras" class="body">
                         <div class="blogroll">
