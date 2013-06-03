@@ -1,5 +1,68 @@
 <?xml version="1.0" encoding="utf-8"?>
-<feed xmlns="http://www.w3.org/2005/Atom"><title>Mozillazg's Blog</title><link href="http://mozillazg.com/" rel="alternate"></link><link href="http://mozillazg.com/feeds/django.atom.xml" rel="self"></link><id>http://mozillazg.com/</id><updated>2013-05-20T00:00:00+00:00</updated><entry><title>[django]在模板标签中使用 javascript 变量的值作为参数</title><link href="http://mozillazg.com/2013/05/django-use-javascript-variable-value-in-template-tag.html" rel="alternate"></link><updated>2013-05-20T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2013-05-20:2013/05/django-use-javascript-variable-value-in-template-tag.html</id><summary type="html">&lt;p&gt;示例：&lt;/p&gt;
+<feed xmlns="http://www.w3.org/2005/Atom"><title>Mozillazg's Blog</title><link href="http://mozillazg.com/" rel="alternate"></link><link href="http://mozillazg.com/feeds/django.atom.xml" rel="self"></link><id>http://mozillazg.com/</id><updated>2013-06-03T00:00:00+00:00</updated><entry><title>[django]让 BigIntegerField 字段自增长</title><link href="http://mozillazg.com/2013/06/django-let-bigintegerfield-auto-increment.html" rel="alternate"></link><updated>2013-06-03T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2013-06-03:2013/06/django-let-bigintegerfield-auto-increment.html</id><summary type="html">&lt;p&gt;默认的 id 字段是 IntegerField 属性，长度是 11。&lt;/p&gt;
+&lt;p&gt;现在要将它改为 BigIntegerField 属性，因为它的长度是更长。&lt;/p&gt;
+&lt;div class="codehilite"&gt;&lt;pre&gt;&lt;span class="k"&gt;class&lt;/span&gt; &lt;span class="nc"&gt;Foo&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;models&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;Model&lt;/span&gt;&lt;span class="p"&gt;):&lt;/span&gt;
+    &lt;span class="nb"&gt;id&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;models&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;BigIntegerField&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;primary_key&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="bp"&gt;True&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+    &lt;span class="c"&gt;#...&lt;/span&gt;
+&lt;/pre&gt;&lt;/div&gt;
+
+
+&lt;p&gt;更改后的数据库字段信息：&lt;/p&gt;
+&lt;div class="codehilite"&gt;&lt;pre&gt;mysql&amp;gt; desc foo_bar;
++--------------+------------+------+-----+---------+-------+
+| Field        | Type       | Null | Key | Default | Extra |
++--------------+------------+------+-----+---------+-------+
+| id           | bigint&lt;span class="o"&gt;(&lt;/span&gt;20&lt;span class="o"&gt;)&lt;/span&gt; | NO   | PRI | NULL    |       |
+&lt;/pre&gt;&lt;/div&gt;
+
+
+&lt;p&gt;问题出来了，更改后的 id 没有自增长的功能。&lt;/p&gt;
+&lt;p&gt;解决办法就是自定义一个字段属性：&lt;/p&gt;
+&lt;p&gt;代码结构：&lt;/p&gt;
+&lt;div class="codehilite"&gt;&lt;pre&gt;foo   &lt;span class="c"&gt;# app&lt;/span&gt;
+|-fields.py
+|-models.py
+&lt;/pre&gt;&lt;/div&gt;
+
+
+&lt;p&gt;代码：&lt;/p&gt;
+&lt;div class="codehilite"&gt;&lt;pre&gt;&lt;span class="c"&gt;# fields.py&lt;/span&gt;
+&lt;span class="kn"&gt;from&lt;/span&gt; &lt;span class="nn"&gt;django.db.models&lt;/span&gt; &lt;span class="kn"&gt;import&lt;/span&gt; &lt;span class="n"&gt;fields&lt;/span&gt;
+&lt;span class="kn"&gt;from&lt;/span&gt; &lt;span class="nn"&gt;south.modelsinspector&lt;/span&gt; &lt;span class="kn"&gt;import&lt;/span&gt; &lt;span class="n"&gt;add_introspection_rules&lt;/span&gt;
+
+
+&lt;span class="k"&gt;class&lt;/span&gt; &lt;span class="nc"&gt;BigIntegerAutoField&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;fields&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;BigIntegerField&lt;/span&gt;&lt;span class="p"&gt;):&lt;/span&gt;
+    &lt;span class="k"&gt;def&lt;/span&gt; &lt;span class="nf"&gt;db_type&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="bp"&gt;self&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;connection&lt;/span&gt;&lt;span class="p"&gt;):&lt;/span&gt;
+        &lt;span class="k"&gt;if&lt;/span&gt; &lt;span class="s"&gt;&amp;#39;mysql&amp;#39;&lt;/span&gt; &lt;span class="ow"&gt;in&lt;/span&gt; &lt;span class="n"&gt;connection&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;__class__&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;__module__&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;
+            &lt;span class="k"&gt;return&lt;/span&gt; &lt;span class="s"&gt;&amp;#39;bigint AUTO_INCREMENT&amp;#39;&lt;/span&gt;
+        &lt;span class="k"&gt;return&lt;/span&gt; &lt;span class="nb"&gt;super&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;BigIntegerAutoField&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="bp"&gt;self&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;db_type&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;connection&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+
+&lt;span class="n"&gt;add_introspection_rules&lt;/span&gt;&lt;span class="p"&gt;([],&lt;/span&gt; &lt;span class="p"&gt;[&lt;/span&gt;&lt;span class="s"&gt;&amp;quot;^foo\.fields\.BigIntegerAutoField&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;])&lt;/span&gt;
+
+
+&lt;span class="c"&gt;# models.py&lt;/span&gt;
+&lt;span class="kn"&gt;from&lt;/span&gt; &lt;span class="nn"&gt;.fields&lt;/span&gt; &lt;span class="kn"&gt;import&lt;/span&gt; &lt;span class="n"&gt;BigIntegerAutoField&lt;/span&gt;
+
+
+&lt;span class="k"&gt;class&lt;/span&gt; &lt;span class="nc"&gt;Bar&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;models&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;Model&lt;/span&gt;&lt;span class="p"&gt;):&lt;/span&gt;
+    &lt;span class="nb"&gt;id&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;BigIntegerAutoField&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;primary_key&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="bp"&gt;True&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+    &lt;span class="c"&gt;# ...&lt;/span&gt;
+&lt;/pre&gt;&lt;/div&gt;
+
+
+&lt;p&gt;结果：&lt;/p&gt;
+&lt;div class="codehilite"&gt;&lt;pre&gt;mysql&amp;gt; desc foo_bar;
++--------------+------------+------+-----+---------+----------------+
+| Field        | Type       | Null | Key | Default | Extra          |
++--------------+------------+------+-----+---------+----------------+
+| id           | bigint&lt;span class="o"&gt;(&lt;/span&gt;20&lt;span class="o"&gt;)&lt;/span&gt; | NO   | PRI | NULL    | auto_increment |
+&lt;/pre&gt;&lt;/div&gt;
+
+
+&lt;h2&gt;参考&lt;/h2&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;a href="http://stackoverflow.com/questions/2672975/django-biginteger-auto-increment-field-as-primary-key"&gt;python - Django BigInteger auto-increment field as primary key? - Stack Overflow&lt;/a&gt;&lt;/li&gt;
+&lt;/ul&gt;</summary><category term="django"></category><category term="python"></category><category term="BigIntegerField"></category><category term="auto-increment"></category><category term="mysql"></category></entry><entry><title>[django]在模板标签中使用 javascript 变量的值作为参数</title><link href="http://mozillazg.com/2013/05/django-use-javascript-variable-value-in-template-tag.html" rel="alternate"></link><updated>2013-05-20T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2013-05-20:2013/05/django-use-javascript-variable-value-in-template-tag.html</id><summary type="html">&lt;p&gt;示例：&lt;/p&gt;
 &lt;div class="codehilite"&gt;&lt;pre&gt;var url = &amp;quot;&lt;span class="cp"&gt;{%&lt;/span&gt; &lt;span class="k"&gt;url&lt;/span&gt; &lt;span class="s1"&gt;&amp;#39;foo&amp;#39;&lt;/span&gt; &lt;span class="m"&gt;0&lt;/span&gt; &lt;span class="cp"&gt;%}&lt;/span&gt;&amp;quot;.replace(&amp;#39;0&amp;#39;, value);
 &lt;/pre&gt;&lt;/div&gt;
 

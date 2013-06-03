@@ -42,8 +42,97 @@
 
                             <aside id="featured" class="body">
                 <article>
-                    <h1 class="entry-title"><a href="./2013/05/javascript-list-object-all-properties.html">[javascript]列出对象所有属性</a></h1> 
+                    <h1 class="entry-title"><a href="./2013/06/django-let-bigintegerfield-auto-increment.html">[django]让 BigIntegerField 字段自增长</a></h1> 
                     <footer class="post-info">
+        <abbr class="published" title="2013-06-03T00:00:00">
+                周一 03 六月 2013
+        </abbr>
+
+                <address class="vcard author">
+                By <a class="url fn" href="./author/mozillazg.html">mozillazg</a>
+        </address>
+        <p>In <a href="./category/django.html">django</a>. </p>
+<p>tags: <a href="./tag/django.html">django</a><a href="./tag/python.html">python</a><a href="./tag/bigintegerfield.html">BigIntegerField</a><a href="./tag/auto-increment.html">auto-increment</a><a href="./tag/mysql.html">mysql</a></p>
+</footer><!-- /.post-info --><p>默认的 id 字段是 IntegerField 属性，长度是 11。</p>
+<p>现在要将它改为 BigIntegerField 属性，因为它的长度是更长。</p>
+<div class="codehilite"><pre><span class="k">class</span> <span class="nc">Foo</span><span class="p">(</span><span class="n">models</span><span class="o">.</span><span class="n">Model</span><span class="p">):</span>
+    <span class="nb">id</span> <span class="o">=</span> <span class="n">models</span><span class="o">.</span><span class="n">BigIntegerField</span><span class="p">(</span><span class="n">primary_key</span><span class="o">=</span><span class="bp">True</span><span class="p">)</span>
+    <span class="c">#...</span>
+</pre></div>
+
+
+<p>更改后的数据库字段信息：</p>
+<div class="codehilite"><pre>mysql&gt; desc foo_bar;
++--------------+------------+------+-----+---------+-------+
+| Field        | Type       | Null | Key | Default | Extra |
++--------------+------------+------+-----+---------+-------+
+| id           | bigint<span class="o">(</span>20<span class="o">)</span> | NO   | PRI | NULL    |       |
+</pre></div>
+
+
+<p>问题出来了，更改后的 id 没有自增长的功能。</p>
+<p>解决办法就是自定义一个字段属性：</p>
+<p>代码结构：</p>
+<div class="codehilite"><pre>foo   <span class="c"># app</span>
+|-fields.py
+|-models.py
+</pre></div>
+
+
+<p>代码：</p>
+<div class="codehilite"><pre><span class="c"># fields.py</span>
+<span class="kn">from</span> <span class="nn">django.db.models</span> <span class="kn">import</span> <span class="n">fields</span>
+<span class="kn">from</span> <span class="nn">south.modelsinspector</span> <span class="kn">import</span> <span class="n">add_introspection_rules</span>
+
+
+<span class="k">class</span> <span class="nc">BigIntegerAutoField</span><span class="p">(</span><span class="n">fields</span><span class="o">.</span><span class="n">BigIntegerField</span><span class="p">):</span>
+    <span class="k">def</span> <span class="nf">db_type</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">connection</span><span class="p">):</span>
+        <span class="k">if</span> <span class="s">&#39;mysql&#39;</span> <span class="ow">in</span> <span class="n">connection</span><span class="o">.</span><span class="n">__class__</span><span class="o">.</span><span class="n">__module__</span><span class="p">:</span>
+            <span class="k">return</span> <span class="s">&#39;bigint AUTO_INCREMENT&#39;</span>
+        <span class="k">return</span> <span class="nb">super</span><span class="p">(</span><span class="n">BigIntegerAutoField</span><span class="p">,</span> <span class="bp">self</span><span class="p">)</span><span class="o">.</span><span class="n">db_type</span><span class="p">(</span><span class="n">connection</span><span class="p">)</span>
+
+<span class="n">add_introspection_rules</span><span class="p">([],</span> <span class="p">[</span><span class="s">&quot;^foo\.fields\.BigIntegerAutoField&quot;</span><span class="p">])</span>
+
+
+<span class="c"># models.py</span>
+<span class="kn">from</span> <span class="nn">.fields</span> <span class="kn">import</span> <span class="n">BigIntegerAutoField</span>
+
+
+<span class="k">class</span> <span class="nc">Bar</span><span class="p">(</span><span class="n">models</span><span class="o">.</span><span class="n">Model</span><span class="p">):</span>
+    <span class="nb">id</span> <span class="o">=</span> <span class="n">BigIntegerAutoField</span><span class="p">(</span><span class="n">primary_key</span><span class="o">=</span><span class="bp">True</span><span class="p">)</span>
+    <span class="c"># ...</span>
+</pre></div>
+
+
+<p>结果：</p>
+<div class="codehilite"><pre>mysql&gt; desc foo_bar;
++--------------+------------+------+-----+---------+----------------+
+| Field        | Type       | Null | Key | Default | Extra          |
++--------------+------------+------+-----+---------+----------------+
+| id           | bigint<span class="o">(</span>20<span class="o">)</span> | NO   | PRI | NULL    | auto_increment |
+</pre></div>
+
+
+<h2>参考</h2>
+<ul>
+<li><a href="http://stackoverflow.com/questions/2672975/django-biginteger-auto-increment-field-as-primary-key">python - Django BigInteger auto-increment field as primary key? - Stack Overflow</a></li>
+</ul><p>There are <a href="./2013/06/django-let-bigintegerfield-auto-increment.html#disqus_thread">comments</a>.</p>                </article>
+                            </aside><!-- /#featured -->
+                            <section id="content" class="body">
+                    <h1>Other articles</h1>
+                    <hr />
+                    <ol id="posts-list" class="hfeed">
+                                                
+
+                 
+                        <li><article class="hentry">    
+                <header>
+                    <h1><a href="./2013/05/javascript-list-object-all-properties.html" rel="bookmark"
+                           title="Permalink to [javascript]列出对象所有属性">[javascript]列出对象所有属性</a></h1>
+                </header>
+                
+                <div class="entry-content">
+                <footer class="post-info">
         <abbr class="published" title="2013-05-23T00:00:00">
                 周四 23 五月 2013
         </abbr>
@@ -53,7 +142,7 @@
         </address>
         <p>In <a href="./category/web.html">web</a>. </p>
 <p>tags: <a href="./tag/javascript.html">javascript</a><a href="./tag/web.html">web</a></p>
-</footer><!-- /.post-info --><p>当我们想知道某个对象拥有哪些的属性时，可以用下面的方法（现代浏览器）：</p>
+</footer><!-- /.post-info -->                <p>当我们想知道某个对象拥有哪些的属性时，可以用下面的方法（现代浏览器）：</p>
 <div class="codehilite"><pre><span class="kd">var</span> <span class="nx">properties</span> <span class="o">=</span> <span class="nb">Object</span><span class="p">.</span><span class="nx">keys</span><span class="p">(</span><span class="nx">obj</span><span class="p">);</span>
 </pre></div>
 
@@ -70,13 +159,11 @@
 <h2>参考</h2>
 <ul>
 <li><a href="http://stackoverflow.com/questions/208016/how-to-list-the-properties-of-a-javascript-object">json - How to list the properties of a javascript object - Stack Overflow</a></li>
-</ul><p>There are <a href="./2013/05/javascript-list-object-all-properties.html#disqus_thread">comments</a>.</p>                </article>
-                            </aside><!-- /#featured -->
-                            <section id="content" class="body">
-                    <h1>Other articles</h1>
-                    <hr />
-                    <ol id="posts-list" class="hfeed">
-                                                
+</ul>
+                <a class="readmore" href="./2013/05/javascript-list-object-all-properties.html">read more</a>
+                <p>There are <a href="./2013/05/javascript-list-object-all-properties.html#disqus_thread">comments</a>.</p>                </div><!-- /.entry-content -->
+            </article></li>
+                            
 
                  
                         <li><article class="hentry">    
@@ -105,57 +192,6 @@
 将 url 定义为 /foo?xxx=y 这种形式，这样就不需要使用 javascript 变量的值了。</p>
                 <a class="readmore" href="./2013/05/django-use-javascript-variable-value-in-template-tag.html">read more</a>
                 <p>There are <a href="./2013/05/django-use-javascript-variable-value-in-template-tag.html#disqus_thread">comments</a>.</p>                </div><!-- /.entry-content -->
-            </article></li>
-                            
-
-                 
-                        <li><article class="hentry">    
-                <header>
-                    <h1><a href="./2013/05/linux-screen-command.html" rel="bookmark"
-                           title="Permalink to [linux]screen 常用命令">[linux]screen 常用命令</a></h1>
-                </header>
-                
-                <div class="entry-content">
-                <footer class="post-info">
-        <abbr class="published" title="2013-05-16T00:00:00">
-                周四 16 五月 2013
-        </abbr>
-
-                <address class="vcard author">
-                By <a class="url fn" href="./author/mozillazg.html">mozillazg</a>
-        </address>
-        <p>In <a href="./category/linux.html">linux</a>. </p>
-<p>tags: <a href="./tag/linux.html">linux</a><a href="./tag/screen.html">screen</a></p>
-</footer><!-- /.post-info -->                <p>通过 screen 命令可以让终端命令在我们断开远程服务器后依旧运行而不会中断。</p>
-<h2>安装 screen 命令</h2>
-<p>redhat/centos:</p>
-<div class="codehilite"><pre>yum install screen
-</pre></div>
-
-
-<p>ubuntu:</p>
-<div class="codehilite"><pre>sudo apt-get install screen
-</pre></div>
-
-
-<h2>常用的 screen 命令</h2>
-<p>新建一个名为 django 的后台 screen shell：</p>
-<div class="codehilite"><pre>screen -dmS django
-</pre></div>
-
-
-<p>查看所有的 screen shell:</p>
-<div class="codehilite"><pre><span class="nv">$ </span>screen -ls
-There are screens on:
-    1429.django <span class="o">(</span>Detached<span class="o">)</span>
-    23264.abc   <span class="o">(</span>Detached<span class="o">)</span>
-2 Sockets in /var/run/screen/S-abc.
-</pre></div>
-
-
-<p>打开后台状态为 ...</p>
-                <a class="readmore" href="./2013/05/linux-screen-command.html">read more</a>
-                <p>There are <a href="./2013/05/linux-screen-command.html#disqus_thread">comments</a>.</p>                </div><!-- /.entry-content -->
             </article></li>
                             </ol><!-- /#posts-list -->
                             <p class="paginator">
