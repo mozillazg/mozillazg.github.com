@@ -42,29 +42,65 @@
 
                             <aside id="featured" class="body">
                 <article>
-                    <h1 class="entry-title"><a href="../2013/06/django-fix-reset-password-use-webmaster@localhost-send-mail.html">[django]解决发送密码重置邮件的发件人是 "webmaster@localhost" 的问题</a></h1> 
+                    <h1 class="entry-title"><a href="../2013/06/django-south-rename-model-field.html">[django]使用 South 重命名 model 字段名</a></h1> 
                     <footer class="post-info">
-        <abbr class="published" title="2013-06-04T00:00:00">
-                周二 04 六月 2013
+        <abbr class="published" title="2013-06-05T00:00:00">
+                周三 05 六月 2013
         </abbr>
 
                 <address class="vcard author">
                 By <a class="url fn" href="../author/mozillazg.html">mozillazg</a>
         </address>
         <p>In <a href="../category/django.html">django</a>. </p>
-<p>tags: <a href="../tag/django.html">django</a><a href="../tag/python.html">python</a><a href="../tag/send_mail.html">send_mail</a></p>
-</footer><!-- /.post-info --><p>默认情况下，django 将通过 webmaster@localhost 发送密码重置邮件。</p>
-<p>这明显不是我们想要的，更改 settings.py 文件即可修复这个问题。</p>
-<p>增加一个配置项 DEFAULT_FROM_EMAIL：</p>
-<div class="codehilite"><pre><span class="n">DEFAULT_FROM_EMAIL</span> <span class="o">=</span> <span class="s">&#39;foo@bar.com&#39;</span>
+<p>tags: <a href="../tag/django.html">django</a><a href="../tag/python.html">python</a><a href="../tag/south.html">south</a></p>
+</footer><!-- /.post-info --><p>本文将讲述如何使用 South 重命名表的字段名。</p>
+<p>假设应用 foobar 有个 model:</p>
+<div class="codehilite"><pre><span class="k">class</span> <span class="nc">Foo</span><span class="p">(</span><span class="n">models</span><span class="o">.</span><span class="n">Model</span><span class="p">):</span>
+    <span class="n">foo</span> <span class="o">=</span> <span class="n">models</span><span class="o">.</span><span class="n">IntegerField</span><span class="p">()</span>
 </pre></div>
 
 
-<p>此时的发件人将会是：foo@bar.com</p>
+<p>想要将 foo 字段名改为 bar。</p>
+<ol>
+<li>
+<p>改好 models.py</p>
+<div class="codehilite"><pre><span class="k">class</span> <span class="nc">Foo</span><span class="p">(</span><span class="n">models</span><span class="o">.</span><span class="n">Model</span><span class="p">):</span>
+    <span class="n">bar</span> <span class="o">=</span> <span class="n">models</span><span class="o">.</span><span class="n">IntegerField</span><span class="p">()</span>
+</pre></div>
+
+
+</li>
+<li>
+<p>执行 south 命令</p>
+<div class="codehilite"><pre><span class="c"># python manage.py schemamigration yourapp rename_field_foo_to_bar --empty</span>
+<span class="c"># 本例是</span>
+python manage.py schemamigration foobar rename_field_foo_to_bar --empty
+</pre></div>
+
+
+</li>
+<li>
+<p>更改生成的 000x_xxx.py 文件</p>
+<div class="codehilite"><pre><span class="k">class</span> <span class="nc">Migration</span><span class="p">(</span><span class="n">SchemaMigration</span><span class="p">):</span>
+
+    <span class="k">def</span> <span class="nf">forwards</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">orm</span><span class="p">):</span>
+        <span class="c"># 更改列名</span>
+        <span class="c"># db.rename_column(&#39;yourapp_foo&#39;, &#39;oldname&#39;, &#39;newname&#39;)</span>
+        <span class="n">db</span><span class="o">.</span><span class="n">rename_column</span><span class="p">(</span><span class="s">&#39;foobar_foo&#39;</span><span class="p">,</span> <span class="s">&#39;foo&#39;</span><span class="p">,</span> <span class="s">&#39;bar&#39;</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">backwards</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">orm</span><span class="p">):</span>
+        <span class="c"># 撤销更改</span>
+        <span class="c"># db.rename_column(&#39;yourapp_foo&#39;, &#39;newname&#39;, &#39;oldname&#39;)</span>
+        <span class="n">db</span><span class="o">.</span><span class="n">rename_column</span><span class="p">(</span><span class="s">&#39;foobar_foo&#39;</span><span class="p">,</span> <span class="s">&#39;bar&#39;</span><span class="p">,</span> <span class="s">&#39;foo&#39;</span><span class="p">)</span>
+</pre></div>
+
+
+</li>
+</ol>
 <h2>参考</h2>
 <ul>
-<li><a href="http://markmail.org/thread/yiomiws5gvyxvfia#query:+page:1+mid:sb6fpukeijedzxzg+state:results">Re: [Django] #13847: PasswordResetForm sends emails using "webmaster@localhost" - Django - com.googlegroups.django-updates - MarkMail</a></li>
-</ul><p>There are <a href="../2013/06/django-fix-reset-password-use-webmaster@localhost-send-mail.html#disqus_thread">comments</a>.</p>                </article>
+<li><a href="http://stackoverflow.com/questions/3235995/django-how-to-rename-a-model-field-using-south">Django - How to rename a model field using South? - Stack Overflow</a></li>
+</ul><p>There are <a href="../2013/06/django-south-rename-model-field.html#disqus_thread">comments</a>.</p>                </article>
                             </aside><!-- /#featured -->
                             <section id="content" class="body">
                     <h1>Other articles</h1>
@@ -75,85 +111,90 @@
                  
                         <li><article class="hentry">    
                 <header>
-                    <h1><a href="../2013/06/django-let-bigintegerfield-auto-increment.html" rel="bookmark"
-                           title="Permalink to [django]让 BigIntegerField 字段自增长">[django]让 BigIntegerField 字段自增长</a></h1>
+                    <h1><a href="../2013/06/django-south-rename-model-or-table.html" rel="bookmark"
+                           title="Permalink to [django]使用 South 重命名 model 字段名">[django]使用 South 重命名 model 字段名</a></h1>
                 </header>
                 
                 <div class="entry-content">
                 <footer class="post-info">
-        <abbr class="published" title="2013-06-03T00:00:00">
-                周一 03 六月 2013
+        <abbr class="published" title="2013-06-05T00:00:00">
+                周三 05 六月 2013
         </abbr>
 
                 <address class="vcard author">
                 By <a class="url fn" href="../author/mozillazg.html">mozillazg</a>
         </address>
         <p>In <a href="../category/django.html">django</a>. </p>
-<p>tags: <a href="../tag/django.html">django</a><a href="../tag/python.html">python</a><a href="../tag/bigintegerfield.html">BigIntegerField</a><a href="../tag/auto-increment.html">auto-increment</a><a href="../tag/mysql.html">mysql</a></p>
-</footer><!-- /.post-info -->                <p>默认的 id 字段是 IntegerField 属性，长度是 11。</p>
-<p>现在要将它改为 BigIntegerField 属性，因为它的长度是更长。</p>
+<p>tags: <a href="../tag/django.html">django</a><a href="../tag/python.html">python</a><a href="../tag/south.html">south</a></p>
+</footer><!-- /.post-info -->                <p>本文将讲述如何使用 South 重命名表名。</p>
+<p>假设应用 foobar 有个 model:</p>
 <div class="codehilite"><pre><span class="k">class</span> <span class="nc">Foo</span><span class="p">(</span><span class="n">models</span><span class="o">.</span><span class="n">Model</span><span class="p">):</span>
-    <span class="nb">id</span> <span class="o">=</span> <span class="n">models</span><span class="o">.</span><span class="n">BigIntegerField</span><span class="p">(</span><span class="n">primary_key</span><span class="o">=</span><span class="bp">True</span><span class="p">)</span>
-    <span class="c">#...</span>
+    <span class="n">foo</span> <span class="o">=</span> <span class="n">models</span><span class="o">.</span><span class="n">IntegerField</span><span class="p">()</span>
 </pre></div>
 
 
-<p>更改后的数据库字段信息：</p>
-<div class="codehilite"><pre>mysql&gt; desc foo_bar;
-+--------------+------------+------+-----+---------+-------+
-| Field        | Type       | Null | Key | Default | Extra |
-+--------------+------------+------+-----+---------+-------+
-| id           | bigint<span class="o">(</span>20<span class="o">)</span> | NO   | PRI | NULL    |       |
+<p>想要将 model Foo 改名为 Bar。</p>
+<ol>
+<li>
+<p>改好 models.py</p>
+<div class="codehilite"><pre><span class="k">class</span> <span class="nc">Bar</span><span class="p">(</span><span class="n">models</span><span class="o">.</span><span class="n">Model</span><span class="p">):</span>
+    <span class="n">foo</span> <span class="o">=</span> <span class="n">models</span><span class="o">.</span><span class="n">IntegerField</span><span class="p">()</span>
 </pre></div>
 
 
-<p>问题出来了，更改后的 id 没有自增长的功能。</p>
-<p>解决办法就是自定义一个字段属性：</p>
-<p>代码结构：</p>
-<div class="codehilite"><pre>foo   <span class="c"># app</span>
-|-fields.py
-|-models.py
+</li>
+<li>
+<p>执行 south 命令</p>
+<div class="codehilite"><pre><span class="c"># python manage.py schemamigration yourapp rename_model_foo_to_bar --empty</span>
+<span class="c"># 本例是</span>
+python manage.py schemamigration foobar rename_model_foo_to_bar --empty
 </pre></div>
 
 
-<p>代码：</p>
-<div class="codehilite"><pre><span class="c"># fields ...</span></pre></div>
-                <a class="readmore" href="../2013/06/django-let-bigintegerfield-auto-increment.html">read more</a>
-                <p>There are <a href="../2013/06/django-let-bigintegerfield-auto-increment.html#disqus_thread">comments</a>.</p>                </div><!-- /.entry-content -->
+</li>
+<li>
+<p>更改生成的 000x_xxx.py ...</p></li></ol>
+                <a class="readmore" href="../2013/06/django-south-rename-model-or-table.html">read more</a>
+                <p>There are <a href="../2013/06/django-south-rename-model-or-table.html#disqus_thread">comments</a>.</p>                </div><!-- /.entry-content -->
             </article></li>
                             
 
                  
                         <li><article class="hentry">    
                 <header>
-                    <h1><a href="../2013/05/django-use-javascript-variable-value-in-template-tag.html" rel="bookmark"
-                           title="Permalink to [django]在模板标签中使用 javascript 变量的值作为参数">[django]在模板标签中使用 javascript 变量的值作为参数</a></h1>
+                    <h1><a href="../2013/06/django-fix-reset-password-use-webmaster@localhost-send-mail.html" rel="bookmark"
+                           title="Permalink to [django]解决发送密码重置邮件的发件人是 "webmaster@localhost" 的问题">[django]解决发送密码重置邮件的发件人是 "webmaster@localhost" 的问题</a></h1>
                 </header>
                 
                 <div class="entry-content">
                 <footer class="post-info">
-        <abbr class="published" title="2013-05-20T00:00:00">
-                周一 20 五月 2013
+        <abbr class="published" title="2013-06-04T00:00:00">
+                周二 04 六月 2013
         </abbr>
 
                 <address class="vcard author">
                 By <a class="url fn" href="../author/mozillazg.html">mozillazg</a>
         </address>
         <p>In <a href="../category/django.html">django</a>. </p>
-<p>tags: <a href="../tag/django.html">django</a><a href="../tag/python.html">python</a><a href="../tag/javascript.html">javascript</a></p>
-</footer><!-- /.post-info -->                <p>示例：</p>
-<div class="codehilite"><pre>var url = &quot;<span class="cp">{%</span> <span class="k">url</span> <span class="s1">&#39;foo&#39;</span> <span class="m">0</span> <span class="cp">%}</span>&quot;.replace(&#39;0&#39;, value);
+<p>tags: <a href="../tag/django.html">django</a><a href="../tag/python.html">python</a><a href="../tag/send_mail.html">send_mail</a></p>
+</footer><!-- /.post-info -->                <p>默认情况下，django 将通过 webmaster@localhost 发送密码重置邮件。</p>
+<p>这明显不是我们想要的，更改 settings.py 文件即可修复这个问题。</p>
+<p>增加一个配置项 DEFAULT_FROM_EMAIL：</p>
+<div class="codehilite"><pre><span class="n">DEFAULT_FROM_EMAIL</span> <span class="o">=</span> <span class="s">&#39;foo@bar.com&#39;</span>
 </pre></div>
 
 
-<p>当然，针对这个例子更好的办法是：
-将 url 定义为 /foo?xxx=y 这种形式，这样就不需要使用 javascript 变量的值了。</p>
-                <a class="readmore" href="../2013/05/django-use-javascript-variable-value-in-template-tag.html">read more</a>
-                <p>There are <a href="../2013/05/django-use-javascript-variable-value-in-template-tag.html#disqus_thread">comments</a>.</p>                </div><!-- /.entry-content -->
+<p>此时的发件人将会是：foo@bar.com</p>
+<h2>参考</h2>
+<ul>
+<li><a href="http://markmail.org/thread/yiomiws5gvyxvfia#query:+page:1+mid:sb6fpukeijedzxzg+state:results">Re: [Django] #13847: PasswordResetForm sends emails using "webmaster@localhost" - Django - com.googlegroups.django-updates - MarkMail</a></li>
+</ul>
+                <a class="readmore" href="../2013/06/django-fix-reset-password-use-webmaster@localhost-send-mail.html">read more</a>
+                <p>There are <a href="../2013/06/django-fix-reset-password-use-webmaster@localhost-send-mail.html#disqus_thread">comments</a>.</p>                </div><!-- /.entry-content -->
             </article></li>
                             </ol><!-- /#posts-list -->
                             <p class="paginator">
-        Page 1 / 8
+        Page 1 / 9
             <a href="../category/django2.html">&raquo;</a>
     </p>
                         </section><!-- /#content -->
