@@ -1,0 +1,470 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+        <meta charset="utf-8">
+        <title>Mozillazg's Blog - replication</title>
+        <link rel="stylesheet" href="http://mozillazg.com/theme/css/main.css">
+                <link href="http://mozillazg.com/feeds/all.atom.xml" type="application/atom+xml" rel="alternate" title="Mozillazg's Blog Atom Feed" />
+                
+        <!--[if IE]>
+            <script src="http://html5shiv.googlecode.com/svn/trunk/html5.js"></script>
+        <![endif]-->
+</head>
+
+<body id="index" class="home">
+<a href="https://github.com/mozillazg">
+<img style="position: absolute; top: 0; right: 0; border: 0;" src="http://s3.amazonaws.com/github/ribbons/forkme_right_red_aa0000.png" alt="Fork me on GitHub" />
+</a>
+        <header id="banner" class="body">
+                <h1><a href="http://mozillazg.com/">Mozillazg's Blog </a></h1>
+                <nav><ul>
+                                    <li><a href="/index.html">Home</a></li>
+                                    <li><a href="/archives.html">Archives</a></li>
+                                                                                    <li ><a href="http://mozillazg.com/category/database.html">database</a></li>
+                                    <li ><a href="http://mozillazg.com/category/django.html">django</a></li>
+                                    <li ><a href="http://mozillazg.com/category/firefox.html">firefox</a></li>
+                                    <li ><a href="http://mozillazg.com/category/linux.html">linux</a></li>
+                                    <li ><a href="http://mozillazg.com/category/others.html">others</a></li>
+                                    <li ><a href="http://mozillazg.com/category/python.html">python</a></li>
+                                    <li ><a href="http://mozillazg.com/category/web.html">web</a></li>
+                                    <li ><a href="http://mozillazg.com/category/ying-yu.html">ying-yu</a></li>
+                                                </ul></nav>
+        </header><!-- /#banner -->
+                
+            
+
+                            <aside id="featured" class="body">
+                <article>
+                    <h1 class="entry-title"><a href="http://mozillazg.com/2013/06/mysql-master-master.html">mysql 基于 master-master 的双机热备配置</a></h1> 
+                    <footer class="post-info">
+        <abbr class="published" title="2013-06-21T00:00:00">
+                周五 21 六月 2013
+        </abbr>
+
+                <address class="vcard author">
+                By <a class="url fn" href="http://mozillazg.com/author/mozillazg.html">mozillazg</a>
+        </address>
+        <p>In <a href="http://mozillazg.com/category/others.html">others</a>. </p>
+<p>tags: <a href="http://mozillazg.com/tag/mysql.html">mysql</a><a href="http://mozillazg.com/tag/replication.html">replication</a></p>
+</footer><!-- /.post-info -->
+<p>master-master 就是两台服务器互为主从：        <br/>
+master1-slave(master2) &amp;&amp; master2-slave(master1)</p>
+<ul>
+<li>master1: 192.168.100.191</li>
+<li>master2: 192.168.100.166</li>
+</ul>
+<h2 id="master1-slavemaster2">master1-slave(master2)</h2>
+<p><strong>mysql 版本最好一致</strong></p>
+<h3 id="master1">设置 master1</h3>
+<ol>
+<li>
+<p>创建给 slave 登录用的用户名密码:</p>
+<div class="codehilite"><pre>mysql&gt; GRANT REPLICATION SLAVE ON *.* TO <span class="s1">'backup'</span>@<span class="s1">'192.168.100.166'</span> IDENTIFIED BY <span class="s1">'yNZE7fK9*@aMA?*ppF'</span>;
+
+<span class="c"># humanreadable</span>
+mysql&gt; <span class="c"># grant replication slave on *.* to 'backup'@'192.168.100.166' identified by 'yNZE7fK9*@aMA?*ppF';</span>
+
+mysql&gt; create database hello default charset utf8;
+</pre></div>
+</li>
+<li>
+<p>配置 my.cnf</p>
+<div class="codehilite"><pre><span class="c"># vim /etc/my.cnf</span>
+<span class="o">[</span>mysqld<span class="o">]</span>
+server-id<span class="o">=</span>1    <span class="c">#主机id，整数</span>
+<span class="c">#开启二进制日志，并且名称为 /var/lib/mysql/mysql-bin.***</span>
+<span class="c"># 如果是个路径则，保存到该路径下(log-bin=/var/log/mysql-bin.log  -&gt; /var/log/mysql-bin.***)</span>
+log-bin<span class="o">=</span>mysql-bin
+<span class="nb">read</span>-only<span class="o">=</span>0  <span class="c">#主机读写权限，读写都可以</span>
+binlog-do-db<span class="o">=</span>hello   <span class="c">#记录日志的数据库：需要的备份数据，多个写多行</span>
+<span class="c"># binlog-do-db=hello2</span>
+binlog-ignore-db<span class="o">=</span>mysql <span class="c">#不记录日志的数据库：不需要备份的数据库，多个写多行</span>
+binlog-ignore-db<span class="o">=</span><span class="nb">test</span>
+binlog-ignore-db<span class="o">=</span>information_schema
+</pre></div>
+<p>重启 mysql: <code>serivce mysqld restart</code></p>
+</li>
+<li>
+<p>导出数据库</p>
+<p>锁定数据库，不要退出 mysql shell</p>
+<div class="codehilite"><pre>mysql&gt;FLUSH TABLES WITH READ LOCK;
+mysql&gt;# flush tables with <span class="nb">read </span>lock;
+</pre></div>
+<p>新开一个终端，导出数据库</p>
+<div class="codehilite"><pre>mysqldump --master-data -uroot -p hello &gt; hello.sql
+</pre></div>
+<p>查看主服务器的状态</p>
+<div class="codehilite"><pre>mysql&gt; show master status<span class="se">\G</span>;
+*************************** 1. row ***************************
+            File: mysql-bin.000001
+        Position: 98
+    Binlog_Do_DB: hello
+Binlog_Ignore_DB: mysql,test,information_schema
+1 row in <span class="nb">set</span> <span class="o">(</span>0.00 sec<span class="o">)</span>
+
+ERROR: 
+No query specified
+</pre></div>
+<p>记下 Position 和 File 的值。
+解锁</p>
+<div class="codehilite"><pre>mysql&gt; UNLOCK TABLES;
+mysql&gt; <span class="c"># unlock tables;</span>
+</pre></div>
+</li>
+</ol>
+<h3 id="slavemaster2">设置 slave(master2)</h3>
+<ol>
+<li>
+<p>编辑 my.cnf</p>
+<div class="codehilite"><pre><span class="c"># vim /etc/my.cnf</span>
+
+<span class="o">[</span>mysqld<span class="o">]</span>
+server-id<span class="o">=</span>2
+log-bin<span class="o">=</span>mysql-bin
+master-host<span class="o">=</span>192.168.100.191  <span class="c"># master1</span>
+master-user<span class="o">=</span>backup  <span class="c"># 刚才在 master1 上设置的用户名密码</span>
+master-password<span class="o">=</span>yNZE7fK9*@aMA?*ppF  <span class="c"># password</span>
+master-port<span class="o">=</span>3306   <span class="c"># master1 mysql port</span>
+master-connect-retry<span class="o">=</span>60 <span class="c">#如果从服务器发现主服务器断掉，重新连接的时间差(秒)</span>
+replicate-do-db <span class="o">=</span>hello <span class="c">#只复制某个库，多个写多行</span>
+replicate-ignore-db<span class="o">=</span>mysql <span class="c">#不复制某个库</span>
+replicate-ignore-db<span class="o">=</span><span class="nb">test</span>
+replicate-ignore-db<span class="o">=</span>information_schema
+relay-log<span class="o">=</span>mysqld-relay-bin  <span class="c"># 开启日志中继</span>
+log-slave-updates  <span class="c"># slave将复制事件写进自己的二进制日志</span>
+<span class="c">#5.5</span>
+<span class="c">#log-slave-updates = ON</span>
+<span class="c">#5.1</span>
+<span class="c">#log-slave-updates = 1</span>
+</pre></div>
+</li>
+<li>
+<p>导入 master 导出的数据库：</p>
+<div class="codehilite"><pre>mysql&gt; create database hello default charset utf8;
+mysql -uroot -p hello &lt; hello.sql
+</pre></div>
+</li>
+<li>
+<p>配置 master 信息：</p>
+<div class="codehilite"><pre>mysql&gt; slave stop;
+
+mysql&gt; CHANGE MASTER TO
+-&gt; <span class="nv">MASTER_HOST</span><span class="o">=</span><span class="s1">'192.168.100.191'</span>, //主服务器的IP地址
+-&gt; <span class="nv">MASTER_USER</span><span class="o">=</span><span class="s1">'backup'</span>, //同步数据库的用户
+-&gt; <span class="nv">MASTER_PASSWORD</span><span class="o">=</span><span class="s1">'yNZE7fK9*@aMA?*ppF'</span>, //同步数据库的密码
+-&gt; <span class="nv">MASTER_LOG_FILE</span><span class="o">=</span><span class="s1">'mysql-bin.000001'</span>, //主服务器二进制日志的文件名<span class="o">(</span>前面要求记住的 File 参数<span class="o">)</span>
+-&gt; <span class="nv">MASTER_LOG_POS</span><span class="o">=</span>98; //日志文件的开始位置<span class="o">(</span>前面要求记住的 Position 参数<span class="o">)</span>
+
+mysql&gt; CHANGE MASTER TO <span class="nv">MASTER_HOST</span><span class="o">=</span><span class="s1">'192.168.100.191'</span>, <span class="nv">MASTER_USER</span><span class="o">=</span><span class="s1">'backup'</span>, <span class="nv">MASTER_PASSWORD</span><span class="o">=</span><span class="s1">'yNZE7fK9*@aMA?*ppF'</span>, <span class="nv">MASTER_LOG_FILE</span><span class="o">=</span><span class="s1">'mysql-bin.000001'</span>, <span class="nv">MASTER_LOG_POS</span><span class="o">=</span>98;
+
+mysql &gt; slave start;
+</pre></div>
+<p>重启 master, slave: <code>service mysqld restart</code></p>
+<p>查看 slave 状态：</p>
+<p>进入 slave mysql:</p>
+<div class="codehilite"><pre>mysql&gt; show slave status<span class="se">\G</span>;
+*************************** 1. row ***************************
+            Slave_IO_State: Connecting to master
+                Master_Host: 192.168.100.191
+                Master_User: backup
+                Master_Port: 3306
+            Connect_Retry: 60
+            Master_Log_File: mysql-bin.000001
+        Read_Master_Log_Pos: 98
+            Relay_Log_File: mysqld-relay-bin.000001
+            Relay_Log_Pos: 98
+    Relay_Master_Log_File: mysql-bin.000001
+        Slave_IO_Running: Yes
+        Slave_SQL_Running: Yes
+            Replicate_Do_DB: hello
+        Replicate_Ignore_DB: mysql,test,information_schema
+        Exec_Master_Log_Pos: 98
+            Relay_Log_Space: 98
+            Until_Log_Pos: 0
+    Seconds_Behind_Master: NULL
+1 row in <span class="nb">set</span> <span class="o">(</span>0.00 sec<span class="o">)</span>
+</pre></div>
+<p>注意一定要有下面两项，没有的话查看错误日志(less /var/log/mysqld.log)：</p>
+<div class="codehilite"><pre>        <span class="nl">Slave_IO_Running:</span> <span class="n">Yes</span>
+        <span class="nl">Slave_SQL_Running:</span> <span class="n">Yes</span>
+</pre></div>
+</li>
+<li>
+<p>测试</p>
+<p>master 服务器</p>
+<div class="codehilite"><pre>mysql&gt; use hello;
+Database changed
+mysql&gt; create table <span class="nb">test</span><span class="o">(</span>id int<span class="o">)</span>;
+mysql&gt; insert int <span class="nb">test set </span><span class="nv">id</span><span class="o">=</span>1;
+
+mysql&gt; show master status<span class="se">\G</span>;
+*************************** 1. row ***************************
+            File: mysql-bin.000002  <span class="c"># 这样这里</span>
+        Position: 276    <span class="c"># 注意这里</span>
+    Binlog_Do_DB: hello
+Binlog_Ignore_DB: mysql,test,information_schema
+1 row in <span class="nb">set</span> <span class="o">(</span>0.00 sec<span class="o">)</span>
+</pre></div>
+<p>slave 服务器</p>
+<div class="codehilite"><pre>mysql&gt; use hello;
+mysql&gt; show tables;
++-----------------+
+| Tables_in_hello |
++-----------------+
+| <span class="nb">test</span>            | 
++-----------------+
+1 row in <span class="nb">set</span> <span class="o">(</span>0.00 sec<span class="o">)</span>
+
+mysql&gt; <span class="k">select</span> * from <span class="nb">test</span>;
++------+
+| id   |
++------+
+|    1 | 
++------+
+1 row in <span class="nb">set</span> <span class="o">(</span>0.00 sec<span class="o">)</span>
+
+mysql&gt; show slave status<span class="se">\G</span>;
+*************************** 1. row ***************************
+            Slave_IO_State: Waiting <span class="k">for </span>master to send event
+                Master_Host: 192.168.100.191
+                Master_User: backup
+                Master_Port: 3306
+            Connect_Retry: 60
+            Master_Log_File: mysql-bin.000002  <span class="c"># 跟 master 一样</span>
+        Read_Master_Log_Pos: 276  <span class="c"># 跟 master 一样</span>
+            Relay_Log_File: mysqld-relay-bin.000003
+            Relay_Log_Pos: 413
+    Relay_Master_Log_File: mysql-bin.000002
+        Slave_IO_Running: Yes
+        Slave_SQL_Running: Yes
+            Replicate_Do_DB: hello
+        Replicate_Ignore_DB: mysql,test,information_schema
+                Last_Errno: 0
+                Last_Error: 
+            Skip_Counter: 0
+        Exec_Master_Log_Pos: 276
+            Relay_Log_Space: 413
+    Seconds_Behind_Master: 0
+1 row in <span class="nb">set</span> <span class="o">(</span>0.00 sec<span class="o">)</span>
+</pre></div>
+</li>
+</ol>
+<h2 id="master2-slavemaster1">master2-slave(master1)</h2>
+<h3 id="master2">master2:</h3>
+<div class="codehilite"><pre>mysql&gt; grant replication slave on *.* to <span class="s1">'backup'</span>@<span class="s1">'192.168.100.191'</span> identified by <span class="s1">'yNZE7fK9*@aMA?*ppF'</span>;
+mysql&gt; flush tables with <span class="nb">read </span>lock;
+mysql&gt; show master status<span class="se">\G</span>;
+*************************** 1. row ***************************
+            File: mysql-bin.000002
+        Position: 276
+    Binlog_Do_DB: 
+Binlog_Ignore_DB: 
+mysql&gt; unlock tables;
+</pre></div>
+<p>vim /etc/my.cnf:</p>
+<div class="codehilite"><pre><span class="c"># as master</span>
+<span class="c">#开启二进制日志，并且名称为 /var/log/mysql/mysql-bin.***</span>
+log-bin<span class="o">=</span>mysql-bin
+<span class="nb">read</span>-only<span class="o">=</span>0  <span class="c">#主机读写权限，读写都可以</span>
+binlog-do-db<span class="o">=</span>hello   <span class="c">#记录日志的数据库：需要的备份数据，多个写多行</span>
+binlog-ignore-db<span class="o">=</span>mysql <span class="c">#不记录日志的数据库：不需要备份的数据库，多个写多行</span>
+binlog-ignore-db<span class="o">=</span><span class="nb">test</span>
+binlog-ignore-db<span class="o">=</span>information_schema
+</pre></div>
+<p>service mysqld restart</p>
+<h4 id="slave">slave:</h4>
+<div class="codehilite"><pre>mysql&gt; slave stop;
+
+mysql&gt;  CHANGE MASTER TO <span class="nv">MASTER_HOST</span><span class="o">=</span><span class="s1">'192.168.100.166'</span>, <span class="nv">MASTER_USER</span><span class="o">=</span><span class="s1">'backup'</span>, <span class="nv">MASTER_PASSWORD</span><span class="o">=</span><span class="s1">'yNZE7fK9*@aMA?*ppF'</span>, <span class="nv">MASTER_LOG_FILE</span><span class="o">=</span><span class="s1">'mysql-bin.000002, MASTER_LOG_POS=276'</span>;
+
+mysql&gt; slave start;
+</pre></div>
+<p>vim /etc/my.cnf</p>
+<div class="codehilite"><pre><span class="c"># as slave</span>
+master-host<span class="o">=</span>192.168.100.166  <span class="c"># master</span>
+master-user<span class="o">=</span>backup  <span class="c"># 刚才在 master1 上设置的用户名密码</span>
+master-password<span class="o">=</span>yNZE7fK9*@aMA?*ppF  <span class="c"># password</span>
+master-port<span class="o">=</span>3306   <span class="c"># master1 mysql port</span>
+master-connect-retry<span class="o">=</span>60 <span class="c">#如果从服务器发现主服务器断掉，重新连接的时间差(秒)</span>
+replicate-do-db <span class="o">=</span>hello <span class="c">#只复制某个库，多个写多行</span>
+replicate-ignore-db<span class="o">=</span>mysql <span class="c">#不复制某个库</span>
+replicate-ignore-db<span class="o">=</span><span class="nb">test</span>
+replicate-ignore-db<span class="o">=</span>information_schema
+relay-log<span class="o">=</span>mysqld-relay-bin  <span class="c"># 开启日志中继</span>
+log-slave-updates  <span class="c"># slave将复制事件写进自己的二进制日志</span>
+</pre></div>
+<p>serivce mysqld restart</p>
+<h4 id="_1">测试</h4>
+<p>master2:</p>
+<div class="codehilite"><pre>mysql&gt; use hello;    
+mysql&gt; insert into <span class="nb">test set </span><span class="nv">id</span><span class="o">=</span>2;
+mysql&gt; <span class="k">select</span> * from <span class="nb">test</span>;
++------+
+| id   |
++------+
+|    1 | 
+|    2 | 
++------+
+2 rows in <span class="nb">set</span> <span class="o">(</span>0.00 sec<span class="o">)</span>
+mysql&gt; show master status<span class="se">\G</span>;
+*************************** 1. row ***************************
+            File: mysql-bin.000003
+        Position: 187
+    Binlog_Do_DB: hello
+Binlog_Ignore_DB: mysql,test,information_schema
+1 row in <span class="nb">set</span> <span class="o">(</span>0.00 sec<span class="o">)</span>
+</pre></div>
+<p>slave:</p>
+<div class="codehilite"><pre>mysql&gt; show slave status <span class="se">\G</span>;
+*************************** 1. row ***************************
+            Slave_IO_State: Waiting <span class="k">for </span>master to send event
+                Master_Host: 192.168.100.166
+                Master_User: backup
+                Master_Port: 3306
+            Connect_Retry: 60
+            Master_Log_File: mysql-bin.000003
+        Read_Master_Log_Pos: 187
+            Relay_Log_File: mysqld-relay-bin.000003
+            Relay_Log_Pos: 324
+    Relay_Master_Log_File: mysql-bin.000003
+        Slave_IO_Running: Yes
+        Slave_SQL_Running: Yes
+            Replicate_Do_DB: hello
+        Replicate_Ignore_DB: mysql,test,information_schema
+                Last_Errno: 0
+                Last_Error: 
+            Skip_Counter: 0
+        Exec_Master_Log_Pos: 187
+            Relay_Log_Space: 324
+            Until_Condition: None
+            Until_Log_File: 
+            Until_Log_Pos: 0
+    Seconds_Behind_Master: 0
+
+mysql&gt; use hello;
+
+mysql&gt; <span class="k">select</span> * from <span class="nb">test</span>;
++------+
+| id   |
++------+
+|    1 | 
+|    2 | 
++------+
+2 rows in <span class="nb">set</span> <span class="o">(</span>0.00 sec<span class="o">)</span>
+</pre></div>
+<!--less /var/log/mysqld.log-->
+<p>最后的配置文件</p>
+<p>master1:</p>
+<div class="codehilite"><pre><span class="c"># /etc/my.cnf</span>
+<span class="o">[</span>mysqld<span class="o">]</span>
+
+<span class="c"># as master</span>
+server-id<span class="o">=</span>1    <span class="c">#主机id，整数</span>
+<span class="c">#开启二进制日志，并且名称为 /var/lib/mysql/mysql-bin.***</span>
+log-bin<span class="o">=</span>mysql-bin
+<span class="nb">read</span>-only<span class="o">=</span>0  <span class="c">#主机读写权限，读写都可以</span>
+binlog-do-db<span class="o">=</span>hello   <span class="c">#记录日志的数据库：需要的备份数据，多个写多行</span>
+<span class="c"># binlog-do-db=hello2</span>
+binlog-ignore-db<span class="o">=</span>mysql <span class="c">#不记录日志的数据库：不需要备份的数据库，多个写多行</span>
+binlog-ignore-db<span class="o">=</span><span class="nb">test</span>
+binlog-ignore-db<span class="o">=</span>information_schema
+
+<span class="c"># as slave</span>
+master-host<span class="o">=</span>192.168.100.166  <span class="c"># master</span>
+master-user<span class="o">=</span>backup  <span class="c"># 刚才在 master1 上设置的用户名密码</span>
+master-password<span class="o">=</span>yNZE7fK9*@aMA?*ppF  <span class="c"># password</span>
+master-port<span class="o">=</span>3306   <span class="c"># master1 mysql port</span>
+master-connect-retry<span class="o">=</span>60 <span class="c">#如果从服务器发现主服务器断掉，重新连接的时间差(秒)</span>
+replicate-do-db <span class="o">=</span>hello <span class="c">#只复制某个库，多个写多行</span>
+replicate-ignore-db<span class="o">=</span>mysql <span class="c">#不复制某个库</span>
+replicate-ignore-db<span class="o">=</span><span class="nb">test</span>
+replicate-ignore-db<span class="o">=</span>information_schema
+relay-log<span class="o">=</span>mysqld-relay-bin  <span class="c"># 开启日志中继</span>
+log-slave-updates  <span class="c"># slave将复制事件写进自己的二进制日志</span>
+</pre></div>
+<p>master2:</p>
+<div class="codehilite"><pre><span class="c"># /etc/my.cnf</span>
+<span class="o">[</span>mysqld<span class="o">]</span>
+
+<span class="c"># as slave</span>
+server-id<span class="o">=</span>2
+log-bin<span class="o">=</span>mysql-bin
+master-host<span class="o">=</span>192.168.100.191  <span class="c"># master1</span>
+master-user<span class="o">=</span>backup  <span class="c"># 刚才在 master1 上设置的用户名密码</span>
+master-password<span class="o">=</span>yNZE7fK9*@aMA?*ppF  <span class="c"># password</span>
+master-port<span class="o">=</span>3306   <span class="c"># master1 mysql port</span>
+master-connect-retry<span class="o">=</span>60 <span class="c">#如果从服务器发现主服务器断掉，重新连接的时间差(秒)</span>
+replicate-do-db <span class="o">=</span>hello <span class="c">#只复制某个库，多个写多行</span>
+replicate-ignore-db<span class="o">=</span>mysql <span class="c">#不复制某个库</span>
+replicate-ignore-db<span class="o">=</span><span class="nb">test</span>
+replicate-ignore-db<span class="o">=</span>information_schema
+relay-log<span class="o">=</span>mysqld-relay-bin  <span class="c"># 开启日志中继</span>
+log-slave-updates  <span class="c"># 示slave将复制事件写进自己的二进制日志</span>
+
+<span class="c"># as master</span>
+<span class="c">#开启二进制日志，并且名称为 /var/lib/mysql/mysql-bin.***</span>
+log-bin<span class="o">=</span>mysql-bin
+<span class="nb">read</span>-only<span class="o">=</span>0  <span class="c">#主机读写权限，读写都可以</span>
+binlog-do-db<span class="o">=</span>hello   <span class="c">#记录日志的数据库：需要的备份数据，多个写多行</span>
+<span class="c"># binlog-do-db=hello2</span>
+binlog-ignore-db<span class="o">=</span>mysql <span class="c">#不记录日志的数据库：不需要备份的数据库，多个写多行</span>
+binlog-ignore-db<span class="o">=</span><span class="nb">test</span>
+binlog-ignore-db<span class="o">=</span>information_schema
+</pre></div>
+<h2 id="_2">参考</h2>
+<ul>
+<li><a href="http://www.d5s.cn/archives/95">MYSQL 主从服务器配置 | 无影的博客</a></li>
+<li><a href="http://database.51cto.com/art/200510/8434.htm">Mysql 数据库双机热备的配置 - 51CTO.COM</a></li>
+<li><a href="http://serverfault.com/questions/268627/mysql-master-master-replication-of-all-databases-how">MySQL Master-Master Replication of ALL databases. How? - Server Fault</a></li>
+<li><a href="http://dev.mysql.com/doc/refman/5.1/en/replication.html">MySQL :: MySQL 5.1 Reference Manual :: 16 Replication</a></li>
+<li><a href="file:///D:/Settings/Mozilla/ScrapBook/data/20130522165305/index.html">MySqL的主从复制和读写分离 - ZhouLS的个人空间 - 开源中国社区</a></li>
+<li><a href="http://blog.csdn.net/hguisu/article/details/7325124">高性能Mysql主从架构的复制原理及配置详解 - guisu，程序人生。 - 博客频道 - CSDN.NET</a></li>
+<li><a href="http://mvbridge.blog.sohu.com/172644721.html">MySQL master slave 安装部署及常见问题-桥-搜狐博客</a>
+<!--* [)-->
+<!--https://groups.google.com/forum/#!topic/django-users/0RiRw6jlnAs--></li>
+</ul><p>There are <a href="http://mozillazg.com/2013/06/mysql-master-master.html#disqus_thread">comments</a>.</p>                </article>
+                                    <p class="paginator">
+        Page 1 / 1
+    </p>
+                            </aside><!-- /#featured -->
+                                                </ol><!-- /#posts-list -->
+                        </section><!-- /#content -->
+                    <section id="extras" class="body">
+                        <div class="blogroll">
+                        <h2>blogroll</h2>
+                        <ul>
+                                                    <li><a href="http://docs.notmyidea.org/alexis/pelican/">Pelican</a></li>
+                                                    <li><a href="http://python.org">Python.org</a></li>
+                                                    <li><a href="http://jinja.pocoo.org">Jinja2</a></li>
+                                                </ul>
+                </div><!-- /.blogroll -->
+                                <div class="social">
+                        <h2>social</h2>
+                        <ul>
+                            <li><a href="http://mozillazg.com/feeds/all.atom.xml" type="application/atom+xml" rel="alternate">atom feed</a></li>
+                            
+                                                    <li><a href="http://about.me/mozillazg">About Me</a></li>
+                                                    <li><a href="https://github.com/mozillazg">Fork me on GitHub</a></li>
+                                                </ul>
+                </div><!-- /.social -->
+                </section><!-- /#extras -->
+
+        <footer id="contentinfo" class="body">
+                <address id="about" class="vcard body">
+                Proudly powered by <a href="http://getpelican.com/">Pelican</a>, which takes great advantage of <a href="http://python.org">Python</a>.
+                </address><!-- /#about -->
+
+                <p>The theme is by <a href="http://coding.smashingmagazine.com/2009/08/04/designing-a-html-5-layout-from-scratch/">Smashing Magazine</a>, thanks!</p>
+        </footer><!-- /#contentinfo -->
+
+<script type="text/javascript">
+    var disqus_shortname = 'my-github-blog';
+    (function () {
+        var s = document.createElement('script'); s.async = true;
+        s.type = 'text/javascript';
+        s.src = 'http://' + disqus_shortname + '.disqus.com/count.js';
+        (document.getElementsByTagName('HEAD')[0] || document.getElementsByTagName('BODY')[0]).appendChild(s);
+    }());
+</script>
+</body>
+</html>
