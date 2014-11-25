@@ -1,5 +1,129 @@
 <?xml version="1.0" encoding="utf-8"?>
-<feed xmlns="http://www.w3.org/2005/Atom"><title>Mozillazg's Blog</title><link href="http://mozillazg.com/" rel="alternate"></link><link href="http://mozillazg.com/feeds/python.atom.xml" rel="self"></link><id>http://mozillazg.com/</id><updated>2014-11-20T00:00:00+00:00</updated><entry><title>[python]如何复制一个 class</title><link href="http://mozillazg.com/2014/11/python-copy-a-class.html" rel="alternate"></link><updated>2014-11-20T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2014-11-20:2014/11/python-copy-a-class.html</id><summary type="html">&lt;p&gt;通过下面两种方法可以复制一个 &lt;code&gt;class&lt;/code&gt;:&lt;/p&gt;
+<feed xmlns="http://www.w3.org/2005/Atom"><title>Mozillazg's Blog</title><link href="http://mozillazg.com/" rel="alternate"></link><link href="http://mozillazg.com/feeds/python.atom.xml" rel="self"></link><id>http://mozillazg.com/</id><updated>2014-11-25T00:00:00+00:00</updated><entry><title>[python]通过 alembic 更改外键相关的属性</title><link href="http://mozillazg.com/2014/11/python-alembic-change-foreignkey-attribute.html" rel="alternate"></link><updated>2014-11-25T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2014-11-25:2014/11/python-alembic-change-foreignkey-attribute.html</id><summary type="html">&lt;p&gt;当我们想修改已有的外键字段属性值时， &lt;tt class="docutils literal"&gt;alembic reversion &lt;span class="pre"&gt;--autogenerate&lt;/span&gt;&lt;/tt&gt; 无法检查外键属性修改，
+需要我们手动写相关的操作语句。&lt;/p&gt;
+&lt;p&gt;下面以修改外键的 &lt;tt class="docutils literal"&gt;ondelete&lt;/tt&gt; 和 &lt;tt class="docutils literal"&gt;onupdate&lt;/tt&gt; 属性为例，讲解如何修改外键属性。&lt;/p&gt;
+&lt;p&gt;假设有如下 Model:&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span class="k"&gt;class&lt;/span&gt; &lt;span class="nc"&gt;Parent&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;Base&lt;/span&gt;&lt;span class="p"&gt;):&lt;/span&gt;
+    &lt;span class="n"&gt;__tablename__&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="s"&gt;&amp;#39;parent&amp;#39;&lt;/span&gt;
+    &lt;span class="nb"&gt;id&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;Column&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;Integer&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;primary_key&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="bp"&gt;True&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+    &lt;span class="n"&gt;children&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;relationship&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="s"&gt;&amp;quot;Child&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+
+&lt;span class="k"&gt;class&lt;/span&gt; &lt;span class="nc"&gt;Child&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;Base&lt;/span&gt;&lt;span class="p"&gt;):&lt;/span&gt;
+    &lt;span class="n"&gt;__tablename__&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="s"&gt;&amp;#39;child&amp;#39;&lt;/span&gt;
+    &lt;span class="nb"&gt;id&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;Column&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;Integer&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;primary_key&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="bp"&gt;True&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+    &lt;span class="n"&gt;parent_id&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;Column&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;Integer&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;ForeignKey&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="s"&gt;&amp;#39;parent.id&amp;#39;&lt;/span&gt;&lt;span class="p"&gt;))&lt;/span&gt;
+&lt;/pre&gt;&lt;/div&gt;
+&lt;p&gt;现在想要修改 &lt;tt class="docutils literal"&gt;Child&lt;/tt&gt; 中 &lt;tt class="docutils literal"&gt;parent_id&lt;/tt&gt; 的外键属性:&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span class="n"&gt;parent_id&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;Column&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;Integer&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;ForeignKey&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="s"&gt;&amp;#39;parent.id&amp;#39;&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;onupdate&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="s"&gt;&amp;#39;CASCADE&amp;#39;&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;ondelete&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="s"&gt;&amp;#39;CASCADE&amp;#39;&lt;/span&gt;&lt;span class="p"&gt;))&lt;/span&gt;
+&lt;/pre&gt;&lt;/div&gt;
+&lt;p&gt;首先，需要从数据中查看 `` child`` 的建表语句，找到外键名称:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+mysql&amp;gt;show create table child;
+| child | CREATE TABLE `child` (
+  `id` int(10) NOT NULL AUTO_INCREMENT,
+  `parent_id` int(10) DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  CONSTRAINT `child_ibfk_1` FOREIGN KEY (`parent_id`) REFERENCES `parent` (`id`)
+) ENGINE=InnoDB AUTO_INCREMENT=66 DEFAULT CHARSET=utf8 |
+&lt;/pre&gt;
+&lt;p&gt;&lt;tt class="docutils literal"&gt;child_ibfk_1&lt;/tt&gt; 即为外键名称&lt;/p&gt;
+&lt;p&gt;然后通过 &lt;tt class="docutils literal"&gt;alembic reversion&lt;/tt&gt; 生成一个 version 文件，打开生成的文件编辑内容：&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span class="k"&gt;def&lt;/span&gt; &lt;span class="nf"&gt;upgrade&lt;/span&gt;&lt;span class="p"&gt;():&lt;/span&gt;
+    &lt;span class="c"&gt;### commands auto generated by Alembic - please adjust! ###&lt;/span&gt;
+    &lt;span class="c"&gt;# 删除已有外键         外键名称        表名&lt;/span&gt;
+    &lt;span class="n"&gt;op&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;drop_constraint&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="s"&gt;&amp;quot;child_ibfk_1&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="s"&gt;&amp;quot;child&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;type_&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="s"&gt;&amp;quot;foreignkey&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+    &lt;span class="c"&gt;# 重新添加外键&lt;/span&gt;
+    &lt;span class="n"&gt;op&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;create_foreign_key&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;
+        &lt;span class="s"&gt;&amp;quot;child_ibfk_1&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;    &lt;span class="c"&gt;# 外键名称&lt;/span&gt;
+        &lt;span class="s"&gt;&amp;quot;child&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;           &lt;span class="c"&gt;# 当前表的表名&lt;/span&gt;
+        &lt;span class="s"&gt;&amp;quot;parent&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;          &lt;span class="c"&gt;# 外键指向的目标表的表名&lt;/span&gt;
+        &lt;span class="p"&gt;[&lt;/span&gt;&lt;span class="s"&gt;&amp;quot;parent_id&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;],&lt;/span&gt;     &lt;span class="c"&gt;# 外键列名（字段名）&lt;/span&gt;
+        &lt;span class="p"&gt;[&lt;/span&gt;&lt;span class="s"&gt;&amp;quot;id&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;],&lt;/span&gt;            &lt;span class="c"&gt;# 与目标表的某一列（字段）建立外键关系&lt;/span&gt;
+        &lt;span class="n"&gt;onupdate&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="s"&gt;&amp;quot;CASCADE&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;ondelete&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="s"&gt;&amp;quot;CASCADE&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;  &lt;span class="c"&gt;# 新增的属性&lt;/span&gt;
+    &lt;span class="c"&gt;### end Alembic commands ###&lt;/span&gt;
+
+
+&lt;span class="k"&gt;def&lt;/span&gt; &lt;span class="nf"&gt;downgrade&lt;/span&gt;&lt;span class="p"&gt;():&lt;/span&gt;
+    &lt;span class="c"&gt;### commands auto generated by Alembic - please adjust! ###&lt;/span&gt;
+    &lt;span class="n"&gt;p&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;drop_constraint&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="s"&gt;&amp;quot;child_ibfk_1&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="s"&gt;&amp;quot;child&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;type_&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="s"&gt;&amp;quot;foreignkey&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+    &lt;span class="n"&gt;op&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;create_foreign_key&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;
+        &lt;span class="s"&gt;&amp;quot;child_ibfk_1&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;
+        &lt;span class="s"&gt;&amp;quot;child&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;
+        &lt;span class="s"&gt;&amp;quot;parent&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;
+        &lt;span class="p"&gt;[&lt;/span&gt;&lt;span class="s"&gt;&amp;quot;parent_id&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;],&lt;/span&gt;
+        &lt;span class="p"&gt;[&lt;/span&gt;&lt;span class="s"&gt;&amp;quot;id&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;])&lt;/span&gt;
+    &lt;span class="c"&gt;### end Alembic commands ###&lt;/span&gt;
+&lt;/pre&gt;&lt;/div&gt;
+&lt;p&gt;&lt;a class="reference external" href="http://alembic.readthedocs.org/en/latest/ops.html#alembic.operations.Operations.drop_constraint"&gt;drop_constraint&lt;/a&gt; 和 &lt;a class="reference external" href="http://alembic.readthedocs.org/en/latest/ops.html#alembic.operations.Operations.create_foreign_key"&gt;create_foreign_key&lt;/a&gt; 的基本用法已经在上面的注释中有说明了，
+想要更详细的用法，请阅读相应的官方文档。&lt;/p&gt;
+&lt;div class="section" id="id3"&gt;
+&lt;h2&gt;参考资料&lt;/h2&gt;
+&lt;ul class="simple"&gt;
+&lt;li&gt;&lt;a class="reference external" href="http://alembic.readthedocs.org/en/latest/ops.html#alembic.operations.Operations.create_foreign_key"&gt;create_foreign_key Operation Reference — Alembic 0.7.0 documentation&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="http://alembic.readthedocs.org/en/latest/ops.html#alembic.operations.Operations.drop_constraint"&gt;drop_constraint Operation Reference — Alembic 0.7.0 documentation&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://groups.google.com/forum/?_escaped_fragment_=topic/sqlalchemy-alembic/wHk9ZAtzmcw#!topic/sqlalchemy-alembic/wHk9ZAtzmcw"&gt;Add ondelete='CASCADE' to existing foreignkey - Google グループ&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://github.com/urschrei/CDP/blob/master/db/versions/25b06dd4bab6_add_sign_orphan_deletion_to_cdp.py"&gt;CDP/25b06dd4bab6_add_sign_orphan_deletion_to_cdp.py at master · urschrei/CDP&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://bitbucket.org/zzzeek/alembic/issue/44/"&gt;zzzeek / alembic / issues / #44 - need operation to drop foreign key — Bitbucket&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="http://docs.sqlalchemy.org/en/rel_0_9/orm/session.html#cascades"&gt;Cascades - Using the Session — SQLAlchemy 0.9 Documentation&lt;/a&gt;&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/div&gt;
+</summary><category term="sqlalchemy"></category><category term="alembic"></category></entry><entry><title>[python]通过 alembic 重命名表列名（Model字段名）</title><link href="http://mozillazg.com/2014/11/python-alembic-rename-column-name-field-name.html" rel="alternate"></link><updated>2014-11-25T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2014-11-25:2014/11/python-alembic-rename-column-name-field-name.html</id><summary type="html">&lt;p&gt;为什么要特意讲一下这个，是因为 alembic 无法自动检测是否对字段名进行了重命名操作，需要我们手动添加相关语句。&lt;/p&gt;
+&lt;p&gt;假设有下面这样一个 Model&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span class="k"&gt;class&lt;/span&gt; &lt;span class="nc"&gt;User&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;Base&lt;/span&gt;&lt;span class="p"&gt;):&lt;/span&gt;
+    &lt;span class="n"&gt;__tablename__&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="s"&gt;&amp;#39;user&amp;#39;&lt;/span&gt;
+
+    &lt;span class="nb"&gt;id&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;Column&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;Integer&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;primary_key&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="bp"&gt;True&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+    &lt;span class="n"&gt;name&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;Column&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;String&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="mi"&gt;20&lt;/span&gt;&lt;span class="p"&gt;))&lt;/span&gt;
+&lt;/pre&gt;&lt;/div&gt;
+&lt;p&gt;我们现在想要把 &lt;tt class="docutils literal"&gt;name&lt;/tt&gt; 字段改名为 &lt;tt class="docutils literal"&gt;username&lt;/tt&gt;, 通过 &lt;tt class="docutils literal"&gt;alembic revision &lt;span class="pre"&gt;--autogenerate&lt;/span&gt;&lt;/tt&gt; 无法实现我们的目的:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+INFO  [alembic.migration] Context impl MySQLImpl.
+INFO  [alembic.migration] Will assume non-transactional DDL.
+INFO  [alembic.autogenerate.compare] Detected added column 'user.username'
+INFO  [alembic.autogenerate.compare] Detected removed column 'user.name'
+  Generating /home/xx/alembic/versions/4475103466d3_rename_user_name_to_username.py .
+.. done
+&lt;/pre&gt;
+&lt;p&gt;上面的检测结果明显不是我们想要的，需要手动更改生成的 version 文件:&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span class="kn"&gt;from&lt;/span&gt; &lt;span class="nn"&gt;sqlalchemy.dialects&lt;/span&gt; &lt;span class="kn"&gt;import&lt;/span&gt; &lt;span class="n"&gt;mysql&lt;/span&gt;
+
+&lt;span class="k"&gt;def&lt;/span&gt; &lt;span class="nf"&gt;upgrade&lt;/span&gt;&lt;span class="p"&gt;():&lt;/span&gt;
+    &lt;span class="c"&gt;### commands auto generated by Alembic - please adjust! ###&lt;/span&gt;
+    &lt;span class="c"&gt;# 把 user 表里的 name 列重命名为 username&lt;/span&gt;
+    &lt;span class="n"&gt;op&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;alter_column&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="s"&gt;&amp;#39;user&amp;#39;&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="s"&gt;&amp;#39;name&amp;#39;&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;new_column_name&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="s"&gt;&amp;#39;username&amp;#39;&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;
+                    &lt;span class="n"&gt;existing_type&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="n"&gt;mysql&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;VARCHAR&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;length&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="mi"&gt;20&lt;/span&gt;&lt;span class="p"&gt;))&lt;/span&gt;
+    &lt;span class="c"&gt;### end Alembic commands ###&lt;/span&gt;
+
+
+&lt;span class="k"&gt;def&lt;/span&gt; &lt;span class="nf"&gt;downgrade&lt;/span&gt;&lt;span class="p"&gt;():&lt;/span&gt;
+    &lt;span class="c"&gt;### commands auto generated by Alembic - please adjust! ###&lt;/span&gt;
+    &lt;span class="n"&gt;op&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;alter_column&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="s"&gt;&amp;#39;user&amp;#39;&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="s"&gt;&amp;#39;username&amp;#39;&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;new_column_name&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="s"&gt;&amp;#39;name&amp;#39;&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;
+                    &lt;span class="n"&gt;existing_type&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="n"&gt;mysql&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;VARCHAR&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;length&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="mi"&gt;20&lt;/span&gt;&lt;span class="p"&gt;))&lt;/span&gt;
+    &lt;span class="c"&gt;### end Alembic commands ###&lt;/span&gt;
+&lt;/pre&gt;&lt;/div&gt;
+&lt;p&gt;&lt;tt class="docutils literal"&gt;alemblic upgrade&lt;/tt&gt; 命令结果:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+$ alembic upgrade 549c504fe1b5:4475103466d3 --sql
+INFO  [alembic.migration] Context impl MySQLImpl.
+INFO  [alembic.migration] Generating static SQL
+INFO  [alembic.migration] Will assume non-transactional DDL.
+INFO  [alembic.migration] Running upgrade 549c504fe1b5 -&amp;gt; 4475103466d3, rename User.name to username
+-- Running upgrade 549c504fe1b5 -&amp;gt; 4475103466d3
+
+ALTER TABLE user CHANGE name username VARCHAR(20) NULL;
+
+UPDATE alembic_version SET version_num='4475103466d3';
+&lt;/pre&gt;
+&lt;p&gt;可以看到生成的 sql 语句就是我们想要的结果。&lt;/p&gt;
+&lt;p&gt;通过 &lt;tt class="docutils literal"&gt;alter_column&lt;/tt&gt; 方法进行重命名的基本用法就是 &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;alter_column('表名',&lt;/span&gt; '先有的列名', &lt;span class="pre"&gt;new_column_name='重命名后的列名',&lt;/span&gt; existring_type=字段类型)&lt;/tt&gt;&lt;/p&gt;
+&lt;p&gt;通过 &lt;tt class="docutils literal"&gt;alter_column&lt;/tt&gt; 方法可以更多的 &lt;tt class="docutils literal"&gt;ALTER TABLE&lt;/tt&gt; 操作，详见 &lt;a class="reference external" href="http://alembic.readthedocs.org/en/latest/ops.html#alembic.operations.Operations.alter_column"&gt;文档&lt;/a&gt;&lt;/p&gt;
+&lt;div class="section" id="id2"&gt;
+&lt;h2&gt;参考&lt;/h2&gt;
+&lt;ul class="simple"&gt;
+&lt;li&gt;&lt;a class="reference external" href="http://alembic.readthedocs.org/en/latest/ops.html#alembic.operations.Operations.alter_column"&gt;Operation Reference — Alembic 0.7.0 documentation&lt;/a&gt;&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/div&gt;
+</summary><category term="alembic"></category><category term="sqlalchemy"></category></entry><entry><title>[python]如何复制一个 class</title><link href="http://mozillazg.com/2014/11/python-copy-a-class.html" rel="alternate"></link><updated>2014-11-20T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2014-11-20:2014/11/python-copy-a-class.html</id><summary type="html">&lt;p&gt;通过下面两种方法可以复制一个 &lt;code&gt;class&lt;/code&gt;:&lt;/p&gt;
 &lt;ul&gt;
 &lt;li&gt;&lt;code&gt;class B(A): pass&lt;/code&gt;&lt;/li&gt;
 &lt;li&gt;&lt;code&gt;B = type("B", (A,), {})&lt;/code&gt;&lt;/li&gt;
