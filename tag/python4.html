@@ -73,128 +73,211 @@ Mozillazg's Blog            </a>
     <div class="row">
         <div class="col-sm-9">
             <article>
-                <h2><a href="http://mozillazg.com/2013/11/python-socket-connect-set-timeout.html">[python]指定 Socket connect 方法的超时时间</a></h2>
+                <h2><a href="http://mozillazg.com/2013/09/django-group-by-day.html">[django]按天分组统计数据</a></h2>
                     <div class="well well-sm">
 <footer class="post-info">
     <span class="label label-default">Date</span>
     <span class="published">
-        <i class="fa fa-calendar"></i><time datetime="2013-11-18T00:00:00+00:00"> Mon 18 November 2013</time>
+        <i class="fa fa-calendar"></i><time datetime="2013-09-29T00:00:00+00:00"> Sun 29 September 2013</time>
     </span>
 
 
 
         <span class="label label-default">Category</span>
-        <a href="http://mozillazg.com/category/python.html">python</a>
+        <a href="http://mozillazg.com/category/django.html">django</a>
 
 
 <span class="label label-default">Tags</span>
-	<a href="http://mozillazg.com/tag/python.html">python</a>
+	<a href="http://mozillazg.com/tag/django.html">django</a>
         /
-	<a href="http://mozillazg.com/tag/socket.html">socket</a>
+	<a href="http://mozillazg.com/tag/python.html">python</a>
     
 </footer><!-- /.post-info -->                    </div>
-                <div class="summary"><p>通过设置 <code>socket.settimeout</code> 来实现超时功能：</p>
-<div class="codehilite"><pre><span class="kn">import</span> <span class="nn">select</span>
-<span class="kn">import</span> <span class="nn">socket</span>
+                <div class="summary"><p>假设有以下 model:</p>
+<div class="codehilite"><pre><span class="k">class</span> <span class="nc">Foobar</span><span class="p">(</span><span class="n">models</span><span class="o">.</span><span class="n">Model</span><span class="p">):</span>
+    <span class="n">name</span> <span class="o">=</span> <span class="n">models</span><span class="o">.</span><span class="n">CharField</span><span class="p">(</span><span class="n">max_length</span><span class="o">=</span><span class="mi">100</span><span class="p">)</span>
+    <span class="n">date_created</span> <span class="o">=</span> <span class="n">models</span><span class="o">.</span><span class="n">DateField</span><span class="p">(</span><span class="n">auto_now_add</span><span class="o">=</span><span class="bp">True</span><span class="p">)</span>
 
-<span class="n">HOST</span> <span class="o">=</span> <span class="s">&#39;127.0.0.1&#39;</span>
-<span class="n">PORT</span> <span class="o">=</span> <span class="mi">8000</span>
-<span class="n">timeout</span> <span class="o">=</span> <span class="mi">60</span> <span class="o">*</span> <span class="mi">1</span>   <span class="c"># 1 分钟</span>
+    <span class="k">def</span> <span class="nf">__unicode__</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">name</span>
+</pre></div>
 
-<span class="n">s</span> <span class="o">=</span> <span class="n">socket</span><span class="o">.</span><span class="n">socket</span><span class="p">(</span><span class="n">socket</span><span class="o">.</span><span class="n">AF_INET</span><span class="p">,</span> <span class="n">socket</span><span class="o">.</span><span class="n">SOCK_STREAM</span><span class="p">)</span>
-<span class="c"># 设置连接超时</span>
-<span class="n">s</span><span class="o">.</span><span class="n">settimeout</span><span class="p">(</span><span class="mi">10</span><span class="p">)</span>
-<span class="n">s</span><span class="o">.</span><span class="n">connect</span><span class="p">((</span><span class="n">HOST</span><span class="p">,</span> <span class="n">PORT</span><span class="p">))</span>
-<span class="c"># 恢复默认超时设置</span>
-<span class="n">s</span><span class="o">.</span><span class="n">settimeout</span><span class="p">(</span><span class="bp">None</span><span class="p">)</span>
-<span class="n">s</span><span class="o">.</span><span class="n">connect</span><span class="p">((</span><span class="n">HOST</span><span class="p">,</span> <span class="n">PORT</span><span class="p">))</span>
-<span class="n">s</span><span class="o">.</span><span class="n">sendall</span><span class="p">(</span><span class="s">&#39;msg&#39;</span><span class="p">)</span>
+
+<p>按天统计数量的代码如下：</p>
+<div class="codehilite"><pre><span class="kn">from</span> <span class="nn">django.db</span> <span class="kn">import</span> <span class="n">connection</span>
+<span class="kn">from</span> <span class="nn">django.db.models</span> <span class="kn">import</span> <span class="n">Count</span>
+
+<span class="n">select</span> <span class="o">=</span> <span class="p">{</span><span class="s">&#39;day&#39;</span><span class="p">:</span> <span class="n">connection</span><span class="o">.</span><span class="n">ops</span><span class="o">.</span><span class="n">date_trunc_sql</span><span class="p">(</span><span class="s">&#39;day&#39;</span><span class="p">,</span> <span class="s">&#39;date_created&#39;</span><span class="p">)}</span>
+<span class="n">Foobar</span><span class="o">.</span><span class="n">objects</span><span class="o">.</span><span class="n">extra</span><span class="p">(</span><span class="n">select</span><span class="o">=</span><span class="n">select</span><span class="p">)</span><span class="o">.</span><span class="n">values</span><span class="p">(</span><span class="s">&#39;day&#39;</span><span class="p">)</span><span class="o">.</span><span class="n">annotate</span><span class="p">(</span><span class="n">number ...</span></pre></div>
+                    <a class="btn btn-default btn-xs" href="http://mozillazg.com/2013/09/django-group-by-day.html">more ...</a>
+                </div>
+            </article>
+            <hr/>
+            <article>
+                <h2><a href="http://mozillazg.com/2013/09/django-group-by-hour.html">[django]按小时分组统计数据</a></h2>
+                    <div class="well well-sm">
+<footer class="post-info">
+    <span class="label label-default">Date</span>
+    <span class="published">
+        <i class="fa fa-calendar"></i><time datetime="2013-09-29T00:00:00+00:00"> Sun 29 September 2013</time>
+    </span>
+
+
+
+        <span class="label label-default">Category</span>
+        <a href="http://mozillazg.com/category/django.html">django</a>
+
+
+<span class="label label-default">Tags</span>
+	<a href="http://mozillazg.com/tag/django.html">django</a>
+        /
+	<a href="http://mozillazg.com/tag/python.html">python</a>
+    
+</footer><!-- /.post-info -->                    </div>
+                <div class="summary"><p>假设有以下 model:</p>
+<div class="codehilite"><pre><span class="k">class</span> <span class="nc">Foobar</span><span class="p">(</span><span class="n">models</span><span class="o">.</span><span class="n">Model</span><span class="p">):</span>
+    <span class="n">name</span> <span class="o">=</span> <span class="n">models</span><span class="o">.</span><span class="n">CharField</span><span class="p">(</span><span class="n">max_length</span><span class="o">=</span><span class="mi">100</span><span class="p">)</span>
+    <span class="n">date_created</span> <span class="o">=</span> <span class="n">models</span><span class="o">.</span><span class="n">DateField</span><span class="p">(</span><span class="n">auto_now_add</span><span class="o">=</span><span class="bp">True</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">__unicode__</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">name</span>
+</pre></div>
+
+
+<p>按小时统计数量的代码如下：</p>
+<div class="codehilite"><pre><span class="kn">from</span> <span class="nn">collections</span> <span class="kn">import</span> <span class="n">defaultdict</span>
+<span class="kn">from</span> <span class="nn">django.db</span> <span class="kn">import</span> <span class="n">connection</span>
+<span class="kn">from</span> <span class="nn">django.db.models</span> <span class="kn">import</span> <span class="n">Count</span>
+
+<span class="n">select</span> <span class="o">=</span> <span class="p">{</span><span class="s">&#39;hour&#39;</span><span class="p">:</span> <span class="n">connection</span><span class="o">.</span><span class="n">ops</span><span class="o">.</span><span class="n">date_trunc_sql</span><span class="p">(</span><span class="s">&#39;hour&#39;</span><span class="p">,</span> <span class="s">&#39;date_created&#39;</span><span class="p">)}</span>
+<span class="n">result</span> <span class="o">=</span> <span class="n">Foobar</span><span class="o">.</span><span class="n">objects</span><span class="o">.</span><span class="n">extra</span><span class="p">(</span><span class="n">select ...</span></pre></div>
+                    <a class="btn btn-default btn-xs" href="http://mozillazg.com/2013/09/django-group-by-hour.html">more ...</a>
+                </div>
+            </article>
+            <hr/>
+            <article>
+                <h2><a href="http://mozillazg.com/2013/09/django-group-by-month.html">[django]按月分组统计数据</a></h2>
+                    <div class="well well-sm">
+<footer class="post-info">
+    <span class="label label-default">Date</span>
+    <span class="published">
+        <i class="fa fa-calendar"></i><time datetime="2013-09-29T00:00:00+00:00"> Sun 29 September 2013</time>
+    </span>
+
+
+
+        <span class="label label-default">Category</span>
+        <a href="http://mozillazg.com/category/django.html">django</a>
+
+
+<span class="label label-default">Tags</span>
+	<a href="http://mozillazg.com/tag/django.html">django</a>
+        /
+	<a href="http://mozillazg.com/tag/python.html">python</a>
+    
+</footer><!-- /.post-info -->                    </div>
+                <div class="summary"><p>假设有以下 model:</p>
+<div class="codehilite"><pre><span class="k">class</span> <span class="nc">Foobar</span><span class="p">(</span><span class="n">models</span><span class="o">.</span><span class="n">Model</span><span class="p">):</span>
+    <span class="n">name</span> <span class="o">=</span> <span class="n">models</span><span class="o">.</span><span class="n">CharField</span><span class="p">(</span><span class="n">max_length</span><span class="o">=</span><span class="mi">100</span><span class="p">)</span>
+    <span class="n">date_created</span> <span class="o">=</span> <span class="n">models</span><span class="o">.</span><span class="n">DateField</span><span class="p">(</span><span class="n">auto_now_add</span><span class="o">=</span><span class="bp">True</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">__unicode__</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">name</span>
+</pre></div>
+
+
+<p>按月统计数量的代码如下：</p>
+<div class="codehilite"><pre><span class="kn">from</span> <span class="nn">django.db</span> <span class="kn">import</span> <span class="n">connection</span>
+<span class="kn">from</span> <span class="nn">django.db.models</span> <span class="kn">import</span> <span class="n">Count</span>
+
+<span class="n">select</span> <span class="o">=</span> <span class="p">{</span><span class="s">&#39;month&#39;</span><span class="p">:</span> <span class="n">connection</span><span class="o">.</span><span class="n">ops</span><span class="o">.</span><span class="n">date_trunc_sql</span><span class="p">(</span><span class="s">&#39;month&#39;</span><span class="p">,</span> <span class="s">&#39;date_created&#39;</span><span class="p">)}</span>
+<span class="n">Foobar</span><span class="o">.</span><span class="n">objects</span><span class="o">.</span><span class="n">extra</span><span class="p">(</span><span class="n">select</span><span class="o">=</span><span class="n">select</span><span class="p">)</span><span class="o">.</span><span class="n">values</span><span class="p">(</span><span class="s">&#39;month&#39;</span><span class="p">)</span><span class="o">.</span><span class="n">annotate</span><span class="p">(</span><span class="n">number ...</span></pre></div>
+                    <a class="btn btn-default btn-xs" href="http://mozillazg.com/2013/09/django-group-by-month.html">more ...</a>
+                </div>
+            </article>
+            <hr/>
+            <article>
+                <h2><a href="http://mozillazg.com/2013/09/django-render_to_response-and-set_cookie.html">[django]同时使用 render_to_response 和 set_cookie</a></h2>
+                    <div class="well well-sm">
+<footer class="post-info">
+    <span class="label label-default">Date</span>
+    <span class="published">
+        <i class="fa fa-calendar"></i><time datetime="2013-09-01T00:00:00+00:00"> Sun 01 September 2013</time>
+    </span>
+
+
+
+        <span class="label label-default">Category</span>
+        <a href="http://mozillazg.com/category/django.html">django</a>
+
+
+<span class="label label-default">Tags</span>
+	<a href="http://mozillazg.com/tag/django.html">django</a>
+        /
+	<a href="http://mozillazg.com/tag/python.html">python</a>
+    
+</footer><!-- /.post-info -->                    </div>
+                <div class="summary"><p>render_to_response 返回的其实也是一个 response 对象，直接使用这个 response 对象即可:</p>
+<div class="codehilite"><pre><span class="k">def</span> <span class="nf">foobar</span><span class="p">(</span><span class="n">request</span><span class="p">):</span>
+    <span class="c">#...</span>
+    <span class="n">response</span> <span class="o">=</span> <span class="n">render_to_response</span><span class="p">(</span><span class="n">template_name</span><span class="p">,</span> <span class="n">context</span><span class="p">)</span>
+    <span class="n">response</span><span class="o">.</span><span class="n">set_cookie</span><span class="p">(</span><span class="s">&#39;foo&#39;</span><span class="p">,</span> <span class="s">&#39;bar&#39;</span><span class="p">,</span> <span class="mi">60</span> <span class="o">*</span> <span class="mi">60</span> <span class="o">*</span> <span class="mi">24</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">response</span>
 </pre></div>
 
 
 <h2 id="_1">参考</h2>
 <ul>
-<li><a href="http://stackoverflow.com/questions/3432102/python-socket-connection-timeout">Python socket connection ...</a></li></ul>
-                    <a class="btn btn-default btn-xs" href="http://mozillazg.com/2013/11/python-socket-connect-set-timeout.html">more ...</a>
+<li><a href="http://stackoverflow.com/questions/4981601/django-use-render-to-response-and-set-cookie">Django: use render_to_response and set cookie</a></li>
+</ul>
+                    <a class="btn btn-default btn-xs" href="http://mozillazg.com/2013/09/django-render_to_response-and-set_cookie.html">more ...</a>
                 </div>
             </article>
             <hr/>
             <article>
-                <h2><a href="http://mozillazg.com/2013/11/python-socket-recv-set-timeout.html">[python]指定 Socket recv 方法的超时时间</a></h2>
+                <h2><a href="http://mozillazg.com/2013/08/django-attributeerror-this-querydict-instance-is-immutable.html">[django]更改 request.GET 字典的键值时出现 "AttributeError: This QueryDict instance is immutable" 错误</a></h2>
                     <div class="well well-sm">
 <footer class="post-info">
     <span class="label label-default">Date</span>
     <span class="published">
-        <i class="fa fa-calendar"></i><time datetime="2013-11-18T00:00:00+00:00"> Mon 18 November 2013</time>
+        <i class="fa fa-calendar"></i><time datetime="2013-08-31T00:00:00+00:00"> Sat 31 August 2013</time>
     </span>
 
 
 
         <span class="label label-default">Category</span>
-        <a href="http://mozillazg.com/category/python.html">python</a>
+        <a href="http://mozillazg.com/category/django.html">django</a>
 
 
 <span class="label label-default">Tags</span>
-	<a href="http://mozillazg.com/tag/python.html">python</a>
+	<a href="http://mozillazg.com/tag/django.html">django</a>
         /
-	<a href="http://mozillazg.com/tag/socket.html">socket</a>
+	<a href="http://mozillazg.com/tag/querydict.html">querydict</a>
+        /
+	<a href="http://mozillazg.com/tag/python.html">python</a>
     
 </footer><!-- /.post-info -->                    </div>
-                <div class="summary"><p>使用 <code>select</code> 来变相实现超时功能：</p>
-<div class="codehilite"><pre><span class="kn">import</span> <span class="nn">select</span>
-<span class="kn">import</span> <span class="nn">socket</span>
-
-<span class="n">HOST</span> <span class="o">=</span> <span class="s">&#39;127.0.0.1&#39;</span>
-<span class="n">PORT</span> <span class="o">=</span> <span class="mi">8000</span>
-<span class="n">timeout</span> <span class="o">=</span> <span class="mi">60</span> <span class="o">*</span> <span class="mi">1</span>   <span class="c"># 1 分钟</span>
-
-<span class="n">s</span> <span class="o">=</span> <span class="n">socket</span><span class="o">.</span><span class="n">socket</span><span class="p">(</span><span class="n">socket</span><span class="o">.</span><span class="n">AF_INET</span><span class="p">,</span> <span class="n">socket</span><span class="o">.</span><span class="n">SOCK_STREAM</span><span class="p">)</span>
-<span class="n">s</span><span class="o">.</span><span class="n">connect</span><span class="p">((</span><span class="n">HOST</span><span class="p">,</span> <span class="n">PORT</span><span class="p">))</span>
-<span class="n">s</span><span class="o">.</span><span class="n">sendall</span><span class="p">(</span><span class="s">&#39;msg&#39;</span><span class="p">)</span>
-<span class="c"># 设置 recv 超时时间</span>
-<span class="n">s</span><span class="o">.</span><span class="n">setblocking</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span>
-<span class="n">ready</span> <span class="o">=</span> <span class="n">select</span><span class="o">.</span><span class="n">select</span><span class="p">([</span><span class="n">s</span><span class="p">],</span> <span class="p">[],</span> <span class="p">[],</span> <span class="n">timeout</span><span class="p">)</span>
-<span class="k">if</span> <span class="n">ready</span><span class="p">[</span><span class="mi">0</span><span class="p">]:</span>
-    <span class="c"># 接收结果</span>
-    <span class="n">data</span> <span class="o">=</span> <span class="n">s ...</span></pre></div>
-                    <a class="btn btn-default btn-xs" href="http://mozillazg.com/2013/11/python-socket-recv-set-timeout.html">more ...</a>
-                </div>
-            </article>
-            <hr/>
-            <article>
-                <h2><a href="http://mozillazg.com/2013/11/python-utf8-bom-MissingSectionHeaderError.html">[python] 修复读取 utf-8 BOM 编码的配置文件时出现的 ConfigParser.MissingSectionHeaderError: File contains no section headers 错误</a></h2>
-                    <div class="well well-sm">
-<footer class="post-info">
-    <span class="label label-default">Date</span>
-    <span class="published">
-        <i class="fa fa-calendar"></i><time datetime="2013-11-10T00:00:00+00:00"> Sun 10 November 2013</time>
-    </span>
-
-
-
-        <span class="label label-default">Category</span>
-        <a href="http://mozillazg.com/category/python.html">python</a>
-
-
-<span class="label label-default">Tags</span>
-	<a href="http://mozillazg.com/tag/python.html">python</a>
-        /
-	<a href="http://mozillazg.com/tag/unicode.html">unicode</a>
-    
-</footer><!-- /.post-info -->                    </div>
-                <div class="summary"><p>当使用 ConfigParser 读取 utf-8 BOM 编码的配置文件时,会出现如下类似错误：</p>
-<div class="highlight"><pre><span class="n">ConfigParser</span><span class="o">.</span><span class="n">MissingSectionHeaderError</span><span class="p">:</span> <span class="n">File</span> <span class="n">contains</span> <span class="n">no</span> <span class="n">section</span> <span class="n">headers</span><span class="o">.</span>
-<span class="n">File</span><span class="p">:</span> <span class="n">settings</span><span class="o">.</span><span class="n">ini</span><span class="p">,</span> <span class="n">line</span><span class="p">:</span> <span class="mi">1</span>
-<span class="s">&#39;</span><span class="se">\xef\xbb\xbf</span><span class="s">[General]</span><span class="se">\n</span><span class="s">&#39;</span>
+                <div class="summary"><p>当修改 request.GET/request.POST 时，会出现: "AttributeError: This QueryDict instance is immutable":</p>
+<div class="codehilite"><pre><span class="k">def</span> <span class="nf">foobar</span><span class="p">(</span><span class="n">request</span><span class="p">):</span>
+    <span class="c">#...</span>
+    <span class="n">request</span><span class="o">.</span><span class="n">GET</span><span class="p">[</span><span class="s">&#39;foo&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">bar</span>  <span class="c"># AttributeError: This QueryDict instance is immutable</span>
+    <span class="c">#...</span>
 </pre></div>
-<p>解决办法就是先将文件内容读出来，然后转码，然后再读取转码后的配置信息：</p>
-<div class="highlight"><pre><span class="kn">import</span> <span class="nn">ConfigParser</span>
-<span class="kn">from</span> <span class="nn">StringIO</span> <span class="kn">import</span> <span class="n">StringIO</span>
 
-<span class="n">conf</span> <span class="o">=</span> <span class="n">ConfigParser</span><span class="o">.</span><span class="n">RawConfigParser</span><span class="p">()</span>
-<span class="k">with</span> <span class="nb">open</span><span class="p">(</span><span class="s">&#39;settings.ini&#39;</span><span class="p">,</span> <span class="s">&#39;rb&#39;</span><span class="p">)</span> <span class="k">as</span> <span class="n">f</span><span class="p">:</span>
-    <span class="n">content</span> <span class="o">=</span> <span class="n">f</span><span class="o">.</span><span class="n">read</span><span class="p">()</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span><span class="s">&#39;utf-8-sig&#39;</span><span class="p">)</span><span class="o">.</span><span class="n">encode</span><span class="p">(</span><span class="s">&#39;utf8 ...</span></pre></div>
-                    <a class="btn btn-default btn-xs" href="http://mozillazg.com/2013/11/python-utf8-bom-MissingSectionHeaderError.html">more ...</a>
+
+<p>因为默认的 QueryDict 是<strong>不可修改</strong>的。解决办法就是复制一份副本，对副本进行修改：</p>
+<div class="codehilite"><pre><span class="k">def</span> <span class="nf">foobar</span><span class="p">(</span><span class="n">request</span><span class="p">):</span>
+    <span class="c">#...</span>
+    <span class="n">request</span><span class="o">.</span><span class="n">GET</span> <span class="o">=</span> <span class="n">request</span><span class="o">.</span><span class="n">GET</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>  <span class="c"># 添加这一句</span>
+    <span class="n">request</span><span class="o">.</span><span class="n">GET</span><span class="p">[</span><span class="s">&#39;foo&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">bar</span>
+    <span class="c">#...</span>
+</pre></div>
+
+
+<h2 id="_1">参考</h2>
+<ul>
+<li><a href="http://www.djangofoo.com/67/changing-request-post-values-querydict-immutable">Changing request.POST ...</a></li></ul>
+                    <a class="btn btn-default btn-xs" href="http://mozillazg.com/2013/08/django-attributeerror-this-querydict-instance-is-immutable.html">more ...</a>
                 </div>
             </article>
             <hr/>
@@ -228,25 +311,10 @@ Mozillazg's Blog            </a>
                             href="http://mozillazg.com/tag/python12.html">12</a></li>
                     <li class=""><a
                             href="http://mozillazg.com/tag/python13.html">13</a></li>
-                    <li class=""><a
-                            href="http://mozillazg.com/tag/python14.html">14</a></li>
-                    <li class=""><a
-                            href="http://mozillazg.com/tag/python15.html">15</a></li>
-                    <li class=""><a
-                            href="http://mozillazg.com/tag/python16.html">16</a></li>
-                    <li class=""><a
-                            href="http://mozillazg.com/tag/python17.html">17</a></li>
-                    <li class=""><a
-                            href="http://mozillazg.com/tag/python18.html">18</a></li>
-                    <li class=""><a
-                            href="http://mozillazg.com/tag/python19.html">19</a></li>
-                    <li class=""><a
-                            href="http://mozillazg.com/tag/python20.html">20</a></li>
-                    <li class=""><a
-                            href="http://mozillazg.com/tag/python21.html">21</a></li>
                 <li class="next"><a
                         href="http://mozillazg.com/tag/python5.html">&raquo;</a></li>
         </ul>
+
         </div>
         <div class="col-sm-3" id="sidebar">
             <aside>

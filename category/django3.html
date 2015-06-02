@@ -75,12 +75,12 @@ Mozillazg's Blog            </a>
     <div class="row">
         <div class="col-sm-9">
             <article>
-                <h2><a href="http://mozillazg.com/2013/09/django-group-by-day.html">[django]按天分组统计数据</a></h2>
+                <h2><a href="http://mozillazg.com/2013/08/django-attributeerror-this-querydict-instance-is-immutable.html">[django]更改 request.GET 字典的键值时出现 "AttributeError: This QueryDict instance is immutable" 错误</a></h2>
                     <div class="well well-sm">
 <footer class="post-info">
     <span class="label label-default">Date</span>
     <span class="published">
-        <i class="fa fa-calendar"></i><time datetime="2013-09-29T00:00:00+00:00"> Sun 29 September 2013</time>
+        <i class="fa fa-calendar"></i><time datetime="2013-08-31T00:00:00+00:00"> Sat 31 August 2013</time>
     </span>
 
 
@@ -92,36 +92,42 @@ Mozillazg's Blog            </a>
 <span class="label label-default">Tags</span>
 	<a href="http://mozillazg.com/tag/django.html">django</a>
         /
+	<a href="http://mozillazg.com/tag/querydict.html">querydict</a>
+        /
 	<a href="http://mozillazg.com/tag/python.html">python</a>
     
 </footer><!-- /.post-info -->                    </div>
-                <div class="summary"><p>假设有以下 model:</p>
-<div class="codehilite"><pre><span class="k">class</span> <span class="nc">Foobar</span><span class="p">(</span><span class="n">models</span><span class="o">.</span><span class="n">Model</span><span class="p">):</span>
-    <span class="n">name</span> <span class="o">=</span> <span class="n">models</span><span class="o">.</span><span class="n">CharField</span><span class="p">(</span><span class="n">max_length</span><span class="o">=</span><span class="mi">100</span><span class="p">)</span>
-    <span class="n">date_created</span> <span class="o">=</span> <span class="n">models</span><span class="o">.</span><span class="n">DateField</span><span class="p">(</span><span class="n">auto_now_add</span><span class="o">=</span><span class="bp">True</span><span class="p">)</span>
-
-    <span class="k">def</span> <span class="nf">__unicode__</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
-        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">name</span>
+                <div class="summary"><p>当修改 request.GET/request.POST 时，会出现: "AttributeError: This QueryDict instance is immutable":</p>
+<div class="codehilite"><pre><span class="k">def</span> <span class="nf">foobar</span><span class="p">(</span><span class="n">request</span><span class="p">):</span>
+    <span class="c">#...</span>
+    <span class="n">request</span><span class="o">.</span><span class="n">GET</span><span class="p">[</span><span class="s">&#39;foo&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">bar</span>  <span class="c"># AttributeError: This QueryDict instance is immutable</span>
+    <span class="c">#...</span>
 </pre></div>
 
 
-<p>按天统计数量的代码如下：</p>
-<div class="codehilite"><pre><span class="kn">from</span> <span class="nn">django.db</span> <span class="kn">import</span> <span class="n">connection</span>
-<span class="kn">from</span> <span class="nn">django.db.models</span> <span class="kn">import</span> <span class="n">Count</span>
+<p>因为默认的 QueryDict 是<strong>不可修改</strong>的。解决办法就是复制一份副本，对副本进行修改：</p>
+<div class="codehilite"><pre><span class="k">def</span> <span class="nf">foobar</span><span class="p">(</span><span class="n">request</span><span class="p">):</span>
+    <span class="c">#...</span>
+    <span class="n">request</span><span class="o">.</span><span class="n">GET</span> <span class="o">=</span> <span class="n">request</span><span class="o">.</span><span class="n">GET</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>  <span class="c"># 添加这一句</span>
+    <span class="n">request</span><span class="o">.</span><span class="n">GET</span><span class="p">[</span><span class="s">&#39;foo&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">bar</span>
+    <span class="c">#...</span>
+</pre></div>
 
-<span class="n">select</span> <span class="o">=</span> <span class="p">{</span><span class="s">&#39;day&#39;</span><span class="p">:</span> <span class="n">connection</span><span class="o">.</span><span class="n">ops</span><span class="o">.</span><span class="n">date_trunc_sql</span><span class="p">(</span><span class="s">&#39;day&#39;</span><span class="p">,</span> <span class="s">&#39;date_created&#39;</span><span class="p">)}</span>
-<span class="n">Foobar</span><span class="o">.</span><span class="n">objects</span><span class="o">.</span><span class="n">extra</span><span class="p">(</span><span class="n">select</span><span class="o">=</span><span class="n">select</span><span class="p">)</span><span class="o">.</span><span class="n">values</span><span class="p">(</span><span class="s">&#39;day&#39;</span><span class="p">)</span><span class="o">.</span><span class="n">annotate</span><span class="p">(</span><span class="n">number ...</span></pre></div>
-                    <a class="btn btn-default btn-xs" href="http://mozillazg.com/2013/09/django-group-by-day.html">more ...</a>
+
+<h2 id="_1">参考</h2>
+<ul>
+<li><a href="http://www.djangofoo.com/67/changing-request-post-values-querydict-immutable">Changing request.POST ...</a></li></ul>
+                    <a class="btn btn-default btn-xs" href="http://mozillazg.com/2013/08/django-attributeerror-this-querydict-instance-is-immutable.html">more ...</a>
                 </div>
             </article>
             <hr/>
             <article>
-                <h2><a href="http://mozillazg.com/2013/09/django-group-by-hour.html">[django]按小时分组统计数据</a></h2>
+                <h2><a href="http://mozillazg.com/2013/07/django-memcachedkeycharactererror.html">[django]修复 MemcachedKeyCharacterError</a></h2>
                     <div class="well well-sm">
 <footer class="post-info">
     <span class="label label-default">Date</span>
     <span class="published">
-        <i class="fa fa-calendar"></i><time datetime="2013-09-29T00:00:00+00:00"> Sun 29 September 2013</time>
+        <i class="fa fa-calendar"></i><time datetime="2013-07-09T00:00:00+00:00"> Tue 09 July 2013</time>
     </span>
 
 
@@ -133,37 +139,33 @@ Mozillazg's Blog            </a>
 <span class="label label-default">Tags</span>
 	<a href="http://mozillazg.com/tag/django.html">django</a>
         /
-	<a href="http://mozillazg.com/tag/python.html">python</a>
+	<a href="http://mozillazg.com/tag/memcached.html">memcached</a>
     
 </footer><!-- /.post-info -->                    </div>
-                <div class="summary"><p>假设有以下 model:</p>
-<div class="codehilite"><pre><span class="k">class</span> <span class="nc">Foobar</span><span class="p">(</span><span class="n">models</span><span class="o">.</span><span class="n">Model</span><span class="p">):</span>
-    <span class="n">name</span> <span class="o">=</span> <span class="n">models</span><span class="o">.</span><span class="n">CharField</span><span class="p">(</span><span class="n">max_length</span><span class="o">=</span><span class="mi">100</span><span class="p">)</span>
-    <span class="n">date_created</span> <span class="o">=</span> <span class="n">models</span><span class="o">.</span><span class="n">DateField</span><span class="p">(</span><span class="n">auto_now_add</span><span class="o">=</span><span class="bp">True</span><span class="p">)</span>
-
-    <span class="k">def</span> <span class="nf">__unicode__</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
-        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">name</span>
-</pre></div>
-
-
-<p>按小时统计数量的代码如下：</p>
-<div class="codehilite"><pre><span class="kn">from</span> <span class="nn">collections</span> <span class="kn">import</span> <span class="n">defaultdict</span>
-<span class="kn">from</span> <span class="nn">django.db</span> <span class="kn">import</span> <span class="n">connection</span>
-<span class="kn">from</span> <span class="nn">django.db.models</span> <span class="kn">import</span> <span class="n">Count</span>
-
-<span class="n">select</span> <span class="o">=</span> <span class="p">{</span><span class="s">&#39;hour&#39;</span><span class="p">:</span> <span class="n">connection</span><span class="o">.</span><span class="n">ops</span><span class="o">.</span><span class="n">date_trunc_sql</span><span class="p">(</span><span class="s">&#39;hour&#39;</span><span class="p">,</span> <span class="s">&#39;date_created&#39;</span><span class="p">)}</span>
-<span class="n">result</span> <span class="o">=</span> <span class="n">Foobar</span><span class="o">.</span><span class="n">objects</span><span class="o">.</span><span class="n">extra</span><span class="p">(</span><span class="n">select ...</span></pre></div>
-                    <a class="btn btn-default btn-xs" href="http://mozillazg.com/2013/09/django-group-by-hour.html">more ...</a>
+                <div class="summary"><h2 id="_1">错误详情</h2>
+<blockquote>
+<p>MemcachedKeyCharacterError at /</p>
+<p>Control characters not allowed
+</p>
+</blockquote>
+<p>出现这个错误是因为 key 值不合法：长度大于 250、包含空格或控制符</p>
+<h2 id="_2">解决</h2>
+<p>去掉非法字符或将 key 进行编码(base64/md5/sha1/...)</p>
+<h2 id="_3">参考</h2>
+<ul>
+<li><a href="http://stackoverflow.com/a/11322746">php - Can memcached keys contain spaces? - Stack Overflow</a></li>
+</ul>
+                    <a class="btn btn-default btn-xs" href="http://mozillazg.com/2013/07/django-memcachedkeycharactererror.html">more ...</a>
                 </div>
             </article>
             <hr/>
             <article>
-                <h2><a href="http://mozillazg.com/2013/09/django-group-by-month.html">[django]按月分组统计数据</a></h2>
+                <h2><a href="http://mozillazg.com/2013/06/django-south-rename-model-field.html">[django]使用 South 重命名 model 字段名</a></h2>
                     <div class="well well-sm">
 <footer class="post-info">
     <span class="label label-default">Date</span>
     <span class="published">
-        <i class="fa fa-calendar"></i><time datetime="2013-09-29T00:00:00+00:00"> Sun 29 September 2013</time>
+        <i class="fa fa-calendar"></i><time datetime="2013-06-05T00:00:00+00:00"> Wed 05 June 2013</time>
     </span>
 
 
@@ -176,25 +178,133 @@ Mozillazg's Blog            </a>
 	<a href="http://mozillazg.com/tag/django.html">django</a>
         /
 	<a href="http://mozillazg.com/tag/python.html">python</a>
+        /
+	<a href="http://mozillazg.com/tag/south.html">south</a>
     
 </footer><!-- /.post-info -->                    </div>
-                <div class="summary"><p>假设有以下 model:</p>
-<div class="codehilite"><pre><span class="k">class</span> <span class="nc">Foobar</span><span class="p">(</span><span class="n">models</span><span class="o">.</span><span class="n">Model</span><span class="p">):</span>
-    <span class="n">name</span> <span class="o">=</span> <span class="n">models</span><span class="o">.</span><span class="n">CharField</span><span class="p">(</span><span class="n">max_length</span><span class="o">=</span><span class="mi">100</span><span class="p">)</span>
-    <span class="n">date_created</span> <span class="o">=</span> <span class="n">models</span><span class="o">.</span><span class="n">DateField</span><span class="p">(</span><span class="n">auto_now_add</span><span class="o">=</span><span class="bp">True</span><span class="p">)</span>
-
-    <span class="k">def</span> <span class="nf">__unicode__</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
-        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">name</span>
+                <div class="summary"><p>本文将讲述如何使用 South 重命名表的字段名。</p>
+<p>假设应用 foobar 有个 model:</p>
+<div class="codehilite"><pre><span class="k">class</span> <span class="nc">Foo</span><span class="p">(</span><span class="n">models</span><span class="o">.</span><span class="n">Model</span><span class="p">):</span>
+    <span class="n">foo</span> <span class="o">=</span> <span class="n">models</span><span class="o">.</span><span class="n">IntegerField</span><span class="p">()</span>
 </pre></div>
 
 
-<p>按月统计数量的代码如下：</p>
-<div class="codehilite"><pre><span class="kn">from</span> <span class="nn">django.db</span> <span class="kn">import</span> <span class="n">connection</span>
-<span class="kn">from</span> <span class="nn">django.db.models</span> <span class="kn">import</span> <span class="n">Count</span>
+<p>想要将 foo 字段名改为 bar。</p>
+<ol>
+<li>
+<p>改好 models.py</p>
+<div class="codehilite"><pre><span class="k">class</span> <span class="nc">Foo</span><span class="p">(</span><span class="n">models</span><span class="o">.</span><span class="n">Model</span><span class="p">):</span>
+    <span class="n">bar</span> <span class="o">=</span> <span class="n">models</span><span class="o">.</span><span class="n">IntegerField</span><span class="p">()</span>
+</pre></div>
 
-<span class="n">select</span> <span class="o">=</span> <span class="p">{</span><span class="s">&#39;month&#39;</span><span class="p">:</span> <span class="n">connection</span><span class="o">.</span><span class="n">ops</span><span class="o">.</span><span class="n">date_trunc_sql</span><span class="p">(</span><span class="s">&#39;month&#39;</span><span class="p">,</span> <span class="s">&#39;date_created&#39;</span><span class="p">)}</span>
-<span class="n">Foobar</span><span class="o">.</span><span class="n">objects</span><span class="o">.</span><span class="n">extra</span><span class="p">(</span><span class="n">select</span><span class="o">=</span><span class="n">select</span><span class="p">)</span><span class="o">.</span><span class="n">values</span><span class="p">(</span><span class="s">&#39;month&#39;</span><span class="p">)</span><span class="o">.</span><span class="n">annotate</span><span class="p">(</span><span class="n">number ...</span></pre></div>
-                    <a class="btn btn-default btn-xs" href="http://mozillazg.com/2013/09/django-group-by-month.html">more ...</a>
+
+</li>
+<li>
+<p>执行 south 命令</p>
+<div class="codehilite"><pre><span class="c"># python manage.py schemamigration yourapp rename_field_foo_to_bar --empty</span>
+<span class="c"># 本例是</span>
+python manage.py schemamigration foobar rename_field_foo_to_bar --empty
+</pre></div>
+
+
+</li>
+<li>
+<p>更改生成的 000x_xxx.py 文件 ...</p></li></ol>
+                    <a class="btn btn-default btn-xs" href="http://mozillazg.com/2013/06/django-south-rename-model-field.html">more ...</a>
+                </div>
+            </article>
+            <hr/>
+            <article>
+                <h2><a href="http://mozillazg.com/2013/06/django-south-rename-model-or-table.html">[django]使用 South 重命名 model 名称</a></h2>
+                    <div class="well well-sm">
+<footer class="post-info">
+    <span class="label label-default">Date</span>
+    <span class="published">
+        <i class="fa fa-calendar"></i><time datetime="2013-06-05T00:00:00+00:00"> Wed 05 June 2013</time>
+    </span>
+
+
+
+        <span class="label label-default">Category</span>
+        <a href="http://mozillazg.com/category/django.html">django</a>
+
+
+<span class="label label-default">Tags</span>
+	<a href="http://mozillazg.com/tag/django.html">django</a>
+        /
+	<a href="http://mozillazg.com/tag/python.html">python</a>
+        /
+	<a href="http://mozillazg.com/tag/south.html">south</a>
+    
+</footer><!-- /.post-info -->                    </div>
+                <div class="summary"><p>本文将讲述如何使用 South 重命名表名。</p>
+<p>假设应用 foobar 有个 model:</p>
+<div class="codehilite"><pre><span class="k">class</span> <span class="nc">Foo</span><span class="p">(</span><span class="n">models</span><span class="o">.</span><span class="n">Model</span><span class="p">):</span>
+    <span class="n">foo</span> <span class="o">=</span> <span class="n">models</span><span class="o">.</span><span class="n">IntegerField</span><span class="p">()</span>
+</pre></div>
+
+
+<p>想要将 model Foo 改名为 Bar。</p>
+<ol>
+<li>
+<p>改好 models.py</p>
+<div class="codehilite"><pre><span class="k">class</span> <span class="nc">Bar</span><span class="p">(</span><span class="n">models</span><span class="o">.</span><span class="n">Model</span><span class="p">):</span>
+    <span class="n">foo</span> <span class="o">=</span> <span class="n">models</span><span class="o">.</span><span class="n">IntegerField</span><span class="p">()</span>
+</pre></div>
+
+
+</li>
+<li>
+<p>执行 south 命令</p>
+<div class="codehilite"><pre><span class="c"># python manage.py schemamigration yourapp rename_model_foo_to_bar --empty</span>
+<span class="c"># 本例是</span>
+python manage.py schemamigration foobar rename_model_foo_to_bar --empty
+</pre></div>
+
+
+</li>
+<li>
+<p>更改生成的 000x_xxx.py ...</p></li></ol>
+                    <a class="btn btn-default btn-xs" href="http://mozillazg.com/2013/06/django-south-rename-model-or-table.html">more ...</a>
+                </div>
+            </article>
+            <hr/>
+            <article>
+                <h2><a href="http://mozillazg.com/2013/06/django-fix-reset-password-use-webmaster@localhost-send-mail.html">[django]解决发送密码重置邮件的发件人是 "webmaster@localhost" 的问题</a></h2>
+                    <div class="well well-sm">
+<footer class="post-info">
+    <span class="label label-default">Date</span>
+    <span class="published">
+        <i class="fa fa-calendar"></i><time datetime="2013-06-04T00:00:00+00:00"> Tue 04 June 2013</time>
+    </span>
+
+
+
+        <span class="label label-default">Category</span>
+        <a href="http://mozillazg.com/category/django.html">django</a>
+
+
+<span class="label label-default">Tags</span>
+	<a href="http://mozillazg.com/tag/django.html">django</a>
+        /
+	<a href="http://mozillazg.com/tag/python.html">python</a>
+        /
+	<a href="http://mozillazg.com/tag/send_mail.html">send_mail</a>
+    
+</footer><!-- /.post-info -->                    </div>
+                <div class="summary"><p>默认情况下，django 将通过 webmaster@localhost 发送密码重置邮件。</p>
+<p>这明显不是我们想要的，更改 settings.py 文件即可修复这个问题。</p>
+<p>增加一个配置项 DEFAULT_FROM_EMAIL：</p>
+<div class="codehilite"><pre><span class="n">DEFAULT_FROM_EMAIL</span> <span class="o">=</span> <span class="s">&#39;foo@bar.com&#39;</span>
+</pre></div>
+
+
+<p>此时的发件人将会是：foo@bar.com</p>
+<h2 id="_1">参考</h2>
+<ul>
+<li><a href="http://markmail.org/thread/yiomiws5gvyxvfia#query:+page:1+mid:sb6fpukeijedzxzg+state:results">Re: [Django] #13847: PasswordResetForm sends emails using "webmaster@localhost" - Django - com.googlegroups.django-updates - MarkMail</a></li>
+</ul>
+                    <a class="btn btn-default btn-xs" href="http://mozillazg.com/2013/06/django-fix-reset-password-use-webmaster@localhost-send-mail.html">more ...</a>
                 </div>
             </article>
             <hr/>
@@ -218,19 +328,10 @@ Mozillazg's Blog            </a>
                             href="http://mozillazg.com/category/django7.html">7</a></li>
                     <li class=""><a
                             href="http://mozillazg.com/category/django8.html">8</a></li>
-                    <li class=""><a
-                            href="http://mozillazg.com/category/django9.html">9</a></li>
-                    <li class=""><a
-                            href="http://mozillazg.com/category/django10.html">10</a></li>
-                    <li class=""><a
-                            href="http://mozillazg.com/category/django11.html">11</a></li>
-                    <li class=""><a
-                            href="http://mozillazg.com/category/django12.html">12</a></li>
-                    <li class=""><a
-                            href="http://mozillazg.com/category/django13.html">13</a></li>
                 <li class="next"><a
                         href="http://mozillazg.com/category/django4.html">&raquo;</a></li>
         </ul>
+
         </div>
         <div class="col-sm-3" id="sidebar">
             <aside>
