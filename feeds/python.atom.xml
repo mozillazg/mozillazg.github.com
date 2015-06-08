@@ -1,5 +1,70 @@
 <?xml version="1.0" encoding="utf-8"?>
-<feed xmlns="http://www.w3.org/2005/Atom"><title>Mozillazg's Blog</title><link href="http://mozillazg.com/" rel="alternate"></link><link href="http://mozillazg.com/feeds/python.atom.xml" rel="self"></link><id>http://mozillazg.com/</id><updated>2015-06-06T00:00:00+00:00</updated><entry><title>[python][译]让我们一起来构建一个 Web 服务器（二）</title><link href="http://mozillazg.com/2015/06/let-us-build-a-web-server-part-2-zh-cn.html" rel="alternate"></link><updated>2015-06-06T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2015-06-06:2015/06/let-us-build-a-web-server-part-2-zh-cn.html</id><summary type="html">&lt;p&gt;本文译自：&lt;a class="reference external" href="http://ruslanspivak.com/lsbaws-part2/"&gt;http://ruslanspivak.com/lsbaws-part2/&lt;/a&gt;&lt;/p&gt;
+<feed xmlns="http://www.w3.org/2005/Atom"><title>Mozillazg's Blog</title><link href="http://mozillazg.com/" rel="alternate"></link><link href="http://mozillazg.com/feeds/python.atom.xml" rel="self"></link><id>http://mozillazg.com/</id><updated>2015-06-08T00:00:00+00:00</updated><entry><title>在 python 中使用 str.strip 方法时需要注意的地方</title><link href="http://mozillazg.com/2015/06/python-str-strip-lstrip-rstrip-warnning.html" rel="alternate"></link><updated>2015-06-08T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2015-06-08:2015/06/python-str-strip-lstrip-rstrip-warnning.html</id><summary type="html">&lt;p&gt;首先问大家一个问题：你觉得下面代码的输出会是什么？&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+print '12345-abc-12345-defg-54321'.strip('12345')
+&lt;/pre&gt;
+&lt;p&gt;我猜有些同学的答案会是: &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;-abc-12345-defg-54321&lt;/span&gt;&lt;/tt&gt; ，实际的结果是:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+&amp;gt;&amp;gt;&amp;gt; print '12345-abc-12345-defg-54321'.strip('12345')
+-abc-12345-defg-
+&lt;/pre&gt;
+&lt;p&gt;为什么不是 &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;-abc-12345-defg-54321&lt;/span&gt;&lt;/tt&gt; 呢？我们先来看一下 &lt;tt class="docutils literal"&gt;str.strip&lt;/tt&gt; 的文档就知道了:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+S.strip([chars]) -&amp;gt; string or unicode
+
+Return a copy of the string S with leading and trailing
+whitespace removed.
+If chars is given and not None, remove characters in chars instead.
+If chars is unicode, S will be converted to unicode before stripping
+&lt;/pre&gt;
+&lt;p&gt;通过文档我们可以知道:&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;p class="first"&gt;如果未指定 chars 参数或参数值未 None, 去除字符串 &lt;strong&gt;首尾空白符（空格、换行符等等）&lt;/strong&gt;&lt;/p&gt;
+&lt;/li&gt;
+&lt;li&gt;&lt;p class="first"&gt;否则，只要 &lt;strong&gt;首尾字符包含在 chars 定义的字符串内&lt;/strong&gt; ，就会被去除。并且会递归调用直到首尾字符不在 chars 内。类似:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+def _strip(s, chars):
+    if s[0] in chars:
+        return _strip(s[1:], chars)
+    elif s[-1] in chars:
+        return _strip(s[:-1], chars)
+    else:
+        return s
+&lt;/pre&gt;
+&lt;/li&gt;
+&lt;/ul&gt;
+&lt;p&gt;更多的例子:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+&amp;gt;&amp;gt;&amp;gt; '18349-13-3434'.strip('0123456789')
+'-13-'
+
+&amp;gt;&amp;gt;&amp;gt; '18349-13-3434'.strip('123')
+'8349-13-3434'
+
+&amp;gt;&amp;gt;&amp;gt; 'scene_scdefg'.strip('scene_')
+'defg'
+
+&amp;gt;&amp;gt;&amp;gt; '\r   \t\n '.strip()
+''
+&lt;/pre&gt;
+&lt;p&gt;现在我们知道 &lt;tt class="docutils literal"&gt;str.strip&lt;/tt&gt; 是按 &lt;strong&gt;字符&lt;/strong&gt; 进行移除操作的。
+那么如何按字符串进行移除呢？&lt;/p&gt;
+&lt;p&gt;一种解决办法就是使用 &lt;tt class="docutils literal"&gt;re.sub&lt;/tt&gt;:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+def strip2(s, chars):
+    re_chars = re.escape(chars)
+    s = re.sub(r'^(?:%s)+(?P&amp;lt;right&amp;gt;.*)$' % re_chars, '\g&amp;lt;right&amp;gt;', s)
+    s = re.sub(r'^(?P&amp;lt;left&amp;gt;.*?)(?:%s)+$' % re_chars, '\g&amp;lt;left&amp;gt;', s)
+    return s
+
+&amp;gt;&amp;gt;&amp;gt; print strip2('12345-abc-12345-defg-54321', '12345')
+-abc-12345-defg-54321
+&lt;/pre&gt;
+&lt;!-- 一种解决办法就是，使用 ``str.replace``: :: --&gt;
+&lt;!--  --&gt;
+&lt;!-- &gt;&gt;&gt; '12345-abc-12345-defg-54321'.replace('12345', '', 1) --&gt;
+&lt;!-- '-abc-12345-defg-54321' --&gt;
+</summary></entry><entry><title>[python][译]让我们一起来构建一个 Web 服务器（二）</title><link href="http://mozillazg.com/2015/06/let-us-build-a-web-server-part-2-zh-cn.html" rel="alternate"></link><updated>2015-06-06T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2015-06-06:2015/06/let-us-build-a-web-server-part-2-zh-cn.html</id><summary type="html">&lt;p&gt;本文译自：&lt;a class="reference external" href="http://ruslanspivak.com/lsbaws-part2/"&gt;http://ruslanspivak.com/lsbaws-part2/&lt;/a&gt;&lt;/p&gt;
 &lt;p&gt;还记得吗？在 &lt;a class="reference external" href="http://mozillazg.com/2015/06/let-us-build-a-web-server-part-1-zh-cn.html"&gt;第一部分&lt;/a&gt; 我向你问了一个问题：”如何在你新鲜出炉的 Web 服务器上不做任何修改的就运行 Django 应用，Flask 应用， Pyramid 应用?“
 往下读就可以找到答案。&lt;/p&gt;
 &lt;p&gt;在过去，当你选择的 Python Web 框架会限制你所能选择的 Web 服务器, 如果那个框架和服务器被设计的可以一起工作的话，那就皆大欢喜了：&lt;/p&gt;
