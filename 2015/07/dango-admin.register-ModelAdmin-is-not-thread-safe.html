@@ -14,13 +14,13 @@
 
         <meta name="author" content="mozillazg" />
         <meta name="keywords" content="Thread-Locals" />
-        <meta name="description" content="一直以为注册的 ModelAdmin 是线程安全的，直到最近看到有人提到 ModelAdmin 不是线程安全的。 然后看了一下 Django admin.register 的源码，才发现确实不是线程安全的。 核心代码 如下： # Instantiate the admin class to save in the registry self._registry[model] = admin_class(model, self) 当配置如下代码后： @admin.register(Foo) class FooAdmin(admin.ModelAdmin): pass 实际上注册的是一个 FooAdmin 示例，也就是说 FooAdmin 这个类在启动的时候就初始化，所有的请求访问的都是同一个实例。 所以类似下面的代码就会有非线程安全的问题，因为 FooAdmin 实例 ..." />
+        <meta name="description" content="一直以为注册的 ModelAdmin 是线程安全的，直到最近看到有人提到 ModelAdmin 不是线程安全的。 然后看了一下 Django admin.register 的源码，才发现确实不是线程安全的。 核心代码 如下： # Instantiate the admin class to save in the registry self._registry[model] = admin_class(model, self) 当配置如下代码后： @admin.register(Foo) class FooAdmin(admin.ModelAdmin): pass 实际上注册的是一个 FooAdmin 实例，也就是说 FooAdmin 这个类在启动的时候就实例化了，所有的请求访问的都是同一个实例。 所以类似下面的代码就会有非线程安全的问题，因为 FooAdmin 实例 ..." />
 
         <meta property="og:site_name" content="Mozillazg's Blog" />
         <meta property="og:type" content="article"/>
         <meta property="og:title" content="django @admin.register 非线程安全陷阱"/>
         <meta property="og:url" content="http://mozillazg.com/2015/07/dango-admin.register-ModelAdmin-is-not-thread-safe.html"/>
-        <meta property="og:description" content="一直以为注册的 ModelAdmin 是线程安全的，直到最近看到有人提到 ModelAdmin 不是线程安全的。 然后看了一下 Django admin.register 的源码，才发现确实不是线程安全的。 核心代码 如下： # Instantiate the admin class to save in the registry self._registry[model] = admin_class(model, self) 当配置如下代码后： @admin.register(Foo) class FooAdmin(admin.ModelAdmin): pass 实际上注册的是一个 FooAdmin 示例，也就是说 FooAdmin 这个类在启动的时候就初始化，所有的请求访问的都是同一个实例。 所以类似下面的代码就会有非线程安全的问题，因为 FooAdmin 实例 ..."/>
+        <meta property="og:description" content="一直以为注册的 ModelAdmin 是线程安全的，直到最近看到有人提到 ModelAdmin 不是线程安全的。 然后看了一下 Django admin.register 的源码，才发现确实不是线程安全的。 核心代码 如下： # Instantiate the admin class to save in the registry self._registry[model] = admin_class(model, self) 当配置如下代码后： @admin.register(Foo) class FooAdmin(admin.ModelAdmin): pass 实际上注册的是一个 FooAdmin 实例，也就是说 FooAdmin 这个类在启动的时候就实例化了，所有的请求访问的都是同一个实例。 所以类似下面的代码就会有非线程安全的问题，因为 FooAdmin 实例 ..."/>
         <meta property="article:published_time" content="2015-07-27" />
             <meta property="article:section" content="django" />
             <meta property="article:tag" content="Thread-Locals" />
@@ -123,7 +123,7 @@ Mozillazg's Blog            </a>
 </pre></div>
 
 
-<p>实际上注册的是一个 FooAdmin 示例，也就是说 FooAdmin 这个类在启动的时候就初始化，所有的请求访问的都是同一个实例。
+<p>实际上注册的是一个 FooAdmin 实例，也就是说 FooAdmin 这个类在启动的时候就实例化了，所有的请求访问的都是同一个实例。
 所以类似下面的代码就会有非线程安全的问题，因为 FooAdmin 实例(self)会共享给所有子线程/所有请求：</p>
 <div class="codehilite"><pre><span class="err">@</span><span class="n">admin</span><span class="p">.</span><span class="k">register</span><span class="p">(</span><span class="n">Foo</span><span class="p">)</span>
 <span class="n">class</span> <span class="n">FooAdmin</span><span class="p">(</span><span class="n">admin</span><span class="p">.</span><span class="n">ModelAdmin</span><span class="p">)</span><span class="o">:</span>
