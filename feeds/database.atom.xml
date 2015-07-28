@@ -211,8 +211,25 @@
 &lt;/blockquote&gt;
 &lt;p&gt;解决办法是移除重复的索引 key:&lt;/p&gt;
 &lt;div class="codehilite"&gt;&lt;pre&gt;&lt;span class="n"&gt;ALTER&lt;/span&gt; &lt;span class="n"&gt;TABLE&lt;/span&gt; &lt;span class="err"&gt;`&lt;/span&gt;&lt;span class="n"&gt;foo&lt;/span&gt;&lt;span class="err"&gt;`&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="err"&gt;`&lt;/span&gt;&lt;span class="n"&gt;bar&lt;/span&gt;&lt;span class="err"&gt;`&lt;/span&gt; &lt;span class="n"&gt;DROP&lt;/span&gt; &lt;span class="n"&gt;INDEX&lt;/span&gt; &lt;span class="err"&gt;`&lt;/span&gt;&lt;span class="n"&gt;bar_xxx_uniq&lt;/span&gt;&lt;span class="err"&gt;`&lt;/span&gt;&lt;span class="p"&gt;;&lt;/span&gt;
-&lt;/pre&gt;&lt;/div&gt;</summary><category term="mysql"></category></entry><entry><title>mysql 基于 master-master 的双机热备配置</title><link href="http://mozillazg.com/2013/06/mysql-master-master.html" rel="alternate"></link><updated>2013-06-21T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2013-06-21:2013/06/mysql-master-master.html</id><summary type="html">
-&lt;p&gt;master-master 就是两台服务器互为主从：        &lt;br/&gt;
+&lt;/pre&gt;&lt;/div&gt;</summary><category term="mysql"></category></entry><entry><title>mysql 基于 master-master 的双机热备配置</title><link href="http://mozillazg.com/2013/06/mysql-master-master.html" rel="alternate"></link><updated>2013-06-21T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2013-06-21:2013/06/mysql-master-master.html</id><summary type="html">&lt;div class="toc"&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;a href="#master1-slavemaster2"&gt;master1-slave(master2)&lt;/a&gt;&lt;ul&gt;
+&lt;li&gt;&lt;a href="#master1"&gt;设置 master1&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a href="#slavemaster2"&gt;设置 slave(master2)&lt;/a&gt;&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/li&gt;
+&lt;li&gt;&lt;a href="#master2-slavemaster1"&gt;master2-slave(master1)&lt;/a&gt;&lt;ul&gt;
+&lt;li&gt;&lt;a href="#master2"&gt;master2:&lt;/a&gt;&lt;ul&gt;
+&lt;li&gt;&lt;a href="#slave"&gt;slave:&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a href="#_1"&gt;测试&lt;/a&gt;&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/li&gt;
+&lt;li&gt;&lt;a href="#_2"&gt;参考&lt;/a&gt;&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/div&gt;
+&lt;p&gt;master-master 就是两台服务器互为主从：        &lt;br /&gt;
 master1-slave(master2) &amp;amp;&amp;amp; master2-slave(master1)&lt;/p&gt;
 &lt;ul&gt;
 &lt;li&gt;master1: 192.168.100.191&lt;/li&gt;
@@ -224,13 +241,15 @@ master1-slave(master2) &amp;amp;&amp;amp; master2-slave(master1)&lt;/p&gt;
 &lt;ol&gt;
 &lt;li&gt;
 &lt;p&gt;创建给 slave 登录用的用户名密码:&lt;/p&gt;
-&lt;div class="codehilite"&gt;&lt;pre&gt;mysql&amp;gt; GRANT REPLICATION SLAVE ON *.* TO &lt;span class="s1"&gt;'backup'&lt;/span&gt;@&lt;span class="s1"&gt;'192.168.100.166'&lt;/span&gt; IDENTIFIED BY &lt;span class="s1"&gt;'yNZE7fK9*@aMA?*ppF'&lt;/span&gt;;
+&lt;div class="codehilite"&gt;&lt;pre&gt;mysql&amp;gt; GRANT REPLICATION SLAVE ON *.* TO &lt;span class="s1"&gt;&amp;#39;backup&amp;#39;&lt;/span&gt;@&lt;span class="s1"&gt;&amp;#39;192.168.100.166&amp;#39;&lt;/span&gt; IDENTIFIED BY &lt;span class="s1"&gt;&amp;#39;yNZE7fK9*@aMA?*ppF&amp;#39;&lt;/span&gt;;
 
 &lt;span class="c"&gt;# humanreadable&lt;/span&gt;
-mysql&amp;gt; &lt;span class="c"&gt;# grant replication slave on *.* to 'backup'@'192.168.100.166' identified by 'yNZE7fK9*@aMA?*ppF';&lt;/span&gt;
+mysql&amp;gt; &lt;span class="c"&gt;# grant replication slave on *.* to &amp;#39;backup&amp;#39;@&amp;#39;192.168.100.166&amp;#39; identified by &amp;#39;yNZE7fK9*@aMA?*ppF&amp;#39;;&lt;/span&gt;
 
 mysql&amp;gt; create database hello default charset utf8;
 &lt;/pre&gt;&lt;/div&gt;
+
+
 &lt;/li&gt;
 &lt;li&gt;
 &lt;p&gt;配置 my.cnf&lt;/p&gt;
@@ -251,6 +270,8 @@ binlog-ignore-db&lt;span class="o"&gt;=&lt;/span&gt;information_schema
 auto-increment-increment &lt;span class="o"&gt;=&lt;/span&gt; 2  &lt;span class="c"&gt;# 每次递增的步长&lt;/span&gt;
 auto-increment-offset &lt;span class="o"&gt;=&lt;/span&gt; 1  &lt;span class="c"&gt;# 初始值&lt;/span&gt;
 &lt;/pre&gt;&lt;/div&gt;
+
+
 &lt;p&gt;重启 mysql: &lt;code&gt;serivce mysqld restart&lt;/code&gt;&lt;/p&gt;
 &lt;/li&gt;
 &lt;li&gt;
@@ -259,9 +280,13 @@ auto-increment-offset &lt;span class="o"&gt;=&lt;/span&gt; 1  &lt;span class="c"
 &lt;div class="codehilite"&gt;&lt;pre&gt;mysql&amp;gt;FLUSH TABLES WITH READ LOCK;
 mysql&amp;gt;# flush tables with &lt;span class="nb"&gt;read &lt;/span&gt;lock;
 &lt;/pre&gt;&lt;/div&gt;
+
+
 &lt;p&gt;新开一个终端，导出数据库&lt;/p&gt;
 &lt;div class="codehilite"&gt;&lt;pre&gt;mysqldump --master-data -uroot -p hello &amp;gt; hello.sql
 &lt;/pre&gt;&lt;/div&gt;
+
+
 &lt;p&gt;查看主服务器的状态&lt;/p&gt;
 &lt;div class="codehilite"&gt;&lt;pre&gt;mysql&amp;gt; show master status&lt;span class="se"&gt;\G&lt;/span&gt;;
 *************************** 1. row ***************************
@@ -274,11 +299,15 @@ Binlog_Ignore_DB: mysql,test,information_schema
 ERROR: 
 No query specified
 &lt;/pre&gt;&lt;/div&gt;
+
+
 &lt;p&gt;记下 Position 和 File 的值。
 解锁&lt;/p&gt;
 &lt;div class="codehilite"&gt;&lt;pre&gt;mysql&amp;gt; UNLOCK TABLES;
 mysql&amp;gt; &lt;span class="c"&gt;# unlock tables;&lt;/span&gt;
 &lt;/pre&gt;&lt;/div&gt;
+
+
 &lt;/li&gt;
 &lt;/ol&gt;
 &lt;h3 id="slavemaster2"&gt;设置 slave(master2)&lt;/h3&gt;
@@ -301,29 +330,35 @@ log-slave-updates  &lt;span class="c"&gt;# slave将复制事件写进自己的�
 &lt;span class="c"&gt;#5.1&lt;/span&gt;
 &lt;span class="c"&gt;#log-slave-updates = 1&lt;/span&gt;
 &lt;/pre&gt;&lt;/div&gt;
+
+
 &lt;/li&gt;
 &lt;li&gt;
 &lt;p&gt;导入 master 导出的数据库：&lt;/p&gt;
 &lt;div class="codehilite"&gt;&lt;pre&gt;mysql&amp;gt; create database hello default charset utf8;
 mysql -uroot -p hello &amp;lt; hello.sql
 &lt;/pre&gt;&lt;/div&gt;
+
+
 &lt;/li&gt;
 &lt;li&gt;
 &lt;p&gt;配置 master 信息：&lt;/p&gt;
 &lt;div class="codehilite"&gt;&lt;pre&gt;mysql&amp;gt; slave stop;
 
 mysql&amp;gt; CHANGE MASTER TO
--&amp;gt; &lt;span class="nv"&gt;MASTER_HOST&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="s1"&gt;'192.168.100.191'&lt;/span&gt;, //主服务器的IP地址
--&amp;gt; &lt;span class="nv"&gt;MASTER_USER&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="s1"&gt;'backup'&lt;/span&gt;, //同步数据库的用户
--&amp;gt; &lt;span class="nv"&gt;MASTER_PASSWORD&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="s1"&gt;'yNZE7fK9*@aMA?*ppF'&lt;/span&gt;, //同步数据库的密码
+-&amp;gt; &lt;span class="nv"&gt;MASTER_HOST&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;192.168.100.191&amp;#39;&lt;/span&gt;, //主服务器的IP地址
+-&amp;gt; &lt;span class="nv"&gt;MASTER_USER&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;backup&amp;#39;&lt;/span&gt;, //同步数据库的用户
+-&amp;gt; &lt;span class="nv"&gt;MASTER_PASSWORD&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;yNZE7fK9*@aMA?*ppF&amp;#39;&lt;/span&gt;, //同步数据库的密码
 -&amp;gt; &lt;span class="nv"&gt;MASTER_CONNECT_RETRY&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;60,  // 如果从服务器发现主服务器断掉，重新连接的时间差&lt;span class="o"&gt;(&lt;/span&gt;秒&lt;span class="o"&gt;)&lt;/span&gt;
--&amp;gt; &lt;span class="nv"&gt;MASTER_LOG_FILE&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="s1"&gt;'mysql-bin.000001'&lt;/span&gt;, //主服务器二进制日志的文件名&lt;span class="o"&gt;(&lt;/span&gt;前面要求记住的 File 参数&lt;span class="o"&gt;)&lt;/span&gt;
+-&amp;gt; &lt;span class="nv"&gt;MASTER_LOG_FILE&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;mysql-bin.000001&amp;#39;&lt;/span&gt;, //主服务器二进制日志的文件名&lt;span class="o"&gt;(&lt;/span&gt;前面要求记住的 File 参数&lt;span class="o"&gt;)&lt;/span&gt;
 -&amp;gt; &lt;span class="nv"&gt;MASTER_LOG_POS&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;98; //日志文件的开始位置&lt;span class="o"&gt;(&lt;/span&gt;前面要求记住的 Position 参数&lt;span class="o"&gt;)&lt;/span&gt;
 
-mysql&amp;gt; CHANGE MASTER TO &lt;span class="nv"&gt;MASTER_HOST&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="s1"&gt;'192.168.100.191'&lt;/span&gt;, &lt;span class="nv"&gt;MASTER_USER&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="s1"&gt;'backup'&lt;/span&gt;, &lt;span class="nv"&gt;MASTER_PASSWORD&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="s1"&gt;'yNZE7fK9*@aMA?*ppF'&lt;/span&gt;, &lt;span class="nv"&gt;MASTER_CONNECT_RETRY&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;60, &lt;span class="nv"&gt;MASTER_LOG_FILE&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="s1"&gt;'mysql-bin.000001'&lt;/span&gt;, &lt;span class="nv"&gt;MASTER_LOG_POS&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;98;
+mysql&amp;gt; CHANGE MASTER TO &lt;span class="nv"&gt;MASTER_HOST&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;192.168.100.191&amp;#39;&lt;/span&gt;, &lt;span class="nv"&gt;MASTER_USER&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;backup&amp;#39;&lt;/span&gt;, &lt;span class="nv"&gt;MASTER_PASSWORD&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;yNZE7fK9*@aMA?*ppF&amp;#39;&lt;/span&gt;, &lt;span class="nv"&gt;MASTER_CONNECT_RETRY&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;60, &lt;span class="nv"&gt;MASTER_LOG_FILE&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;mysql-bin.000001&amp;#39;&lt;/span&gt;, &lt;span class="nv"&gt;MASTER_LOG_POS&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;98;
 
 mysql &amp;gt; slave start;
 &lt;/pre&gt;&lt;/div&gt;
+
+
 &lt;p&gt;重启 master, slave: &lt;code&gt;service mysqld restart&lt;/code&gt;&lt;/p&gt;
 &lt;p&gt;查看 slave 状态：&lt;/p&gt;
 &lt;p&gt;进入 slave mysql:&lt;/p&gt;
@@ -349,10 +384,14 @@ mysql &amp;gt; slave start;
     Seconds_Behind_Master: NULL
 1 row in &lt;span class="nb"&gt;set&lt;/span&gt; &lt;span class="o"&gt;(&lt;/span&gt;0.00 sec&lt;span class="o"&gt;)&lt;/span&gt;
 &lt;/pre&gt;&lt;/div&gt;
+
+
 &lt;p&gt;注意一定要有下面两项，没有的话查看错误日志(less /var/log/mysqld.log)：&lt;/p&gt;
 &lt;div class="codehilite"&gt;&lt;pre&gt;        &lt;span class="nl"&gt;Slave_IO_Running:&lt;/span&gt; &lt;span class="n"&gt;Yes&lt;/span&gt;
         &lt;span class="nl"&gt;Slave_SQL_Running:&lt;/span&gt; &lt;span class="n"&gt;Yes&lt;/span&gt;
 &lt;/pre&gt;&lt;/div&gt;
+
+
 &lt;/li&gt;
 &lt;li&gt;
 &lt;p&gt;测试&lt;/p&gt;
@@ -370,6 +409,8 @@ mysql&amp;gt; show master status&lt;span class="se"&gt;\G&lt;/span&gt;;
 Binlog_Ignore_DB: mysql,test,information_schema
 1 row in &lt;span class="nb"&gt;set&lt;/span&gt; &lt;span class="o"&gt;(&lt;/span&gt;0.00 sec&lt;span class="o"&gt;)&lt;/span&gt;
 &lt;/pre&gt;&lt;/div&gt;
+
+
 &lt;p&gt;slave 服务器&lt;/p&gt;
 &lt;div class="codehilite"&gt;&lt;pre&gt;mysql&amp;gt; use hello;
 mysql&amp;gt; show tables;
@@ -412,11 +453,13 @@ mysql&amp;gt; show slave status&lt;span class="se"&gt;\G&lt;/span&gt;;
     Seconds_Behind_Master: 0
 1 row in &lt;span class="nb"&gt;set&lt;/span&gt; &lt;span class="o"&gt;(&lt;/span&gt;0.00 sec&lt;span class="o"&gt;)&lt;/span&gt;
 &lt;/pre&gt;&lt;/div&gt;
+
+
 &lt;/li&gt;
 &lt;/ol&gt;
 &lt;h2 id="master2-slavemaster1"&gt;master2-slave(master1)&lt;/h2&gt;
 &lt;h3 id="master2"&gt;master2:&lt;/h3&gt;
-&lt;div class="codehilite"&gt;&lt;pre&gt;mysql&amp;gt; grant replication slave on *.* to &lt;span class="s1"&gt;'backup'&lt;/span&gt;@&lt;span class="s1"&gt;'192.168.100.191'&lt;/span&gt; identified by &lt;span class="s1"&gt;'yNZE7fK9*@aMA?*ppF'&lt;/span&gt;;
+&lt;div class="codehilite"&gt;&lt;pre&gt;mysql&amp;gt; grant replication slave on *.* to &lt;span class="s1"&gt;&amp;#39;backup&amp;#39;&lt;/span&gt;@&lt;span class="s1"&gt;&amp;#39;192.168.100.191&amp;#39;&lt;/span&gt; identified by &lt;span class="s1"&gt;&amp;#39;yNZE7fK9*@aMA?*ppF&amp;#39;&lt;/span&gt;;
 mysql&amp;gt; flush tables with &lt;span class="nb"&gt;read &lt;/span&gt;lock;
 mysql&amp;gt; show master status&lt;span class="se"&gt;\G&lt;/span&gt;;
 *************************** 1. row ***************************
@@ -426,6 +469,8 @@ mysql&amp;gt; show master status&lt;span class="se"&gt;\G&lt;/span&gt;;
 Binlog_Ignore_DB: 
 mysql&amp;gt; unlock tables;
 &lt;/pre&gt;&lt;/div&gt;
+
+
 &lt;p&gt;vim /etc/my.cnf:&lt;/p&gt;
 &lt;div class="codehilite"&gt;&lt;pre&gt;&lt;span class="c"&gt;# as master&lt;/span&gt;
 &lt;span class="c"&gt;#开启二进制日志，并且名称为 /var/log/mysql/mysql-bin.***&lt;/span&gt;
@@ -441,14 +486,18 @@ binlog-ignore-db&lt;span class="o"&gt;=&lt;/span&gt;information_schema
 auto-increment-increment &lt;span class="o"&gt;=&lt;/span&gt; 2  &lt;span class="c"&gt;# 每次递增的步长&lt;/span&gt;
 auto-increment-offset &lt;span class="o"&gt;=&lt;/span&gt; 2  &lt;span class="c"&gt;# 初始值&lt;/span&gt;
 &lt;/pre&gt;&lt;/div&gt;
+
+
 &lt;p&gt;service mysqld restart&lt;/p&gt;
 &lt;h4 id="slave"&gt;slave:&lt;/h4&gt;
 &lt;div class="codehilite"&gt;&lt;pre&gt;mysql&amp;gt; slave stop;
 
-mysql&amp;gt;  CHANGE MASTER TO &lt;span class="nv"&gt;MASTER_HOST&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="s1"&gt;'192.168.100.166'&lt;/span&gt;, &lt;span class="nv"&gt;MASTER_USER&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="s1"&gt;'backup'&lt;/span&gt;, &lt;span class="nv"&gt;MASTER_PASSWORD&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="s1"&gt;'yNZE7fK9*@aMA?*ppF'&lt;/span&gt;, &lt;span class="nv"&gt;MASTER_CONNECT_RETRY&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;60, &lt;span class="nv"&gt;MASTER_LOG_FILE&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="s1"&gt;'mysql-bin.000002, MASTER_LOG_POS=276'&lt;/span&gt;;
+mysql&amp;gt;  CHANGE MASTER TO &lt;span class="nv"&gt;MASTER_HOST&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;192.168.100.166&amp;#39;&lt;/span&gt;, &lt;span class="nv"&gt;MASTER_USER&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;backup&amp;#39;&lt;/span&gt;, &lt;span class="nv"&gt;MASTER_PASSWORD&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;yNZE7fK9*@aMA?*ppF&amp;#39;&lt;/span&gt;, &lt;span class="nv"&gt;MASTER_CONNECT_RETRY&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;60, &lt;span class="nv"&gt;MASTER_LOG_FILE&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;mysql-bin.000002, MASTER_LOG_POS=276&amp;#39;&lt;/span&gt;;
 
 mysql&amp;gt; slave start;
 &lt;/pre&gt;&lt;/div&gt;
+
+
 &lt;p&gt;vim /etc/my.cnf&lt;/p&gt;
 &lt;div class="codehilite"&gt;&lt;pre&gt;&lt;span class="c"&gt;# as slave&lt;/span&gt;
 replicate-do-db &lt;span class="o"&gt;=&lt;/span&gt;hello &lt;span class="c"&gt;#只复制某个库，多个写多行&lt;/span&gt;
@@ -458,6 +507,8 @@ replicate-ignore-db&lt;span class="o"&gt;=&lt;/span&gt;information_schema
 relay-log&lt;span class="o"&gt;=&lt;/span&gt;mysqld-relay-bin  &lt;span class="c"&gt;# 开启日志中继&lt;/span&gt;
 log-slave-updates  &lt;span class="c"&gt;# slave将复制事件写进自己的二进制日志&lt;/span&gt;
 &lt;/pre&gt;&lt;/div&gt;
+
+
 &lt;p&gt;serivce mysqld restart&lt;/p&gt;
 &lt;h4 id="_1"&gt;测试&lt;/h4&gt;
 &lt;p&gt;master2:&lt;/p&gt;
@@ -479,6 +530,8 @@ mysql&amp;gt; show master status&lt;span class="se"&gt;\G&lt;/span&gt;;
 Binlog_Ignore_DB: mysql,test,information_schema
 1 row in &lt;span class="nb"&gt;set&lt;/span&gt; &lt;span class="o"&gt;(&lt;/span&gt;0.00 sec&lt;span class="o"&gt;)&lt;/span&gt;
 &lt;/pre&gt;&lt;/div&gt;
+
+
 &lt;p&gt;slave:&lt;/p&gt;
 &lt;div class="codehilite"&gt;&lt;pre&gt;mysql&amp;gt; show slave status &lt;span class="se"&gt;\G&lt;/span&gt;;
 *************************** 1. row ***************************
@@ -517,7 +570,10 @@ mysql&amp;gt; &lt;span class="k"&gt;select&lt;/span&gt; * from &lt;span class="n
 +------+
 2 rows in &lt;span class="nb"&gt;set&lt;/span&gt; &lt;span class="o"&gt;(&lt;/span&gt;0.00 sec&lt;span class="o"&gt;)&lt;/span&gt;
 &lt;/pre&gt;&lt;/div&gt;
+
+
 &lt;!--less /var/log/mysqld.log--&gt;
+
 &lt;p&gt;最后的配置文件&lt;/p&gt;
 &lt;p&gt;master1:&lt;/p&gt;
 &lt;div class="codehilite"&gt;&lt;pre&gt;&lt;span class="c"&gt;# /etc/my.cnf&lt;/span&gt;
@@ -547,6 +603,8 @@ log-slave-updates  &lt;span class="c"&gt;# slave将复制事件写进自己的�
 auto-increment-increment &lt;span class="o"&gt;=&lt;/span&gt; 2  &lt;span class="c"&gt;# 每次递增的步长&lt;/span&gt;
 auto-increment-offset &lt;span class="o"&gt;=&lt;/span&gt; 1  &lt;span class="c"&gt;# 初始值&lt;/span&gt;
 &lt;/pre&gt;&lt;/div&gt;
+
+
 &lt;p&gt;master2:&lt;/p&gt;
 &lt;div class="codehilite"&gt;&lt;pre&gt;&lt;span class="c"&gt;# /etc/my.cnf&lt;/span&gt;
 &lt;span class="o"&gt;[&lt;/span&gt;mysqld&lt;span class="o"&gt;]&lt;/span&gt;
@@ -576,6 +634,8 @@ binlog-ignore-db&lt;span class="o"&gt;=&lt;/span&gt;information_schema
 auto-increment-increment &lt;span class="o"&gt;=&lt;/span&gt; 2  &lt;span class="c"&gt;# 每次递增的步长&lt;/span&gt;
 auto-increment-offset &lt;span class="o"&gt;=&lt;/span&gt; 2  &lt;span class="c"&gt;# 初始值&lt;/span&gt;
 &lt;/pre&gt;&lt;/div&gt;
+
+
 &lt;h2 id="_2"&gt;参考&lt;/h2&gt;
 &lt;ul&gt;
 &lt;li&gt;&lt;a href="http://www.d5s.cn/archives/95"&gt;MYSQL 主从服务器配置 | 无影的博客&lt;/a&gt;&lt;/li&gt;
