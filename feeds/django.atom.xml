@@ -1,5 +1,58 @@
 <?xml version="1.0" encoding="utf-8"?>
-<feed xmlns="http://www.w3.org/2005/Atom"><title>Mozillazg's Blog</title><link href="http://mozillazg.com/" rel="alternate"></link><link href="http://mozillazg.com/feeds/django.atom.xml" rel="self"></link><id>http://mozillazg.com/</id><updated>2015-09-25T00:00:00+00:00</updated><entry><title>配置 django-rq 在 admin 后台显示队列管理页面</title><link href="http://mozillazg.com/2015/09/how-to-configure-for-show-django-rq-admin.html" rel="alternate"></link><updated>2015-09-25T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2015-09-25:2015/09/how-to-configure-for-show-django-rq-admin.html</id><summary type="html">&lt;p&gt;效果：&lt;/p&gt;
+<feed xmlns="http://www.w3.org/2005/Atom"><title>Mozillazg's Blog</title><link href="http://mozillazg.com/" rel="alternate"></link><link href="http://mozillazg.com/feeds/django.atom.xml" rel="self"></link><id>http://mozillazg.com/</id><updated>2015-11-01T00:00:00+00:00</updated><entry><title>解决在 Django 中使用 rq 或 celery 任务队列有时会出现 DoesNotExist 的问题</title><link href="http://mozillazg.com/2015/11/django-use-queue-maybe-raise-object-not-exist-error.html" rel="alternate"></link><updated>2015-11-01T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2015-11-01:2015/11/django-use-queue-maybe-raise-object-not-exist-error.html</id><summary type="html">&lt;p&gt;在 Django 中下面的代码有时会抛出 &lt;code&gt;DoesNotExist&lt;/code&gt; 异常：&lt;/p&gt;
+&lt;div class="codehilite"&gt;&lt;pre&gt;&lt;span class="err"&gt;@&lt;/span&gt;&lt;span class="n"&gt;app&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="n"&gt;task&lt;/span&gt;
+&lt;span class="n"&gt;def&lt;/span&gt; &lt;span class="n"&gt;job1&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;pk&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;&lt;span class="o"&gt;:&lt;/span&gt;
+    &lt;span class="n"&gt;Foobar&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="n"&gt;objects&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="n"&gt;get&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;pk&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="n"&gt;pk&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+
+
+&lt;span class="err"&gt;@&lt;/span&gt;&lt;span class="n"&gt;transaction&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="n"&gt;atomic&lt;/span&gt;
+&lt;span class="n"&gt;def&lt;/span&gt; &lt;span class="n"&gt;foo&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;request&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;&lt;span class="o"&gt;:&lt;/span&gt;
+    &lt;span class="n"&gt;foobar&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;Foobar&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="n"&gt;objects&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="n"&gt;create&lt;/span&gt;&lt;span class="p"&gt;(...)&lt;/span&gt;
+    &lt;span class="n"&gt;job1&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="n"&gt;delay&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;foobar&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="n"&gt;pk&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+    &lt;span class="p"&gt;...&lt;/span&gt;
+    &lt;span class="k"&gt;return&lt;/span&gt; &lt;span class="p"&gt;...&lt;/span&gt;
+&lt;/pre&gt;&lt;/div&gt;
+
+
+&lt;p&gt;上面的代码有时就会出现: &lt;code&gt;DoesNotExist: Foobar matching query does not exist.&lt;/code&gt; 异常。
+为什么为出现这种情况呢?&lt;/p&gt;
+&lt;p&gt;原来在这种情况下只在 view return 的时候 Django 才会提交数据库事物，如果 view 中有异常的话会回滚事物。
+也就是说虽然我们通过 &lt;code&gt;create&lt;/code&gt; 方法创建了记录同时得到了一个主键，但是在事物提交之前这条记录其实并没有
+真实存在于数据库中，所以如果 job1 在 return 之前就立马执行了的话就会出现 &lt;code&gt;DoesNotExist&lt;/code&gt; 异常。（
+在实践中发现就算是使用 Django 默认的自动提交事物有时也会出现 &lt;code&gt;DoesNotExist&lt;/code&gt; 异常）&lt;/p&gt;
+&lt;p&gt;解决办法就是，只在事物执行成功的时候才执行放入任务队列的操作。有一个第三方 app: &lt;a href="https://github.com/carljm/django-transaction-hooks"&gt;django-transaction-hooks&lt;/a&gt;
+可以很方便的帮助我们解决这个问题:&lt;/p&gt;
+&lt;ol&gt;
+&lt;li&gt;安装: &lt;code&gt;pip install django-transaction-hooks&lt;/code&gt;&lt;/li&gt;
+&lt;li&gt;
+&lt;p&gt;修改 settings 中 &lt;code&gt;DATABASES&lt;/code&gt; 的值，将  &lt;code&gt;ENGINE&lt;/code&gt; 替换为这个包内置的 engine。
+   postgresql 替换为 &lt;code&gt;transaction_hooks.backends.postgresql_psycopg2&lt;/code&gt;,
+   mysql 替换为 &lt;code&gt;transaction_hooks.backends.mysql&lt;/code&gt;,
+   sqlite 替换为 &lt;code&gt;transaction_hooks.backends.sqlite3&lt;/code&gt;,
+   postgis 替换为 &lt;code&gt;transaction_hooks.backends.postgis&lt;/code&gt; 比如：&lt;/p&gt;
+&lt;div class="codehilite"&gt;&lt;pre&gt;&lt;span class="n"&gt;DATABASES&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="p"&gt;{&lt;/span&gt;
+&lt;span class="err"&gt;&amp;#39;&lt;/span&gt;&lt;span class="k"&gt;default&lt;/span&gt;&lt;span class="err"&gt;&amp;#39;&lt;/span&gt;&lt;span class="o"&gt;:&lt;/span&gt; &lt;span class="p"&gt;{&lt;/span&gt;
+    &lt;span class="err"&gt;&amp;#39;&lt;/span&gt;&lt;span class="n"&gt;ENGINE&lt;/span&gt;&lt;span class="err"&gt;&amp;#39;&lt;/span&gt;&lt;span class="o"&gt;:&lt;/span&gt; &lt;span class="err"&gt;&amp;#39;&lt;/span&gt;&lt;span class="n"&gt;transaction_hooks&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="n"&gt;backends&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="n"&gt;postgresql_psycopg2&lt;/span&gt;&lt;span class="err"&gt;&amp;#39;&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;
+    &lt;span class="err"&gt;&amp;#39;&lt;/span&gt;&lt;span class="n"&gt;NAME&lt;/span&gt;&lt;span class="err"&gt;&amp;#39;&lt;/span&gt;&lt;span class="o"&gt;:&lt;/span&gt; &lt;span class="err"&gt;&amp;#39;&lt;/span&gt;&lt;span class="n"&gt;foo&lt;/span&gt;&lt;span class="err"&gt;&amp;#39;&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;
+    &lt;span class="p"&gt;},&lt;/span&gt;
+&lt;span class="p"&gt;}&lt;/span&gt;
+&lt;/pre&gt;&lt;/div&gt;
+
+
+&lt;ol&gt;
+&lt;li&gt;
+&lt;p&gt;使用 &lt;code&gt;connection.on_commit&lt;/code&gt; 来执行需要在事物成功提交时才执行的操作：&lt;/p&gt;
+&lt;p&gt;connection.on_commit(lambda: job1.delay(foobar.pk))&lt;/p&gt;
+&lt;/li&gt;
+&lt;/ol&gt;
+&lt;/li&gt;
+&lt;/ol&gt;
+&lt;p&gt;详情请查看文档：&lt;a href="https://django-transaction-hooks.readthedocs.org"&gt;https://django-transaction-hooks.readthedocs.org&lt;/a&gt;&lt;/p&gt;
+&lt;h2 id="_1"&gt;参考资料&lt;/h2&gt;
+&lt;ul&gt;
+&lt;li&gt;《High Performance Django》&lt;/li&gt;
+&lt;li&gt;&lt;a href="http://celery.readthedocs.org/en/latest/userguide/tasks.html#database-transactions"&gt;http://celery.readthedocs.org/en/latest/userguide/tasks.html#database-transactions&lt;/a&gt;&lt;/li&gt;
+&lt;/ul&gt;</summary><category term="rq"></category><category term="celery"></category><category term="django-rq"></category></entry><entry><title>配置 django-rq 在 admin 后台显示队列管理页面</title><link href="http://mozillazg.com/2015/09/how-to-configure-for-show-django-rq-admin.html" rel="alternate"></link><updated>2015-09-25T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2015-09-25:2015/09/how-to-configure-for-show-django-rq-admin.html</id><summary type="html">&lt;p&gt;效果：&lt;/p&gt;
 &lt;p&gt;&lt;img alt="django-rq-admin-1" src="/static/images/django/django-rq-admin-1.png" /&gt;&lt;/p&gt;
 &lt;p&gt;&lt;img alt="django-rq-admin-2" src="/static/images/django/django-rq-admin-2.png" /&gt;&lt;/p&gt;
 &lt;p&gt;&lt;img alt="django-rq-admin-2" src="/static/images/django/django-rq-admin-3.png" /&gt;&lt;/p&gt;
