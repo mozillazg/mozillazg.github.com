@@ -1,0 +1,607 @@
+<!DOCTYPE html>
+<html lang="zh-hans" prefix="og: http://ogp.me/ns# fb: https://www.facebook.com/2008/fbml" class="han-init">
+<head>
+    <title>让我们一起来构建一个模版引擎（二） - Mozillazg's Blog</title>
+    <!-- Using the latest rendering mode for IE -->
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+
+    <link href="https://mozillazg.com/favicon.ico" rel="icon">
+
+<link rel="canonical" href="https://mozillazg.com/2016/03/let-us-build-a-template-engine-part2.html">
+
+        <meta name="author" content="mozillazg" />
+        <meta name="keywords" content="lsbate,让我们一起来构建一个模版引擎" />
+        <meta name="description" content="在 上篇文章 中我们的模版引擎实现了变量和注释功能，同时在文章的最后我给大家留了一个 问题：如何实现支持 if 和 for 的标签功能: {% if user.is_admin %} admin, {{ user.name }} {% elif user.is_staff %} staff {% else %} others {% endif %} {% for name in names %} {{ name }} {% endfor %} 在本篇文章中我们将一起来实现这个功能。 if ... elif ... else ... endif 首先我们来实现对 if 语句的支持。 if 语句的语法如下: {% if True %} ... {% elif True %} ... {% else %} ... {% endif %} 我们首先要做的跟之前一样，那就是确定匹配标签语法的正则表达式。这里我们用的是下面 的正则来匹配标签语法: re_tag ..." />
+
+        <meta property="og:site_name" content="Mozillazg's Blog" />
+        <meta property="og:type" content="article"/>
+        <meta property="og:title" content="让我们一起来构建一个模版引擎（二）"/>
+        <meta property="og:url" content="https://mozillazg.com/2016/03/let-us-build-a-template-engine-part2.html"/>
+        <meta property="og:description" content="在 上篇文章 中我们的模版引擎实现了变量和注释功能，同时在文章的最后我给大家留了一个 问题：如何实现支持 if 和 for 的标签功能: {% if user.is_admin %} admin, {{ user.name }} {% elif user.is_staff %} staff {% else %} others {% endif %} {% for name in names %} {{ name }} {% endfor %} 在本篇文章中我们将一起来实现这个功能。 if ... elif ... else ... endif 首先我们来实现对 if 语句的支持。 if 语句的语法如下: {% if True %} ... {% elif True %} ... {% else %} ... {% endif %} 我们首先要做的跟之前一样，那就是确定匹配标签语法的正则表达式。这里我们用的是下面 的正则来匹配标签语法: re_tag ..."/>
+        <meta property="article:published_time" content="2016-03-18" />
+            <meta property="article:section" content="python" />
+            <meta property="article:tag" content="lsbate" />
+            <meta property="article:tag" content="让我们一起来构建一个模版引擎" />
+            <meta property="article:author" content="mozillazg" />
+
+
+    <!-- Bootstrap -->
+        <link rel="stylesheet" href="https://mozillazg.com/theme/css/bootstrap.min.css" type="text/css"/>
+    <link href="https://mozillazg.com/theme/css/font-awesome.min.css" rel="stylesheet">
+
+    <link href="https://mozillazg.com/theme/css/pygments/solarizedlight.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://mozillazg.com/theme/css/style.css" type="text/css"/>
+            <link href="https://mozillazg.com/static/yue.css" rel="stylesheet">
+            <link href="https://mozillazg.com/static/custom.css" rel="stylesheet">
+
+        <link href="https://mozillazg.com/feeds/all.atom.xml" type="application/atom+xml" rel="alternate"
+              title="Mozillazg's Blog ATOM Feed"/>
+
+        <link href="https://mozillazg.com/feeds/all.rss.xml" type="application/rss+xml" rel="alternate"
+              title="Mozillazg's Blog RSS Feed"/>
+
+
+        <link href="https://mozillazg.com/feeds/python.atom.xml" type="application/atom+xml" rel="alternate"
+              title="Mozillazg's Blog python ATOM Feed"/>
+
+    <style>
+        .container {
+            max-width: 970px;
+        }
+    </style>
+<style>
+article .page-header {
+    border-bottom: none;
+    margin-bottom: 55px;
+}
+article .page-header h1 {
+    font-size: 3em;
+    font-weight: 500;
+}
+article .published {
+    font-size: 1.8rem;
+    /*font-weight: 400;*/
+    color: #9EABB3;
+    margin-top: 1.1rem;
+}
+article .entry-content {
+    color: #2F2F2F;
+}
+article .entry-content .article-info {
+    border-bottom: 1px solid #dededc;
+    margin-bottom: 2em;
+}
+</style>
+</head>
+<body>
+
+<div class="navbar navbar-default navbar-fixed-top" role="navigation">
+	<div class="container">
+        <div class="navbar-header">
+            <button type="button" class="navbar-toggle" data-toggle="collapse" data-target=".navbar-ex1-collapse">
+                <span class="sr-only">Toggle navigation</span>
+                <span class="icon-bar"></span>
+                <span class="icon-bar"></span>
+                <span class="icon-bar"></span>
+            </button>
+            <a href="https://mozillazg.com/" class="navbar-brand">
+Mozillazg's Blog            </a>
+        </div>
+        <div class="collapse navbar-collapse navbar-ex1-collapse">
+            <ul class="nav navbar-nav">
+                    <li><a href="/index.html">Home</a></li>
+                    <li><a href="/archives.html">Archives</a></li>
+                         <li><a href="https://mozillazg.com/2014/10/pages/about-me.html">
+                             About me
+                          </a></li>
+            </ul>
+            <ul class="nav navbar-nav navbar-right">
+              <li><a href="https://mozillazg.com/archives.html"><i class="fa fa-th-list"></i><span class="icon-label">Archives</span></a></li>
+            </ul>
+        </div>
+        <!-- /.navbar-collapse -->
+    </div>
+</div> <!-- /.navbar -->
+<!-- Banner -->
+<!-- End Banner -->
+<div class="container">
+    <div class="row">
+        <div class="col-lg-12">
+    <section id="content" class="yue">
+        <article>
+            <header class="page-header text-center">
+                <h1>
+                    <a href="https://mozillazg.com/2016/03/let-us-build-a-template-engine-part2.html"
+                       rel="bookmark"
+                       title="Permalink to 让我们一起来构建一个模版引擎（二）">
+                        让我们一起来构建一个模版引擎（二）
+                    </a>
+                </h1>
+                <p class="published">
+                    <time datetime="2016-03-18T00:00:00+00:00">
+                    周五 18 三月 2016
+                    </time>
+                </p>
+            </header>
+            <div class="entry-content">
+                <div class="well-sm article-info">
+<footer class="post-info">
+        <a href="https://mozillazg.com/category/python.html">python</a>
+
+
+<span class="label label-default hide">Tags</span>
+	<a href="https://mozillazg.com/tag/lsbate.html">lsbate</a>
+        /
+	<a href="https://mozillazg.com/tag/rang-wo-men-qi-lai-gou-jian-ge-mo-ban-yin-qing.html">让我们一起来构建一个模版引擎</a>
+    
+</footer><!-- /.post-info -->                </div>
+                <div>
+                <p>在 <a class="reference external" href="https://mozillazg.com/2016/03/let-us-build-a-template-engine-part1.html">上篇文章</a> 中我们的模版引擎实现了变量和注释功能，同时在文章的最后我给大家留了一个
+问题：如何实现支持 <tt class="docutils literal">if</tt> 和 <tt class="docutils literal">for</tt> 的标签功能:</p>
+<div class="highlight"><pre>{% if user.is_admin %}
+    admin, {{ user.name }}
+{% elif user.is_staff %}
+    staff
+{% else %}
+    others
+{% endif %}
+
+{% for name in names %}
+    {{ name }}
+{% endfor %}
+</pre></div>
+<p>在本篇文章中我们将一起来实现这个功能。</p>
+<div class="section" id="if-elif-else-endif">
+<h2>if ... elif ... else ... endif</h2>
+<p>首先我们来实现对 <tt class="docutils literal">if</tt> 语句的支持。 <tt class="docutils literal">if</tt> 语句的语法如下:</p>
+<div class="highlight"><pre>{% if True %}
+...
+{% elif True %}
+...
+{% else %}
+...
+{% endif %}
+</pre></div>
+<p>我们首先要做的跟之前一样，那就是确定匹配标签语法的正则表达式。这里我们用的是下面
+的正则来匹配标签语法:</p>
+<div class="highlight"><pre><span class="n">re_tag</span> <span class="o">=</span> <span class="n">re</span><span class="o">.</span><span class="n">compile</span><span class="p">(</span><span class="s">r&#39;\{% .*? %\}&#39;</span><span class="p">)</span>
+
+<span class="o">&gt;&gt;&gt;</span> <span class="n">re_tag</span><span class="o">.</span><span class="n">findall</span><span class="p">(</span><span class="s">&#39;{</span><span class="si">% i</span><span class="s">f True %}...{</span><span class="si">% e</span><span class="s">lif True %}...{</span><span class="si">% e</span><span class="s">lse %}...{</span><span class="si">% e</span><span class="s">ndif %}&#39;</span><span class="p">)</span>
+<span class="p">[</span><span class="s">&#39;{</span><span class="si">% i</span><span class="s">f True %}&#39;</span><span class="p">,</span> <span class="s">&#39;{</span><span class="si">% e</span><span class="s">lif True %}&#39;</span><span class="p">,</span> <span class="s">&#39;{</span><span class="si">% e</span><span class="s">lse %}&#39;</span><span class="p">,</span> <span class="s">&#39;{</span><span class="si">% e</span><span class="s">ndif %}&#39;</span><span class="p">]</span>
+</pre></div>
+<p>然后就是生成代码了， <tt class="docutils literal">if</tt> 语句跟之前的变量不一样那就是：需要进行缩进切换，这一点需要注意一下。</p>
+<p>下面我们来看一下为了支持 <tt class="docutils literal">if</tt> 标签增加了哪些代码吧(完整代码可以从 Github 上下载 <a class="reference external" href="https://github.com/mozillazg/lsbate/raw/master/part2/template2a.py">template2a.py</a> ):</p>
+<div class="highlight"><pre><span class="k">class</span> <span class="nc">Template</span><span class="p">:</span>
+
+    <span class="c"># ...</span>
+    <span class="c"># 注释</span>
+    <span class="bp">self</span><span class="o">.</span><span class="n">re_comment</span> <span class="o">=</span> <span class="n">re</span><span class="o">.</span><span class="n">compile</span><span class="p">(</span><span class="s">r&#39;\{# .*? #\}&#39;</span><span class="p">)</span>
+    <span class="c"># 标签</span>
+    <span class="bp">self</span><span class="o">.</span><span class="n">re_tag</span> <span class="o">=</span> <span class="n">re</span><span class="o">.</span><span class="n">compile</span><span class="p">(</span><span class="s">r&#39;\{% .*? %\}&#39;</span><span class="p">)</span>
+    <span class="c"># 用于按变量，注释，标签分割模版字符串</span>
+    <span class="bp">self</span><span class="o">.</span><span class="n">re_tokens</span> <span class="o">=</span> <span class="n">re</span><span class="o">.</span><span class="n">compile</span><span class="p">(</span><span class="s">r&#39;&#39;&#39;(</span>
+<span class="s">        (?:\{\{ .*? \}\})</span>
+<span class="s">        |(?:\{\# .*? \#\})</span>
+<span class="s">        |(?:\{% .*? %\})</span>
+<span class="s">    )&#39;&#39;&#39;</span><span class="p">,</span> <span class="n">re</span><span class="o">.</span><span class="n">X</span><span class="p">)</span>
+
+    <span class="c"># 生成 def __func_name():</span>
+    <span class="c"># ...</span>
+
+    <span class="k">def</span> <span class="nf">_parse_text</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="c"># ...</span>
+        <span class="k">for</span> <span class="n">token</span> <span class="ow">in</span> <span class="n">tokens</span><span class="p">:</span>
+            <span class="c"># ...</span>
+            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">re_variable</span><span class="o">.</span><span class="n">match</span><span class="p">(</span><span class="n">token</span><span class="p">):</span>
+                <span class="c"># ...</span>
+            <span class="k">elif</span> <span class="bp">self</span><span class="o">.</span><span class="n">re_comment</span><span class="o">.</span><span class="n">match</span><span class="p">(</span><span class="n">token</span><span class="p">):</span>
+                <span class="k">continue</span>
+
+            <span class="c"># {% tag %}</span>
+            <span class="k">elif</span> <span class="bp">self</span><span class="o">.</span><span class="n">re_tag</span><span class="o">.</span><span class="n">match</span><span class="p">(</span><span class="n">token</span><span class="p">):</span>
+                <span class="c"># 将前面解析的字符串，变量写入到 code_builder 中</span>
+                <span class="c"># 因为标签生成的代码需要新起一行</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">flush_buffer</span><span class="p">()</span>
+
+                <span class="n">tag</span> <span class="o">=</span> <span class="n">token</span><span class="o">.</span><span class="n">strip</span><span class="p">(</span><span class="s">&#39;{%} &#39;</span><span class="p">)</span>
+                <span class="n">tag_name</span> <span class="o">=</span> <span class="n">tag</span><span class="o">.</span><span class="n">split</span><span class="p">()[</span><span class="mi">0</span><span class="p">]</span>
+                <span class="k">if</span> <span class="n">tag_name</span> <span class="ow">in</span> <span class="p">(</span><span class="s">&#39;if&#39;</span><span class="p">,</span> <span class="s">&#39;elif&#39;</span><span class="p">,</span> <span class="s">&#39;else&#39;</span><span class="p">):</span>
+                    <span class="c"># elif 和 else 之前需要向后缩进一步</span>
+                    <span class="k">if</span> <span class="n">tag_name</span> <span class="ow">in</span> <span class="p">(</span><span class="s">&#39;elif&#39;</span><span class="p">,</span> <span class="s">&#39;else&#39;</span><span class="p">):</span>
+                        <span class="bp">self</span><span class="o">.</span><span class="n">code_builder</span><span class="o">.</span><span class="n">backward</span><span class="p">()</span>
+                    <span class="bp">self</span><span class="o">.</span><span class="n">code_builder</span><span class="o">.</span><span class="n">add_line</span><span class="p">(</span><span class="s">&#39;{}:&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">tag</span><span class="p">))</span>
+                    <span class="c"># if 语句条件部分结束，向前缩进一步，为下一行做准备</span>
+                    <span class="bp">self</span><span class="o">.</span><span class="n">code_builder</span><span class="o">.</span><span class="n">forward</span><span class="p">()</span>
+                <span class="k">elif</span> <span class="n">tag_name</span> <span class="ow">in</span> <span class="p">(</span><span class="s">&#39;endif&#39;</span><span class="p">,):</span>
+                    <span class="c"># if 语句结束，向后缩进一步</span>
+                    <span class="bp">self</span><span class="o">.</span><span class="n">code_builder</span><span class="o">.</span><span class="n">backward</span><span class="p">()</span>
+
+            <span class="k">else</span><span class="p">:</span>
+                <span class="c"># ...</span>
+</pre></div>
+<p>上面代码的关键点是生成代码时的缩进控制:</p>
+<ul class="simple">
+<li>在遇到 <tt class="docutils literal">if</tt> 的时候, 需要在 <tt class="docutils literal">if</tt> 这一行之后将缩进往前移一步</li>
+<li>在遇到 <tt class="docutils literal">elif</tt> 和 <tt class="docutils literal">else</tt> 的时候, 需要将缩进先往后移一步，待 <tt class="docutils literal">elif</tt>/ <tt class="docutils literal">else</tt> 那一行完成后还需要把缩进再移回来</li>
+<li>在遇到 <tt class="docutils literal">endif</tt> 的时候, 我们知道此时 <tt class="docutils literal">if</tt> 语句已经结束了，需要把缩进往后移一步，
+离开 <tt class="docutils literal">if</tt> 语句的主体部分</li>
+</ul>
+<p>我们来看一下生成的代码:</p>
+<div class="highlight"><pre><span class="o">&gt;&gt;&gt;</span> <span class="kn">from</span> <span class="nn">template2a</span> <span class="kn">import</span> <span class="n">Template</span>
+<span class="o">&gt;&gt;&gt;</span> <span class="n">t</span> <span class="o">=</span> <span class="n">Template</span><span class="p">(</span><span class="s">&#39;&#39;&#39;</span>
+<span class="s">   ... {</span><span class="si">% i</span><span class="s">f score &gt;= 80 %}</span>
+<span class="s">   ... A</span>
+<span class="s">   ... {</span><span class="si">% e</span><span class="s">lif score &gt;= 60 %}</span>
+<span class="s">   ... B</span>
+<span class="s">   ... {</span><span class="si">% e</span><span class="s">lse %}</span>
+<span class="s">   ... C</span>
+<span class="s">   ... {</span><span class="si">% e</span><span class="s">ndif %}</span>
+<span class="s">   ... &#39;&#39;&#39;</span><span class="p">)</span>
+<span class="o">&gt;&gt;&gt;</span> <span class="n">t</span><span class="o">.</span><span class="n">code_builder</span>
+<span class="k">def</span> <span class="nf">__func_name</span><span class="p">():</span>
+    <span class="n">__result</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="n">__result</span><span class="o">.</span><span class="n">extend</span><span class="p">([</span><span class="s">&#39;</span><span class="se">\n</span><span class="s">&#39;</span><span class="p">])</span>
+    <span class="k">if</span> <span class="n">score</span> <span class="o">&gt;=</span> <span class="mi">80</span><span class="p">:</span>
+        <span class="n">__result</span><span class="o">.</span><span class="n">extend</span><span class="p">([</span><span class="s">&#39;</span><span class="se">\n</span><span class="s">A</span><span class="se">\n</span><span class="s">&#39;</span><span class="p">])</span>
+    <span class="k">elif</span> <span class="n">score</span> <span class="o">&gt;=</span> <span class="mi">60</span><span class="p">:</span>
+        <span class="n">__result</span><span class="o">.</span><span class="n">extend</span><span class="p">([</span><span class="s">&#39;</span><span class="se">\n</span><span class="s">B</span><span class="se">\n</span><span class="s">&#39;</span><span class="p">])</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="n">__result</span><span class="o">.</span><span class="n">extend</span><span class="p">([</span><span class="s">&#39;</span><span class="se">\n</span><span class="s">C</span><span class="se">\n</span><span class="s">&#39;</span><span class="p">])</span>
+    <span class="n">__result</span><span class="o">.</span><span class="n">extend</span><span class="p">([</span><span class="s">&#39;</span><span class="se">\n</span><span class="s">&#39;</span><span class="p">])</span>
+    <span class="k">return</span> <span class="s">&quot;&quot;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">__result</span><span class="p">)</span>
+</pre></div>
+<p>代码中的 <tt class="docutils literal">if</tt> 语句和缩进没有问题。下面再看一下 <tt class="docutils literal">render</tt> 的结果:</p>
+<div class="highlight"><pre><span class="o">&gt;&gt;&gt;</span> <span class="n">t</span><span class="o">.</span><span class="n">render</span><span class="p">({</span><span class="s">&#39;score&#39;</span><span class="p">:</span> <span class="mi">90</span><span class="p">})</span>
+ <span class="s">&#39;</span><span class="se">\n\n</span><span class="s">A</span><span class="se">\n\n</span><span class="s">&#39;</span>
+<span class="o">&gt;&gt;&gt;</span> <span class="n">t</span><span class="o">.</span><span class="n">render</span><span class="p">({</span><span class="s">&#39;score&#39;</span><span class="p">:</span> <span class="mi">70</span><span class="p">})</span>
+ <span class="s">&#39;</span><span class="se">\n\n</span><span class="s">B</span><span class="se">\n\n</span><span class="s">&#39;</span>
+<span class="o">&gt;&gt;&gt;</span> <span class="n">t</span><span class="o">.</span><span class="n">render</span><span class="p">({</span><span class="s">&#39;score&#39;</span><span class="p">:</span> <span class="mi">50</span><span class="p">})</span>
+ <span class="s">&#39;</span><span class="se">\n\n</span><span class="s">C</span><span class="se">\n\n</span><span class="s">&#39;</span>
+</pre></div>
+<p>对 <tt class="docutils literal">if</tt> 语句的支持就这样实现了。有了这次经验下面让我们一起来实现对 <tt class="docutils literal">for</tt> 循环的支持吧。</p>
+</div>
+<div class="section" id="for-endfor">
+<h2>for ... endfor</h2>
+<p>模版中的 <tt class="docutils literal">for</tt> 循环的语法如下:</p>
+<div class="highlight"><pre>{% for name in names %}
+    ...
+{% endfor %}
+</pre></div>
+<p>从语法上可以看出来跟 <tt class="docutils literal">if</tt> 语句是很相似了，甚至比 <tt class="docutils literal">if</tt> 语句还要简单。只需在原有 <tt class="docutils literal">if</tt> 语句代码
+的基础上稍作修改就可以(完整版可以从 Github 上下载 <a class="reference external" href="https://github.com/mozillazg/lsbate/raw/master/part2/template2b.py">template2b.py</a> ):</p>
+<div class="highlight"><pre><span class="k">class</span> <span class="nc">Template</span><span class="p">:</span>
+
+    <span class="c"># ...</span>
+
+    <span class="k">def</span> <span class="nf">_parse_text</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="c"># ...</span>
+            <span class="k">elif</span> <span class="bp">self</span><span class="o">.</span><span class="n">re_tag</span><span class="o">.</span><span class="n">match</span><span class="p">(</span><span class="n">token</span><span class="p">):</span>
+                <span class="c"># ...</span>
+                <span class="k">if</span> <span class="n">tag_name</span> <span class="ow">in</span> <span class="p">(</span><span class="s">&#39;if&#39;</span><span class="p">,</span> <span class="s">&#39;elif&#39;</span><span class="p">,</span> <span class="s">&#39;else&#39;</span><span class="p">,</span> <span class="s">&#39;for&#39;</span><span class="p">):</span>
+                    <span class="c"># ...</span>
+                <span class="k">elif</span> <span class="n">tag_name</span> <span class="ow">in</span> <span class="p">(</span><span class="s">&#39;endif&#39;</span><span class="p">,</span> <span class="s">&#39;endfor&#39;</span><span class="p">):</span>
+                    <span class="c"># ...</span>
+</pre></div>
+<p>可以看到其实就是修改了两行代码。按照惯例我们先来看一下生成的代码:</p>
+<div class="highlight"><pre><span class="o">&gt;&gt;&gt;</span> <span class="kn">from</span> <span class="nn">template2b</span> <span class="kn">import</span> <span class="n">Template</span>
+<span class="o">&gt;&gt;&gt;</span> <span class="n">t</span> <span class="o">=</span> <span class="n">Template</span><span class="p">(</span><span class="s">&#39;&#39;&#39;</span>
+<span class="s">   ... {</span><span class="si">% f</span><span class="s">or number in numbers %}</span>
+<span class="s">   ... {{ number }}</span>
+<span class="s">   ... {</span><span class="si">% e</span><span class="s">ndfor %}</span>
+<span class="s">   ... &#39;&#39;&#39;</span><span class="p">)</span>
+<span class="o">&gt;&gt;&gt;</span> <span class="n">t</span><span class="o">.</span><span class="n">code_builder</span>
+<span class="k">def</span> <span class="nf">__func_name</span><span class="p">():</span>
+    <span class="n">__result</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="n">__result</span><span class="o">.</span><span class="n">extend</span><span class="p">([</span><span class="s">&#39;</span><span class="se">\n</span><span class="s">&#39;</span><span class="p">])</span>
+    <span class="k">for</span> <span class="n">number</span> <span class="ow">in</span> <span class="n">numbers</span><span class="p">:</span>
+        <span class="n">__result</span><span class="o">.</span><span class="n">extend</span><span class="p">([</span><span class="s">&#39;</span><span class="se">\n</span><span class="s">&#39;</span><span class="p">,</span><span class="nb">str</span><span class="p">(</span><span class="n">number</span><span class="p">),</span><span class="s">&#39;</span><span class="se">\n</span><span class="s">&#39;</span><span class="p">])</span>
+    <span class="n">__result</span><span class="o">.</span><span class="n">extend</span><span class="p">([</span><span class="s">&#39;</span><span class="se">\n</span><span class="s">&#39;</span><span class="p">])</span>
+    <span class="k">return</span> <span class="s">&quot;&quot;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">__result</span><span class="p">)</span>
+</pre></div>
+<p><tt class="docutils literal">render</tt> 效果:</p>
+<div class="highlight"><pre><span class="o">&gt;&gt;&gt;</span> <span class="n">t</span><span class="o">.</span><span class="n">render</span><span class="p">({</span><span class="s">&#39;numbers&#39;</span><span class="p">:</span> <span class="nb">range</span><span class="p">(</span><span class="mi">3</span><span class="p">)})</span>
+<span class="s">&#39;</span><span class="se">\n\n</span><span class="s">0</span><span class="se">\n\n</span><span class="s">1</span><span class="se">\n\n</span><span class="s">2</span><span class="se">\n\n</span><span class="s">&#39;</span>
+</pre></div>
+<p><tt class="docutils literal">for ... endfor</tt> 语法就这样实现了。是不是很简单😄？但是还没完😁</p>
+<p>相信大家都知道在 python 中 <tt class="docutils literal">for</tt> 循环其实还支持 <tt class="docutils literal">break</tt> 和 <tt class="docutils literal">else</tt> 。
+下面我们就一起来让我们的模版引擎的 <tt class="docutils literal">for</tt> 语法支持 <tt class="docutils literal">break</tt> 和 <tt class="docutils literal">else</tt> （可以从 Github 上下载: <a class="reference external" href="https://github.com/mozillazg/lsbate/raw/master/part2/template2c.py">template2c.py</a> ）</p>
+<!-- 至于如何让我们都模版都 ``for`` 标签也支持 ``break`` 和 ``else`` 这个任务就 -->
+<!-- 交给大家自己去实现了（也可以从 Github 上下载我的实现: `template2c.py`_ ）。 -->
+<div class="highlight"><pre><span class="k">class</span> <span class="nc">Template</span><span class="p">:</span>
+
+    <span class="c"># ...</span>
+
+    <span class="k">def</span> <span class="nf">_parse_text</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="c"># ...</span>
+            <span class="k">elif</span> <span class="bp">self</span><span class="o">.</span><span class="n">re_tag</span><span class="o">.</span><span class="n">match</span><span class="p">(</span><span class="n">token</span><span class="p">):</span>
+                <span class="c"># ...</span>
+                <span class="k">if</span> <span class="n">tag_name</span> <span class="ow">in</span> <span class="p">(</span><span class="s">&#39;if&#39;</span><span class="p">,</span> <span class="s">&#39;elif&#39;</span><span class="p">,</span> <span class="s">&#39;else&#39;</span><span class="p">,</span> <span class="s">&#39;for&#39;</span><span class="p">):</span>
+                    <span class="c"># ...</span>
+                <span class="k">elif</span> <span class="n">tag_name</span> <span class="ow">in</span> <span class="p">(</span><span class="s">&#39;break&#39;</span><span class="p">,):</span>
+                    <span class="bp">self</span><span class="o">.</span><span class="n">code_builder</span><span class="o">.</span><span class="n">add_line</span><span class="p">(</span><span class="n">tag</span><span class="p">)</span>
+                <span class="k">elif</span> <span class="n">tag_name</span> <span class="ow">in</span> <span class="p">(</span><span class="s">&#39;endif&#39;</span><span class="p">,</span> <span class="s">&#39;endfor&#39;</span><span class="p">):</span>
+                    <span class="c"># ...</span>
+</pre></div>
+<p>可以看到，其实也是只增加了两行代码。效果：</p>
+<div class="highlight"><pre><span class="kn">from</span> <span class="nn">template2c</span> <span class="kn">import</span> <span class="n">Template</span>
+
+<span class="o">&gt;&gt;&gt;</span> <span class="n">t</span> <span class="o">=</span> <span class="n">Template</span><span class="p">(</span><span class="s">&#39;&#39;&#39;</span>
+<span class="s">... {</span><span class="si">% f</span><span class="s">or number in numbers %}</span>
+<span class="s">...    {</span><span class="si">% i</span><span class="s">f number &gt; 2 %}</span>
+<span class="s">...       {% break %}</span>
+<span class="s">...    {</span><span class="si">% e</span><span class="s">lse %}</span>
+<span class="s">...       {{ number }}</span>
+<span class="s">...    {</span><span class="si">% e</span><span class="s">ndif %}</span>
+<span class="s">... {</span><span class="si">% e</span><span class="s">lse %}</span>
+<span class="s">...    no break</span>
+<span class="s">... {</span><span class="si">% e</span><span class="s">ndfor %}</span>
+<span class="s">... &#39;&#39;&#39;&#39;)</span>
+
+<span class="o">&gt;&gt;&gt;</span> <span class="n">t</span><span class="o">.</span><span class="n">code_builder</span>
+<span class="k">def</span> <span class="nf">__func_name</span><span class="p">():</span>
+    <span class="n">__result</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="n">__result</span><span class="o">.</span><span class="n">extend</span><span class="p">([</span><span class="s">&#39;</span><span class="se">\n</span><span class="s">&#39;</span><span class="p">])</span>
+    <span class="k">for</span> <span class="n">number</span> <span class="ow">in</span> <span class="n">numbers</span><span class="p">:</span>
+        <span class="n">__result</span><span class="o">.</span><span class="n">extend</span><span class="p">([</span><span class="s">&#39;</span><span class="se">\n</span><span class="s">   &#39;</span><span class="p">])</span>
+        <span class="k">if</span> <span class="n">number</span> <span class="o">&gt;</span> <span class="mi">2</span><span class="p">:</span>
+            <span class="n">__result</span><span class="o">.</span><span class="n">extend</span><span class="p">([</span><span class="s">&#39;</span><span class="se">\n</span><span class="s">      &#39;</span><span class="p">])</span>
+            <span class="k">break</span>
+            <span class="n">__result</span><span class="o">.</span><span class="n">extend</span><span class="p">([</span><span class="s">&#39;</span><span class="se">\n</span><span class="s">   &#39;</span><span class="p">])</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">__result</span><span class="o">.</span><span class="n">extend</span><span class="p">([</span><span class="s">&#39;</span><span class="se">\n</span><span class="s">      &#39;</span><span class="p">,</span><span class="nb">str</span><span class="p">(</span><span class="n">number</span><span class="p">),</span><span class="s">&#39;</span><span class="se">\n</span><span class="s">   &#39;</span><span class="p">])</span>
+        <span class="n">__result</span><span class="o">.</span><span class="n">extend</span><span class="p">([</span><span class="s">&#39;</span><span class="se">\n</span><span class="s">&#39;</span><span class="p">])</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="n">__result</span><span class="o">.</span><span class="n">extend</span><span class="p">([</span><span class="s">&#39;</span><span class="se">\n</span><span class="s">   no break</span><span class="se">\n</span><span class="s">&#39;</span><span class="p">])</span>
+    <span class="n">__result</span><span class="o">.</span><span class="n">extend</span><span class="p">([</span><span class="s">&#39;</span><span class="se">\n</span><span class="s">&#39;</span><span class="p">])</span>
+    <span class="k">return</span> <span class="s">&quot;&quot;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">__result</span><span class="p">)</span>
+
+
+<span class="o">&gt;&gt;&gt;</span> <span class="n">t</span><span class="o">.</span><span class="n">render</span><span class="p">({</span><span class="s">&#39;numbers&#39;</span><span class="p">:</span> <span class="nb">range</span><span class="p">(</span><span class="mi">3</span><span class="p">)})</span><span class="o">.</span><span class="n">replace</span><span class="p">(</span><span class="s">&#39;</span><span class="se">\n</span><span class="s">&#39;</span><span class="p">,</span> <span class="s">&#39;&#39;</span><span class="p">)</span>
+<span class="s">&#39;         0            1            2      no break&#39;</span>
+
+<span class="o">&gt;&gt;&gt;</span> <span class="n">t</span><span class="o">.</span><span class="n">render</span><span class="p">({</span><span class="s">&#39;numbers&#39;</span><span class="p">:</span> <span class="nb">range</span><span class="p">(</span><span class="mi">4</span><span class="p">)})</span><span class="o">.</span><span class="n">replace</span><span class="p">(</span><span class="s">&#39;</span><span class="se">\n</span><span class="s">&#39;</span><span class="p">,</span> <span class="s">&#39;&#39;</span><span class="p">)</span>
+<span class="s">&#39;         0            1            2            &#39;</span>
+</pre></div>
+<p>就这样我们的模版引擎对 <tt class="docutils literal">for</tt> 的支持算是比较完善了。
+至于生成的代码里的换行和空格暂时先不管，留待之后优化代码的时候再处理。</p>
+</div>
+<div class="section" id="id2">
+<h2>重构</h2>
+<p>我们的 <tt class="docutils literal">Template.render</tt> 方法代码随着功能的增加已经变成下面这样了:</p>
+<div class="highlight"><pre><span class="k">def</span> <span class="nf">_parse_text</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;解析模版&quot;&quot;&quot;</span>
+    <span class="n">tokens</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">re_tokens</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">raw_text</span><span class="p">)</span>
+
+    <span class="k">for</span> <span class="n">token</span> <span class="ow">in</span> <span class="n">tokens</span><span class="p">:</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">re_variable</span><span class="o">.</span><span class="n">match</span><span class="p">(</span><span class="n">token</span><span class="p">):</span>
+            <span class="n">variable</span> <span class="o">=</span> <span class="n">token</span><span class="o">.</span><span class="n">strip</span><span class="p">(</span><span class="s">&#39;{} &#39;</span><span class="p">)</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">buffered</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="s">&#39;str({})&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">variable</span><span class="p">))</span>
+        <span class="k">elif</span> <span class="bp">self</span><span class="o">.</span><span class="n">re_comment</span><span class="o">.</span><span class="n">match</span><span class="p">(</span><span class="n">token</span><span class="p">):</span>
+            <span class="k">continue</span>
+        <span class="k">elif</span> <span class="bp">self</span><span class="o">.</span><span class="n">re_tag</span><span class="o">.</span><span class="n">match</span><span class="p">(</span><span class="n">token</span><span class="p">):</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">flush_buffer</span><span class="p">()</span>
+
+            <span class="n">tag</span> <span class="o">=</span> <span class="n">token</span><span class="o">.</span><span class="n">strip</span><span class="p">(</span><span class="s">&#39;{%} &#39;</span><span class="p">)</span>
+            <span class="n">tag_name</span> <span class="o">=</span> <span class="n">tag</span><span class="o">.</span><span class="n">split</span><span class="p">()[</span><span class="mi">0</span><span class="p">]</span>
+            <span class="k">if</span> <span class="n">tag_name</span> <span class="ow">in</span> <span class="p">(</span><span class="s">&#39;if&#39;</span><span class="p">,</span> <span class="s">&#39;elif&#39;</span><span class="p">,</span> <span class="s">&#39;else&#39;</span><span class="p">,</span> <span class="s">&#39;for&#39;</span><span class="p">):</span>
+                <span class="k">if</span> <span class="n">tag_name</span> <span class="ow">in</span> <span class="p">(</span><span class="s">&#39;elif&#39;</span><span class="p">,</span> <span class="s">&#39;else&#39;</span><span class="p">):</span>
+                    <span class="bp">self</span><span class="o">.</span><span class="n">code_builder</span><span class="o">.</span><span class="n">backward</span><span class="p">()</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">code_builder</span><span class="o">.</span><span class="n">add_line</span><span class="p">(</span><span class="s">&#39;{}:&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">tag</span><span class="p">))</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">code_builder</span><span class="o">.</span><span class="n">forward</span><span class="p">()</span>
+            <span class="k">elif</span> <span class="n">tag_name</span> <span class="ow">in</span> <span class="p">(</span><span class="s">&#39;break&#39;</span><span class="p">,):</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">code_builder</span><span class="o">.</span><span class="n">add_line</span><span class="p">(</span><span class="n">tag</span><span class="p">)</span>
+            <span class="k">elif</span> <span class="n">tag_name</span> <span class="ow">in</span> <span class="p">(</span><span class="s">&#39;endif&#39;</span><span class="p">,</span> <span class="s">&#39;endfor&#39;</span><span class="p">):</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">code_builder</span><span class="o">.</span><span class="n">backward</span><span class="p">()</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">buffered</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="s">&#39;{}&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="nb">repr</span><span class="p">(</span><span class="n">token</span><span class="p">)))</span>
+</pre></div>
+<p>有什么问题呢？问题就是 <tt class="docutils literal">for</tt> 循环里的代码太长了，我们需要分割 <tt class="docutils literal">for</tt> 循环里的
+代码。比如把对变量，<tt class="docutils literal">if/for</tt> 的处理封装到单独的方法里。</p>
+<p>下面展示了一种方法（可以从 Github 下载 <a class="reference external" href="https://github.com/mozillazg/lsbate/raw/master/part2/template2d.py">template2d.py</a> ):</p>
+<div class="highlight"><pre><span class="k">def</span> <span class="nf">_parse_text</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;解析模版&quot;&quot;&quot;</span>
+    <span class="n">tokens</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">re_tokens</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">raw_text</span><span class="p">)</span>
+    <span class="n">handlers</span> <span class="o">=</span> <span class="p">(</span>
+        <span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">re_variable</span><span class="o">.</span><span class="n">match</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">_handle_variable</span><span class="p">),</span>   <span class="c"># {{ variable }}</span>
+        <span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">re_tag</span><span class="o">.</span><span class="n">match</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">_handle_tag</span><span class="p">),</span>             <span class="c"># {% tag %}</span>
+        <span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">re_comment</span><span class="o">.</span><span class="n">match</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">_handle_comment</span><span class="p">),</span>     <span class="c"># {# comment #}</span>
+    <span class="p">)</span>
+    <span class="n">default_handler</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_handle_string</span>                  <span class="c"># 普通字符串</span>
+
+    <span class="k">for</span> <span class="n">token</span> <span class="ow">in</span> <span class="n">tokens</span><span class="p">:</span>
+        <span class="k">for</span> <span class="n">match</span><span class="p">,</span> <span class="n">handler</span> <span class="ow">in</span> <span class="n">handlers</span><span class="p">:</span>
+            <span class="k">if</span> <span class="n">match</span><span class="p">(</span><span class="n">token</span><span class="p">):</span>
+                <span class="n">handler</span><span class="p">(</span><span class="n">token</span><span class="p">)</span>
+                <span class="k">break</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">default_handler</span><span class="p">(</span><span class="n">token</span><span class="p">)</span>
+
+<span class="k">def</span> <span class="nf">_handle_variable</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">token</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;处理变量&quot;&quot;&quot;</span>
+    <span class="n">variable</span> <span class="o">=</span> <span class="n">token</span><span class="o">.</span><span class="n">strip</span><span class="p">(</span><span class="s">&#39;{} &#39;</span><span class="p">)</span>
+    <span class="bp">self</span><span class="o">.</span><span class="n">buffered</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="s">&#39;str({})&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">variable</span><span class="p">))</span>
+
+<span class="k">def</span> <span class="nf">_handle_comment</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">token</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;处理注释&quot;&quot;&quot;</span>
+    <span class="k">pass</span>
+
+<span class="k">def</span> <span class="nf">_handle_string</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">token</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;处理字符串&quot;&quot;&quot;</span>
+    <span class="bp">self</span><span class="o">.</span><span class="n">buffered</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="s">&#39;{}&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="nb">repr</span><span class="p">(</span><span class="n">token</span><span class="p">)))</span>
+
+<span class="k">def</span> <span class="nf">_handle_tag</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">token</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;处理标签&quot;&quot;&quot;</span>
+    <span class="c"># 将前面解析的字符串，变量写入到 code_builder 中</span>
+    <span class="c"># 因为标签生成的代码需要新起一行</span>
+    <span class="bp">self</span><span class="o">.</span><span class="n">flush_buffer</span><span class="p">()</span>
+    <span class="n">tag</span> <span class="o">=</span> <span class="n">token</span><span class="o">.</span><span class="n">strip</span><span class="p">(</span><span class="s">&#39;{%} &#39;</span><span class="p">)</span>
+    <span class="n">tag_name</span> <span class="o">=</span> <span class="n">tag</span><span class="o">.</span><span class="n">split</span><span class="p">()[</span><span class="mi">0</span><span class="p">]</span>
+    <span class="bp">self</span><span class="o">.</span><span class="n">_handle_statement</span><span class="p">(</span><span class="n">tag</span><span class="p">,</span> <span class="n">tag_name</span><span class="p">)</span>
+
+<span class="k">def</span> <span class="nf">_handle_statement</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">tag</span><span class="p">,</span> <span class="n">tag_name</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;处理 if/for&quot;&quot;&quot;</span>
+    <span class="k">if</span> <span class="n">tag_name</span> <span class="ow">in</span> <span class="p">(</span><span class="s">&#39;if&#39;</span><span class="p">,</span> <span class="s">&#39;elif&#39;</span><span class="p">,</span> <span class="s">&#39;else&#39;</span><span class="p">,</span> <span class="s">&#39;for&#39;</span><span class="p">):</span>
+        <span class="c"># elif 和 else 之前需要向后缩进一步</span>
+        <span class="k">if</span> <span class="n">tag_name</span> <span class="ow">in</span> <span class="p">(</span><span class="s">&#39;elif&#39;</span><span class="p">,</span> <span class="s">&#39;else&#39;</span><span class="p">):</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">code_builder</span><span class="o">.</span><span class="n">backward</span><span class="p">()</span>
+        <span class="c"># if True:, elif True:, else:, for xx in yy:</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">code_builder</span><span class="o">.</span><span class="n">add_line</span><span class="p">(</span><span class="s">&#39;{}:&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">tag</span><span class="p">))</span>
+        <span class="c"># if/for 表达式部分结束，向前缩进一步，为下一行做准备</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">code_builder</span><span class="o">.</span><span class="n">forward</span><span class="p">()</span>
+    <span class="k">elif</span> <span class="n">tag_name</span> <span class="ow">in</span> <span class="p">(</span><span class="s">&#39;break&#39;</span><span class="p">,):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">code_builder</span><span class="o">.</span><span class="n">add_line</span><span class="p">(</span><span class="n">tag</span><span class="p">)</span>
+    <span class="k">elif</span> <span class="n">tag_name</span> <span class="ow">in</span> <span class="p">(</span><span class="s">&#39;endif&#39;</span><span class="p">,</span> <span class="s">&#39;endfor&#39;</span><span class="p">):</span>
+        <span class="c"># if/for 结束，向后缩进一步</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">code_builder</span><span class="o">.</span><span class="n">backward</span><span class="p">()</span>
+</pre></div>
+<p>这样处理后是不是比之前那个都放在 <tt class="docutils literal">_parse_text</tt> 方法里要好很多？</p>
+<p>至此，我们的模版引擎已经支持了如下语法:</p>
+<ul class="simple">
+<li>变量: <tt class="docutils literal">{{ variable }}</tt></li>
+<li>注释: <tt class="docutils literal">{# comment #}</tt></li>
+<li><tt class="docutils literal">if</tt> 语句: <tt class="docutils literal">{% if ... %} ... {% elif ... %} ... {% else %} ... {% endif %}</tt></li>
+<li><tt class="docutils literal">for</tt> 循环: <tt class="docutils literal">{% for ... in ... %} ... {% break %} ... {% else %} ... {% endfor %}</tt></li>
+</ul>
+<p>之后的文章还将实现其他实用的模版语法，比如 <tt class="docutils literal">include</tt>, <tt class="docutils literal">extends</tt> 模版继承等。</p>
+<p><tt class="docutils literal">include</tt> 的语法(item.html 是个独立的模版文件, list.html 中 include item.html):</p>
+<div class="highlight"><pre>{# item.html #}
+&lt;li&gt;{{ item }}&lt;/li&gt;
+
+{# list.html #}
+&lt;ul&gt;
+    {% for name in names %}
+        {% include &quot;item.html&quot; %}
+    {% endfor %}
+&lt;/ul&gt;
+</pre></div>
+<p>list.html 渲染后将生成类似下面这样的字符串:</p>
+<div class="highlight"><pre><span class="nt">&lt;ul&gt;</span>
+    <span class="nt">&lt;li&gt;</span>Tom<span class="nt">&lt;/li&gt;</span>
+    <span class="nt">&lt;li&gt;</span>Jim<span class="nt">&lt;li&gt;</span>
+<span class="nt">&lt;/ul&gt;</span>
+</pre></div>
+<p><tt class="docutils literal">extends</tt> 的语法(base.html 是基础模版, child.html 继承 base.html 然后重载 base.html
+中定义的 block):</p>
+<div class="highlight"><pre>{# base.html #}
+&lt;div id=&quot;content&quot;&gt;
+{% block content %}
+    parent_content
+{% endblock content %}
+&lt;/div&gt;
+&lt;footer id=&quot;footer&quot;&gt;
+{% block footer %}
+    (c) 2016 example.com
+{% endblock footer %}
+&lt;/footer&gt;
+</pre></div>
+<p>child.html:</p>
+<div class="highlight"><pre>{% extends &quot;base.html&quot; %}
+
+{% block content %}
+    child_content
+    {{ block.super }}
+{% endblock content %}
+</pre></div>
+<p>child.html 渲染后将生成类似下面这样的字符串:</p>
+<div class="highlight"><pre><span class="nt">&lt;div</span> <span class="na">id=</span><span class="s">&quot;content&quot;</span><span class="nt">&gt;</span>
+    child_content
+    parent_content
+<span class="nt">&lt;/div&gt;</span>
+<span class="nt">&lt;footer</span> <span class="na">id=</span><span class="s">&quot;footer&quot;</span><span class="nt">&gt;</span>
+    (c) 2016 example.com
+<span class="nt">&lt;/footer&gt;</span>
+</pre></div>
+<p>那么，该如何实现 <tt class="docutils literal">include</tt> 和 <tt class="docutils literal">extends</tt> 功能呢？
+我将在 <a class="reference external" href="#">第三篇文章</a> 中向你详细的讲解。敬请期待。</p>
+</div>
+
+                </div>
+            </div>
+            <!-- /.entry-content -->
+<section class="well" id="related-posts">
+    <h4>Related Posts:</h4>
+    <ul>
+        <li><a href="https://mozillazg.com/2016/03/let-us-build-a-template-engine-part1.html">让我们一起来构建一个模版引擎（一）</a></li>
+    </ul>
+</section>
+    <hr/>
+    <section class="comments" id="comments">
+        <h2>Comments</h2>
+
+        <div id="disqus_thread"></div>
+        <script type="text/javascript">
+            /* * * CONFIGURATION VARIABLES: EDIT BEFORE PASTING INTO YOUR WEBPAGE * * */
+            var disqus_shortname = 'my-github-blog'; // required: replace example with your forum shortname
+
+                    var disqus_identifier = 'let-us-build-a-template-engine-part2';
+                var disqus_url = 'https://mozillazg.com/2016/03/let-us-build-a-template-engine-part2.html';
+
+            var disqus_config = function () {
+                this.language = "zh-hans";
+            };
+
+            /* * * DON'T EDIT BELOW THIS LINE * * */
+            (function () {
+                var dsq = document.createElement('script');
+                dsq.type = 'text/javascript';
+                dsq.async = true;
+                dsq.src = '//' + disqus_shortname + '.disqus.com/embed.js';
+                (document.getElementsByTagName('head')[0] || document.getElementsByTagName('body')[0]).appendChild(dsq);
+            })();
+        </script>
+        <noscript>Please enable JavaScript to view the <a href="http://disqus.com/?ref_noscript">comments powered by
+            Disqus.</a></noscript>
+        <a href="http://disqus.com" class="dsq-brlink">comments powered by <span class="logo-disqus">Disqus</span></a>
+
+    </section>
+        </article>
+    </section>
+
+        </div>
+    </div>
+</div>
+<footer>
+   <div class="container">
+      <hr>
+      <div class="row">
+         <div class="col-xs-10">&copy; 2016 mozillazg
+            &middot; Powered by <a href="https://github.com/DandyDev/pelican-bootstrap3" target="_blank">pelican-bootstrap3</a>,
+            <a href="http://docs.getpelican.com/" target="_blank">Pelican</a>,
+            <a href="http://getbootstrap.com" target="_blank">Bootstrap</a>              <p><small>  <a rel="license" href="http://creativecommons.org/licenses/by-sa/4.0/"><img alt="Creative Commons License" style="border-width:0" src="/static/images/by-sa-80x15.png" /></a>
+    &quot;<span xmlns:dct="http://purl.org/dc/terms/" property="dct:title">Mozillazg's Blog</span>&quot; by <a xmlns:cc="http://creativecommons.org/ns#" href="https://mozillazg.com" property="cc:attributionName" rel="cc:attributionURL">mozillazg</a> is
+  licensed under a <a rel="license" href="http://creativecommons.org/licenses/by-sa/4.0/">Creative Commons Attribution-ShareAlike 4.0 International License</a>, except where indicated otherwise.
+</small></p>
+         </div>
+         <div class="col-xs-2"><p class="pull-right"><i class="fa fa-arrow-up"></i> <a href="#">Back to top</a></p></div>
+      </div>
+   </div>
+</footer>
+<script src="https://mozillazg.com/theme/js/jquery.min.js"></script>
+
+<!-- Include all compiled plugins (below), or include individual files as needed -->
+<script src="https://mozillazg.com/theme/js/bootstrap.min.js"></script>
+
+<!-- Enable responsive features in IE8 with Respond.js (https://github.com/scottjehl/Respond) -->
+<script src="https://mozillazg.com/theme/js/respond.min.js"></script>
+
+    <!-- Disqus -->
+    <script type="text/javascript">
+        /* * * CONFIGURATION VARIABLES: EDIT BEFORE PASTING INTO YOUR WEBPAGE * * */
+        var disqus_shortname = 'my-github-blog'; // required: replace example with your forum shortname
+
+        /* * * DON'T EDIT BELOW THIS LINE * * */
+        (function () {
+            var s = document.createElement('script');
+            s.async = true;
+            s.type = 'text/javascript';
+            s.src = '//' + disqus_shortname + '.disqus.com/count.js';
+            (document.getElementsByTagName('HEAD')[0] || document.getElementsByTagName('BODY')[0]).appendChild(s);
+        }());
+    </script>
+    <!-- End Disqus Code -->
+
+</body>
+</html>
