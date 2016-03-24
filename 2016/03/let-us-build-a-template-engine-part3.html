@@ -1,0 +1,539 @@
+<!DOCTYPE html>
+<html lang="zh-hans" prefix="og: http://ogp.me/ns# fb: https://www.facebook.com/2008/fbml" class="han-init">
+<head>
+    <title>让我们一起来构建一个模版引擎（三） - Mozillazg's Blog</title>
+    <!-- Using the latest rendering mode for IE -->
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+
+    <link href="https://mozillazg.com/favicon.ico" rel="icon">
+
+<link rel="canonical" href="https://mozillazg.com/2016/03/let-us-build-a-template-engine-part3.html">
+
+        <meta name="author" content="mozillazg" />
+        <meta name="keywords" content="lsbate,让我们一起来构建一个模版引擎" />
+        <meta name="description" content="在 上篇文章 中我们的模版引擎实现了对 if 和 for 对支持，同时在文章的最后我给大家留了一个 问题：如何实现支持 include 和 extends 的标签功能。 在本篇文章中我们将一起来动手实现这两个功能。 include include 标签对语法是这样的：假设有一个 item.html 模版文件，它的内容如下: &lt;li&gt;{{ item }}&lt;/li&gt; 还有一个我们要渲染的模版 list.html 内容如下: &lt;ul&gt; {% for item in items %} {% include &#34;item.html&#34; %} {% endfor %} &lt;/ul&gt; 渲染 list.html 后的结果类似: &lt;ul&gt; &lt;li&gt;item1&lt;/li&gt; &lt;li&gt;item2 ..." />
+
+        <meta property="og:site_name" content="Mozillazg's Blog" />
+        <meta property="og:type" content="article"/>
+        <meta property="og:title" content="让我们一起来构建一个模版引擎（三）"/>
+        <meta property="og:url" content="https://mozillazg.com/2016/03/let-us-build-a-template-engine-part3.html"/>
+        <meta property="og:description" content="在 上篇文章 中我们的模版引擎实现了对 if 和 for 对支持，同时在文章的最后我给大家留了一个 问题：如何实现支持 include 和 extends 的标签功能。 在本篇文章中我们将一起来动手实现这两个功能。 include include 标签对语法是这样的：假设有一个 item.html 模版文件，它的内容如下: &lt;li&gt;{{ item }}&lt;/li&gt; 还有一个我们要渲染的模版 list.html 内容如下: &lt;ul&gt; {% for item in items %} {% include &#34;item.html&#34; %} {% endfor %} &lt;/ul&gt; 渲染 list.html 后的结果类似: &lt;ul&gt; &lt;li&gt;item1&lt;/li&gt; &lt;li&gt;item2 ..."/>
+        <meta property="article:published_time" content="2016-03-24" />
+            <meta property="article:section" content="python" />
+            <meta property="article:tag" content="lsbate" />
+            <meta property="article:tag" content="让我们一起来构建一个模版引擎" />
+            <meta property="article:author" content="mozillazg" />
+
+
+    <!-- Bootstrap -->
+        <link rel="stylesheet" href="https://mozillazg.com/theme/css/bootstrap.min.css" type="text/css"/>
+    <link href="https://mozillazg.com/theme/css/font-awesome.min.css" rel="stylesheet">
+
+    <link href="https://mozillazg.com/theme/css/pygments/solarizedlight.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://mozillazg.com/theme/css/style.css" type="text/css"/>
+            <link href="https://mozillazg.com/static/yue.css" rel="stylesheet">
+            <link href="https://mozillazg.com/static/custom.css" rel="stylesheet">
+
+        <link href="https://mozillazg.com/feeds/all.atom.xml" type="application/atom+xml" rel="alternate"
+              title="Mozillazg's Blog ATOM Feed"/>
+
+        <link href="https://mozillazg.com/feeds/all.rss.xml" type="application/rss+xml" rel="alternate"
+              title="Mozillazg's Blog RSS Feed"/>
+
+
+        <link href="https://mozillazg.com/feeds/python.atom.xml" type="application/atom+xml" rel="alternate"
+              title="Mozillazg's Blog python ATOM Feed"/>
+
+    <style>
+        .container {
+            max-width: 970px;
+        }
+    </style>
+<style>
+article .page-header {
+    border-bottom: none;
+    margin-bottom: 55px;
+}
+article .page-header h1 {
+    font-size: 3em;
+    font-weight: 500;
+}
+article .published {
+    font-size: 1.8rem;
+    /*font-weight: 400;*/
+    color: #9EABB3;
+    margin-top: 1.1rem;
+}
+article .entry-content {
+    color: #2F2F2F;
+}
+article .entry-content .article-info {
+    border-bottom: 1px solid #dededc;
+    margin-bottom: 2em;
+}
+</style>
+</head>
+<body>
+
+<div class="navbar navbar-default navbar-fixed-top" role="navigation">
+	<div class="container">
+        <div class="navbar-header">
+            <button type="button" class="navbar-toggle" data-toggle="collapse" data-target=".navbar-ex1-collapse">
+                <span class="sr-only">Toggle navigation</span>
+                <span class="icon-bar"></span>
+                <span class="icon-bar"></span>
+                <span class="icon-bar"></span>
+            </button>
+            <a href="https://mozillazg.com/" class="navbar-brand">
+Mozillazg's Blog            </a>
+        </div>
+        <div class="collapse navbar-collapse navbar-ex1-collapse">
+            <ul class="nav navbar-nav">
+                    <li><a href="/index.html">Home</a></li>
+                    <li><a href="/archives.html">Archives</a></li>
+                         <li><a href="https://mozillazg.com/2014/10/pages/about-me.html">
+                             About me
+                          </a></li>
+            </ul>
+            <ul class="nav navbar-nav navbar-right">
+              <li><a href="https://mozillazg.com/archives.html"><i class="fa fa-th-list"></i><span class="icon-label">Archives</span></a></li>
+            </ul>
+        </div>
+        <!-- /.navbar-collapse -->
+    </div>
+</div> <!-- /.navbar -->
+<!-- Banner -->
+<!-- End Banner -->
+<div class="container">
+    <div class="row">
+        <div class="col-lg-12">
+    <section id="content" class="yue">
+        <article>
+            <header class="page-header text-center">
+                <h1>
+                    <a href="https://mozillazg.com/2016/03/let-us-build-a-template-engine-part3.html"
+                       rel="bookmark"
+                       title="Permalink to 让我们一起来构建一个模版引擎（三）">
+                        让我们一起来构建一个模版引擎（三）
+                    </a>
+                </h1>
+                <p class="published">
+                    <time datetime="2016-03-24T00:00:00+00:00">
+                    周四 24 三月 2016
+                    </time>
+                </p>
+            </header>
+            <div class="entry-content">
+                <div class="well-sm article-info">
+<footer class="post-info">
+        <a href="https://mozillazg.com/category/python.html">python</a>
+
+
+<span class="label label-default hide">Tags</span>
+	<a href="https://mozillazg.com/tag/lsbate.html">lsbate</a>
+        /
+	<a href="https://mozillazg.com/tag/rang-wo-men-qi-lai-gou-jian-ge-mo-ban-yin-qing.html">让我们一起来构建一个模版引擎</a>
+    
+</footer><!-- /.post-info -->                </div>
+                <div>
+                <p>在 <a class="reference external" href="https://mozillazg.com/2016/03/let-us-build-a-template-engine-part2.html">上篇文章</a> 中我们的模版引擎实现了对 <tt class="docutils literal">if</tt> 和 <tt class="docutils literal">for</tt> 对支持，同时在文章的最后我给大家留了一个
+问题：如何实现支持 <tt class="docutils literal">include</tt> 和 <tt class="docutils literal">extends</tt> 的标签功能。</p>
+<p>在本篇文章中我们将一起来动手实现这两个功能。</p>
+<div class="section" id="include">
+<h2>include</h2>
+<p><tt class="docutils literal">include</tt> 标签对语法是这样的：假设有一个 item.html 模版文件，它的内容如下:</p>
+<div class="highlight"><pre>&lt;li&gt;{{ item }}&lt;/li&gt;
+</pre></div>
+<p>还有一个我们要渲染的模版 list.html 内容如下:</p>
+<div class="highlight"><pre>&lt;ul&gt;
+  {% for item in items %}
+    {% include &quot;item.html&quot; %}
+  {% endfor %}
+&lt;/ul&gt;
+</pre></div>
+<p>渲染 list.html 后的结果类似:</p>
+<div class="highlight"><pre>&lt;ul&gt;
+  &lt;li&gt;item1&lt;/li&gt;
+  &lt;li&gt;item2&lt;/li&gt;
+  &lt;li&gt;item3&lt;/li&gt;
+&lt;/ul&gt;
+</pre></div>
+<p>从上面可以看出来 <tt class="docutils literal">include</tt> 标签的作用类似使用 <tt class="docutils literal">include</tt> 所在位置的名字空间
+渲染另一个模版然后再使用渲染后的结果。所以我们可以将 <tt class="docutils literal">include</tt> 的模版文件
+当作普通的模版文件来处理，用解析那个模版生成后的代码替换 <tt class="docutils literal">include</tt> 所在的位置，
+再将结果追加到 <tt class="docutils literal">result_var</tt> 。 生成的代码类似:</p>
+<div class="highlight"><pre><span class="k">def</span> <span class="nf">func_name</span><span class="p">():</span>
+    <span class="n">result</span> <span class="o">=</span> <span class="p">[]</span>
+
+    <span class="c"># 解析 include 的模版</span>
+    <span class="k">def</span> <span class="nf">func_name_include</span><span class="p">():</span>
+        <span class="n">result_include</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="k">return</span> <span class="s">&#39;&#39;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">result_include</span><span class="p">)</span>
+    <span class="c"># 调用生成的 func_name_include 函数获取渲染结果</span>
+    <span class="n">result</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">func_name_include</span><span class="p">())</span>
+
+    <span class="k">return</span> <span class="s">&#39;&#39;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">result</span><span class="p">)</span>
+</pre></div>
+<p>生成类似上面的代码就是 <tt class="docutils literal">include</tt> 的关键点，下面看一下实现 <tt class="docutils literal">include</tt> 功能
+都做了哪些改动 (可以从 Github 上下载 <a class="reference external" href="https://github.com/mozillazg/lsbate/raw/master/part3/template3a.py">template3a.py</a>):</p>
+<div class="highlight"><pre><span class="k">class</span> <span class="nc">Template</span><span class="p">:</span>
+
+    <span class="k">def</span> <span class="nf">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="o">...</span><span class="p">,</span> <span class="n">template_dir</span><span class="o">=</span><span class="s">&#39;&#39;</span><span class="p">,</span> <span class="n">encoding</span><span class="o">=</span><span class="s">&#39;utf-8&#39;</span><span class="p">):</span>
+        <span class="c"># ...</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">template_dir</span> <span class="o">=</span> <span class="n">template_dir</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">encoding</span> <span class="o">=</span> <span class="n">encoding</span>
+        <span class="c"># ...</span>
+
+    <span class="k">def</span> <span class="nf">_handle_tag</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">token</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;处理标签&quot;&quot;&quot;</span>
+        <span class="c"># ...</span>
+        <span class="n">tag_name</span> <span class="o">=</span> <span class="n">tag</span><span class="o">.</span><span class="n">split</span><span class="p">()[</span><span class="mi">0</span><span class="p">]</span>
+        <span class="k">if</span> <span class="n">tag_name</span> <span class="o">==</span> <span class="s">&#39;include&#39;</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_handle_include</span><span class="p">(</span><span class="n">tag</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_handle_statement</span><span class="p">(</span><span class="n">tag</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">_handle_include</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">tag</span><span class="p">):</span>
+        <span class="n">filename</span> <span class="o">=</span> <span class="n">tag</span><span class="o">.</span><span class="n">split</span><span class="p">()[</span><span class="mi">1</span><span class="p">]</span><span class="o">.</span><span class="n">strip</span><span class="p">(</span><span class="s">&#39;&quot;</span><span class="se">\&#39;</span><span class="s">&#39;</span><span class="p">)</span>
+        <span class="n">included_template</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_parse_another_template_file</span><span class="p">(</span><span class="n">filename</span><span class="p">)</span>
+        <span class="c"># 把解析 include 模版后得到的代码加入当前代码中</span>
+        <span class="c"># def __func_name():</span>
+        <span class="c">#    __result = []</span>
+        <span class="c">#    ...</span>
+        <span class="c">#    def __func_name_hash():</span>
+        <span class="c">#        __result_hash = []</span>
+        <span class="c">#        return &#39;&#39;.join(__result_hash)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">code_builder</span><span class="o">.</span><span class="n">add</span><span class="p">(</span><span class="n">included_template</span><span class="o">.</span><span class="n">code_builder</span><span class="p">)</span>
+        <span class="c"># 把上面生成的代码中函数的执行结果添加到原有的结果中</span>
+        <span class="c"># __result.append(__func_name_hash())</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">code_builder</span><span class="o">.</span><span class="n">add_line</span><span class="p">(</span>
+            <span class="s">&#39;{0}.append({1}())&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">result_var</span><span class="p">,</span> <span class="n">included_template</span><span class="o">.</span><span class="n">func_name</span>
+            <span class="p">)</span>
+        <span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">_parse_another_template_file</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">filename</span><span class="p">):</span>
+        <span class="n">template_path</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">realpath</span><span class="p">(</span>
+            <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">template_dir</span><span class="p">,</span> <span class="n">filename</span><span class="p">)</span>
+        <span class="p">)</span>
+        <span class="n">name_suffix</span> <span class="o">=</span> <span class="nb">str</span><span class="p">(</span><span class="nb">hash</span><span class="p">(</span><span class="n">template_path</span><span class="p">))</span><span class="o">.</span><span class="n">replace</span><span class="p">(</span><span class="s">&#39;-&#39;</span><span class="p">,</span> <span class="s">&#39;_&#39;</span><span class="p">)</span>
+        <span class="n">func_name</span> <span class="o">=</span> <span class="s">&#39;{}_{}&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">func_name</span><span class="p">,</span> <span class="n">name_suffix</span><span class="p">)</span>
+        <span class="n">result_var</span> <span class="o">=</span> <span class="s">&#39;{}_{}&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">result_var</span><span class="p">,</span> <span class="n">name_suffix</span><span class="p">)</span>
+        <span class="k">with</span> <span class="nb">open</span><span class="p">(</span><span class="n">template_path</span><span class="p">,</span> <span class="n">encoding</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">encoding</span><span class="p">)</span> <span class="k">as</span> <span class="n">fp</span><span class="p">:</span>
+            <span class="n">template</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">__class__</span><span class="p">(</span>
+                <span class="n">fp</span><span class="o">.</span><span class="n">read</span><span class="p">(),</span> <span class="n">indent</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">code_builder</span><span class="o">.</span><span class="n">indent</span><span class="p">,</span>
+                <span class="n">default_context</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">default_context</span><span class="p">,</span>
+                <span class="n">func_name</span><span class="o">=</span><span class="n">func_name</span><span class="p">,</span> <span class="n">result_var</span><span class="o">=</span><span class="n">result_var</span><span class="p">,</span>
+                <span class="n">template_dir</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">template_dir</span>
+            <span class="p">)</span>
+        <span class="k">return</span> <span class="n">template</span>
+</pre></div>
+<p>首先是 <tt class="docutils literal">__init__</tt> 增加了两个参数 <tt class="docutils literal">template_dir</tt> 和 <tt class="docutils literal">encoding</tt>:</p>
+<ul class="simple">
+<li><tt class="docutils literal">template_dir</tt>: 指定模版文件夹路径，因为 <tt class="docutils literal">include</tt> 的模版是相对路径所以需要这个
+选项来获取模版的绝对路径</li>
+<li><tt class="docutils literal">encoding</tt>: 指定模版文件的编码，默认是 <tt class="docutils literal"><span class="pre">utf-8</span></tt></li>
+</ul>
+<p>然后就是 <tt class="docutils literal">_parse_another_template_file</tt> 了，这个方法是用来解析 <tt class="docutils literal">include</tt> 中
+指定的模版文件的，其中的 <tt class="docutils literal">func_name</tt> 和 <tt class="docutils literal">result_var</tt> 之所以加了个 hash 值
+作为后缀是不想跟其他函数变量重名。</p>
+<p><tt class="docutils literal">_handle_include</tt> 实现的是解析 include 的模版，
+然后将生成的代码和代码中函数的执行结果添加到当前代码中。</p>
+<p>下面来看一下实现的效果。还是用上面的模版文件:</p>
+<p>item.html:</p>
+<div class="highlight"><pre>&lt;li&gt;{{ item }}&lt;/li&gt;
+</pre></div>
+<p>list.html:</p>
+<div class="highlight"><pre>&lt;ul&gt;
+  {% for item in items %}
+    {% include &quot;item.html&quot; %}
+  {% endfor %}
+&lt;/ul&gt;
+</pre></div>
+<p>先来看一下生成的代码:</p>
+<div class="highlight"><pre><span class="o">&gt;&gt;&gt;</span> <span class="kn">from</span> <span class="nn">template3a</span> <span class="kn">import</span> <span class="n">Template</span>
+<span class="o">&gt;&gt;&gt;</span> <span class="n">text</span> <span class="o">=</span> <span class="nb">open</span><span class="p">(</span><span class="s">&#39;list.html&#39;</span><span class="p">)</span><span class="o">.</span><span class="n">read</span><span class="p">()</span>
+<span class="o">&gt;&gt;&gt;</span> <span class="n">t</span> <span class="o">=</span> <span class="n">Template</span><span class="p">(</span><span class="n">text</span><span class="p">)</span>
+<span class="o">&gt;&gt;&gt;</span> <span class="n">t</span><span class="o">.</span><span class="n">code_builder</span>
+<span class="k">def</span> <span class="nf">__func_name</span><span class="p">():</span>
+    <span class="n">__result</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="n">__result</span><span class="o">.</span><span class="n">extend</span><span class="p">([</span><span class="s">&#39;&lt;ul&gt;</span><span class="se">\n</span><span class="s">  &#39;</span><span class="p">])</span>
+    <span class="k">for</span> <span class="n">item</span> <span class="ow">in</span> <span class="n">items</span><span class="p">:</span>
+        <span class="n">__result</span><span class="o">.</span><span class="n">extend</span><span class="p">([</span><span class="s">&#39;</span><span class="se">\n</span><span class="s">    &#39;</span><span class="p">])</span>
+        <span class="k">def</span> <span class="nf">__func_name_7654650009897399020</span><span class="p">():</span>
+            <span class="n">__result_7654650009897399020</span> <span class="o">=</span> <span class="p">[]</span>
+            <span class="n">__result_7654650009897399020</span><span class="o">.</span><span class="n">extend</span><span class="p">([</span><span class="s">&#39;&lt;li&gt;&#39;</span><span class="p">,</span><span class="nb">str</span><span class="p">(</span><span class="n">item</span><span class="p">),</span><span class="s">&#39;&lt;/li&gt;</span><span class="se">\n</span><span class="s">&#39;</span><span class="p">])</span>
+            <span class="k">return</span> <span class="s">&quot;&quot;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">__result_7654650009897399020</span><span class="p">)</span>
+        <span class="n">__result</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">__func_name_7654650009897399020</span><span class="p">())</span>
+        <span class="n">__result</span><span class="o">.</span><span class="n">extend</span><span class="p">([</span><span class="s">&#39;</span><span class="se">\n</span><span class="s">  &#39;</span><span class="p">])</span>
+    <span class="n">__result</span><span class="o">.</span><span class="n">extend</span><span class="p">([</span><span class="s">&#39;</span><span class="se">\n</span><span class="s">&lt;/ul&gt;</span><span class="se">\n</span><span class="s">&#39;</span><span class="p">])</span>
+    <span class="k">return</span> <span class="s">&quot;&quot;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">__result</span><span class="p">)</span>
+</pre></div>
+<p>然后是渲染效果:</p>
+<div class="highlight"><pre><span class="o">&gt;&gt;&gt;</span> <span class="k">print</span><span class="p">(</span><span class="n">t</span><span class="o">.</span><span class="n">render</span><span class="p">({</span><span class="s">&#39;items&#39;</span><span class="p">:</span> <span class="p">[</span><span class="s">&#39;item1&#39;</span><span class="p">,</span> <span class="s">&#39;item2&#39;</span><span class="p">,</span> <span class="s">&#39;item3&#39;</span><span class="p">]}))</span>
+<span class="o">&lt;</span><span class="n">ul</span><span class="o">&gt;</span>
+
+    <span class="o">&lt;</span><span class="n">li</span><span class="o">&gt;</span><span class="n">item1</span><span class="o">&lt;/</span><span class="n">li</span><span class="o">&gt;</span>
+
+
+    <span class="o">&lt;</span><span class="n">li</span><span class="o">&gt;</span><span class="n">item2</span><span class="o">&lt;/</span><span class="n">li</span><span class="o">&gt;</span>
+
+
+    <span class="o">&lt;</span><span class="n">li</span><span class="o">&gt;</span><span class="n">item3</span><span class="o">&lt;/</span><span class="n">li</span><span class="o">&gt;</span>
+
+
+<span class="o">&lt;/</span><span class="n">ul</span><span class="o">&gt;</span>
+</pre></div>
+<p><tt class="docutils literal">include</tt> 已经实现了，下面让我们一起来实现 <tt class="docutils literal">extends</tt> 功能。</p>
+</div>
+<div class="section" id="extends">
+<h2>extends</h2>
+<p><tt class="docutils literal">extends</tt> 标签实现的是模版继承的功能，并且只能在第一行出现，语法如下:</p>
+<p>假设有一个 parent.html 文件它的内容是:</p>
+<div class="highlight"><pre>&lt;div id=&quot;header&quot;&gt;{% block header %} parent_header {% endblock header %}&lt;/div&gt;
+&lt;div id=&quot;footer&quot;&gt;{% block footer %} parent_footer {% endblock footer %}&lt;/div&gt;
+</pre></div>
+<p>还有一个 child.html 文件:</p>
+<div class="highlight"><pre>{% extends &quot;parent.html&quot; %}
+{% block header %} child_header {{ block.super }} {% endblock header %}
+</pre></div>
+<p>child.html 渲染后的结果:</p>
+<div class="highlight"><pre><span class="nt">&lt;div</span> <span class="na">id=</span><span class="s">&quot;header&quot;</span><span class="nt">&gt;</span> child_header parent_header <span class="nt">&lt;/div&gt;</span>
+<span class="nt">&lt;div</span> <span class="na">id=</span><span class="s">&quot;footer&quot;</span><span class="nt">&gt;</span> parent_footer <span class="nt">&lt;/div&gt;</span>
+</pre></div>
+<p>可以看到 <tt class="docutils literal">extends</tt> 的效果类似用子模版里的 <tt class="docutils literal">block</tt> 替换父模版中定义的同名 <tt class="docutils literal">block</tt>,
+同时又可以使用 <tt class="docutils literal">{{ block.super }}</tt> 引用父模版中定义的内容，有点类似 <tt class="docutils literal">class</tt> 的继承效果。</p>
+<p>注意我刚才说的是: 类似用子模版里的 <tt class="docutils literal">block</tt> 替换父模版中定义的同名 <tt class="docutils literal">block</tt> 。</p>
+<p>这个就是 <tt class="docutils literal">extends</tt> 的关键点，我们可以先找出子模版里定义的 <tt class="docutils literal">block</tt> ，
+然后用子模版里的 <tt class="docutils literal">block</tt> 替换父模版里的同名 <tt class="docutils literal">block</tt> ,
+最后只处理替换后的父模版就可以了。</p>
+<p>暂时先不管 <tt class="docutils literal">block.super</tt> ，支持 <tt class="docutils literal">extends</tt> 的代码改动如下(可以从 Github 下载 <a class="reference external" href="https://github.com/mozillazg/lsbate/raw/master/part3/template3b.py">template3b.py</a> ):</p>
+<div class="highlight"><pre><span class="k">class</span> <span class="nc">Template</span><span class="p">:</span>
+    <span class="k">def</span> <span class="nf">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="o">...</span><span class="p">):</span>
+        <span class="c"># extends</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">re_extends</span> <span class="o">=</span> <span class="n">re</span><span class="o">.</span><span class="n">compile</span><span class="p">(</span><span class="s">r&#39;\{</span><span class="si">% e</span><span class="s">xtends (?P&lt;name&gt;.*?) %\}&#39;</span><span class="p">)</span>
+        <span class="c"># blocks</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">re_blocks</span> <span class="o">=</span> <span class="n">re</span><span class="o">.</span><span class="n">compile</span><span class="p">(</span>
+            <span class="s">r&#39;\{% block (?P&lt;name&gt;\w+) %\}&#39;</span>
+            <span class="s">r&#39;(?P&lt;code&gt;.*?)&#39;</span>
+            <span class="s">r&#39;\{</span><span class="si">% e</span><span class="s">ndblock \1 %\}&#39;</span><span class="p">,</span> <span class="n">re</span><span class="o">.</span><span class="n">DOTALL</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">_parse_text</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="c"># extends</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_handle_extends</span><span class="p">()</span>
+
+        <span class="n">tokens</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">re_tokens</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">raw_text</span><span class="p">)</span>
+        <span class="c"># ...</span>
+
+    <span class="k">def</span> <span class="nf">_handle_extends</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="n">match_extends</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">re_extends</span><span class="o">.</span><span class="n">match</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">raw_text</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">match_extends</span> <span class="ow">is</span> <span class="bp">None</span><span class="p">:</span>
+            <span class="k">return</span>
+
+        <span class="n">parent_template_name</span> <span class="o">=</span> <span class="n">match_extends</span><span class="o">.</span><span class="n">group</span><span class="p">(</span><span class="s">&#39;name&#39;</span><span class="p">)</span><span class="o">.</span><span class="n">strip</span><span class="p">(</span><span class="s">&#39;&quot;</span><span class="se">\&#39;</span><span class="s"> &#39;</span><span class="p">)</span>
+        <span class="n">parent_template_path</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">template_dir</span><span class="p">,</span> <span class="n">parent_template_name</span>
+        <span class="p">)</span>
+        <span class="c"># 获取当前模版里的所有 blocks</span>
+        <span class="n">child_blocks</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_all_blocks</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">raw_text</span><span class="p">)</span>
+        <span class="c"># 用这些 blocks 替换掉父模版里的同名 blocks</span>
+        <span class="k">with</span> <span class="nb">open</span><span class="p">(</span><span class="n">parent_template_path</span><span class="p">,</span> <span class="n">encoding</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">encoding</span><span class="p">)</span> <span class="k">as</span> <span class="n">fp</span><span class="p">:</span>
+            <span class="n">parent_text</span> <span class="o">=</span> <span class="n">fp</span><span class="o">.</span><span class="n">read</span><span class="p">()</span>
+        <span class="n">new_parent_text</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_replace_parent_blocks</span><span class="p">(</span>
+            <span class="n">parent_text</span><span class="p">,</span> <span class="n">child_blocks</span>
+        <span class="p">)</span>
+        <span class="c"># 改为解析替换后的父模版内容</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">raw_text</span> <span class="o">=</span> <span class="n">new_parent_text</span>
+
+    <span class="k">def</span> <span class="nf">_replace_parent_blocks</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">parent_text</span><span class="p">,</span> <span class="n">child_blocks</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;用子模版的 blocks 替换掉父模版里的同名 blocks&quot;&quot;&quot;</span>
+        <span class="k">def</span> <span class="nf">replace</span><span class="p">(</span><span class="n">match</span><span class="p">):</span>
+            <span class="n">name</span> <span class="o">=</span> <span class="n">match</span><span class="o">.</span><span class="n">group</span><span class="p">(</span><span class="s">&#39;name&#39;</span><span class="p">)</span>
+            <span class="n">parent_code</span> <span class="o">=</span> <span class="n">match</span><span class="o">.</span><span class="n">group</span><span class="p">(</span><span class="s">&#39;code&#39;</span><span class="p">)</span>
+            <span class="n">child_code</span> <span class="o">=</span> <span class="n">child_blocks</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">name</span><span class="p">)</span>
+            <span class="k">return</span> <span class="n">child_code</span> <span class="ow">or</span> <span class="n">parent_code</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">re_blocks</span><span class="o">.</span><span class="n">sub</span><span class="p">(</span><span class="n">replace</span><span class="p">,</span> <span class="n">parent_text</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">_get_all_blocks</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">text</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;获取模版内定义的 blocks&quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="p">{</span>
+            <span class="n">name</span><span class="p">:</span> <span class="n">code</span>
+            <span class="k">for</span> <span class="n">name</span><span class="p">,</span> <span class="n">code</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">re_blocks</span><span class="o">.</span><span class="n">findall</span><span class="p">(</span><span class="n">text</span><span class="p">)</span>
+        <span class="p">}</span>
+</pre></div>
+<p>从上面的代码可以看出来我们遵循的是使用子模版 <tt class="docutils literal">block</tt> 替换父模版同名 <tt class="docutils literal">block</tt>
+然后改为解析替换后的父模版的思路. 即，虽然我们要渲染的是:</p>
+<div class="highlight"><pre>{% extends &quot;parent.html&quot; %}
+{% block header %} child_header {% endblock header %}
+</pre></div>
+<p>实际上我们最终渲染的是替换后的父模版:</p>
+<div class="highlight"><pre>&lt;div id=&quot;header&quot;&gt; child_header &lt;/div&gt;
+&lt;div id=&quot;footer&quot;&gt; parent_footer &lt;/div&gt;
+</pre></div>
+<p>依旧是来看一下实际效果:</p>
+<p>parent1.html:</p>
+<div class="highlight"><pre>&lt;div id=&quot;header&quot;&gt;{% block header %} parent_header {% endblock header %}&lt;/div&gt;
+&lt;div id=&quot;footer&quot;&gt;{% block footer %} parent_footer {% endblock footer %}&lt;/div&gt;
+</pre></div>
+<p>child1.html:</p>
+<div class="highlight"><pre>{% extends &quot;parent1.html&quot; %}
+{% block header %} {{ header }} {% endblock header %}
+</pre></div>
+<p>看看最后要渲染的模版字符串:</p>
+<div class="highlight"><pre><span class="o">&gt;&gt;&gt;</span> <span class="kn">from</span> <span class="nn">template3b</span> <span class="kn">import</span> <span class="n">Template</span>
+<span class="o">&gt;&gt;&gt;</span> <span class="n">text</span> <span class="o">=</span> <span class="nb">open</span><span class="p">(</span><span class="s">&#39;child1.html&#39;</span><span class="p">)</span><span class="o">.</span><span class="n">read</span><span class="p">()</span>
+<span class="o">&gt;&gt;&gt;</span> <span class="n">t</span> <span class="o">=</span> <span class="n">Template</span><span class="p">(</span><span class="n">text</span><span class="p">)</span>
+<span class="o">&gt;&gt;&gt;</span> <span class="k">print</span><span class="p">(</span><span class="n">t</span><span class="o">.</span><span class="n">raw_text</span><span class="p">)</span>
+<span class="o">&lt;</span><span class="n">div</span> <span class="nb">id</span><span class="o">=</span><span class="s">&quot;header&quot;</span><span class="o">&gt;</span> <span class="p">{{</span> <span class="n">header</span> <span class="p">}}</span> <span class="o">&lt;/</span><span class="n">div</span><span class="o">&gt;</span>
+<span class="o">&lt;</span><span class="n">div</span> <span class="nb">id</span><span class="o">=</span><span class="s">&quot;footer&quot;</span><span class="o">&gt;</span> <span class="n">parent_footer</span> <span class="o">&lt;/</span><span class="n">div</span><span class="o">&gt;</span>
+</pre></div>
+<p>可以看到确实是替换后的内容，再来看一下生成的代码和渲染后的效果:</p>
+<div class="highlight"><pre><span class="o">&gt;&gt;&gt;</span> <span class="n">t</span><span class="o">.</span><span class="n">code_builder</span>
+<span class="k">def</span> <span class="nf">__func_name</span><span class="p">():</span>
+    <span class="n">__result</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="n">__result</span><span class="o">.</span><span class="n">extend</span><span class="p">([</span><span class="s">&#39;&lt;div id=&quot;header&quot;&gt; &#39;</span><span class="p">,</span><span class="nb">str</span><span class="p">(</span><span class="n">header</span><span class="p">),</span><span class="s">&#39; &lt;/div&gt;</span><span class="se">\n</span><span class="s">&lt;div id=&quot;footer&quot;&gt; parent_footer &lt;/div&gt;</span><span class="se">\n</span><span class="s">&#39;</span><span class="p">])</span>
+    <span class="k">return</span> <span class="s">&quot;&quot;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">__result</span><span class="p">)</span>
+
+<span class="o">&gt;&gt;&gt;</span> <span class="k">print</span><span class="p">(</span><span class="n">t</span><span class="o">.</span><span class="n">render</span><span class="p">({</span><span class="s">&#39;header&#39;</span><span class="p">:</span> <span class="s">&#39;child_header&#39;</span><span class="p">}))</span>
+<span class="o">&lt;</span><span class="n">div</span> <span class="nb">id</span><span class="o">=</span><span class="s">&quot;header&quot;</span><span class="o">&gt;</span> <span class="n">child_header</span> <span class="o">&lt;/</span><span class="n">div</span><span class="o">&gt;</span>
+<span class="o">&lt;</span><span class="n">div</span> <span class="nb">id</span><span class="o">=</span><span class="s">&quot;footer&quot;</span><span class="o">&gt;</span> <span class="n">parent_footer</span> <span class="o">&lt;/</span><span class="n">div</span><span class="o">&gt;</span>
+</pre></div>
+<p><tt class="docutils literal">extends</tt> 的基本功能就这样实现了。下面再实现一下 <tt class="docutils literal">{{ block.super }}</tt> 功能。</p>
+</div>
+<div class="section" id="block-super">
+<h2>block.super</h2>
+<p><tt class="docutils literal">{{ block.super }}</tt> 类似 Python <tt class="docutils literal">class</tt> 里的 <tt class="docutils literal">super</tt> 用来实现对父 <tt class="docutils literal">block</tt>
+的引用，让子模版可以重用父 <tt class="docutils literal">block</tt> 中定义的内容。
+只要改一下 <tt class="docutils literal">_replace_parent_blocks</tt> 中的 <tt class="docutils literal">replace</tt> 函数让它支持 <tt class="docutils literal">{{ block.super }}</tt>
+就可以了(可以从 Github 下载 <a class="reference external" href="https://github.com/mozillazg/lsbate/raw/master/part3/template3c.py">template3c.py</a>):</p>
+<div class="highlight"><pre><span class="k">class</span> <span class="nc">Template</span><span class="p">:</span>
+    <span class="k">def</span> <span class="nf">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="o">....</span><span class="p">):</span>
+        <span class="c"># blocks</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">re_blocks</span> <span class="o">=</span> <span class="o">...</span>
+        <span class="c"># block.super</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">re_block_super</span> <span class="o">=</span> <span class="n">re</span><span class="o">.</span><span class="n">compile</span><span class="p">(</span><span class="s">r&#39;\{\{ block\.super \}\}&#39;</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">_replace_parent_blocks</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">parent_text</span><span class="p">,</span> <span class="n">child_blocks</span><span class="p">):</span>
+        <span class="k">def</span> <span class="nf">replace</span><span class="p">(</span><span class="n">match</span><span class="p">):</span>
+            <span class="o">...</span>
+            <span class="n">parent_code</span> <span class="o">=</span> <span class="n">match</span><span class="o">.</span><span class="n">group</span><span class="p">(</span><span class="s">&#39;code&#39;</span><span class="p">)</span>
+            <span class="n">child_code</span> <span class="o">=</span> <span class="n">child_blocks</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">name</span><span class="p">,</span> <span class="s">&#39;&#39;</span><span class="p">)</span>
+            <span class="n">child_code</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">re_block_super</span><span class="o">.</span><span class="n">sub</span><span class="p">(</span><span class="n">parent_code</span><span class="p">,</span> <span class="n">child_code</span><span class="p">)</span>
+            <span class="n">new_code</span> <span class="o">=</span> <span class="n">child_code</span> <span class="ow">or</span> <span class="n">parent_code</span>
+            <span class="k">return</span> <span class="n">new_code</span>
+</pre></div>
+<p>效果:</p>
+<p>parent2.html:</p>
+<div class="highlight"><pre>&lt;div id=&quot;header&quot;&gt;{% block header %} parent_header {% endblock header %}&lt;/div&gt;
+</pre></div>
+<p>child2.html:</p>
+<div class="highlight"><pre>{% extends &quot;parent2.html&quot; %}
+{% block header %} child_header {{ block.super }} {% endblock header %}
+</pre></div>
+<div class="highlight"><pre><span class="o">&gt;&gt;&gt;</span> <span class="kn">from</span> <span class="nn">template3c</span> <span class="kn">import</span> <span class="n">Template</span>
+<span class="o">&gt;&gt;&gt;</span> <span class="n">text</span> <span class="o">=</span> <span class="nb">open</span><span class="p">(</span><span class="s">&#39;child2.html&#39;</span><span class="p">)</span><span class="o">.</span><span class="n">read</span><span class="p">()</span>
+<span class="o">&gt;&gt;&gt;</span> <span class="n">t</span> <span class="o">=</span> <span class="n">Template</span><span class="p">(</span><span class="n">text</span><span class="p">)</span>
+<span class="o">&gt;&gt;&gt;</span> <span class="n">t</span><span class="o">.</span><span class="n">raw_text</span>
+<span class="s">&#39;&lt;div id=&quot;header&quot;&gt; child_header  parent_header  &lt;/div&gt;</span><span class="se">\n</span><span class="s">&#39;</span>
+
+<span class="o">&gt;&gt;&gt;</span> <span class="n">t</span><span class="o">.</span><span class="n">render</span><span class="p">()</span>
+<span class="s">&#39;&lt;div id=&quot;header&quot;&gt; child_header  parent_header  &lt;/div&gt;</span><span class="se">\n</span><span class="s">&#39;</span>
+</pre></div>
+<p>到目前为主我们已经实现了现代 python 模版引擎应有到大部分功能了， 之后就是完善了。</p>
+<p>不知道大家有没有注意到，我之前都是用生成 html 来试验模版引擎的功能的，
+这是因为模版引擎确实是在 web 开发中用的比较多，既然是生成 html 源码那就需要考虑
+针对 html 做一点优化，比如去掉多余的空格，转义之类的，还有就是一些 Web 安全方面的考虑。</p>
+<p>至于怎么实现这些优化项，我将在 <a class="reference external" href="#">第四篇文章</a> 中向你详细的讲解。敬请期待。</p>
+</div>
+
+                </div>
+            </div>
+            <!-- /.entry-content -->
+<section class="well" id="related-posts">
+    <h4>Related Posts:</h4>
+    <ul>
+        <li><a href="https://mozillazg.com/2016/03/let-us-build-a-template-engine-part1.html">让我们一起来构建一个模版引擎（一）</a></li>
+        <li><a href="https://mozillazg.com/2016/03/let-us-build-a-template-engine-part2.html">让我们一起来构建一个模版引擎（二）</a></li>
+    </ul>
+</section>
+    <hr/>
+    <section class="comments" id="comments">
+        <h2>Comments</h2>
+
+        <div id="disqus_thread"></div>
+        <script type="text/javascript">
+            /* * * CONFIGURATION VARIABLES: EDIT BEFORE PASTING INTO YOUR WEBPAGE * * */
+            var disqus_shortname = 'my-github-blog'; // required: replace example with your forum shortname
+
+                    var disqus_identifier = 'let-us-build-a-template-engine-part3';
+                var disqus_url = 'https://mozillazg.com/2016/03/let-us-build-a-template-engine-part3.html';
+
+            var disqus_config = function () {
+                this.language = "zh-hans";
+            };
+
+            /* * * DON'T EDIT BELOW THIS LINE * * */
+            (function () {
+                var dsq = document.createElement('script');
+                dsq.type = 'text/javascript';
+                dsq.async = true;
+                dsq.src = '//' + disqus_shortname + '.disqus.com/embed.js';
+                (document.getElementsByTagName('head')[0] || document.getElementsByTagName('body')[0]).appendChild(dsq);
+            })();
+        </script>
+        <noscript>Please enable JavaScript to view the <a href="http://disqus.com/?ref_noscript">comments powered by
+            Disqus.</a></noscript>
+        <a href="http://disqus.com" class="dsq-brlink">comments powered by <span class="logo-disqus">Disqus</span></a>
+
+    </section>
+        </article>
+    </section>
+
+        </div>
+    </div>
+</div>
+<footer>
+   <div class="container">
+      <hr>
+      <div class="row">
+         <div class="col-xs-10">&copy; 2016 mozillazg
+            &middot; Powered by <a href="https://github.com/DandyDev/pelican-bootstrap3" target="_blank">pelican-bootstrap3</a>,
+            <a href="http://docs.getpelican.com/" target="_blank">Pelican</a>,
+            <a href="http://getbootstrap.com" target="_blank">Bootstrap</a>              <p><small>  <a rel="license" href="http://creativecommons.org/licenses/by-sa/4.0/"><img alt="Creative Commons License" style="border-width:0" src="/static/images/by-sa-80x15.png" /></a>
+    &quot;<span xmlns:dct="http://purl.org/dc/terms/" property="dct:title">Mozillazg's Blog</span>&quot; by <a xmlns:cc="http://creativecommons.org/ns#" href="https://mozillazg.com" property="cc:attributionName" rel="cc:attributionURL">mozillazg</a> is
+  licensed under a <a rel="license" href="http://creativecommons.org/licenses/by-sa/4.0/">Creative Commons Attribution-ShareAlike 4.0 International License</a>, except where indicated otherwise.
+</small></p>
+         </div>
+         <div class="col-xs-2"><p class="pull-right"><i class="fa fa-arrow-up"></i> <a href="#">Back to top</a></p></div>
+      </div>
+   </div>
+</footer>
+<script src="https://mozillazg.com/theme/js/jquery.min.js"></script>
+
+<!-- Include all compiled plugins (below), or include individual files as needed -->
+<script src="https://mozillazg.com/theme/js/bootstrap.min.js"></script>
+
+<!-- Enable responsive features in IE8 with Respond.js (https://github.com/scottjehl/Respond) -->
+<script src="https://mozillazg.com/theme/js/respond.min.js"></script>
+
+    <!-- Disqus -->
+    <script type="text/javascript">
+        /* * * CONFIGURATION VARIABLES: EDIT BEFORE PASTING INTO YOUR WEBPAGE * * */
+        var disqus_shortname = 'my-github-blog'; // required: replace example with your forum shortname
+
+        /* * * DON'T EDIT BELOW THIS LINE * * */
+        (function () {
+            var s = document.createElement('script');
+            s.async = true;
+            s.type = 'text/javascript';
+            s.src = '//' + disqus_shortname + '.disqus.com/count.js';
+            (document.getElementsByTagName('HEAD')[0] || document.getElementsByTagName('BODY')[0]).appendChild(s);
+        }());
+    </script>
+    <!-- End Disqus Code -->
+
+</body>
+</html>
