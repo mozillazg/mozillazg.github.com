@@ -1,5 +1,344 @@
 <?xml version="1.0" encoding="utf-8"?>
-<feed xmlns="http://www.w3.org/2005/Atom"><title>Mozillazg's Blog</title><link href="https://mozillazg.com/" rel="alternate"></link><link href="https://mozillazg.com/feeds/all-zh-hans.atom.xml" rel="self"></link><id>https://mozillazg.com/</id><updated>2016-07-17T00:00:00+00:00</updated><entry><title>Cyanide &amp; Happiness #1757：剑鱼</title><link href="https://mozillazg.com/2016/07/1757.swordfish2.zh-cn.html" rel="alternate"></link><updated>2016-07-17T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2016-07-17:2016/07/1757.swordfish2.zh-cn.html</id><summary type="html">&lt;p&gt;译自：&lt;a href="http://explosm.net/comics/1757/"&gt;Cyanide &amp;amp; Happiness #1757 - Explosm.net&lt;/a&gt;&lt;/p&gt;
+<feed xmlns="http://www.w3.org/2005/Atom"><title>Mozillazg's Blog</title><link href="https://mozillazg.com/" rel="alternate"></link><link href="https://mozillazg.com/feeds/all-zh-hans.atom.xml" rel="self"></link><id>https://mozillazg.com/</id><updated>2016-08-16T00:00:00+00:00</updated><entry><title>Python: 捕获异常然后再抛出另一个异常的正确姿势</title><link href="https://mozillazg.com/2016/08/python-the-right-way-to-catch-exception-then-reraise-another-exception.html" rel="alternate"></link><updated>2016-08-16T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2016-08-16:2016/08/python-the-right-way-to-catch-exception-then-reraise-another-exception.html</id><summary type="html">&lt;p&gt;一般大家实现捕获异常然后再抛出另一个异常的方法是下面这样的:&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span class="k"&gt;def&lt;/span&gt; &lt;span class="nf"&gt;div&lt;/span&gt;&lt;span class="p"&gt;():&lt;/span&gt;
+    &lt;span class="mi"&gt;2&lt;/span&gt; &lt;span class="o"&gt;/&lt;/span&gt; &lt;span class="mi"&gt;0&lt;/span&gt;
+
+&lt;span class="k"&gt;try&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;
+    &lt;span class="n"&gt;div&lt;/span&gt;&lt;span class="p"&gt;()&lt;/span&gt;
+&lt;span class="k"&gt;except&lt;/span&gt; &lt;span class="ne"&gt;ZeroDivisionError&lt;/span&gt; &lt;span class="k"&gt;as&lt;/span&gt; &lt;span class="n"&gt;e&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;
+    &lt;span class="k"&gt;raise&lt;/span&gt; &lt;span class="ne"&gt;ValueError&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;e&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+&lt;/pre&gt;&lt;/div&gt;
+&lt;p&gt;不知道大家有没有注意到这样抛出异常的方式有一个很严重的问题，那就是
+在重新抛出另一个异常的时候，捕获的上一个异常的 traceback 信息丢失了(python2):&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+$ cat a.py
+def div():
+    2 / 0
+try:
+    div()
+except ZeroDivisionError as e:
+    raise ValueError(e)
+
+$ python2 a.py
+Traceback (most recent call last):
+  File &amp;quot;a.py&amp;quot;, line 6, in &amp;lt;module&amp;gt;
+    raise ValueError(e)
+ValueError: integer division or modulo by zero
+&lt;/pre&gt;
+&lt;p&gt;这样的话非常不利于查找问题: 比如上面的例子中实际出错的代码是第二行，但是
+当我们捕获了第一个异常然后再抛出一个自定义异常的时候，
+实际出错位置的信息就丢失了。&lt;/p&gt;
+&lt;div class="section" id="python-2"&gt;
+&lt;h2&gt;Python 2&lt;/h2&gt;
+&lt;p&gt;那么在 Python 2 下如果我们不想丢失捕获的异常的 traceback 信息的话，应该
+怎样重新抛出异常呢？&lt;/p&gt;
+&lt;p&gt;有两种办法, 还是用上面的例子举例:&lt;/p&gt;
+&lt;p&gt;一种办法是直接 &lt;tt class="docutils literal"&gt;raise&lt;/tt&gt;:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+$ cat a.py
+def div():
+    2 / 0
+try:
+    div()
+except ZeroDivisionError as e:
+    raise
+
+$ python2 a.py
+Traceback (most recent call last):
+  File &amp;quot;a.py&amp;quot;, line 4, in &amp;lt;module&amp;gt;
+    div()
+  File &amp;quot;a.py&amp;quot;, line 2, in div
+    2 / 0
+ZeroDivisionError: integer division or modulo by zero
+&lt;/pre&gt;
+&lt;p&gt;另一种办法就是 &lt;tt class="docutils literal"&gt;raise&lt;/tt&gt; 另一个异常时指定上一个异常的 traceback 信息
+(通过 &lt;tt class="docutils literal"&gt;sys.exc_info()&lt;/tt&gt; 获取当前捕获的异常信息):&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+$ cat a.py
+import sys
+
+def div():
+    2 / 0
+try:
+    div()
+except ZeroDivisionError as e:
+    raise ValueError(e), None, sys.exc_info()[2]
+
+$ python2 a.py
+Traceback (most recent call last):
+  File &amp;quot;a.py&amp;quot;, line 6, in &amp;lt;module&amp;gt;
+    div()
+  File &amp;quot;a.py&amp;quot;, line 4, in div
+    2 / 0
+ValueError: integer division or modulo by zero
+&lt;/pre&gt;
+&lt;p&gt;这个是 &lt;tt class="docutils literal"&gt;raise&lt;/tt&gt; 的高级用法:&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span class="k"&gt;raise&lt;/span&gt; &lt;span class="n"&gt;exception&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;value&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;traceback&lt;/span&gt;
+&lt;/pre&gt;&lt;/div&gt;
+&lt;ul class="simple"&gt;
+&lt;li&gt;&lt;tt class="docutils literal"&gt;exception&lt;/tt&gt;: 异常类实例/异常类&lt;/li&gt;
+&lt;li&gt;&lt;tt class="docutils literal"&gt;value&lt;/tt&gt;: 初始化异常类的参数值/异常类实例（使用这个实例作为 raise 的异常实例）/元组/None&lt;/li&gt;
+&lt;li&gt;&lt;tt class="docutils literal"&gt;traceback&lt;/tt&gt;: traceback 对象/None&lt;/li&gt;
+&lt;/ul&gt;
+&lt;p&gt;下面我们来看看上面的方法是否可以应对多层异常捕获然后再抛出的情况:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+$ cat a.py
+import sys
+
+def div():
+    2 / 0
+
+def foo():
+    try:
+        div()
+    except ZeroDivisionError as e:
+        raise ValueError(e), None, sys.exc_info()[2]
+
+def bar():
+    try:
+        foo()
+    except ValueError as e:
+        raise TypeError(e), None, sys.exc_info()[2]
+
+def foobar():
+    try:
+        bar()
+    except TypeError as e:
+        raise
+foobar()
+
+$ python2 a.py
+Traceback (most recent call last):
+  File &amp;quot;a.py&amp;quot;, line 23, in &amp;lt;module&amp;gt;
+    foobar()
+  File &amp;quot;a.py&amp;quot;, line 20, in foobar
+    bar()
+  File &amp;quot;a.py&amp;quot;, line 14, in bar
+    foo()
+  File &amp;quot;a.py&amp;quot;, line 8, in foo
+    div()
+  File &amp;quot;a.py&amp;quot;, line 4, in div
+    2 / 0
+TypeError: integer division or modulo by zero
+&lt;/pre&gt;
+&lt;p&gt;从上面的结果可以看到这两种方法是支持多层异常 traceback 信息传递的。&lt;/p&gt;
+&lt;p&gt;那么在 Python 3 下又怎么解决这个问题呢？&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class="section" id="python-3"&gt;
+&lt;h2&gt;Python 3&lt;/h2&gt;
+&lt;p&gt;在 Python 3 下默认会附加上捕获的上个异常的 trackback 信息（保存在异常实例的 &lt;tt class="docutils literal"&gt;__traceback__&lt;/tt&gt; 属性中）:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+$ cat a.py
+def div():
+    2 / 0
+try:
+    div()
+except ZeroDivisionError as e:
+    raise ValueError(e)
+
+$ python3 a.py
+Traceback (most recent call last):
+  File &amp;quot;a.py&amp;quot;, line 4, in &amp;lt;module&amp;gt;
+    div()
+  File &amp;quot;a.py&amp;quot;, line 2, in div
+    2 / 0
+ZeroDivisionError: division by zero
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File &amp;quot;a.py&amp;quot;, line 6, in &amp;lt;module&amp;gt;
+    raise ValueError(e)
+ValueError: division by zero
+&lt;/pre&gt;
+&lt;p&gt;也支持指定使用哪个异常实例的 traceback 信息: &lt;tt class="docutils literal"&gt;raise ... from ...&lt;/tt&gt;&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+$ cat a.py
+def div():
+    2 / 0
+try:
+    div()
+except ZeroDivisionError as e:
+    raise ValueError(e)
+
+$ python a.py
+Traceback (most recent call last):
+  File &amp;quot;a.py&amp;quot;, line 5, in &amp;lt;module&amp;gt;
+    div()
+  File &amp;quot;a.py&amp;quot;, line 2, in div
+    2 / 0
+ZeroDivisionError: division by zero
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File &amp;quot;a.py&amp;quot;, line 7, in &amp;lt;module&amp;gt;
+    raise ValueError(e) from e
+ValueError: division by zero
+&lt;/pre&gt;
+&lt;p&gt;也可以指定使用的 traceback 对象: &lt;tt class="docutils literal"&gt;raise exception.with_traceback(traceback)&lt;/tt&gt;&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+$ cat a.py
+import sys
+
+def div():
+    2 / 0
+
+try:
+    div()
+except ZeroDivisionError as e:
+    raise ValueError(e).with_traceback(sys.exc_info()[2])
+
+$ python a.py
+Traceback (most recent call last):
+  File &amp;quot;a.py&amp;quot;, line 7, in &amp;lt;module&amp;gt;
+    div()
+  File &amp;quot;a.py&amp;quot;, line 4, in div
+    2 / 0
+ZeroDivisionError: division by zero
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File &amp;quot;a.py&amp;quot;, line 9, in &amp;lt;module&amp;gt;
+    raise ValueError(e).with_traceback(sys.exc_info()[2])
+  File &amp;quot;a.py&amp;quot;, line 7, in &amp;lt;module&amp;gt;
+    div()
+  File &amp;quot;a.py&amp;quot;, line 4, in div
+    2 / 0
+ValueError: division by zero
+&lt;/pre&gt;
+&lt;/div&gt;
+&lt;div class="section" id="python-2-python-3"&gt;
+&lt;h2&gt;兼容 Python 2 和 Python 3 的写法&lt;/h2&gt;
+&lt;p&gt;上面介绍了在 Python 2 和 Python 3 下的不同解决办法，那么如何写一个兼容 Python 2
+和 Python 3 的 &lt;tt class="docutils literal"&gt;reraise&lt;/tt&gt; 函数呢？&lt;/p&gt;
+&lt;p&gt;下面将介绍一种方法:&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span class="n"&gt;PY3&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;sys&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;version_info&lt;/span&gt;&lt;span class="p"&gt;[&lt;/span&gt;&lt;span class="mi"&gt;0&lt;/span&gt;&lt;span class="p"&gt;]&lt;/span&gt; &lt;span class="o"&gt;==&lt;/span&gt; &lt;span class="mi"&gt;3&lt;/span&gt;
+&lt;span class="k"&gt;if&lt;/span&gt; &lt;span class="n"&gt;PY3&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;
+    &lt;span class="k"&gt;def&lt;/span&gt; &lt;span class="nf"&gt;reraise&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;tp&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;value&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;tb&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="bp"&gt;None&lt;/span&gt;&lt;span class="p"&gt;):&lt;/span&gt;
+        &lt;span class="k"&gt;if&lt;/span&gt; &lt;span class="n"&gt;value&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;__traceback__&lt;/span&gt; &lt;span class="ow"&gt;is&lt;/span&gt; &lt;span class="ow"&gt;not&lt;/span&gt; &lt;span class="n"&gt;tb&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;
+            &lt;span class="k"&gt;raise&lt;/span&gt; &lt;span class="n"&gt;value&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;with_traceback&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;tb&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+        &lt;span class="k"&gt;else&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;
+            &lt;span class="k"&gt;raise&lt;/span&gt; &lt;span class="n"&gt;value&lt;/span&gt;
+&lt;span class="k"&gt;else&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;
+    &lt;span class="k"&gt;exec&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="s"&gt;&amp;#39;&amp;#39;&amp;#39;def reraise(tp, value, tb=None):&lt;/span&gt;
+&lt;span class="s"&gt;           raise tp, value, tb&lt;/span&gt;
+&lt;span class="s"&gt;    &amp;#39;&amp;#39;&amp;#39;&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+&lt;/pre&gt;&lt;/div&gt;
+&lt;p&gt;这里的 &lt;tt class="docutils literal"&gt;reraise&lt;/tt&gt; 函数我们约定了 &lt;tt class="docutils literal"&gt;vlaue&lt;/tt&gt; 参数的值是一个异常类的实例。
+上面 &lt;tt class="docutils literal"&gt;else&lt;/tt&gt; 中之所以用 &lt;tt class="docutils literal"&gt;exec&lt;/tt&gt; 去定义 &lt;tt class="docutils literal"&gt;reraise&lt;/tt&gt; 函数是因为
+&lt;tt class="docutils literal"&gt;raise tp, value, tb&lt;/tt&gt; 在 Python 3 下会报语法错误，所以用 &lt;tt class="docutils literal"&gt;exec&lt;/tt&gt; 来
+绕过 Python 3 下的语法错误检查。&lt;/p&gt;
+&lt;p&gt;下面我们来看一下效果:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+$ cat a.py
+
+ef div():
+    2 / 0
+
+def foo():
+    try:
+        div()
+    except ZeroDivisionError as e:
+        reraise(ValueError, ValueError(e), sys.exc_info()[2])
+
+def bar():
+    try:
+        foo()
+    except ValueError as e:
+        reraise(TypeError, TypeError(e), sys.exc_info()[2])
+
+def foobar():
+    try:
+        bar()
+    except TypeError:
+        raise
+foobar()
+&lt;/pre&gt;
+&lt;p&gt;Python 2:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+$ python2 a.py
+Traceback (most recent call last):
+  File &amp;quot;a.py&amp;quot;, line 34, in &amp;lt;module&amp;gt;
+    foobar()
+  File &amp;quot;a.py&amp;quot;, line 31, in foobar
+    bar()
+  File &amp;quot;a.py&amp;quot;, line 27, in bar
+    reraise(TypeError, TypeError(e), sys.exc_info()[2])
+  File &amp;quot;a.py&amp;quot;, line 25, in bar
+    foo()
+  File &amp;quot;a.py&amp;quot;, line 21, in foo
+    reraise(ValueError, ValueError(e), sys.exc_info()[2])
+  File &amp;quot;a.py&amp;quot;, line 19, in foo
+    div()
+  File &amp;quot;a.py&amp;quot;, line 15, in div
+    2 / 0
+TypeError: integer division or modulo by zero
+&lt;/pre&gt;
+&lt;p&gt;Python 3:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+$ python3 a.py
+Traceback (most recent call last):
+  File &amp;quot;a.py&amp;quot;, line 19, in foo
+    div()
+  File &amp;quot;a.py&amp;quot;, line 15, in div
+    2 / 0
+ZeroDivisionError: division by zero
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File &amp;quot;a.py&amp;quot;, line 25, in bar
+    foo()
+  File &amp;quot;a.py&amp;quot;, line 21, in foo
+    reraise(ValueError, ValueError(e), sys.exc_info()[2])
+  File &amp;quot;a.py&amp;quot;, line 6, in reraise
+    raise value.with_traceback(tb)
+  File &amp;quot;a.py&amp;quot;, line 19, in foo
+    div()
+  File &amp;quot;a.py&amp;quot;, line 15, in div
+    2 / 0
+ValueError: division by zero
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File &amp;quot;a.py&amp;quot;, line 34, in &amp;lt;module&amp;gt;
+    foobar()
+  File &amp;quot;a.py&amp;quot;, line 31, in foobar
+    bar()
+  File &amp;quot;a.py&amp;quot;, line 27, in bar
+    reraise(TypeError, TypeError(e), sys.exc_info()[2])
+  File &amp;quot;a.py&amp;quot;, line 6, in reraise
+    raise value.with_traceback(tb)
+  File &amp;quot;a.py&amp;quot;, line 25, in bar
+    foo()
+  File &amp;quot;a.py&amp;quot;, line 21, in foo
+    reraise(ValueError, ValueError(e), sys.exc_info()[2])
+  File &amp;quot;a.py&amp;quot;, line 6, in reraise
+    raise value.with_traceback(tb)
+  File &amp;quot;a.py&amp;quot;, line 19, in foo
+    div()
+  File &amp;quot;a.py&amp;quot;, line 15, in div
+    2 / 0
+TypeError: division by zero
+&lt;/pre&gt;
+&lt;p&gt;下次需要捕获一个异常然后再抛出另一个异常的时候大家可以试试本文的方法。&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class="section" id="id1"&gt;
+&lt;h2&gt;参考资料&lt;/h2&gt;
+&lt;ul class="simple"&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://docs.python.org/2/reference/simple_stmts.html#the-raise-statement"&gt;6. Simple statements — Python 2.7.12 documentation&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://docs.python.org/2/library/exceptions.html#exceptions.BaseException"&gt;6. Built-in Exceptions — Python 2.7.12 documentation&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://docs.python.org/3/reference/simple_stmts.html#raise"&gt;7. Simple statements — Python 3.5.2 documentation&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://docs.python.org/3/library/exceptions.html#BaseException"&gt;5. Built-in Exceptions — Python 3.5.2 documentation&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://www.python.org/dev/peps/pep-3109/#compatibility-issues"&gt;PEP 3109 -- Raising Exceptions in Python 3000 | Python.org&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://github.com/bottlepy/bottle/blob/cafc15419cbb4a6cb748e6ecdccf92893bb25ce5/bottle.py#L160"&gt;bottle/bottle.py at cafc15419cbb4a6cb748e6ecdccf92893bb25ce5 · bottlepy/bottle&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://github.com/pallets/flask/blob/6e46d0cd3969f6c13ff61c95c81a975192232fed/flask/_compat.py#L30"&gt;flask/_compat.py at 6e46d0cd3969f6c13ff61c95c81a975192232fed · pallets/flask&lt;/a&gt;&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/div&gt;
+</summary></entry><entry><title>Cyanide &amp; Happiness #1757：剑鱼</title><link href="https://mozillazg.com/2016/07/1757.swordfish2.zh-cn.html" rel="alternate"></link><updated>2016-07-17T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2016-07-17:2016/07/1757.swordfish2.zh-cn.html</id><summary type="html">&lt;p&gt;译自：&lt;a href="http://explosm.net/comics/1757/"&gt;Cyanide &amp;amp; Happiness #1757 - Explosm.net&lt;/a&gt;&lt;/p&gt;
 &lt;p&gt;&lt;img alt="1757.swordfish2.zh-cn.png" src="/static/images/comics/1757.swordfish2.zh-cn.png" /&gt;&lt;/p&gt;
 &lt;p&gt;could I get the swordfish,
 but without the fish?     &lt;br /&gt;
