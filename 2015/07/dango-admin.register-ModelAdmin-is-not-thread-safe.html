@@ -14,13 +14,13 @@
 
         <meta name="author" content="mozillazg" />
         <meta name="keywords" content="Thread-Locals" />
-        <meta name="description" content="一直以为注册的 ModelAdmin 是线程安全的，直到最近看到有人提到 ModelAdmin 不是线程安全的。 然后看了一下 Django admin.register 的源码，才发现确实不是线程安全的。 核心代码 如下： # Instantiate the admin class to save in the registry self._registry[model] = admin_class(model, self) 当配置如下代码后： @admin.register(Foo) class FooAdmin(admin.ModelAdmin): pass 实际上注册的是一个 FooAdmin 实例，也就是说 FooAdmin 这个类在启动的时候就实例化了，所有的请求访问的都是同一个实例。 所以类似下面的代码就会有非线程安全的问题，因为 FooAdmin 实例 ..." />
+        <meta name="description" content="一直以为注册的 ModelAdmin 是线程安全的，直到最近看到有人提到 ModelAdmin 不是线程安全的。 然后看了一下 Django admin.register 的源码，才发现确实不是线程安全的。 核心代码 如下： # Instantiate the admin class to save in the registry self._registry[model] = admin_class(model, self) 当配置如下代码后： @admin.register(Foo) class FooAdmin(admin.ModelAdmin): pass 实际上注册的是一个 FooAdmin 实例，也就是说 FooAdmin 这个类在启动的时候就实例化了，所有的请求访问的都是同一个实例。 所以类似下面的代码就会有非线程安全的问题，因为 FooAdmin 实例 …" />
 
         <meta property="og:site_name" content="Mozillazg's Blog" />
         <meta property="og:type" content="article"/>
         <meta property="og:title" content="django @admin.register 非线程安全陷阱"/>
         <meta property="og:url" content="https://mozillazg.com/2015/07/dango-admin.register-ModelAdmin-is-not-thread-safe.html"/>
-        <meta property="og:description" content="一直以为注册的 ModelAdmin 是线程安全的，直到最近看到有人提到 ModelAdmin 不是线程安全的。 然后看了一下 Django admin.register 的源码，才发现确实不是线程安全的。 核心代码 如下： # Instantiate the admin class to save in the registry self._registry[model] = admin_class(model, self) 当配置如下代码后： @admin.register(Foo) class FooAdmin(admin.ModelAdmin): pass 实际上注册的是一个 FooAdmin 实例，也就是说 FooAdmin 这个类在启动的时候就实例化了，所有的请求访问的都是同一个实例。 所以类似下面的代码就会有非线程安全的问题，因为 FooAdmin 实例 ..."/>
+        <meta property="og:description" content="一直以为注册的 ModelAdmin 是线程安全的，直到最近看到有人提到 ModelAdmin 不是线程安全的。 然后看了一下 Django admin.register 的源码，才发现确实不是线程安全的。 核心代码 如下： # Instantiate the admin class to save in the registry self._registry[model] = admin_class(model, self) 当配置如下代码后： @admin.register(Foo) class FooAdmin(admin.ModelAdmin): pass 实际上注册的是一个 FooAdmin 实例，也就是说 FooAdmin 这个类在启动的时候就实例化了，所有的请求访问的都是同一个实例。 所以类似下面的代码就会有非线程安全的问题，因为 FooAdmin 实例 …"/>
         <meta property="article:published_time" content="2015-07-27" />
             <meta property="article:section" content="django" />
             <meta property="article:tag" content="Thread-Locals" />
@@ -66,11 +66,8 @@ Mozillazg's Blog            </a>
         </div>
         <div class="collapse navbar-collapse navbar-ex1-collapse">
             <ul class="nav navbar-nav">
-                    <li><a href="/index.html">Home</a></li>
                     <li><a href="https://mozillazg.com/feeds/all.atom.xml">Feed</a></li>
-                         <li><a href="https://mozillazg.com/2014/10/pages/about-me.html">
-                             About me
-                          </a></li>
+                    <li><a href="/2014/10/pages/about-me.html">About</a></li>
             </ul>
             <ul class="nav navbar-nav navbar-right">
               <li><a href="https://mozillazg.com/archives.html"><i class="fa fa-th-list"></i><span class="icon-label">Archives</span></a></li>
@@ -113,57 +110,57 @@ Mozillazg's Blog            </a>
                 <div>
                 <p>一直以为注册的 ModelAdmin 是线程安全的，直到最近看到<a href="http://stackoverflow.com/questions/727928/django-admin-how-to-access-the-request-object-in-admin-py-for-list-display-met#comment27035661_729879">有人提到</a> ModelAdmin 不是线程安全的。</p>
 <p>然后看了一下 Django admin.register 的源码，才发现确实不是线程安全的。 <a href="https://github.com/django/django/blob/927b30a6ab33ea33e5e3b1e7408ac1d5d267ff6a/django/contrib/admin/sites.py#L110">核心代码</a> 如下：</p>
-<div class="codehilite"><pre><span class="cp"># Instantiate the admin class to save in the registry</span>
-<span class="n">self</span><span class="p">.</span><span class="n">_registry</span><span class="p">[</span><span class="n">model</span><span class="p">]</span> <span class="o">=</span> <span class="n">admin_class</span><span class="p">(</span><span class="n">model</span><span class="p">,</span> <span class="n">self</span><span class="p">)</span>
+<div class="highlight"><pre><span></span># Instantiate the admin class to save in the registry
+self._registry[model] = admin_class(model, self)
 </pre></div>
 
 
 <p>当配置如下代码后：</p>
-<div class="codehilite"><pre><span class="err">@</span><span class="n">admin</span><span class="p">.</span><span class="k">register</span><span class="p">(</span><span class="n">Foo</span><span class="p">)</span>
-<span class="n">class</span> <span class="n">FooAdmin</span><span class="p">(</span><span class="n">admin</span><span class="p">.</span><span class="n">ModelAdmin</span><span class="p">)</span><span class="o">:</span>
-    <span class="n">pass</span>
+<div class="highlight"><pre><span></span>@admin.register(Foo)
+class FooAdmin(admin.ModelAdmin):
+    pass
 </pre></div>
 
 
 <p>实际上注册的是一个 FooAdmin 实例，也就是说 FooAdmin 这个类在启动的时候就实例化了，所有的请求访问的都是同一个实例。
 所以类似下面的代码就会有非线程安全的问题，因为 FooAdmin 实例(self)会共享给所有子线程/所有请求：</p>
-<div class="codehilite"><pre><span class="err">@</span><span class="n">admin</span><span class="p">.</span><span class="k">register</span><span class="p">(</span><span class="n">Foo</span><span class="p">)</span>
-<span class="n">class</span> <span class="n">FooAdmin</span><span class="p">(</span><span class="n">admin</span><span class="p">.</span><span class="n">ModelAdmin</span><span class="p">)</span><span class="o">:</span>
+<div class="highlight"><pre><span></span>@admin.register(Foo)
+class FooAdmin(admin.ModelAdmin):
 
-    <span class="n">def</span> <span class="n">foobar</span><span class="p">(</span><span class="n">self</span><span class="p">)</span><span class="o">:</span>
-        <span class="n">print</span><span class="p">(</span><span class="n">self</span><span class="p">.</span><span class="n">param</span><span class="p">)</span>
+    def foobar(self):
+        print(self.param)
 
-    <span class="n">def</span> <span class="n">changelist_view</span><span class="p">(</span><span class="n">self</span><span class="p">,</span> <span class="n">request</span><span class="p">,</span> <span class="n">extra_context</span><span class="o">=</span><span class="n">None</span><span class="p">)</span><span class="o">:</span>
-        <span class="n">self</span><span class="p">.</span><span class="n">param</span> <span class="o">=</span> <span class="n">request</span><span class="p">.</span><span class="n">GET</span><span class="p">[</span><span class="err">&#39;</span><span class="n">param</span><span class="err">&#39;</span><span class="p">]</span>
-        <span class="k">return</span> <span class="n">super</span><span class="p">(</span><span class="n">FooAdmin</span><span class="p">,</span><span class="n">self</span><span class="p">).</span><span class="n">changelist_view</span><span class="p">(</span><span class="n">request</span><span class="p">,</span> <span class="n">extra_context</span><span class="o">=</span><span class="n">extra_context</span><span class="p">)</span>
+    def changelist_view(self, request, extra_context=None):
+        self.param = request.GET[&#39;param&#39;]
+        return super(FooAdmin,self).changelist_view(request, extra_context=extra_context)
 </pre></div>
 
 
 <p>对于使用多线程的服务，可以使用 Thread-Locals （内置的 threading.local 或 werkzeug.local） 解决这个问题:</p>
-<div class="codehilite"><pre><span class="nt">from</span> <span class="nt">threading</span> <span class="nt">import</span> <span class="nt">local</span>
-<span class="nt">g</span> <span class="o">=</span> <span class="nt">local</span><span class="o">()</span>
+<div class="highlight"><pre><span></span><span class="kn">from</span> <span class="nn">threading</span> <span class="kn">import</span> <span class="n">local</span>
+<span class="n">g</span> <span class="o">=</span> <span class="n">local</span><span class="p">()</span>
 
-<span class="k">@admin</span><span class="nc">.register</span><span class="o">(</span><span class="nt">Foo</span><span class="o">)</span>
-<span class="nt">class</span> <span class="nt">FooAdmin</span><span class="o">(</span><span class="nt">admin</span><span class="nc">.ModelAdmin</span><span class="o">):</span>
+<span class="nd">@admin.register</span><span class="p">(</span><span class="n">Foo</span><span class="p">)</span>
+<span class="k">class</span> <span class="nc">FooAdmin</span><span class="p">(</span><span class="n">admin</span><span class="o">.</span><span class="n">ModelAdmin</span><span class="p">):</span>
 
-    <span class="nt">def</span> <span class="nt">foobar</span><span class="o">(</span><span class="nt">self</span><span class="o">):</span>
-        <span class="nt">print</span><span class="o">(</span><span class="nt">g</span><span class="nc">.param</span><span class="o">)</span>
+    <span class="k">def</span> <span class="nf">foobar</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">print</span><span class="p">(</span><span class="n">g</span><span class="o">.</span><span class="n">param</span><span class="p">)</span>
 
-    <span class="nt">def</span> <span class="nt">changelist_view</span><span class="o">(</span><span class="nt">self</span><span class="o">,</span> <span class="nt">request</span><span class="o">,</span> <span class="nt">extra_context</span><span class="o">=</span><span class="nt">None</span><span class="o">):</span>
-        <span class="nt">g</span><span class="nc">.param</span> <span class="o">=</span> <span class="nt">request</span><span class="nc">.GET</span><span class="cp">[</span><span class="s1">&#39;param&#39;</span><span class="cp">]</span>
-        <span class="nt">return</span> <span class="nt">super</span><span class="o">(</span><span class="nt">FooAdmin</span><span class="o">,</span><span class="nt">self</span><span class="o">)</span><span class="nc">.changelist_view</span><span class="o">(</span><span class="nt">request</span><span class="o">,</span> <span class="nt">extra_context</span><span class="o">=</span><span class="nt">extra_context</span><span class="o">)</span>
+    <span class="k">def</span> <span class="nf">changelist_view</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">request</span><span class="p">,</span> <span class="n">extra_context</span><span class="o">=</span><span class="bp">None</span><span class="p">):</span>
+        <span class="n">g</span><span class="o">.</span><span class="n">param</span> <span class="o">=</span> <span class="n">request</span><span class="o">.</span><span class="n">GET</span><span class="p">[</span><span class="s1">&#39;param&#39;</span><span class="p">]</span>
+        <span class="k">return</span> <span class="nb">super</span><span class="p">(</span><span class="n">FooAdmin</span><span class="p">,</span><span class="bp">self</span><span class="p">)</span><span class="o">.</span><span class="n">changelist_view</span><span class="p">(</span><span class="n">request</span><span class="p">,</span> <span class="n">extra_context</span><span class="o">=</span><span class="n">extra_context</span><span class="p">)</span>
 </pre></div>
 
 
 <p>对于使用协程（比如，使用 gevent）的服务，可以用 werkzeug.local.Local（内置的 threading.local 不行）:</p>
-<div class="codehilite"><pre><span class="nt">from</span> <span class="nt">werkzeug</span><span class="nc">.local</span> <span class="nt">import</span> <span class="nt">Local</span>
-<span class="nt">g</span> <span class="o">=</span> <span class="nt">Local</span><span class="o">()</span>
+<div class="highlight"><pre><span></span><span class="kn">from</span> <span class="nn">werkzeug.local</span> <span class="kn">import</span> <span class="n">Local</span>
+<span class="n">g</span> <span class="o">=</span> <span class="n">Local</span><span class="p">()</span>
 
-<span class="err">#</span> <span class="o">...</span>
+<span class="c1"># ...</span>
 </pre></div>
 
 
-<h2 id="_1">参考资料</h2>
+<h2>参考资料</h2>
 <ul>
 <li><a href="http://stackoverflow.com/questions/727928/django-admin-how-to-access-the-request-object-in-admin-py-for-list-display-met#comment27035661_729879">http://stackoverflow.com/questions/727928/django-admin-how-to-access-the-request-object-in-admin-py-for-list-display-met#comment27035661_729879</a></li>
 <li><a href="https://github.com/django/django/blob/927b30a6ab33ea33e5e3b1e7408ac1d5d267ff6a/django/contrib/admin/sites.py#L110">https://github.com/django/django/blob/927b30a6ab33ea33e5e3b1e7408ac1d5d267ff6a/django/contrib/admin/sites.py#L110</a></li>

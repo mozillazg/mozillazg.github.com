@@ -14,13 +14,13 @@
 
         <meta name="author" content="mozillazg" />
         <meta name="keywords" content="import,sys.meta_path,sitecustomize,usercustomize,探针,APM" />
-        <meta name="description" content="本文将简单讲述一下 Python 探针的实现原理。 同时为了验证这个原理，我们也会一起来实现一个简单的统计指定函数执行时间的探针程序。 探针的实现主要涉及以下几个知识点: sys.meta_path sitecustomize.py sys.meta_path sys.meta_path 这个简单的来说就是可以实现 import hook 的功能， 当执行 import 相关的操作时，会触发 sys.meta_path 列表中定义的对象。 关于 sys.meta_path 更详细的资料请查阅 python 文档中 sys.meta_path 相关内容以及 PEP 0302 。 sys.meta_path 中的对象需要实现一个 find_module 方法， 这个 find_module 方法返回 None 或一个实现了 load_module 方法的对象 (代码可以从 github ..." />
+        <meta name="description" content="本文将简单讲述一下 Python 探针的实现原理。 同时为了验证这个原理，我们也会一起来实现一个简单的统计指定函数执行时间的探针程序。 探针的实现主要涉及以下几个知识点: sys.meta_path sitecustomize.py sys.meta_path sys.meta_path 这个简单的来说就是可以实现 import hook 的功能， 当执行 import 相关的操作时，会触发 sys.meta_path 列表中定义的对象。 关于 sys.meta_path 更详细的资料请查阅 python 文档中 sys.meta_path 相关内容以及 PEP 0302 。 sys.meta_path 中的对象需要实现一个 find_module 方法， 这个 find_module 方法返回 None 或一个实现了 load_module 方法的对象 (代码可以从 github …" />
 
         <meta property="og:site_name" content="Mozillazg's Blog" />
         <meta property="og:type" content="article"/>
         <meta property="og:title" content="Python 探针实现原理"/>
         <meta property="og:url" content="https://mozillazg.com/2016/04/apm-python-agent-principle.html"/>
-        <meta property="og:description" content="本文将简单讲述一下 Python 探针的实现原理。 同时为了验证这个原理，我们也会一起来实现一个简单的统计指定函数执行时间的探针程序。 探针的实现主要涉及以下几个知识点: sys.meta_path sitecustomize.py sys.meta_path sys.meta_path 这个简单的来说就是可以实现 import hook 的功能， 当执行 import 相关的操作时，会触发 sys.meta_path 列表中定义的对象。 关于 sys.meta_path 更详细的资料请查阅 python 文档中 sys.meta_path 相关内容以及 PEP 0302 。 sys.meta_path 中的对象需要实现一个 find_module 方法， 这个 find_module 方法返回 None 或一个实现了 load_module 方法的对象 (代码可以从 github ..."/>
+        <meta property="og:description" content="本文将简单讲述一下 Python 探针的实现原理。 同时为了验证这个原理，我们也会一起来实现一个简单的统计指定函数执行时间的探针程序。 探针的实现主要涉及以下几个知识点: sys.meta_path sitecustomize.py sys.meta_path sys.meta_path 这个简单的来说就是可以实现 import hook 的功能， 当执行 import 相关的操作时，会触发 sys.meta_path 列表中定义的对象。 关于 sys.meta_path 更详细的资料请查阅 python 文档中 sys.meta_path 相关内容以及 PEP 0302 。 sys.meta_path 中的对象需要实现一个 find_module 方法， 这个 find_module 方法返回 None 或一个实现了 load_module 方法的对象 (代码可以从 github …"/>
         <meta property="article:published_time" content="2016-04-04" />
             <meta property="article:section" content="python" />
             <meta property="article:tag" content="import" />
@@ -71,11 +71,8 @@ Mozillazg's Blog            </a>
         </div>
         <div class="collapse navbar-collapse navbar-ex1-collapse">
             <ul class="nav navbar-nav">
-                    <li><a href="/index.html">Home</a></li>
                     <li><a href="https://mozillazg.com/feeds/all.atom.xml">Feed</a></li>
-                         <li><a href="https://mozillazg.com/2014/10/pages/about-me.html">
-                             About me
-                          </a></li>
+                    <li><a href="/2014/10/pages/about-me.html">About</a></li>
             </ul>
             <ul class="nav navbar-nav navbar-right">
               <li><a href="https://mozillazg.com/archives.html"><i class="fa fa-th-list"></i><span class="icon-label">Archives</span></a></li>
@@ -142,55 +139,55 @@ Mozillazg's Blog            </a>
 <p><tt class="docutils literal">sys.meta_path</tt> 中的对象需要实现一个 <tt class="docutils literal">find_module</tt> 方法，
 这个 <tt class="docutils literal">find_module</tt> 方法返回 <tt class="docutils literal">None</tt> 或一个实现了 <tt class="docutils literal">load_module</tt> 方法的对象
 (代码可以从 github 上下载 <a class="reference external" href="https://github.com/mozillazg/apm-python-agent-principle/tree/master/part1">part1</a>) :</p>
-<div class="highlight"><pre><span class="kn">import</span> <span class="nn">sys</span>
+<div class="highlight"><pre><span></span><span class="kn">import</span> <span class="nn">sys</span>
 
 
 <span class="k">class</span> <span class="nc">MetaPathFinder</span><span class="p">:</span>
 
     <span class="k">def</span> <span class="nf">find_module</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">fullname</span><span class="p">,</span> <span class="n">path</span><span class="o">=</span><span class="bp">None</span><span class="p">):</span>
-        <span class="k">print</span><span class="p">(</span><span class="s">&#39;find_module {}&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">fullname</span><span class="p">))</span>
+        <span class="k">print</span><span class="p">(</span><span class="s1">&#39;find_module {}&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">fullname</span><span class="p">))</span>
         <span class="k">return</span> <span class="n">MetaPathLoader</span><span class="p">()</span>
 
 
 <span class="k">class</span> <span class="nc">MetaPathLoader</span><span class="p">:</span>
 
     <span class="k">def</span> <span class="nf">load_module</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">fullname</span><span class="p">):</span>
-        <span class="k">print</span><span class="p">(</span><span class="s">&#39;load_module {}&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">fullname</span><span class="p">))</span>
+        <span class="k">print</span><span class="p">(</span><span class="s1">&#39;load_module {}&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">fullname</span><span class="p">))</span>
         <span class="n">sys</span><span class="o">.</span><span class="n">modules</span><span class="p">[</span><span class="n">fullname</span><span class="p">]</span> <span class="o">=</span> <span class="n">sys</span>
         <span class="k">return</span> <span class="n">sys</span>
 
 <span class="n">sys</span><span class="o">.</span><span class="n">meta_path</span><span class="o">.</span><span class="n">insert</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="n">MetaPathFinder</span><span class="p">())</span>
 
-<span class="k">if</span> <span class="n">__name__</span> <span class="o">==</span> <span class="s">&#39;__main__&#39;</span><span class="p">:</span>
+<span class="k">if</span> <span class="n">__name__</span> <span class="o">==</span> <span class="s1">&#39;__main__&#39;</span><span class="p">:</span>
     <span class="kn">import</span> <span class="nn">http</span>
     <span class="k">print</span><span class="p">(</span><span class="n">http</span><span class="p">)</span>
     <span class="k">print</span><span class="p">(</span><span class="n">http</span><span class="o">.</span><span class="n">version_info</span><span class="p">)</span>
 </pre></div>
 <p><tt class="docutils literal">load_module</tt> 方法返回一个 module 对象，这个对象就是 import 的 module 对象了。
 比如我上面那样就把 <tt class="docutils literal">http</tt> 替换为 <tt class="docutils literal">sys</tt> 这个 module 了。</p>
-<div class="highlight"><pre>$ python meta_path1.py
+<div class="highlight"><pre><span></span>$ python meta_path1.py
 find_module http
 load_module http
-&lt;module &#39;sys&#39; (built-in)&gt;
-sys.version_info(major=3, minor=5, micro=1, releaselevel=&#39;final&#39;, serial=0)
+&lt;module <span class="s1">&#39;sys&#39;</span> <span class="o">(</span>built-in<span class="o">)</span>&gt;
+sys.version_info<span class="o">(</span><span class="nv">major</span><span class="o">=</span>3, <span class="nv">minor</span><span class="o">=</span>5, <span class="nv">micro</span><span class="o">=</span>1, <span class="nv">releaselevel</span><span class="o">=</span><span class="s1">&#39;final&#39;</span>, <span class="nv">serial</span><span class="o">=</span>0<span class="o">)</span>
 </pre></div>
 <p>通过 <tt class="docutils literal">sys.meta_path</tt> 我们就可以实现 import hook 的功能：
 当 import 预定的 module 时，对这个 module 里的对象来个狸猫换太子，
 从而实现获取函数或方法的执行时间等探测信息。</p>
 <p>上面说到了狸猫换太子，那么怎么对一个对象进行狸猫换太子的操作呢？
 对于函数对象，我们可以使用装饰器的方式来替换函数对象(代码可以从 github 上下载 <a class="reference external" href="https://github.com/mozillazg/apm-python-agent-principle/tree/master/part2">part2</a>) :</p>
-<div class="highlight"><pre><span class="kn">import</span> <span class="nn">functools</span>
+<div class="highlight"><pre><span></span><span class="kn">import</span> <span class="nn">functools</span>
 <span class="kn">import</span> <span class="nn">time</span>
 
 
 <span class="k">def</span> <span class="nf">func_wrapper</span><span class="p">(</span><span class="n">func</span><span class="p">):</span>
     <span class="nd">@functools.wraps</span><span class="p">(</span><span class="n">func</span><span class="p">)</span>
     <span class="k">def</span> <span class="nf">wrapper</span><span class="p">(</span><span class="o">*</span><span class="n">args</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
-        <span class="k">print</span><span class="p">(</span><span class="s">&#39;start func&#39;</span><span class="p">)</span>
+        <span class="k">print</span><span class="p">(</span><span class="s1">&#39;start func&#39;</span><span class="p">)</span>
         <span class="n">start</span> <span class="o">=</span> <span class="n">time</span><span class="o">.</span><span class="n">time</span><span class="p">()</span>
         <span class="n">result</span> <span class="o">=</span> <span class="n">func</span><span class="p">(</span><span class="o">*</span><span class="n">args</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span>
         <span class="n">end</span> <span class="o">=</span> <span class="n">time</span><span class="o">.</span><span class="n">time</span><span class="p">()</span>
-        <span class="k">print</span><span class="p">(</span><span class="s">&#39;spent {}s&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">end</span> <span class="o">-</span> <span class="n">start</span><span class="p">))</span>
+        <span class="k">print</span><span class="p">(</span><span class="s1">&#39;spent {}s&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">end</span> <span class="o">-</span> <span class="n">start</span><span class="p">))</span>
         <span class="k">return</span> <span class="n">result</span>
     <span class="k">return</span> <span class="n">wrapper</span>
 
@@ -199,7 +196,7 @@ sys.version_info(major=3, minor=5, micro=1, releaselevel=&#39;final&#39;, serial
     <span class="n">time</span><span class="o">.</span><span class="n">sleep</span><span class="p">(</span><span class="n">n</span><span class="p">)</span>
     <span class="k">return</span> <span class="n">n</span>
 
-<span class="k">if</span> <span class="n">__name__</span> <span class="o">==</span> <span class="s">&#39;__main__&#39;</span><span class="p">:</span>
+<span class="k">if</span> <span class="n">__name__</span> <span class="o">==</span> <span class="s1">&#39;__main__&#39;</span><span class="p">:</span>
     <span class="n">func</span> <span class="o">=</span> <span class="n">func_wrapper</span><span class="p">(</span><span class="n">sleep</span><span class="p">)</span>
     <span class="k">print</span><span class="p">(</span><span class="n">func</span><span class="p">(</span><span class="mi">3</span><span class="p">))</span>
 </pre></div>
@@ -212,7 +209,7 @@ spent 3.004966974258423s
 </pre>
 <p>下面我们来实现一个计算指定模块的指定函数的执行时间的功能(代码可以从 github 上下载 <a class="reference external" href="https://github.com/mozillazg/apm-python-agent-principle/tree/master/part3">part3</a>) 。</p>
 <p>假设我们的模块文件是 hello.py:</p>
-<div class="highlight"><pre><span class="kn">import</span> <span class="nn">time</span>
+<div class="highlight"><pre><span></span><span class="kn">import</span> <span class="nn">time</span>
 
 
 <span class="k">def</span> <span class="nf">sleep</span><span class="p">(</span><span class="n">n</span><span class="p">):</span>
@@ -220,18 +217,18 @@ spent 3.004966974258423s
     <span class="k">return</span> <span class="n">n</span>
 </pre></div>
 <p>我们的 import hook 是 hook.py:</p>
-<div class="highlight"><pre><span class="kn">import</span> <span class="nn">functools</span>
+<div class="highlight"><pre><span></span><span class="kn">import</span> <span class="nn">functools</span>
 <span class="kn">import</span> <span class="nn">importlib</span>
 <span class="kn">import</span> <span class="nn">sys</span>
 <span class="kn">import</span> <span class="nn">time</span>
 
-<span class="n">_hook_modules</span> <span class="o">=</span> <span class="p">{</span><span class="s">&#39;hello&#39;</span><span class="p">}</span>
+<span class="n">_hook_modules</span> <span class="o">=</span> <span class="p">{</span><span class="s1">&#39;hello&#39;</span><span class="p">}</span>
 
 
 <span class="k">class</span> <span class="nc">MetaPathFinder</span><span class="p">:</span>
 
     <span class="k">def</span> <span class="nf">find_module</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">fullname</span><span class="p">,</span> <span class="n">path</span><span class="o">=</span><span class="bp">None</span><span class="p">):</span>
-        <span class="k">print</span><span class="p">(</span><span class="s">&#39;find_module {}&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">fullname</span><span class="p">))</span>
+        <span class="k">print</span><span class="p">(</span><span class="s1">&#39;find_module {}&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">fullname</span><span class="p">))</span>
         <span class="k">if</span> <span class="n">fullname</span> <span class="ow">in</span> <span class="n">_hook_modules</span><span class="p">:</span>
             <span class="k">return</span> <span class="n">MetaPathLoader</span><span class="p">()</span>
 
@@ -239,16 +236,16 @@ spent 3.004966974258423s
 <span class="k">class</span> <span class="nc">MetaPathLoader</span><span class="p">:</span>
 
     <span class="k">def</span> <span class="nf">load_module</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">fullname</span><span class="p">):</span>
-        <span class="k">print</span><span class="p">(</span><span class="s">&#39;load_module {}&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">fullname</span><span class="p">))</span>
-        <span class="c"># ``sys.modules`` 中保存的是已经导入过的 module</span>
+        <span class="k">print</span><span class="p">(</span><span class="s1">&#39;load_module {}&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">fullname</span><span class="p">))</span>
+        <span class="c1"># ``sys.modules`` 中保存的是已经导入过的 module</span>
         <span class="k">if</span> <span class="n">fullname</span> <span class="ow">in</span> <span class="n">sys</span><span class="o">.</span><span class="n">modules</span><span class="p">:</span>
             <span class="k">return</span> <span class="n">sys</span><span class="o">.</span><span class="n">modules</span><span class="p">[</span><span class="n">fullname</span><span class="p">]</span>
 
-        <span class="c"># 先从 sys.meta_path 中删除自定义的 finder</span>
-        <span class="c"># 防止下面执行 import_module 的时候再次触发此 finder</span>
-        <span class="c"># 从而出现递归调用的问题</span>
+        <span class="c1"># 先从 sys.meta_path 中删除自定义的 finder</span>
+        <span class="c1"># 防止下面执行 import_module 的时候再次触发此 finder</span>
+        <span class="c1"># 从而出现递归调用的问题</span>
         <span class="n">finder</span> <span class="o">=</span> <span class="n">sys</span><span class="o">.</span><span class="n">meta_path</span><span class="o">.</span><span class="n">pop</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span>
-        <span class="c"># 导入 module</span>
+        <span class="c1"># 导入 module</span>
         <span class="n">module</span> <span class="o">=</span> <span class="n">importlib</span><span class="o">.</span><span class="n">import_module</span><span class="p">(</span><span class="n">fullname</span><span class="p">)</span>
 
         <span class="n">module_hook</span><span class="p">(</span><span class="n">fullname</span><span class="p">,</span> <span class="n">module</span><span class="p">)</span>
@@ -260,23 +257,23 @@ spent 3.004966974258423s
 
 
 <span class="k">def</span> <span class="nf">module_hook</span><span class="p">(</span><span class="n">fullname</span><span class="p">,</span> <span class="n">module</span><span class="p">):</span>
-    <span class="k">if</span> <span class="n">fullname</span> <span class="o">==</span> <span class="s">&#39;hello&#39;</span><span class="p">:</span>
+    <span class="k">if</span> <span class="n">fullname</span> <span class="o">==</span> <span class="s1">&#39;hello&#39;</span><span class="p">:</span>
         <span class="n">module</span><span class="o">.</span><span class="n">sleep</span> <span class="o">=</span> <span class="n">func_wrapper</span><span class="p">(</span><span class="n">module</span><span class="o">.</span><span class="n">sleep</span><span class="p">)</span>
 
 
 <span class="k">def</span> <span class="nf">func_wrapper</span><span class="p">(</span><span class="n">func</span><span class="p">):</span>
     <span class="nd">@functools.wraps</span><span class="p">(</span><span class="n">func</span><span class="p">)</span>
     <span class="k">def</span> <span class="nf">wrapper</span><span class="p">(</span><span class="o">*</span><span class="n">args</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
-        <span class="k">print</span><span class="p">(</span><span class="s">&#39;start func&#39;</span><span class="p">)</span>
+        <span class="k">print</span><span class="p">(</span><span class="s1">&#39;start func&#39;</span><span class="p">)</span>
         <span class="n">start</span> <span class="o">=</span> <span class="n">time</span><span class="o">.</span><span class="n">time</span><span class="p">()</span>
         <span class="n">result</span> <span class="o">=</span> <span class="n">func</span><span class="p">(</span><span class="o">*</span><span class="n">args</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span>
         <span class="n">end</span> <span class="o">=</span> <span class="n">time</span><span class="o">.</span><span class="n">time</span><span class="p">()</span>
-        <span class="k">print</span><span class="p">(</span><span class="s">&#39;spent {}s&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">end</span> <span class="o">-</span> <span class="n">start</span><span class="p">))</span>
+        <span class="k">print</span><span class="p">(</span><span class="s1">&#39;spent {}s&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">end</span> <span class="o">-</span> <span class="n">start</span><span class="p">))</span>
         <span class="k">return</span> <span class="n">result</span>
     <span class="k">return</span> <span class="n">wrapper</span>
 </pre></div>
 <p>测试代码:</p>
-<div class="highlight"><pre><span class="o">&gt;&gt;&gt;</span> <span class="kn">import</span> <span class="nn">hook</span>
+<div class="highlight"><pre><span></span><span class="o">&gt;&gt;&gt;</span> <span class="kn">import</span> <span class="nn">hook</span>
 <span class="o">&gt;&gt;&gt;</span> <span class="kn">import</span> <span class="nn">hello</span>
 <span class="n">find_module</span> <span class="n">hello</span>
 <span class="n">load_module</span> <span class="n">hello</span>
@@ -391,23 +388,23 @@ $ cat bootstrap/sitecustomize.py
 import _hook
 </pre>
 <p>agent.py 的内容如下:</p>
-<div class="highlight"><pre><span class="kn">import</span> <span class="nn">os</span>
+<div class="highlight"><pre><span></span><span class="kn">import</span> <span class="nn">os</span>
 <span class="kn">import</span> <span class="nn">sys</span>
 
 <span class="n">current_dir</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">dirname</span><span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">realpath</span><span class="p">(</span><span class="n">__file__</span><span class="p">))</span>
-<span class="n">boot_dir</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">current_dir</span><span class="p">,</span> <span class="s">&#39;bootstrap&#39;</span><span class="p">)</span>
+<span class="n">boot_dir</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">current_dir</span><span class="p">,</span> <span class="s1">&#39;bootstrap&#39;</span><span class="p">)</span>
 
 
 <span class="k">def</span> <span class="nf">main</span><span class="p">():</span>
     <span class="n">args</span> <span class="o">=</span> <span class="n">sys</span><span class="o">.</span><span class="n">argv</span><span class="p">[</span><span class="mi">1</span><span class="p">:]</span>
-    <span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="p">[</span><span class="s">&#39;PYTHONPATH&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">boot_dir</span>
-    <span class="c"># 执行后面的 python 程序命令</span>
-    <span class="c"># sys.executable 是 python 解释器程序的绝对路径 ``which python``</span>
-    <span class="c"># &gt;&gt;&gt; sys.executable</span>
-    <span class="c"># &#39;/usr/local/var/pyenv/versions/3.5.1/bin/python3.5&#39;</span>
+    <span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="p">[</span><span class="s1">&#39;PYTHONPATH&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">boot_dir</span>
+    <span class="c1"># 执行后面的 python 程序命令</span>
+    <span class="c1"># sys.executable 是 python 解释器程序的绝对路径 ``which python``</span>
+    <span class="c1"># &gt;&gt;&gt; sys.executable</span>
+    <span class="c1"># &#39;/usr/local/var/pyenv/versions/3.5.1/bin/python3.5&#39;</span>
     <span class="n">os</span><span class="o">.</span><span class="n">execl</span><span class="p">(</span><span class="n">sys</span><span class="o">.</span><span class="n">executable</span><span class="p">,</span> <span class="n">sys</span><span class="o">.</span><span class="n">executable</span><span class="p">,</span> <span class="o">*</span><span class="n">args</span><span class="p">)</span>
 
-<span class="k">if</span> <span class="n">__name__</span> <span class="o">==</span> <span class="s">&#39;__main__&#39;</span><span class="p">:</span>
+<span class="k">if</span> <span class="n">__name__</span> <span class="o">==</span> <span class="s1">&#39;__main__&#39;</span><span class="p">:</span>
     <span class="n">main</span><span class="p">()</span>
 </pre></div>
 <p><tt class="docutils literal">test.py</tt> 的内容为:</p>
