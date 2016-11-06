@@ -1,5 +1,182 @@
 <?xml version="1.0" encoding="utf-8"?>
-<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom"><channel><title>Mozillazg's Blog</title><link>https://mozillazg.com/</link><description></description><atom:link href="https://mozillazg.com/feeds/mozillazg.rss.xml" rel="self"></atom:link><lastBuildDate>Sun, 18 Sep 2016 00:00:00 +0000</lastBuildDate><item><title>Python: threading + multiprocessing + logging = 死锁 ?</title><link>https://mozillazg.com/2016/09/python-threading-multiprocessing-logging-equal-deadlock.html</link><description>&lt;p&gt;前段时间有个程序突然出现了子进程不工作的情况。&lt;/p&gt;
+<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom"><channel><title>Mozillazg's Blog</title><link>https://mozillazg.com/</link><description></description><atom:link href="https://mozillazg.com/feeds/mozillazg.rss.xml" rel="self"></atom:link><lastBuildDate>Sun, 06 Nov 2016 00:00:00 +0000</lastBuildDate><item><title>Python: 多继承模式下 MRO(Method Resolution Order) 的计算方式</title><link>https://mozillazg.com/2016/11/python-mro-compute.html</link><description>&lt;p&gt;大家可能已经知道了，在 Python 3(Python 2 的新式类)中多继承模式是使用 C3 算法来确定 MRO(Method Resolution Order) 的。&lt;/p&gt;
+&lt;p&gt;那么具体是怎么计算的呢？本文将基于 &lt;a class="reference external" href="https://www.python.org/download/releases/2.3/mro/"&gt;https://www.python.org/download/releases/2.3/mro/&lt;/a&gt; 中的几个例子来讲解 MRO 是怎么计算的。&lt;/p&gt;
+&lt;p&gt;我们首先来定义一些符号：&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+用 CN 表示一个类：C1, C2, C3, ..., CN
+C1 C2 C3 ... CN 表示的是一个包含多个类的列表 [C1, C2, C3, ..., CN]
+&lt;/pre&gt;
+&lt;p&gt;其中：&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+head = C1
+tail = C2 ... CN
+&lt;/pre&gt;
+&lt;p&gt;加法运算:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+C + (C1 C2 ... CN) = C C1 C2 ... CN
+[C] + [C1, C2, ... ,CN] = [C, C1, C2, ..., CN]
+&lt;/pre&gt;
+&lt;p&gt;L[C] 表示类 C 的线性值，其实就是 C 的 MRO, 其中&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+L[object] = object
+&lt;/pre&gt;
+&lt;p&gt;比如有个类 :&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+class C(B1, B2, ..., BN): pass
+&lt;/pre&gt;
+&lt;p&gt;那么:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+L[C(B1 ... BN)] = C + merge(L[B1] ... L[BN], B1 ... BN)
+&lt;/pre&gt;
+&lt;p&gt;merge 的计算规则如下：&lt;/p&gt;
+&lt;blockquote&gt;
+take the head of the first list, i.e L[B1][0]; if this head is not in the tail of any of the other lists, then add it to the linearization of C and remove it from the lists in the merge, otherwise look at the head of the next list and take it, if it is a good head. Then repeat the operation until all the class are removed or it is impossible to find good heads. In this case, it is impossible to construct the merge, Python 2.3 will refuse to create the class C and will raise an exception.&lt;/blockquote&gt;
+&lt;div class="section" id="mro"&gt;
+&lt;h2&gt;计算 MRO&lt;/h2&gt;
+&lt;p&gt;先从简单的类说起：&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+class B(object): pass
+
+L[B] = L[B(object)]
+     = B + merge(L[object])
+     = B + L[object]
+     = B object
+
+&amp;gt;&amp;gt;&amp;gt; B.mro()
+[&amp;lt;class '__main__.B'&amp;gt;, &amp;lt;type 'object'&amp;gt;]
+&lt;/pre&gt;
+&lt;p&gt;简单的子类:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+class C(B): pass
+
+L[C] = L[C(B)]
+     = C + merge(L[B])
+     = C + L[B]
+     = C B object     # 从上面已经知道了 L[B] = B object
+
+&amp;gt;&amp;gt;&amp;gt; C.mro()
+[&amp;lt;class '__main__.C'&amp;gt;, &amp;lt;class '__main__.B'&amp;gt;, &amp;lt;type 'object'&amp;gt;]
+&lt;/pre&gt;
+&lt;p&gt;下面来看一个复杂的例子:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+&amp;gt;&amp;gt;&amp;gt; O = object
+&amp;gt;&amp;gt;&amp;gt; class F(O): pass
+&amp;gt;&amp;gt;&amp;gt; class E(O): pass
+&amp;gt;&amp;gt;&amp;gt; class D(O): pass
+&amp;gt;&amp;gt;&amp;gt; class C(D,F): pass
+&amp;gt;&amp;gt;&amp;gt; class B(D,E): pass
+&amp;gt;&amp;gt;&amp;gt; class A(B,C): pass
+&lt;/pre&gt;
+&lt;p&gt;很容易就可以想到:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+L[O] = O = object
+L[F] = L[F(O)] = F  O
+L[E] = L[E(O)] = E  O
+L[D] = L[D(O)] = D  O
+&lt;/pre&gt;
+&lt;p&gt;下面来计算 C, B, A:&lt;/p&gt;
+&lt;p&gt;&lt;tt class="docutils literal"&gt;L[C]&lt;/tt&gt;:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+L[C] = L[C(D, F)]
+     = C + merge(L[D], L[F], DF)
+     # 从前面可知 L[D] 和 L[F] 的结果
+     = C +  merge(DO, FO, DF)
+     # 因为 D 是顺序第一个并且在几个包含 D 的 list 中是 head，
+     # 所以这一次取 D 同时从列表中删除 D
+     = C + D + merge(O, FO, F)
+     # 因为 O 虽然是顺序第一个但在其他 list (FO)中不是 head, 跳过,
+     # 改为检查第二个list FO # F 是第二个 list 和其他 list 的 head,
+     # 取 F同时从列表中删除 F
+     = C + D + F + merge(O)
+     = C D F O
+
+&amp;gt;&amp;gt;&amp;gt; C.mro()
+[&amp;lt;class '__main__.C'&amp;gt;, &amp;lt;class '__main__.D'&amp;gt;, &amp;lt;class '__main__.F'&amp;gt;, &amp;lt;type 'object'&amp;gt;]
+&lt;/pre&gt;
+&lt;p&gt;&lt;tt class="docutils literal"&gt;L[B]&lt;/tt&gt;:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+L[B] = L[B(D, E)]
+     = B + merge(L[D], L[E], DE)
+     = B + merge(DO, EO, DE)
+     = B + D + merge(O, EO, E)
+     = B + D + E + merge(O)
+     = B D E O
+
+&amp;gt;&amp;gt;&amp;gt; B.mro()
+[&amp;lt;class '__main__.B'&amp;gt;, &amp;lt;class '__main__.D'&amp;gt;, &amp;lt;class '__main__.E'&amp;gt;, &amp;lt;type 'object'&amp;gt;]
+&lt;/pre&gt;
+&lt;p&gt;&lt;tt class="docutils literal"&gt;L[A]&lt;/tt&gt;:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+L[A] = L[A(B, C)]
+     = A + merge(L(B), L(C), BC)
+     = A + merge(BDEO, CDFO, BC)
+     = A + B + merge(DEO, CDFO, C)
+     # 注意这里是 C , 因为第一个list 的 head D 不是其他list 的 head
+     # 所以改为从下一个 list CDFO 开始
+     = A + B + C + merge(DEO, DFO)
+     = A + B + C + D + merge(EO, FO)
+     = A + B + C  + D + E + merge(O, FO)
+     = A + B + C + D + E + F + merge(O)
+     = A B C D E F O
+
+&amp;gt;&amp;gt;&amp;gt; A.mro()
+[&amp;lt;class '__main__.A'&amp;gt;, &amp;lt;class '__main__.B'&amp;gt;, &amp;lt;class '__main__.C'&amp;gt;,
+ &amp;lt;class '__main__.D'&amp;gt;, &amp;lt;class '__main__.E'&amp;gt;, &amp;lt;class '__main__.F'&amp;gt;, &amp;lt;type 'object'&amp;gt;]
+&lt;/pre&gt;
+&lt;p&gt;到这里应该已经有一点眉目了。下面再来个上面那些类的变种，可以先自己算算看，后面有详细的计算过程。&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+&amp;gt;&amp;gt;&amp;gt; O = object
+&amp;gt;&amp;gt;&amp;gt; class F(O): pass
+&amp;gt;&amp;gt;&amp;gt; class E(O): pass
+&amp;gt;&amp;gt;&amp;gt; class D(O): pass
+&amp;gt;&amp;gt;&amp;gt; class C(D,F): pass
+&amp;gt;&amp;gt;&amp;gt; class B(E,D): pass
+&amp;gt;&amp;gt;&amp;gt; class A(B,C): pass
+&lt;/pre&gt;
+&lt;p&gt;跟之前唯一的区别是 &lt;tt class="docutils literal"&gt;B(D, E)&lt;/tt&gt; 变成了 &lt;tt class="docutils literal"&gt;B(E, D)&lt;/tt&gt;&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+L[O] = O = object
+L[F(O)] = F  O
+L[E(O)] = E  O
+L[D(O)] = D  O
+
+L[C] = L[C(D, F)]
+     = C + merge(L[D], L[F], DF)
+     = C D F O
+
+L[B] = L[B(E, D)]
+     = B + merge(L[E], L[D], ED)
+     = B + merge(EO, DO, ED)
+     = B + E + merge(O, DO, D)
+     = B + E + D + merge(O)
+     = B E D O
+&amp;gt;&amp;gt;&amp;gt; B.mro()
+[&amp;lt;class '__main__.B'&amp;gt;, &amp;lt;class '__main__.E'&amp;gt;, &amp;lt;class '__main__.D'&amp;gt;, &amp;lt;type 'object'&amp;gt;]
+
+L[A] = L[A(B, C)]
+     = A + merge(L[B], L[C], BC)
+     = A + merge(BEDO, CDFO, BC)
+     = A + B + merge(EDO, CDFO, C)
+     = A + B + E + merge(DO, CDFO, C)
+     = A + B + E + C + merge(DO, DFO)
+     = A + B + E + C + D + merge(O, FO)
+     = A + B + E + C + D + F + merge(O)
+     = A B E C D F O
+&amp;gt;&amp;gt;&amp;gt; A.mro()
+[&amp;lt;class '__main__.A'&amp;gt;, &amp;lt;class '__main__.B'&amp;gt;, &amp;lt;class '__main__.E'&amp;gt;,
+ &amp;lt;class '__main__.C'&amp;gt;, &amp;lt;class '__main__.D'&amp;gt;, &amp;lt;class '__main__.F'&amp;gt;, &amp;lt;type 'object'&amp;gt;]
+&lt;/pre&gt;
+&lt;p&gt;通过这几个例子应该对如何计算 MRO 已经有所了解了，更详细的信息可以阅读 &lt;a class="reference external" href="https://www.python.org/download/releases/2.3/mro/"&gt;python MRO 文档&lt;/a&gt;
+以及 wikipedia 中的 &lt;a class="reference external" href="https://en.wikipedia.org/wiki/C3_linearization"&gt;C3 算法&lt;/a&gt;.&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class="section" id="id1"&gt;
+&lt;h2&gt;参考资料&lt;/h2&gt;
+&lt;ul class="simple"&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://www.python.org/download/releases/2.3/mro/"&gt;The Python 2.3 Method Resolution Order | Python.org&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://en.wikipedia.org/wiki/C3_linearization"&gt;C3 linearization - Wikipedia&lt;/a&gt;&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/div&gt;
+</description><dc:creator xmlns:dc="http://purl.org/dc/elements/1.1/">mozillazg</dc:creator><pubDate>Sun, 06 Nov 2016 00:00:00 +0000</pubDate><guid>tag:mozillazg.com,2016-11-06:2016/11/python-mro-compute.html</guid></item><item><title>Python: threading + multiprocessing + logging = 死锁 ?</title><link>https://mozillazg.com/2016/09/python-threading-multiprocessing-logging-equal-deadlock.html</link><description>&lt;p&gt;前段时间有个程序突然出现了子进程不工作的情况。&lt;/p&gt;
 &lt;p&gt;后来通过调查发现是因为程序中同时使用了多线程，多进程以及 logging
 模块，导致子进程中出现了死锁的情况。&lt;/p&gt;
 &lt;p&gt;当创建子进程的时候，后台线程中的 logging 模块正好获取了一个锁(&lt;tt class="docutils literal"&gt;threading.RLock&lt;/tt&gt;)在记录日志信息。由于在 unix/linux 平台下 Python 是通过 fork 来创建子进程的，因此创建子进程的时候会把 logging 中的锁也复制了一份，当子进程中需要记录日志的时候发现 logging 的锁一直处于被占用的状态，从而出现了死锁（复制的这个锁永远也不会被释放，因为它的所有者是父进程的某个线程，但是这个线程释放锁的时候又不会影响子进程里的这个锁）。&lt;/p&gt;
