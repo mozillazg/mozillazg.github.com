@@ -1,5 +1,361 @@
 <?xml version="1.0" encoding="utf-8"?>
-<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom"><channel><title>Huang Huang 的博客</title><link>https://mozillazg.github.io/</link><description></description><atom:link href="https://mozillazg.github.io/feeds/mozillazg.rss.xml" rel="self"></atom:link><lastBuildDate>Mon, 12 Dec 2016 00:00:00 +0000</lastBuildDate><item><title>Python: super 没那么简单</title><link>https://mozillazg.github.io/2016/12/python-super-is-not-as-simple-as-you-thought.html</link><description>&lt;p&gt;说到 &lt;tt class="docutils literal"&gt;super&lt;/tt&gt;， 大家可能觉得很简单呀，不就是用来调用父类方法的嘛。如果真的这么简单的话也就不会有这篇文章了，且听我细细道来。😄&lt;/p&gt;
+<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom"><channel><title>Huang Huang 的博客</title><link>https://mozillazg.github.io/</link><description></description><atom:link href="https://mozillazg.github.io/feeds/mozillazg.rss.xml" rel="self"></atom:link><lastBuildDate>Mon, 10 Apr 2017 00:00:00 +0000</lastBuildDate><item><title>tinyq: 一个队列框架</title><link>https://mozillazg.github.io/2017/04/tinyq-a-queue-framework.html</link><description>&lt;p&gt;最近尝试着写了一个简单的队列框架，整体的功能类似 celery, rq 之类的队列框架。
+下面简单的介绍一下。&lt;/p&gt;
+&lt;div class="section" id="id1"&gt;
+&lt;h2&gt;安装&lt;/h2&gt;
+&lt;div class="line-block"&gt;
+&lt;div class="line"&gt;项目地址： &lt;a class="reference external" href="https://github.com/mozillazg/tinyq"&gt;https://github.com/mozillazg/tinyq&lt;/a&gt;&lt;/div&gt;
+&lt;div class="line"&gt;安装：&lt;/div&gt;
+&lt;/div&gt;
+&lt;pre class="literal-block"&gt;
+pip install tinyq
+&lt;/pre&gt;
+&lt;p&gt;这个框架使用 redis 作为队列服务，所以同时也需要安装 redis 服务程序。&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class="section" id="hello-world"&gt;
+&lt;h2&gt;Hello World&lt;/h2&gt;
+&lt;ol class="arabic"&gt;
+&lt;li&gt;&lt;p class="first"&gt;启动 redis 服务:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+$ redis-server
+&lt;/pre&gt;
+&lt;/li&gt;
+&lt;li&gt;&lt;p class="first"&gt;增加一个 app.py 文件:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+from tinyq import Application
+
+app = Application()
+
+
+&amp;#64;app.task()
+def add(m, n):
+    return m + n
+&lt;/pre&gt;
+&lt;/li&gt;
+&lt;li&gt;&lt;p class="first"&gt;通过 python shell 增加几个 delay job:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+from app import app
+
+for m in range(10):
+ for n in range(3):
+     add.delay(m, n)
+&lt;/pre&gt;
+&lt;/li&gt;
+&lt;li&gt;&lt;p class="first"&gt;启动 worker 消费队列中的 job:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+$ tinyq -l info
+2017-03-12 21:27:12,322 - WARNING - tinyq.runner[line:73 thread:MainThread(140736379601856) process:MainProcess(15388)] - Starting TinyQ worker, version 0.1.0...
+2017-03-12 21:27:12,446 - INFO - tinyq.worker[line:65 thread:Worker-2(123145554059264) process:MainProcess(15388)] - Got a job: &amp;lt;Job: id: 9687d9dd-30f4-4920-bd0c-924e672d9794, task_name: add&amp;gt;
+2017-03-12 21:27:12,447 - INFO - tinyq.worker[line:67 thread:Worker-2(123145554059264) process:MainProcess(15388)] - Finish run job &amp;lt;Job: id: 9687d9dd-30f4-4920-bd0c-924e672d9794, task_name: add&amp;gt;
+2017-03-12 21:27:12,500 - INFO - tinyq.worker[line:65 thread:Worker-5(123145569824768) process:MainProcess(15388)] - Got a job: &amp;lt;Job: id: 315f4ead-cedb-4b7a-b3c6-d328b0152e35, task_name: add&amp;gt;
+2017-03-12 21:27:12,501 - INFO - tinyq.worker[line:67 thread:Worker-5(123145569824768) process:MainProcess(15388)] - Finish run job &amp;lt;Job: id: 315f4ead-cedb-4b7a-b3c6-d328b0152e35, task_name: add&amp;gt;
+2017-03-12 21:27:12,610 - INFO - tinyq.worker[line:65 thread:Worker-1(123145548804096) process:MainProcess(15388)] - Got a job: &amp;lt;Job: id: a014ee87-0200-4b78-af25-6fe8dcca3f14, task_name: add&amp;gt;
+2017-03-12 21:27:12,610 - INFO - tinyq.worker[line:67 thread:Worker-1(123145548804096) process:MainProcess(15388)] - Finish run job &amp;lt;Job: id: a014ee87-0200-4b78-af25-6fe8dcca3f14, task_name: add&amp;gt;
+^C2017-03-12 21:27:13,863 - WARNING - tinyq.runner[line:144 thread:MainThread(140736379601856) process:MainProcess(15388)] - Received stop signal, warm shutdown...
+2017-03-12 21:27:13,886 - WARNING - tinyq.runner[line:135 thread:Worker-2(123145554059264) process:MainProcess(15388)] - Exit worker Worker-2.
+2017-03-12 21:27:13,896 - WARNING - tinyq.runner[line:135 thread:Worker-7(123145580335104) process:MainProcess(15388)] - Exit worker Worker-7.
+2017-03-12 21:27:13,906 - WARNING - tinyq.runner[line:135 thread:Scheduler(123145538293760) process:MainProcess(15388)] - Exit worker Scheduler.
+2017-03-12 21:27:13,924 - WARNING - tinyq.runner[line:135 thread:Worker-5(123145569824768) process:MainProcess(15388)] - Exit worker Worker-5.
+2017-03-12 21:27:13,936 - WARNING - tinyq.runner[line:135 thread:Worker-0(123145543548928) process:MainProcess(15388)] - Exit worker Worker-0.
+2017-03-12 21:27:13,956 - WARNING - tinyq.runner[line:135 thread:Worker-4(123145564569600) process:MainProcess(15388)] - Exit worker Worker-4.
+2017-03-12 21:27:13,978 - WARNING - tinyq.runner[line:135 thread:Worker-6(123145575079936) process:MainProcess(15388)] - Exit worker Worker-6.
+2017-03-12 21:27:14,017 - WARNING - tinyq.runner[line:135 thread:Worker-1(123145548804096) process:MainProcess(15388)] - Exit worker Worker-1.
+2017-03-12 21:27:14,068 - WARNING - tinyq.runner[line:135 thread:Worker-3(123145559314432) process:MainProcess(15388)] - Exit worker Worker-3.
+2017-03-12 21:27:14,068 - WARNING - tinyq.runner[line:101 thread:MainThread(140736379601856) process:MainProcess(15388)] - Exit workers.
+$
+&lt;/pre&gt;
+&lt;/li&gt;
+&lt;/ol&gt;
+&lt;/div&gt;
+&lt;div class="section" id="id2"&gt;
+&lt;h2&gt;功能&lt;/h2&gt;
+&lt;p&gt;通过上面的 Hello World 示例可以看出 tinyq 的功能类似 rq/celery。
+还有一些 Hello World 中没有展示出来的功能:&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;p class="first"&gt;&lt;tt class="docutils literal"&gt;app = Application()&lt;/tt&gt;, 可以给 &lt;tt class="docutils literal"&gt;Application&lt;/tt&gt; 传递一个参数来指定 redis 配置:
+&lt;tt class="docutils literal"&gt;app = &lt;span class="pre"&gt;Application('redis://192.168.99.100:2375/1')&lt;/span&gt;&lt;/tt&gt;&lt;/p&gt;
+&lt;/li&gt;
+&lt;li&gt;&lt;p class="first"&gt;app.py 也可以叫其他的名字，只要在启动 worker 的时候指定 &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;--app&lt;/span&gt;&lt;/tt&gt; 参数就可以了。
+比如有如下文件:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+$ cat test/hello.py
+
+  tinyq_app = Application()
+&lt;/pre&gt;
+&lt;p&gt;那么 &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;--app&lt;/span&gt;&lt;/tt&gt; 参数的值就是 &lt;tt class="docutils literal"&gt;test.hello.tinyq_app&lt;/tt&gt; ，
+关键点是告诉 worker &lt;tt class="docutils literal"&gt;Application&lt;/tt&gt; 实例所在位置&lt;/p&gt;
+&lt;/li&gt;
+&lt;li&gt;&lt;p class="first"&gt;装饰器 &lt;tt class="docutils literal"&gt;&amp;#64;app.task()&lt;/tt&gt; 还有个 &lt;tt class="docutils literal"&gt;name&lt;/tt&gt; 参数，用于指定 task 的名称（默认是被装饰的函数的名称）&lt;/p&gt;
+&lt;/li&gt;
+&lt;li&gt;&lt;p class="first"&gt;既可以通过 &lt;tt class="docutils literal"&gt;add.delay&lt;/tt&gt; 把操作放到队列中，也可以通过 &lt;tt class="docutils literal"&gt;add(m, n)&lt;/tt&gt; 立即执行操作&lt;/p&gt;
+&lt;/li&gt;
+&lt;li&gt;&lt;p class="first"&gt;通过 control + c 退出 worker 时会等待正在处理的 job 全部完成后再退出&lt;/p&gt;
+&lt;/li&gt;
+&lt;li&gt;&lt;p class="first"&gt;worker 还支持其他参数:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+$ tinyq -h
+usage: tinyq [-h] [-V] [-u URI] [-v] [-w WORKER_NUMBER] [-a APP]
+             [-l {debug,info,warn,error,critical}]
+
+Starts a TinyQ worker.
+
+optional arguments:
+  -h, --help            show this help message and exit
+  -V, --version         show program's version number and exit
+  -u URI, --uri URI     The Redis URI (default: redis://)
+  -v, --verbose         Show more output
+  -w WORKER_NUMBER, --worker-number WORKER_NUMBER
+                        Worker number (default: 8)
+  -a APP, --app APP     Application path (default: app.app)
+  -l {debug,info,warn,error,critical}, --log-level {debug,info,warn,error,critical}
+                        Logging level (default: warn)
+&lt;/pre&gt;
+&lt;/li&gt;
+&lt;/ul&gt;
+&lt;p&gt;That's all.&lt;/p&gt;
+&lt;/div&gt;
+</description><dc:creator xmlns:dc="http://purl.org/dc/elements/1.1/">mozillazg</dc:creator><pubDate>Mon, 10 Apr 2017 00:00:00 +0000</pubDate><guid>tag:mozillazg.github.io,2017-04-10:2017/04/tinyq-a-queue-framework.html</guid><category>framework</category><category>queue</category></item><item><title>ZooKeeper FastLeader 选举</title><link>https://mozillazg.github.io/2017/03/zookeeper-fastleader-elect-leader.html</link><description>&lt;p&gt;ZooKeeper 在集群模式下默认会使用 FastLeader 算法来选举 leader。下面将说说 ZooKeeper 集群使用 FastLeader 算法选举的具体过程。写的过程中参考了多篇文章，详见文末的参考资料。&lt;/p&gt;
+&lt;p&gt;首先需要明确几个概念:&lt;/p&gt;
+&lt;ul class="simple"&gt;
+&lt;li&gt;节点状态：每个集群中的节点都有一个状态 LOOKING/FOLLOWING/LEADING/OBSERVING。每个节点启动的时候都是 LOOKING 状态，如果这个节点参与选举但最后不是leader，则状态是 FOLLOWING，如果不参与选举则是 OBSERVING，leader 的状态是 LEADING。&lt;/li&gt;
+&lt;li&gt;epoch: 表示选举轮数。&lt;/li&gt;
+&lt;li&gt;zxid: 事务 zxid 包含了本地数据的最后更新时间相关的信息。&lt;/li&gt;
+&lt;li&gt;serverid: 当前 server 的 ID, 通过配置文件指定(比如: &lt;tt class="docutils literal"&gt;echo '1' &amp;gt; myid&lt;/tt&gt;)。&lt;/li&gt;
+&lt;/ul&gt;
+&lt;p&gt;先用文字描述一下大概的选举思想：&lt;/p&gt;
+&lt;ul class="simple"&gt;
+&lt;li&gt;在没有遇到比我牛的人之前，第一票推荐我自己&lt;/li&gt;
+&lt;li&gt;当接收到其他人的选举信息时，如果他们推荐的人没我牛，那我还是推荐我自己&lt;/li&gt;
+&lt;li&gt;我有一个票箱，保存了当前这一轮选举中自己的推荐人以及接收到的推荐人信息，一人一票，重复或过期的票概不接受&lt;/li&gt;
+&lt;li&gt;当我发现了比我牛的人的时候，改为推荐这个牛人&lt;/li&gt;
+&lt;li&gt;如果我发现我的选举轮数落后了，清空票箱，改为推荐接收到的最新选举中大家推荐的最牛的那个人（如果没有人比我牛，那还是推荐我自己）&lt;/li&gt;
+&lt;li&gt;不断的重复上面的过程，不断的告诉别人“我的投票是第几轮”、“我推举的人是谁”。直到我的票箱中“我推举的最牛的人”收到了不少于 &lt;strong&gt;N / 2 + 1&lt;/strong&gt; 的推举投票，此时这个人就是我认定的最终 leader。&lt;/li&gt;
+&lt;li&gt;当我确定了谁是最终 leader 并且这个 leader 一切正常，我就更新我的状态为 FOLLOWING/LEADING（我自己是最终  leader 则是 LEADING 否则就是 FOLLOWING），之后的选举中都直接反馈我确定的这个最终 leader。&lt;/li&gt;
+&lt;/ul&gt;
+&lt;p&gt;那么，以什么标准来确定一个节点可以成为一个 leader 呢？
+依次比较 epoch, zxid, serverid ：&lt;/p&gt;
+&lt;ul class="simple"&gt;
+&lt;li&gt;接收到的消息中，有 epoch 比我大的，则选 epoch 大的消息中确定的 server&lt;/li&gt;
+&lt;li&gt;如果 epoch 相等，则选 zxid 最大的 server&lt;/li&gt;
+&lt;li&gt;如果 zxid 也相等，则选 serverid 最大的 server (有的节点生来就是当 leader 的 😂）&lt;/li&gt;
+&lt;/ul&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="k"&gt;switch&lt;/span&gt; &lt;span class="o"&gt;(&lt;/span&gt;&lt;span class="n"&gt;n&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="na"&gt;state&lt;/span&gt;&lt;span class="o"&gt;)&lt;/span&gt; &lt;span class="o"&gt;{&lt;/span&gt;
+&lt;span class="c1"&gt;//LOOKING消息，则&lt;/span&gt;
+&lt;span class="k"&gt;case&lt;/span&gt; &lt;span class="n"&gt;LOOKING&lt;/span&gt;&lt;span class="o"&gt;:&lt;/span&gt;
+&lt;span class="o"&gt;......&lt;/span&gt;
+    &lt;span class="c1"&gt;//检查下收到的这张选票是否可以胜出，依次比较选举轮数epoch，事务zxid，服务器编号server id&lt;/span&gt;
+    &lt;span class="o"&gt;}&lt;/span&gt; &lt;span class="k"&gt;else&lt;/span&gt; &lt;span class="k"&gt;if&lt;/span&gt; &lt;span class="o"&gt;(&lt;/span&gt;&lt;span class="n"&gt;totalOrderPredicate&lt;/span&gt;&lt;span class="o"&gt;(&lt;/span&gt;&lt;span class="n"&gt;n&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="na"&gt;leader&lt;/span&gt;&lt;span class="o"&gt;,&lt;/span&gt; &lt;span class="n"&gt;n&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="na"&gt;zxid&lt;/span&gt;&lt;span class="o"&gt;,&lt;/span&gt; &lt;span class="n"&gt;n&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="na"&gt;peerEpoch&lt;/span&gt;&lt;span class="o"&gt;,&lt;/span&gt;
+            &lt;span class="n"&gt;proposedLeader&lt;/span&gt;&lt;span class="o"&gt;,&lt;/span&gt; &lt;span class="n"&gt;proposedZxid&lt;/span&gt;&lt;span class="o"&gt;,&lt;/span&gt; &lt;span class="n"&gt;proposedEpoch&lt;/span&gt;&lt;span class="o"&gt;))&lt;/span&gt; &lt;span class="o"&gt;{&lt;/span&gt;
+        &lt;span class="c1"&gt;//胜出了，就把自己的投票修改为对方的，然后广播消息&lt;/span&gt;
+        &lt;span class="n"&gt;updateProposal&lt;/span&gt;&lt;span class="o"&gt;(&lt;/span&gt;&lt;span class="n"&gt;n&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="na"&gt;leader&lt;/span&gt;&lt;span class="o"&gt;,&lt;/span&gt; &lt;span class="n"&gt;n&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="na"&gt;zxid&lt;/span&gt;&lt;span class="o"&gt;,&lt;/span&gt; &lt;span class="n"&gt;n&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="na"&gt;peerEpoch&lt;/span&gt;&lt;span class="o"&gt;);&lt;/span&gt;
+        &lt;span class="n"&gt;sendNotifications&lt;/span&gt;&lt;span class="o"&gt;();&lt;/span&gt;
+    &lt;span class="o"&gt;}&lt;/span&gt;
+&lt;span class="o"&gt;}&lt;/span&gt;
+
+&lt;span class="kd"&gt;protected&lt;/span&gt; &lt;span class="kt"&gt;boolean&lt;/span&gt; &lt;span class="nf"&gt;totalOrderPredicate&lt;/span&gt;&lt;span class="o"&gt;(&lt;/span&gt;&lt;span class="kt"&gt;long&lt;/span&gt; &lt;span class="n"&gt;newId&lt;/span&gt;&lt;span class="o"&gt;,&lt;/span&gt; &lt;span class="kt"&gt;long&lt;/span&gt; &lt;span class="n"&gt;newZxid&lt;/span&gt;&lt;span class="o"&gt;,&lt;/span&gt; &lt;span class="kt"&gt;long&lt;/span&gt; &lt;span class="n"&gt;newEpoch&lt;/span&gt;&lt;span class="o"&gt;,&lt;/span&gt; &lt;span class="kt"&gt;long&lt;/span&gt; &lt;span class="n"&gt;curId&lt;/span&gt;&lt;span class="o"&gt;,&lt;/span&gt; &lt;span class="kt"&gt;long&lt;/span&gt; &lt;span class="n"&gt;curZxid&lt;/span&gt;&lt;span class="o"&gt;,&lt;/span&gt; &lt;span class="kt"&gt;long&lt;/span&gt; &lt;span class="n"&gt;curEpoch&lt;/span&gt;&lt;span class="o"&gt;)&lt;/span&gt; &lt;span class="o"&gt;{&lt;/span&gt;
+    &lt;span class="k"&gt;return&lt;/span&gt; &lt;span class="o"&gt;(&lt;/span&gt;
+        &lt;span class="o"&gt;(&lt;/span&gt;&lt;span class="n"&gt;newEpoch&lt;/span&gt; &lt;span class="o"&gt;&amp;gt;&lt;/span&gt; &lt;span class="n"&gt;curEpoch&lt;/span&gt;&lt;span class="o"&gt;)&lt;/span&gt; &lt;span class="o"&gt;||&lt;/span&gt;
+        &lt;span class="o"&gt;((&lt;/span&gt;&lt;span class="n"&gt;newEpoch&lt;/span&gt; &lt;span class="o"&gt;==&lt;/span&gt; &lt;span class="n"&gt;curEpoch&lt;/span&gt;&lt;span class="o"&gt;)&lt;/span&gt; &lt;span class="o"&gt;&amp;amp;&amp;amp;&lt;/span&gt;
+        &lt;span class="o"&gt;((&lt;/span&gt;&lt;span class="n"&gt;newZxid&lt;/span&gt; &lt;span class="o"&gt;&amp;gt;&lt;/span&gt; &lt;span class="n"&gt;curZxid&lt;/span&gt;&lt;span class="o"&gt;)&lt;/span&gt; &lt;span class="o"&gt;||&lt;/span&gt; &lt;span class="o"&gt;((&lt;/span&gt;&lt;span class="n"&gt;newZxid&lt;/span&gt; &lt;span class="o"&gt;==&lt;/span&gt; &lt;span class="n"&gt;curZxid&lt;/span&gt;&lt;span class="o"&gt;)&lt;/span&gt; &lt;span class="o"&gt;&amp;amp;&amp;amp;&lt;/span&gt;
+        &lt;span class="o"&gt;(&lt;/span&gt;&lt;span class="n"&gt;newId&lt;/span&gt; &lt;span class="o"&gt;&amp;gt;&lt;/span&gt; &lt;span class="n"&gt;curId&lt;/span&gt;&lt;span class="o"&gt;))))&lt;/span&gt;
+    &lt;span class="o"&gt;);&lt;/span&gt;
+    &lt;span class="o"&gt;}&lt;/span&gt;
+&lt;/pre&gt;&lt;/div&gt;
+&lt;p&gt;从网上找了一个流程图，可以看看：&lt;/p&gt;
+&lt;p&gt;&lt;img alt="flow.png" src="/static/images/zookeeper/elect-leader.png" /&gt;&lt;/p&gt;
+&lt;p&gt;举个例子，理想情况下，先后启动三个节点的选举过程如下：&lt;/p&gt;
+&lt;ul class="simple"&gt;
+&lt;li&gt;第一轮：每个节点广播选自己（此时只有 node1)&lt;/li&gt;
+&lt;li&gt;第二轮：node2 启动了，发起一轮投票。node1 收到了 node2 选它自己的投票，发现 node2 比自己牛，广播选 node2。此时 node1 发现 node2 获得了2票 &amp;gt;= N / 2 + 1，认定 node2 为 leader 进入 following 状态。
+node2 收到了 node1 选自己的广播，此时 node2 发现自己 获得了2票 &amp;gt;= N / 2 + 1，进入 leading 状态。&lt;/li&gt;
+&lt;li&gt;第三轮：node3 启动了，发起一轮投票。node1 和 node2 都选 node2 , node3 通过比对发现 node2 的票数 &amp;gt;= N /2 + 1，认定 node2 是 leader 进入 following 状态。&lt;/li&gt;
+&lt;/ul&gt;
+&lt;p&gt;上面就是 FastLeader 算法选举的简单介绍了，更详细的信息可以查阅官方文档和代码。&lt;/p&gt;
+&lt;div class="section" id="id1"&gt;
+&lt;h2&gt;参考&lt;/h2&gt;
+&lt;ul class="simple"&gt;
+&lt;li&gt;&lt;a class="reference external" href="http://codemacro.com/2014/10/19/zk-fastleaderelection/"&gt;图解zookeeper FastLeader选举算法 - loop in codes&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="http://blog.csdn.net/xhh198781/article/details/6619203"&gt;zookeeper3.3.3源码分析(二)FastLeader选举算法 - xhh198781的专栏 - 博客频道 - CSDN.NET&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="http://iwinit.iteye.com/blog/1773531"&gt;深入浅出Zookeeper之五 Leader选举 - 吊丝码农 - ITeye技术网站&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="http://www.cnblogs.com/yuyijq/p/4116365.html"&gt;Zookeeper-Zookeeper leader选举 - 横刀天笑 - 博客园&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="http://blog.csdn.net/yinwenjie/article/details/47613309"&gt;hadoop系列：zookeeper（2）——zookeeper核心原理（选举） - JAVA入门中 - 博客频道 - CSDN.NET&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://github.com/apache/zookeeper/blob/branch-3.4/src/java/main/org/apache/zookeeper/server/quorum/FastLeaderElection.java"&gt;zookeeper/FastLeaderElection.java at branch-3.4 · apache/zookeeper&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="http://zookeeper.apache.org/doc/r3.4.10/zookeeperAdmin.html#sc_configuration"&gt;ZooKeeper Administrator's Guide&lt;/a&gt;&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/div&gt;
+</description><dc:creator xmlns:dc="http://purl.org/dc/elements/1.1/">mozillazg</dc:creator><pubDate>Sat, 11 Mar 2017 00:00:00 +0000</pubDate><guid>tag:mozillazg.github.io,2017-03-11:2017/03/zookeeper-fastleader-elect-leader.html</guid><category>zookeeper</category><category>leader选举</category></item><item><title>Python: 实现 Ruby 风格的字符串插值功能</title><link>https://mozillazg.github.io/2017/02/f-Implement-Ruby-Style-String-Interpolation.html</link><description>&lt;div class="section" id="id1"&gt;
+&lt;h2&gt;什么是字符串插值功能&lt;/h2&gt;
+&lt;p&gt;字符串插值功能是一种定义字符串的方式，可以在字符串中包含变量、表达式，
+这些字符串中的变量/表达式会被自动替换为相应的值。&lt;/p&gt;
+&lt;p&gt;很多语言都支持字符串插值功能。下面我们来看一下 Ruby 和 Python 3.6 中字符串插值功能是什么样的。&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class="section" id="ruby"&gt;
+&lt;h2&gt;Ruby 风格&lt;/h2&gt;
+&lt;p&gt;Ruby 风格的字符串插值是这样的：&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+$ irb
+&amp;gt;&amp;gt; a = 2
+=&amp;gt; 2
+&amp;gt;&amp;gt; b = 3
+=&amp;gt; 3
+&amp;gt;&amp;gt; &amp;quot;#{a}&amp;quot;
+=&amp;gt; &amp;quot;2&amp;quot;
+&amp;gt;&amp;gt; &amp;quot;#{a + b}&amp;quot;
+=&amp;gt; &amp;quot;5&amp;quot;
+&lt;/pre&gt;
+&lt;p&gt;Ruby 中是通过 &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;&amp;quot;#{var}&amp;quot;&lt;/span&gt;&lt;/tt&gt; 来定义的。&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class="section" id="python-3-6"&gt;
+&lt;h2&gt;Python 3.6+ 风格&lt;/h2&gt;
+&lt;p&gt;Python 3.6 也增加了对字符串插值功能的支持:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+$ python3.6
+&amp;gt;&amp;gt;&amp;gt; a = 2
+&amp;gt;&amp;gt;&amp;gt; b = 3
+&amp;gt;&amp;gt;&amp;gt; f&amp;quot;{a}&amp;quot;
+'2'
+&amp;gt;&amp;gt;&amp;gt; f&amp;quot;{a + b}&amp;quot;
+'5'
+&lt;/pre&gt;
+&lt;p&gt;Python 3.6 中新引入了一个 &lt;tt class="docutils literal"&gt;f&lt;/tt&gt; ,  是通过 &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;f&amp;quot;{var}&amp;quot;&lt;/span&gt;&lt;/tt&gt; 来定义的。&lt;/p&gt;
+&lt;p&gt;通过上面的定义以及两个语言的例子，我们可以知道：
+字符串插值就是自动使用当前上下文的变量来求取字符串中特殊标志位中变量或表达式的值,
+同时用求得的值替换掉这个标志位 。&lt;/p&gt;
+&lt;p&gt;所以实现这个功能有三个要点：&lt;/p&gt;
+&lt;ul class="simple"&gt;
+&lt;li&gt;定义语法&lt;/li&gt;
+&lt;li&gt;获取上下文的变量&lt;/li&gt;
+&lt;li&gt;把字符串当作 python 代码执行并求值&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/div&gt;
+&lt;div class="section" id="id2"&gt;
+&lt;h2&gt;语法&lt;/h2&gt;
+&lt;p&gt;我们的字符串插值的语法如下:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+f('#{var}')
+&lt;/pre&gt;
+&lt;p&gt;通过一个 &lt;tt class="docutils literal"&gt;f&lt;/tt&gt; 函数来实现字符串插值功能，通过正则来解析变量:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+re_code = re.compile(r'#\{([^\}]+)\}')
+&lt;/pre&gt;
+&lt;/div&gt;
+&lt;div class="section" id="id3"&gt;
+&lt;h2&gt;获取上下文的变量的值&lt;/h2&gt;
+&lt;p&gt;可以通过 &lt;tt class="docutils literal"&gt;locals()&lt;/tt&gt; 或者当前上下文变量的值，如果要获取调用方的上下文变量的值
+可以使用 frame.&lt;/p&gt;
+&lt;p&gt;&lt;tt class="docutils literal"&gt;frame = sys._getframe()&lt;/tt&gt; 可以获取当前 frame, &lt;tt class="docutils literal"&gt;frame.f_locals&lt;/tt&gt; 可以获取该 frame
+所在上下文的局部变量的值， &lt;tt class="docutils literal"&gt;frame.f_globals&lt;/tt&gt; 可以获取该 frame 所在上下文的全局变量的值。
+而 &lt;tt class="docutils literal"&gt;frame = sys._getframe(1)&lt;/tt&gt; 则可以获取调用方所在  frame:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+$ cat f.py
+import sys
+
+
+def test():
+    frame = sys._getframe(1)
+    print('locals: ', frame.f_locals)
+    print('globals: ', frame.f_globals)
+
+
+a = 1
+test()
+
+$ python f.py
+locals:  {'__name__': '__main__', ..., 'test': &amp;lt;function test at 0x100f1ee18&amp;gt;, 'a': 1}
+globals:  {'__name__': '__main__', ..., 'test': &amp;lt;function test at 0x100f1ee18&amp;gt;, 'a': 1}
+&lt;/pre&gt;
+&lt;p&gt;在上面的例子中我们可以看到，可以在 &lt;tt class="docutils literal"&gt;test&lt;/tt&gt; 函数中获取调用方所在上下文的变量 &lt;tt class="docutils literal"&gt;a&lt;/tt&gt; 的值。&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class="section" id="python"&gt;
+&lt;h2&gt;把字符串当作 python 代码执行并求值&lt;/h2&gt;
+&lt;p&gt;这个可以通过 &lt;tt class="docutils literal"&gt;eval&lt;/tt&gt; 函数来实现这个功能:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+eval(source, globals=None, locals=None, /)
+    Evaluate the given source in the context of globals and locals.
+
+    The source may be a string representing a Python expression
+    or a code object as returned by compile().
+    The globals must be a dictionary and locals can be any mapping,
+    defaulting to the current globals and locals.
+    If only globals is given, locals defaults to it.
+
+&amp;gt;&amp;gt;&amp;gt; eval('1 + 1')
+2
+&amp;gt;&amp;gt;&amp;gt; a = 2
+&amp;gt;&amp;gt;&amp;gt; eval('a')
+2
+&amp;gt;&amp;gt;&amp;gt; eval('a + 1')
+3
+&amp;gt;&amp;gt;&amp;gt; eval('b', {'b': 2})
+2
+&lt;/pre&gt;
+&lt;/div&gt;
+&lt;div class="section" id="f"&gt;
+&lt;h2&gt;实现 f 函数&lt;/h2&gt;
+&lt;p&gt;下面的代码是一种 &lt;tt class="docutils literal"&gt;f&lt;/tt&gt; 函数的实现方法 :&lt;/p&gt;
+&lt;pre class="code python literal-block"&gt;
+&lt;span class="err"&gt;$&lt;/span&gt; &lt;span class="n"&gt;cat&lt;/span&gt; &lt;span class="n"&gt;f&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;py&lt;/span&gt;
+&lt;span class="c1"&gt;# -*- coding: utf-8 -*-&lt;/span&gt;
+&lt;span class="kn"&gt;import&lt;/span&gt; &lt;span class="nn"&gt;re&lt;/span&gt;
+&lt;span class="kn"&gt;import&lt;/span&gt; &lt;span class="nn"&gt;sys&lt;/span&gt;
+
+&lt;span class="n"&gt;re_code&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;re&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;compile&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="s1"&gt;r'#\{([^\}]+)\}'&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+
+
+&lt;span class="k"&gt;def&lt;/span&gt; &lt;span class="nf"&gt;f&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;text&lt;/span&gt;&lt;span class="p"&gt;):&lt;/span&gt;
+    &lt;span class="sd"&gt;&amp;quot;&amp;quot;&amp;quot;实现字符串插值功能&amp;quot;&amp;quot;&amp;quot;&lt;/span&gt;
+    &lt;span class="n"&gt;frame&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;sys&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;_getframe&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="mi"&gt;1&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+    &lt;span class="n"&gt;chucks&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;get_chucks&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;text&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+    &lt;span class="n"&gt;values&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;eval_chucks&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;chucks&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;frame&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;f_globals&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;frame&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;f_locals&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+    &lt;span class="k"&gt;return&lt;/span&gt; &lt;span class="s1"&gt;''&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;join&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;values&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+
+
+&lt;span class="k"&gt;def&lt;/span&gt; &lt;span class="nf"&gt;eval_chucks&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;chucks&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;f_globals&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;f_locals&lt;/span&gt;&lt;span class="p"&gt;):&lt;/span&gt;
+    &lt;span class="sd"&gt;&amp;quot;&amp;quot;&amp;quot;字符串插值求值&amp;quot;&amp;quot;&amp;quot;&lt;/span&gt;
+    &lt;span class="k"&gt;for&lt;/span&gt; &lt;span class="n"&gt;string&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;code&lt;/span&gt; &lt;span class="ow"&gt;in&lt;/span&gt; &lt;span class="n"&gt;chucks&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;
+        &lt;span class="k"&gt;yield&lt;/span&gt; &lt;span class="nb"&gt;str&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;string&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+
+        &lt;span class="k"&gt;if&lt;/span&gt; &lt;span class="n"&gt;code&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;
+            &lt;span class="n"&gt;eval_ret&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="nb"&gt;eval&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;code&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;f_globals&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;f_locals&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+            &lt;span class="k"&gt;yield&lt;/span&gt; &lt;span class="nb"&gt;str&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;eval_ret&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+
+
+&lt;span class="k"&gt;def&lt;/span&gt; &lt;span class="nf"&gt;get_chucks&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;text&lt;/span&gt;&lt;span class="p"&gt;):&lt;/span&gt;
+    &lt;span class="sd"&gt;&amp;quot;&amp;quot;&amp;quot;按插值语法处理字符串
+
+    get_chucks('aa #{a} bb') -&amp;gt; [('aa ', '#{a}'), (' bb', '')]
+    &amp;quot;&amp;quot;&amp;quot;&lt;/span&gt;
+    &lt;span class="n"&gt;matchs&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;re_code&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;finditer&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;text&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+    &lt;span class="n"&gt;pos&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="mi"&gt;0&lt;/span&gt;
+    &lt;span class="k"&gt;for&lt;/span&gt; &lt;span class="n"&gt;match&lt;/span&gt; &lt;span class="ow"&gt;in&lt;/span&gt; &lt;span class="n"&gt;matchs&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;
+        &lt;span class="k"&gt;yield&lt;/span&gt; &lt;span class="n"&gt;text&lt;/span&gt;&lt;span class="p"&gt;[&lt;/span&gt;&lt;span class="n"&gt;pos&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="n"&gt;match&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;start&lt;/span&gt;&lt;span class="p"&gt;()],&lt;/span&gt; &lt;span class="n"&gt;match&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;group&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="mi"&gt;1&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+        &lt;span class="n"&gt;pos&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;match&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;end&lt;/span&gt;&lt;span class="p"&gt;()&lt;/span&gt;
+    &lt;span class="k"&gt;yield&lt;/span&gt; &lt;span class="n"&gt;text&lt;/span&gt;&lt;span class="p"&gt;[&lt;/span&gt;&lt;span class="n"&gt;pos&lt;/span&gt;&lt;span class="p"&gt;:],&lt;/span&gt; &lt;span class="s1"&gt;''&lt;/span&gt;
+&lt;/pre&gt;
+&lt;p&gt;效果&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+&amp;gt;&amp;gt;&amp;gt; from f import f
+&amp;gt;&amp;gt;&amp;gt; a = 1
+&amp;gt;&amp;gt;&amp;gt; b = 2
+&amp;gt;&amp;gt;&amp;gt; c = '3'
+&amp;gt;&amp;gt;&amp;gt; f('#{ a }')
+'1'
+&amp;gt;&amp;gt;&amp;gt; f('#{ a + b}')
+'3'
+&amp;gt;&amp;gt;&amp;gt; f('#{ c * 2}')
+'33'
+&lt;/pre&gt;
+&lt;/div&gt;
+&lt;div class="section" id="id4"&gt;
+&lt;h2&gt;参考资料&lt;/h2&gt;
+&lt;ul class="simple"&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://docs.python.org/3.6/library/sys.html#sys._getframe"&gt;29.1. sys — System-specific parameters and functions — Python 3.6.1 documentation&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://docs.python.org/3.6/library/inspect.html#types-and-members"&gt;29.12. inspect — Inspect live objects — Python 3.6.1 documentation&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://docs.python.org/3.6/library/functions.html#eval"&gt;2. Built-in Functions — Python 3.6.1 documentation&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://github.com/mozillazg/f"&gt;github.com/mozillazg/f&lt;/a&gt;&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/div&gt;
+</description><dc:creator xmlns:dc="http://purl.org/dc/elements/1.1/">mozillazg</dc:creator><pubDate>Thu, 16 Feb 2017 00:00:00 +0000</pubDate><guid>tag:mozillazg.github.io,2017-02-16:2017/02/f-Implement-Ruby-Style-String-Interpolation.html</guid></item><item><title>Python: super 没那么简单</title><link>https://mozillazg.github.io/2016/12/python-super-is-not-as-simple-as-you-thought.html</link><description>&lt;p&gt;说到 &lt;tt class="docutils literal"&gt;super&lt;/tt&gt;， 大家可能觉得很简单呀，不就是用来调用父类方法的嘛。如果真的这么简单的话也就不会有这篇文章了，且听我细细道来。😄&lt;/p&gt;
 &lt;div class="section" id="id1"&gt;
 &lt;h2&gt;约定&lt;/h2&gt;
 &lt;p&gt;在开始之前我们来约定一下本文所使用的 Python 版本。默认用的是 Python 3，也就是说：本文所定义的类都是新式类。如果你用到是 Python 2 的话，记得继承 &lt;tt class="docutils literal"&gt;object&lt;/tt&gt;:&lt;/p&gt;
@@ -3557,7 +3913,7 @@ is your largest weakness?         &lt;br /&gt;
 soup, sir?        &lt;br /&gt;
 先生，你的字母汤味道咋样？&lt;/p&gt;
 &lt;p&gt;it's a little salty.      &lt;br /&gt;
-有点咸。&lt;/p&gt;</description><dc:creator xmlns:dc="http://purl.org/dc/elements/1.1/">mozillazg</dc:creator><pubDate>Mon, 22 Feb 2016 00:00:00 +0000</pubDate><guid>tag:mozillazg.github.io,2016-02-22:2016/02/4218.soup.zh-cn.html</guid><category>Cyanide and Happiness</category></item><item><title>Python: bustard: 一个玩具式的 web 框架</title><link>https://mozillazg.github.io/2016/02/bustard-a-tiny-wsgi-web-framework.html</link><description>&lt;p&gt;最近一直在填一个玩具式（仅供学习交流，不可用于生产环境）的 WEB 框架的坑，现在大部分功能都已经完成的差不多了， 所以写篇博文介绍一下这个框架。&lt;/p&gt;
+有点咸。&lt;/p&gt;</description><dc:creator xmlns:dc="http://purl.org/dc/elements/1.1/">mozillazg</dc:creator><pubDate>Mon, 22 Feb 2016 00:00:00 +0000</pubDate><guid>tag:mozillazg.github.io,2016-02-22:2016/02/4218.soup.zh-cn.html</guid><category>Cyanide and Happiness</category></item><item><title>bustard: 一个 web 框架</title><link>https://mozillazg.github.io/2016/02/bustard-a-tiny-wsgi-web-framework.html</link><description>&lt;p&gt;最近一直在填一个玩具式（仅供学习交流，不可用于生产环境）的 WEB 框架的坑，现在大部分功能都已经完成的差不多了， 所以写篇博文介绍一下这个框架。&lt;/p&gt;
 &lt;div class="line-block"&gt;
 &lt;div class="line"&gt;项目地址： &lt;a class="reference external" href="https://github.com/mozillazg/bustard"&gt;https://github.com/mozillazg/bustard&lt;/a&gt;&lt;/div&gt;
 &lt;div class="line"&gt;安装：&lt;/div&gt;
