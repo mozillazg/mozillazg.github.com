@@ -1,5 +1,355 @@
 <?xml version="1.0" encoding="utf-8"?>
-<feed xmlns="http://www.w3.org/2005/Atom"><title>Huang Huang 的博客</title><link href="https://mozillazg.github.io/" rel="alternate"></link><link href="https://mozillazg.github.io/feeds/mozillazg.atom.xml" rel="self"></link><id>https://mozillazg.github.io/</id><updated>2017-04-10T00:00:00+00:00</updated><entry><title>tinyq: 一个队列框架</title><link href="https://mozillazg.github.io/2017/04/tinyq-a-queue-framework.html" rel="alternate"></link><updated>2017-04-10T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.github.io,2017-04-10:2017/04/tinyq-a-queue-framework.html</id><summary type="html">&lt;p&gt;最近尝试着写了一个简单的队列框架，整体的功能类似 celery, rq 之类的队列框架。
+<feed xmlns="http://www.w3.org/2005/Atom"><title>Huang Huang 的博客</title><link href="https://mozillazg.github.io/" rel="alternate"></link><link href="https://mozillazg.github.io/feeds/mozillazg.atom.xml" rel="self"></link><id>https://mozillazg.github.io/</id><updated>2017-07-02T00:00:00+00:00</updated><entry><title>使用 gdb 调试运行中的 Python 进程</title><link href="https://mozillazg.github.io/2017/07/debug-running-python-process-with-gdb.html" rel="alternate"></link><updated>2017-07-02T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.github.io,2017-07-02:2017/07/debug-running-python-process-with-gdb.html</id><summary type="html">&lt;p&gt;假设一个服务器上运行了下面这样的 test.py 程序，我们怎样才能知道程序是否在正常运行，运行到哪一步了呢？&lt;/p&gt;
+&lt;pre class="code python literal-block"&gt;
+&lt;span class="kn"&gt;import&lt;/span&gt; &lt;span class="nn"&gt;time&lt;/span&gt;
+
+
+&lt;span class="k"&gt;def&lt;/span&gt; &lt;span class="nf"&gt;do&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;x&lt;/span&gt;&lt;span class="p"&gt;):&lt;/span&gt;
+    &lt;span class="n"&gt;time&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;sleep&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="mi"&gt;10&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+
+
+&lt;span class="k"&gt;def&lt;/span&gt; &lt;span class="nf"&gt;main&lt;/span&gt;&lt;span class="p"&gt;():&lt;/span&gt;
+    &lt;span class="k"&gt;for&lt;/span&gt; &lt;span class="n"&gt;x&lt;/span&gt; &lt;span class="ow"&gt;in&lt;/span&gt; &lt;span class="nb"&gt;range&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="mi"&gt;10000&lt;/span&gt;&lt;span class="p"&gt;):&lt;/span&gt;
+        &lt;span class="n"&gt;do&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;x&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+
+
+&lt;span class="k"&gt;if&lt;/span&gt; &lt;span class="n"&gt;__name__&lt;/span&gt; &lt;span class="o"&gt;==&lt;/span&gt; &lt;span class="s1"&gt;'__main__'&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;
+    &lt;span class="n"&gt;main&lt;/span&gt;&lt;span class="p"&gt;()&lt;/span&gt;
+&lt;/pre&gt;
+&lt;p&gt;这个程序既没有日志也没有 print 输出，通过查看日志文件/标准输出/标准错误是没有办法确认程序状况的。
+一种可行的办法就是使用 gdb 来查看程序当前的运行状况。&lt;/p&gt;
+&lt;div class="section" id="id1"&gt;
+&lt;h2&gt;测试环境&lt;/h2&gt;
+&lt;ul class="simple"&gt;
+&lt;li&gt;系统: Ubuntu 16.04.1 LTS&lt;/li&gt;
+&lt;li&gt;Python: 2.7.12&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/div&gt;
+&lt;div class="section" id="id2"&gt;
+&lt;h2&gt;准备工作&lt;/h2&gt;
+&lt;p&gt;安装 gdb 和 python2.7-dbg:&lt;/p&gt;
+&lt;pre class="code shell literal-block"&gt;
+$ sudo apt-get install gdb python2.7-dbg
+&lt;/pre&gt;
+&lt;p&gt;设置 /proc/sys/kernel/yama/ptrace_scope:&lt;/p&gt;
+&lt;pre class="code shell literal-block"&gt;
+$ sudo su
+&lt;span class="c1"&gt;# echo 0 &amp;gt; /proc/sys/kernel/yama/ptrace_scope&lt;/span&gt;
+&lt;/pre&gt;
+&lt;p&gt;运行 test.py:&lt;/p&gt;
+&lt;pre class="code shell literal-block"&gt;
+$ python test.py &lt;span class="p"&gt;&amp;amp;&lt;/span&gt;
+&lt;span class="o"&gt;[&lt;/span&gt;1&lt;span class="o"&gt;]&lt;/span&gt; 6489
+&lt;/pre&gt;
+&lt;p&gt;通过 &lt;tt class="docutils literal"&gt;gdb python PID&lt;/tt&gt; 来调试运行中的进程:&lt;/p&gt;
+&lt;pre class="code shell literal-block"&gt;
+$ gdb python 6489
+GNU gdb &lt;span class="o"&gt;(&lt;/span&gt;Ubuntu 7.11.1-0ubuntu1~16.04&lt;span class="o"&gt;)&lt;/span&gt; 7.11.1
+...
+For help, &lt;span class="nb"&gt;type&lt;/span&gt; &lt;span class="s2"&gt;&amp;quot;help&amp;quot;&lt;/span&gt;.
+Type &lt;span class="s2"&gt;&amp;quot;apropos word&amp;quot;&lt;/span&gt; to search &lt;span class="k"&gt;for&lt;/span&gt; commands related to &lt;span class="s2"&gt;&amp;quot;word&amp;quot;&lt;/span&gt;...
+Reading symbols from python...Reading symbols from /usr/lib/debug/.build-id/90/d1300febaeb0a626baa2540d19df2416cd3361.debug...done.
+&lt;span class="k"&gt;done&lt;/span&gt;.
+...
+Reading symbols from /lib/ld-linux.so.2...Reading symbols from /usr/lib/debug//lib/i386-linux-gnu/ld-2.23.so...done.
+&lt;span class="k"&gt;done&lt;/span&gt;.
+0xb778fc31 in __kernel_vsyscall &lt;span class="o"&gt;()&lt;/span&gt;
+&lt;span class="o"&gt;(&lt;/span&gt;gdb&lt;span class="o"&gt;)&lt;/span&gt;
+&lt;/pre&gt;
+&lt;/div&gt;
+&lt;div class="section" id="core-file"&gt;
+&lt;h2&gt;生成 core file&lt;/h2&gt;
+&lt;p&gt;为了不影响运行中的进程，可以通过生成 core file 的方式来保存进程的当前信息:&lt;/p&gt;
+&lt;pre class="code shell literal-block"&gt;
+&lt;span class="o"&gt;(&lt;/span&gt;gdb&lt;span class="o"&gt;)&lt;/span&gt; generate-core-file
+warning: target file /proc/6489/cmdline contained unexpected null characters
+Saved corefile core.6489
+&lt;span class="o"&gt;(&lt;/span&gt;gdb&lt;span class="o"&gt;)&lt;/span&gt; quit
+A debugging session is active.
+
+    Inferior &lt;span class="m"&gt;1&lt;/span&gt; &lt;span class="o"&gt;[&lt;/span&gt;process 6489&lt;span class="o"&gt;]&lt;/span&gt; will be detached.
+
+Quit anyway? &lt;span class="o"&gt;(&lt;/span&gt;y or n&lt;span class="o"&gt;)&lt;/span&gt; y
+&lt;/pre&gt;
+&lt;p&gt;可以通过 &lt;tt class="docutils literal"&gt;gdb python core.PID&lt;/tt&gt; 的方式来读取 core file:&lt;/p&gt;
+&lt;pre class="code shell literal-block"&gt;
+$ gdb python core.6489
+GNU gdb &lt;span class="o"&gt;(&lt;/span&gt;Ubuntu 7.11.1-0ubuntu1~16.04&lt;span class="o"&gt;)&lt;/span&gt; 7.11.1
+...
+Type &lt;span class="s2"&gt;&amp;quot;apropos word&amp;quot;&lt;/span&gt; to search &lt;span class="k"&gt;for&lt;/span&gt; commands related to &lt;span class="s2"&gt;&amp;quot;word&amp;quot;&lt;/span&gt;...
+Reading symbols from python...Reading symbols from /usr/lib/debug/.build-id/90/d1300febaeb0a626baa2540d19df2416cd3361.debug...done.
+&lt;span class="k"&gt;done&lt;/span&gt;.
+
+warning: core file may not match specified executable file.
+&lt;span class="o"&gt;[&lt;/span&gt;New LWP 6489&lt;span class="o"&gt;]&lt;/span&gt;
+&lt;span class="o"&gt;[&lt;/span&gt;Thread debugging using libthread_db enabled&lt;span class="o"&gt;]&lt;/span&gt;
+Using host libthread_db library &lt;span class="s2"&gt;&amp;quot;/lib/i386-linux-gnu/libthread_db.so.1&amp;quot;&lt;/span&gt;.
+Core was generated by &lt;span class="sb"&gt;`&lt;/span&gt;python&lt;span class="err"&gt;'&lt;/span&gt;.
+&lt;span class="c1"&gt;#0  0xb778fc31 in __kernel_vsyscall ()
+&lt;/span&gt;&lt;span class="o"&gt;(&lt;/span&gt;gdb&lt;span class="o"&gt;)&lt;/span&gt;
+&lt;/pre&gt;
+&lt;/div&gt;
+&lt;div class="section" id="python"&gt;
+&lt;h2&gt;可用的 python 相关的命令&lt;/h2&gt;
+&lt;p&gt;可以通过输入 &lt;tt class="docutils literal"&gt;py&lt;/tt&gt; 然后加 tab 键的方式来查看可用的命令:&lt;/p&gt;
+&lt;pre class="code shell literal-block"&gt;
+&lt;span class="o"&gt;(&lt;/span&gt;gdb&lt;span class="o"&gt;)&lt;/span&gt; py
+py-bt               py-down             py-locals           py-up               python-interactive
+py-bt-full          py-list             py-print            python
+&lt;/pre&gt;
+&lt;p&gt;可以通过 &lt;tt class="docutils literal"&gt;help cmd&lt;/tt&gt; 查看各个命令的说明:&lt;/p&gt;
+&lt;pre class="code shell literal-block"&gt;
+&lt;span class="o"&gt;(&lt;/span&gt;gdb&lt;span class="o"&gt;)&lt;/span&gt; &lt;span class="nb"&gt;help&lt;/span&gt; py-bt
+Display the current python frame and all the frames within its call stack &lt;span class="o"&gt;(&lt;/span&gt;&lt;span class="k"&gt;if&lt;/span&gt; any&lt;span class="o"&gt;)&lt;/span&gt;
+&lt;/pre&gt;
+&lt;/div&gt;
+&lt;div class="section" id="id3"&gt;
+&lt;h2&gt;当前执行位置的源码&lt;/h2&gt;
+&lt;pre class="code shell literal-block"&gt;
+&lt;span class="o"&gt;(&lt;/span&gt;gdb&lt;span class="o"&gt;)&lt;/span&gt; py-list
+   &lt;span class="m"&gt;1&lt;/span&gt;    &lt;span class="c1"&gt;# -*- coding: utf-8 -*-
+&lt;/span&gt;   &lt;span class="m"&gt;2&lt;/span&gt;    import &lt;span class="nb"&gt;time&lt;/span&gt;
+   3
+   4
+   &lt;span class="m"&gt;5&lt;/span&gt;    def &lt;span class="k"&gt;do&lt;/span&gt;&lt;span class="o"&gt;(&lt;/span&gt;x&lt;span class="o"&gt;)&lt;/span&gt;:
+  &amp;gt;6        time.sleep&lt;span class="o"&gt;(&lt;/span&gt;10&lt;span class="o"&gt;)&lt;/span&gt;
+   7
+   8
+   &lt;span class="m"&gt;9&lt;/span&gt;    def main&lt;span class="o"&gt;()&lt;/span&gt;:
+  &lt;span class="m"&gt;10&lt;/span&gt;        &lt;span class="k"&gt;for&lt;/span&gt; x in range&lt;span class="o"&gt;(&lt;/span&gt;10000&lt;span class="o"&gt;)&lt;/span&gt;:
+  &lt;span class="m"&gt;11&lt;/span&gt;            &lt;span class="k"&gt;do&lt;/span&gt;&lt;span class="o"&gt;(&lt;/span&gt;x&lt;span class="o"&gt;)&lt;/span&gt;
+&lt;span class="o"&gt;(&lt;/span&gt;gdb&lt;span class="o"&gt;)&lt;/span&gt;
+&lt;/pre&gt;
+&lt;p&gt;可以看到当前正在执行 &lt;tt class="docutils literal"&gt;time.sleep(10)&lt;/tt&gt;&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class="section" id="id4"&gt;
+&lt;h2&gt;当前位置的调用栈&lt;/h2&gt;
+&lt;pre class="code shell literal-block"&gt;
+&lt;span class="o"&gt;(&lt;/span&gt;gdb&lt;span class="o"&gt;)&lt;/span&gt; py-bt
+Traceback &lt;span class="o"&gt;(&lt;/span&gt;most recent call first&lt;span class="o"&gt;)&lt;/span&gt;:
+  &amp;lt;built-in &lt;span class="k"&gt;function&lt;/span&gt; sleep&amp;gt;
+  File &lt;span class="s2"&gt;&amp;quot;test.py&amp;quot;&lt;/span&gt;, line 6, in &lt;span class="k"&gt;do&lt;/span&gt;
+    time.sleep&lt;span class="o"&gt;(&lt;/span&gt;10&lt;span class="o"&gt;)&lt;/span&gt;
+  File &lt;span class="s2"&gt;&amp;quot;test.py&amp;quot;&lt;/span&gt;, line 11, in main
+    &lt;span class="k"&gt;do&lt;/span&gt;&lt;span class="o"&gt;(&lt;/span&gt;x&lt;span class="o"&gt;)&lt;/span&gt;
+  File &lt;span class="s2"&gt;&amp;quot;test.py&amp;quot;&lt;/span&gt;, line 15, in &amp;lt;module&amp;gt;
+    main&lt;span class="o"&gt;()&lt;/span&gt;
+&lt;span class="o"&gt;(&lt;/span&gt;gdb&lt;span class="o"&gt;)&lt;/span&gt;
+&lt;/pre&gt;
+&lt;p&gt;可以看出来是 &lt;tt class="docutils literal"&gt;main() &lt;span class="pre"&gt;-&amp;gt;&lt;/span&gt; do(x) &lt;span class="pre"&gt;-&amp;gt;&lt;/span&gt; time.sleep(10)&lt;/tt&gt;&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class="section" id="id5"&gt;
+&lt;h2&gt;查看变量的值&lt;/h2&gt;
+&lt;pre class="code shell literal-block"&gt;
+&lt;span class="o"&gt;(&lt;/span&gt;gdb&lt;span class="o"&gt;)&lt;/span&gt; py-list
+   &lt;span class="m"&gt;1&lt;/span&gt;    &lt;span class="c1"&gt;# -*- coding: utf-8 -*-
+&lt;/span&gt;   &lt;span class="m"&gt;2&lt;/span&gt;    import &lt;span class="nb"&gt;time&lt;/span&gt;
+   3
+   4
+   &lt;span class="m"&gt;5&lt;/span&gt;    def &lt;span class="k"&gt;do&lt;/span&gt;&lt;span class="o"&gt;(&lt;/span&gt;x&lt;span class="o"&gt;)&lt;/span&gt;:
+  &amp;gt;6        time.sleep&lt;span class="o"&gt;(&lt;/span&gt;10&lt;span class="o"&gt;)&lt;/span&gt;
+   7
+   8
+   &lt;span class="m"&gt;9&lt;/span&gt;    def main&lt;span class="o"&gt;()&lt;/span&gt;:
+  &lt;span class="m"&gt;10&lt;/span&gt;        &lt;span class="k"&gt;for&lt;/span&gt; x in range&lt;span class="o"&gt;(&lt;/span&gt;10000&lt;span class="o"&gt;)&lt;/span&gt;:
+  &lt;span class="m"&gt;11&lt;/span&gt;            &lt;span class="k"&gt;do&lt;/span&gt;&lt;span class="o"&gt;(&lt;/span&gt;x&lt;span class="o"&gt;)&lt;/span&gt;
+&lt;span class="o"&gt;(&lt;/span&gt;gdb&lt;span class="o"&gt;)&lt;/span&gt; py-print x
+&lt;span class="nb"&gt;local&lt;/span&gt; &lt;span class="s1"&gt;'x'&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; 12
+&lt;span class="o"&gt;(&lt;/span&gt;gdb&lt;span class="o"&gt;)&lt;/span&gt;
+&lt;span class="o"&gt;(&lt;/span&gt;gdb&lt;span class="o"&gt;)&lt;/span&gt; py-locals
+&lt;span class="nv"&gt;x&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; 12
+&lt;span class="o"&gt;(&lt;/span&gt;gdb&lt;span class="o"&gt;)&lt;/span&gt;
+&lt;/pre&gt;
+&lt;/div&gt;
+&lt;div class="section" id="id6"&gt;
+&lt;h2&gt;查看上层调用方的信息&lt;/h2&gt;
+&lt;pre class="code shell literal-block"&gt;
+&lt;span class="o"&gt;(&lt;/span&gt;gdb&lt;span class="o"&gt;)&lt;/span&gt; py-up
+&lt;span class="c1"&gt;#9 Frame 0xb74c0994, for file test.py, line 11, in main (x=12)
+&lt;/span&gt;    &lt;span class="k"&gt;do&lt;/span&gt;&lt;span class="o"&gt;(&lt;/span&gt;x&lt;span class="o"&gt;)&lt;/span&gt;
+&lt;span class="o"&gt;(&lt;/span&gt;gdb&lt;span class="o"&gt;)&lt;/span&gt; py-list
+   &lt;span class="m"&gt;6&lt;/span&gt;        time.sleep&lt;span class="o"&gt;(&lt;/span&gt;10&lt;span class="o"&gt;)&lt;/span&gt;
+   7
+   8
+   &lt;span class="m"&gt;9&lt;/span&gt;    def main&lt;span class="o"&gt;()&lt;/span&gt;:
+  &lt;span class="m"&gt;10&lt;/span&gt;        &lt;span class="k"&gt;for&lt;/span&gt; x in range&lt;span class="o"&gt;(&lt;/span&gt;10000&lt;span class="o"&gt;)&lt;/span&gt;:
+ &amp;gt;11            &lt;span class="k"&gt;do&lt;/span&gt;&lt;span class="o"&gt;(&lt;/span&gt;x&lt;span class="o"&gt;)&lt;/span&gt;
+  12
+  13
+  &lt;span class="m"&gt;14&lt;/span&gt;    &lt;span class="k"&gt;if&lt;/span&gt; &lt;span class="nv"&gt;__name__&lt;/span&gt; &lt;span class="o"&gt;==&lt;/span&gt; &lt;span class="s1"&gt;'__main__'&lt;/span&gt;:
+  &lt;span class="m"&gt;15&lt;/span&gt;        main&lt;span class="o"&gt;()&lt;/span&gt;
+&lt;span class="o"&gt;(&lt;/span&gt;gdb&lt;span class="o"&gt;)&lt;/span&gt; py-print x
+&lt;span class="nb"&gt;local&lt;/span&gt; &lt;span class="s1"&gt;'x'&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; 12
+&lt;span class="o"&gt;(&lt;/span&gt;gdb&lt;span class="o"&gt;)&lt;/span&gt;
+&lt;/pre&gt;
+&lt;p&gt;可以通过 &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;py-down&lt;/span&gt;&lt;/tt&gt; 回去:&lt;/p&gt;
+&lt;pre class="code shell literal-block"&gt;
+&lt;span class="o"&gt;(&lt;/span&gt;gdb&lt;span class="o"&gt;)&lt;/span&gt; py-down
+&lt;span class="c1"&gt;#6 Frame 0xb74926e4, for file test.py, line 6, in do (x=12)
+&lt;/span&gt;    time.sleep&lt;span class="o"&gt;(&lt;/span&gt;10&lt;span class="o"&gt;)&lt;/span&gt;
+&lt;span class="o"&gt;(&lt;/span&gt;gdb&lt;span class="o"&gt;)&lt;/span&gt; py-list
+   &lt;span class="m"&gt;1&lt;/span&gt;    &lt;span class="c1"&gt;# -*- coding: utf-8 -*-
+&lt;/span&gt;   &lt;span class="m"&gt;2&lt;/span&gt;    import &lt;span class="nb"&gt;time&lt;/span&gt;
+   3
+   4
+   &lt;span class="m"&gt;5&lt;/span&gt;    def &lt;span class="k"&gt;do&lt;/span&gt;&lt;span class="o"&gt;(&lt;/span&gt;x&lt;span class="o"&gt;)&lt;/span&gt;:
+  &amp;gt;6        time.sleep&lt;span class="o"&gt;(&lt;/span&gt;10&lt;span class="o"&gt;)&lt;/span&gt;
+   7
+   8
+   &lt;span class="m"&gt;9&lt;/span&gt;    def main&lt;span class="o"&gt;()&lt;/span&gt;:
+  &lt;span class="m"&gt;10&lt;/span&gt;        &lt;span class="k"&gt;for&lt;/span&gt; x in range&lt;span class="o"&gt;(&lt;/span&gt;10000&lt;span class="o"&gt;)&lt;/span&gt;:
+  &lt;span class="m"&gt;11&lt;/span&gt;            &lt;span class="k"&gt;do&lt;/span&gt;&lt;span class="o"&gt;(&lt;/span&gt;x&lt;span class="o"&gt;)&lt;/span&gt;
+&lt;span class="o"&gt;(&lt;/span&gt;gdb&lt;span class="o"&gt;)&lt;/span&gt;
+&lt;/pre&gt;
+&lt;/div&gt;
+&lt;div class="section" id="id7"&gt;
+&lt;h2&gt;调试多线程程序&lt;/h2&gt;
+&lt;p&gt;测试程序 test2.py:&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="c1"&gt;# -*- coding: utf-8 -*-&lt;/span&gt;
+&lt;span class="kn"&gt;from&lt;/span&gt; &lt;span class="nn"&gt;threading&lt;/span&gt; &lt;span class="kn"&gt;import&lt;/span&gt; &lt;span class="n"&gt;Thread&lt;/span&gt;
+&lt;span class="kn"&gt;import&lt;/span&gt; &lt;span class="nn"&gt;time&lt;/span&gt;
+
+
+&lt;span class="k"&gt;def&lt;/span&gt; &lt;span class="nf"&gt;do&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;x&lt;/span&gt;&lt;span class="p"&gt;):&lt;/span&gt;
+    &lt;span class="n"&gt;x&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;x&lt;/span&gt; &lt;span class="o"&gt;*&lt;/span&gt; &lt;span class="mi"&gt;3&lt;/span&gt;
+    &lt;span class="n"&gt;time&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;sleep&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;x&lt;/span&gt; &lt;span class="o"&gt;*&lt;/span&gt; &lt;span class="mi"&gt;60&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+
+
+&lt;span class="k"&gt;def&lt;/span&gt; &lt;span class="nf"&gt;main&lt;/span&gt;&lt;span class="p"&gt;():&lt;/span&gt;
+    &lt;span class="n"&gt;threads&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="p"&gt;[]&lt;/span&gt;
+    &lt;span class="k"&gt;for&lt;/span&gt; &lt;span class="n"&gt;x&lt;/span&gt; &lt;span class="ow"&gt;in&lt;/span&gt; &lt;span class="nb"&gt;range&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="mi"&gt;1&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="mi"&gt;3&lt;/span&gt;&lt;span class="p"&gt;):&lt;/span&gt;
+        &lt;span class="n"&gt;t&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;Thread&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;target&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="n"&gt;do&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;args&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;x&lt;/span&gt;&lt;span class="p"&gt;,))&lt;/span&gt;
+        &lt;span class="n"&gt;t&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;start&lt;/span&gt;&lt;span class="p"&gt;()&lt;/span&gt;
+    &lt;span class="k"&gt;for&lt;/span&gt; &lt;span class="n"&gt;x&lt;/span&gt; &lt;span class="ow"&gt;in&lt;/span&gt; &lt;span class="n"&gt;threads&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;
+        &lt;span class="n"&gt;x&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;join&lt;/span&gt;&lt;span class="p"&gt;()&lt;/span&gt;
+
+
+&lt;span class="k"&gt;if&lt;/span&gt; &lt;span class="n"&gt;__name__&lt;/span&gt; &lt;span class="o"&gt;==&lt;/span&gt; &lt;span class="s1"&gt;&amp;#39;__main__&amp;#39;&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;
+    &lt;span class="n"&gt;main&lt;/span&gt;&lt;span class="p"&gt;()&lt;/span&gt;
+&lt;/pre&gt;&lt;/div&gt;
+&lt;pre class="code shell literal-block"&gt;
+$ python test2.py &lt;span class="p"&gt;&amp;amp;&lt;/span&gt;
+&lt;span class="o"&gt;[&lt;/span&gt;2&lt;span class="o"&gt;]&lt;/span&gt; 12281
+&lt;/pre&gt;
+&lt;div class="section" id="id8"&gt;
+&lt;h3&gt;查看所有线程&lt;/h3&gt;
+&lt;p&gt;&lt;tt class="docutils literal"&gt;info threads&lt;/tt&gt;&lt;/p&gt;
+&lt;pre class="code shell literal-block"&gt;
+$ gdb python core.12281
+
+&lt;span class="o"&gt;(&lt;/span&gt;gdb&lt;span class="o"&gt;)&lt;/span&gt; info threads
+  Id   Target Id         Frame
+* &lt;span class="m"&gt;1&lt;/span&gt;    Thread 0xb74b9700 &lt;span class="o"&gt;(&lt;/span&gt;LWP 11039&lt;span class="o"&gt;)&lt;/span&gt; 0xb7711c31 in __kernel_vsyscall &lt;span class="o"&gt;()&lt;/span&gt;
+  &lt;span class="m"&gt;2&lt;/span&gt;    Thread 0xb73b8b40 &lt;span class="o"&gt;(&lt;/span&gt;LWP 11040&lt;span class="o"&gt;)&lt;/span&gt; 0xb7711c31 in __kernel_vsyscall &lt;span class="o"&gt;()&lt;/span&gt;
+  &lt;span class="m"&gt;3&lt;/span&gt;    Thread 0xb69ffb40 &lt;span class="o"&gt;(&lt;/span&gt;LWP 11041&lt;span class="o"&gt;)&lt;/span&gt; 0xb7711c31 in __kernel_vsyscall &lt;span class="o"&gt;()&lt;/span&gt;
+&lt;span class="o"&gt;(&lt;/span&gt;gdb&lt;span class="o"&gt;)&lt;/span&gt;
+&lt;/pre&gt;
+&lt;p&gt;可以看到这个程序当前有 3 个线程, 当前进入的是 1 号线程。&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class="section" id="id9"&gt;
+&lt;h3&gt;切换线程&lt;/h3&gt;
+&lt;p&gt;&lt;tt class="docutils literal"&gt;thread ID&lt;/tt&gt;&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="o"&gt;(&lt;/span&gt;gdb&lt;span class="o"&gt;)&lt;/span&gt; thread 3
+&lt;span class="o"&gt;[&lt;/span&gt;Switching to thread &lt;span class="m"&gt;3&lt;/span&gt; &lt;span class="o"&gt;(&lt;/span&gt;Thread 0xb69ffb40 &lt;span class="o"&gt;(&lt;/span&gt;LWP 11041&lt;span class="o"&gt;))]&lt;/span&gt;
+&lt;span class="c1"&gt;#0  0xb7711c31 in __kernel_vsyscall ()&lt;/span&gt;
+&lt;span class="o"&gt;(&lt;/span&gt;gdb&lt;span class="o"&gt;)&lt;/span&gt; info threads
+  Id   Target Id         Frame
+  &lt;span class="m"&gt;1&lt;/span&gt;    Thread 0xb74b9700 &lt;span class="o"&gt;(&lt;/span&gt;LWP 11039&lt;span class="o"&gt;)&lt;/span&gt; 0xb7711c31 in __kernel_vsyscall &lt;span class="o"&gt;()&lt;/span&gt;
+  &lt;span class="m"&gt;2&lt;/span&gt;    Thread 0xb73b8b40 &lt;span class="o"&gt;(&lt;/span&gt;LWP 11040&lt;span class="o"&gt;)&lt;/span&gt; 0xb7711c31 in __kernel_vsyscall &lt;span class="o"&gt;()&lt;/span&gt;
+* &lt;span class="m"&gt;3&lt;/span&gt;    Thread 0xb69ffb40 &lt;span class="o"&gt;(&lt;/span&gt;LWP 11041&lt;span class="o"&gt;)&lt;/span&gt; 0xb7711c31 in __kernel_vsyscall &lt;span class="o"&gt;()&lt;/span&gt;
+&lt;span class="o"&gt;(&lt;/span&gt;gdb&lt;span class="o"&gt;)&lt;/span&gt;
+&lt;/pre&gt;&lt;/div&gt;
+&lt;p&gt;现在切换到了 3 号线程。&lt;/p&gt;
+&lt;p&gt;可以通过前面所说的 &lt;tt class="docutils literal"&gt;py-&lt;/tt&gt; 命令来查看当前线程的其他信息：&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="o"&gt;[&lt;/span&gt;Current thread is &lt;span class="m"&gt;1&lt;/span&gt; &lt;span class="o"&gt;(&lt;/span&gt;Thread 0xb74b9700 &lt;span class="o"&gt;(&lt;/span&gt;LWP 11039&lt;span class="o"&gt;))]&lt;/span&gt;
+&lt;span class="o"&gt;(&lt;/span&gt;gdb&lt;span class="o"&gt;)&lt;/span&gt; py-list
+ &lt;span class="m"&gt;335&lt;/span&gt;            waiter.acquire&lt;span class="o"&gt;()&lt;/span&gt;
+ &lt;span class="m"&gt;336&lt;/span&gt;            self.__waiters.append&lt;span class="o"&gt;(&lt;/span&gt;waiter&lt;span class="o"&gt;)&lt;/span&gt;
+ &lt;span class="m"&gt;337&lt;/span&gt;            &lt;span class="nv"&gt;saved_state&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; self._release_save&lt;span class="o"&gt;()&lt;/span&gt;
+ &lt;span class="m"&gt;338&lt;/span&gt;            try:    &lt;span class="c1"&gt;# restore state no matter what (e.g., KeyboardInterrupt)&lt;/span&gt;
+ &lt;span class="m"&gt;339&lt;/span&gt;                &lt;span class="k"&gt;if&lt;/span&gt; timeout is None:
+&amp;gt;340                    waiter.acquire&lt;span class="o"&gt;()&lt;/span&gt;
+ &lt;span class="m"&gt;341&lt;/span&gt;                    &lt;span class="k"&gt;if&lt;/span&gt; __debug__:
+ &lt;span class="m"&gt;342&lt;/span&gt;                        self._note&lt;span class="o"&gt;(&lt;/span&gt;&lt;span class="s2"&gt;&amp;quot;%s.wait(): got it&amp;quot;&lt;/span&gt;, self&lt;span class="o"&gt;)&lt;/span&gt;
+ &lt;span class="m"&gt;343&lt;/span&gt;                &lt;span class="k"&gt;else&lt;/span&gt;:
+ &lt;span class="m"&gt;344&lt;/span&gt;                    &lt;span class="c1"&gt;# Balancing act:  We can&amp;#39;t afford a pure busy loop, so we&lt;/span&gt;
+ &lt;span class="m"&gt;345&lt;/span&gt;                    &lt;span class="c1"&gt;# have to sleep; but if we sleep the whole timeout time,&lt;/span&gt;
+&lt;span class="o"&gt;(&lt;/span&gt;gdb&lt;span class="o"&gt;)&lt;/span&gt; thread 2
+&lt;span class="o"&gt;[&lt;/span&gt;Switching to thread &lt;span class="m"&gt;2&lt;/span&gt; &lt;span class="o"&gt;(&lt;/span&gt;Thread 0xb73b8b40 &lt;span class="o"&gt;(&lt;/span&gt;LWP 11040&lt;span class="o"&gt;))]&lt;/span&gt;
+&lt;span class="c1"&gt;#0  0xb7711c31 in __kernel_vsyscall ()&lt;/span&gt;
+&lt;span class="o"&gt;(&lt;/span&gt;gdb&lt;span class="o"&gt;)&lt;/span&gt; py-list
+   &lt;span class="m"&gt;3&lt;/span&gt;    import &lt;span class="nb"&gt;time&lt;/span&gt;
+   4
+   5
+   &lt;span class="m"&gt;6&lt;/span&gt;    def &lt;span class="k"&gt;do&lt;/span&gt;&lt;span class="o"&gt;(&lt;/span&gt;x&lt;span class="o"&gt;)&lt;/span&gt;:
+   &lt;span class="m"&gt;7&lt;/span&gt;        &lt;span class="nv"&gt;x&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; x * 3
+  &amp;gt;8        time.sleep&lt;span class="o"&gt;(&lt;/span&gt;x * 60&lt;span class="o"&gt;)&lt;/span&gt;
+   9
+  10
+  &lt;span class="m"&gt;11&lt;/span&gt;    def main&lt;span class="o"&gt;()&lt;/span&gt;:
+  &lt;span class="m"&gt;12&lt;/span&gt;        &lt;span class="nv"&gt;threads&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="o"&gt;[]&lt;/span&gt;
+  &lt;span class="m"&gt;13&lt;/span&gt;        &lt;span class="k"&gt;for&lt;/span&gt; x in range&lt;span class="o"&gt;(&lt;/span&gt;1, 3&lt;span class="o"&gt;)&lt;/span&gt;:
+&lt;span class="o"&gt;(&lt;/span&gt;gdb&lt;span class="o"&gt;)&lt;/span&gt;
+&lt;/pre&gt;&lt;/div&gt;
+&lt;/div&gt;
+&lt;div class="section" id="id10"&gt;
+&lt;h3&gt;同时操作所有线程&lt;/h3&gt;
+&lt;p&gt;&lt;tt class="docutils literal"&gt;thread apply all CMD&lt;/tt&gt; 或 &lt;tt class="docutils literal"&gt;t a a CMD&lt;/tt&gt;&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="o"&gt;(&lt;/span&gt;gdb&lt;span class="o"&gt;)&lt;/span&gt; thread apply all py-list
+
+Thread &lt;span class="m"&gt;3&lt;/span&gt; &lt;span class="o"&gt;(&lt;/span&gt;Thread 0xb69ffb40 &lt;span class="o"&gt;(&lt;/span&gt;LWP 11041&lt;span class="o"&gt;))&lt;/span&gt;:
+   &lt;span class="m"&gt;3&lt;/span&gt;    import &lt;span class="nb"&gt;time&lt;/span&gt;
+   4
+   5
+   &lt;span class="m"&gt;6&lt;/span&gt;    def &lt;span class="k"&gt;do&lt;/span&gt;&lt;span class="o"&gt;(&lt;/span&gt;x&lt;span class="o"&gt;)&lt;/span&gt;:
+   &lt;span class="m"&gt;7&lt;/span&gt;        &lt;span class="nv"&gt;x&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; x * 3
+  &amp;gt;8        time.sleep&lt;span class="o"&gt;(&lt;/span&gt;x * 60&lt;span class="o"&gt;)&lt;/span&gt;
+   9
+  10
+  &lt;span class="m"&gt;11&lt;/span&gt;    def main&lt;span class="o"&gt;()&lt;/span&gt;:
+  &lt;span class="m"&gt;12&lt;/span&gt;        &lt;span class="nv"&gt;threads&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="o"&gt;[]&lt;/span&gt;
+  &lt;span class="m"&gt;13&lt;/span&gt;        &lt;span class="k"&gt;for&lt;/span&gt; x in range&lt;span class="o"&gt;(&lt;/span&gt;1, 3&lt;span class="o"&gt;)&lt;/span&gt;:
+
+Thread &lt;span class="m"&gt;2&lt;/span&gt; &lt;span class="o"&gt;(&lt;/span&gt;Thread 0xb73b8b40 &lt;span class="o"&gt;(&lt;/span&gt;LWP 11040&lt;span class="o"&gt;))&lt;/span&gt;:
+   &lt;span class="m"&gt;3&lt;/span&gt;    import &lt;span class="nb"&gt;time&lt;/span&gt;
+   4
+   5
+   &lt;span class="m"&gt;6&lt;/span&gt;    def &lt;span class="k"&gt;do&lt;/span&gt;&lt;span class="o"&gt;(&lt;/span&gt;x&lt;span class="o"&gt;)&lt;/span&gt;:
+   &lt;span class="m"&gt;7&lt;/span&gt;        &lt;span class="nv"&gt;x&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; x * 3
+  &amp;gt;8        time.sleep&lt;span class="o"&gt;(&lt;/span&gt;x * 60&lt;span class="o"&gt;)&lt;/span&gt;
+   9
+  10
+  &lt;span class="m"&gt;11&lt;/span&gt;    def main&lt;span class="o"&gt;()&lt;/span&gt;:
+  &lt;span class="m"&gt;12&lt;/span&gt;        &lt;span class="nv"&gt;threads&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="o"&gt;[]&lt;/span&gt;
+  &lt;span class="m"&gt;13&lt;/span&gt;        &lt;span class="k"&gt;for&lt;/span&gt; x in range&lt;span class="o"&gt;(&lt;/span&gt;1, 3&lt;span class="o"&gt;)&lt;/span&gt;:
+
+---Type &amp;lt;&lt;span class="k"&gt;return&lt;/span&gt;&amp;gt; to &lt;span class="k"&gt;continue&lt;/span&gt;, or q &amp;lt;&lt;span class="k"&gt;return&lt;/span&gt;&amp;gt; to quit---
+Thread &lt;span class="m"&gt;1&lt;/span&gt; &lt;span class="o"&gt;(&lt;/span&gt;Thread 0xb74b9700 &lt;span class="o"&gt;(&lt;/span&gt;LWP 11039&lt;span class="o"&gt;))&lt;/span&gt;:
+ &lt;span class="m"&gt;335&lt;/span&gt;            waiter.acquire&lt;span class="o"&gt;()&lt;/span&gt;
+ &lt;span class="m"&gt;336&lt;/span&gt;            self.__waiters.append&lt;span class="o"&gt;(&lt;/span&gt;waiter&lt;span class="o"&gt;)&lt;/span&gt;
+ &lt;span class="m"&gt;337&lt;/span&gt;            &lt;span class="nv"&gt;saved_state&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; self._release_save&lt;span class="o"&gt;()&lt;/span&gt;
+ &lt;span class="m"&gt;338&lt;/span&gt;            try:    &lt;span class="c1"&gt;# restore state no matter what (e.g., KeyboardInterrupt)&lt;/span&gt;
+ &lt;span class="m"&gt;339&lt;/span&gt;                &lt;span class="k"&gt;if&lt;/span&gt; timeout is None:
+&amp;gt;340                    waiter.acquire&lt;span class="o"&gt;()&lt;/span&gt;
+ &lt;span class="m"&gt;341&lt;/span&gt;                    &lt;span class="k"&gt;if&lt;/span&gt; __debug__:
+ &lt;span class="m"&gt;342&lt;/span&gt;                        self._note&lt;span class="o"&gt;(&lt;/span&gt;&lt;span class="s2"&gt;&amp;quot;%s.wait(): got it&amp;quot;&lt;/span&gt;, self&lt;span class="o"&gt;)&lt;/span&gt;
+ &lt;span class="m"&gt;343&lt;/span&gt;                &lt;span class="k"&gt;else&lt;/span&gt;:
+ &lt;span class="m"&gt;344&lt;/span&gt;                    &lt;span class="c1"&gt;# Balancing act:  We can&amp;#39;t afford a pure busy loop, so we&lt;/span&gt;
+ &lt;span class="m"&gt;345&lt;/span&gt;                    &lt;span class="c1"&gt;# have to sleep; but if we sleep the whole timeout time,&lt;/span&gt;
+&lt;span class="o"&gt;(&lt;/span&gt;gdb&lt;span class="o"&gt;)&lt;/span&gt;
+&lt;/pre&gt;&lt;/div&gt;
+&lt;p&gt;常用的 &lt;tt class="docutils literal"&gt;gdb&lt;/tt&gt; python 相关的操作就是这些， 同时也不要忘记原来的 gdb 命令都是可以使用的哦。&lt;/p&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;div class="section" id="id11"&gt;
+&lt;h2&gt;参考资料&lt;/h2&gt;
+&lt;ul class="simple"&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://wiki.python.org/moin/DebuggingWithGdb"&gt;DebuggingWithGdb - Python Wiki&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://fedoraproject.org/wiki/Features/EasierPythonDebugging"&gt;Features/EasierPythonDebugging - FedoraProject&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://sourceware.org/gdb/onlinedocs/gdb/index.html"&gt;Debugging with GDB: Top&lt;/a&gt;&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/div&gt;
+</summary><category term="gdb"></category><category term="debug"></category></entry><entry><title>tinyq: 一个队列框架</title><link href="https://mozillazg.github.io/2017/04/tinyq-a-queue-framework.html" rel="alternate"></link><updated>2017-04-10T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.github.io,2017-04-10:2017/04/tinyq-a-queue-framework.html</id><summary type="html">&lt;p&gt;最近尝试着写了一个简单的队列框架，整体的功能类似 celery, rq 之类的队列框架。
 下面简单的介绍一下。&lt;/p&gt;
 &lt;div class="section" id="id1"&gt;
 &lt;h2&gt;安装&lt;/h2&gt;
