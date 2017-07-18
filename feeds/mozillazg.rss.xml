@@ -1,5 +1,385 @@
 <?xml version="1.0" encoding="utf-8"?>
-<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom"><channel><title>Huang Huang 的博客</title><link>https://mozillazg.github.io/</link><description></description><atom:link href="https://mozillazg.github.io/feeds/mozillazg.rss.xml" rel="self"></atom:link><lastBuildDate>Sun, 02 Jul 2017 00:00:00 +0000</lastBuildDate><item><title>使用 gdb 调试运行中的 Python 进程</title><link>https://mozillazg.github.io/2017/07/debug-running-python-process-with-gdb.html</link><description>&lt;p&gt;假设一个服务器上运行了下面这样的 test.py 程序，我们怎样才能知道程序是否在正常运行，运行到哪一步了呢？&lt;/p&gt;
+<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom"><channel><title>Huang Huang 的博客</title><link>https://mozillazg.github.io/</link><description></description><atom:link href="https://mozillazg.github.io/feeds/mozillazg.rss.xml" rel="self"></atom:link><lastBuildDate>Tue, 18 Jul 2017 00:00:00 +0000</lastBuildDate><item><title>Python: time.sleep 与 signal 一起使用可能会出现 time.sleep 失效的情况</title><link>https://mozillazg.github.io/2017/07/python-time-sleep-terminate-by-signal.html</link><description>&lt;p&gt;如题所述，当 &lt;tt class="docutils literal"&gt;time.sleep&lt;/tt&gt; 与 &lt;tt class="docutils literal"&gt;signal&lt;/tt&gt; 一起使用时可能会出现 &lt;tt class="docutils literal"&gt;time.sleep&lt;/tt&gt;
+失效，提前结束 sleep 的问题。&lt;/p&gt;
+&lt;p&gt;我们先来看一下 &lt;tt class="docutils literal"&gt;time.sleep&lt;/tt&gt; 的文档:&lt;/p&gt;
+&lt;p&gt;Python 2.7.13:&lt;/p&gt;
+&lt;blockquote&gt;
+&lt;p&gt;time.sleep(secs)&lt;/p&gt;
+&lt;blockquote&gt;
+Suspend execution of the current thread for the given number of seconds. The argument may be a floating point number to indicate a more precise sleep time. &lt;strong&gt;The actual suspension time may be less than that requested because any caught signal will terminate the sleep() following execution of that signal’s catching routine.&lt;/strong&gt; Also, the suspension time may be longer than requested by an arbitrary amount because of the scheduling of other activity in the system.&lt;/blockquote&gt;
+&lt;/blockquote&gt;
+&lt;p&gt;Python 3.6.2:&lt;/p&gt;
+&lt;blockquote&gt;
+&lt;p&gt;time.sleep(secs)&lt;/p&gt;
+&lt;blockquote&gt;
+&lt;p&gt;Suspend execution of the calling thread for the given number of seconds. The argument may be a floating point number to indicate a more precise sleep time. &lt;strong&gt;The actual suspension time may be less than that requested because any caught signal will terminate the sleep() following execution of that signal’s catching routine.&lt;/strong&gt; Also, the suspension time may be longer than requested by an arbitrary amount because of the scheduling of other activity in the system.&lt;/p&gt;
+&lt;p&gt;Changed in version 3.5: &lt;strong&gt;The function now sleeps at least secs even if the sleep is interrupted by a signal, except if the signal handler raises an exception&lt;/strong&gt; (see &lt;a class="reference external" href="https://www.python.org/dev/peps/pep-0475"&gt;PEP 475&lt;/a&gt; for the rationale).&lt;/p&gt;
+&lt;/blockquote&gt;
+&lt;/blockquote&gt;
+&lt;p&gt;通过文档可以看到，在 Python 2 下，当定义了 signal handler 并接收到
+signal 时， &lt;tt class="docutils literal"&gt;time.sleep&lt;/tt&gt; 会提前返回， 在 Python 3.5+
+下，没有这个问题，只是在 signal handler 抛异常时 sleep 会被终止 。&lt;/p&gt;
+&lt;p&gt;下面我们就来验证一下这个问题。&lt;/p&gt;
+&lt;div class="section" id="id1"&gt;
+&lt;h2 id="hidid1"&gt;测试环境&lt;a class="headerlink" href="#hidid1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;ul class="simple"&gt;
+&lt;li&gt;os: mac os&lt;/li&gt;
+&lt;li&gt;python: python2.7, python3.6&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/div&gt;
+&lt;div class="section" id="python-2"&gt;
+&lt;h2 id="hidpython-2"&gt;Python 2&lt;a class="headerlink" href="#hidpython-2" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;div class="section" id="sleep"&gt;
+&lt;h3 id="hidsleep"&gt;普通 sleep 程序&lt;a class="headerlink" href="#hidsleep" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
+&lt;p&gt;先来看一个正常 sleep 的程序:&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="err"&gt;$&lt;/span&gt; &lt;span class="n"&gt;cat&lt;/span&gt; &lt;span class="n"&gt;time_a&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;py&lt;/span&gt;
+&lt;span class="kn"&gt;import&lt;/span&gt; &lt;span class="nn"&gt;logging&lt;/span&gt;
+&lt;span class="kn"&gt;import&lt;/span&gt; &lt;span class="nn"&gt;time&lt;/span&gt;
+
+&lt;span class="n"&gt;logging&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;basicConfig&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;
+    &lt;span class="n"&gt;level&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="n"&gt;logging&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;DEBUG&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;
+    &lt;span class="n"&gt;format&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;&lt;/span&gt;&lt;span class="si"&gt;%(asctime)-15s&lt;/span&gt;&lt;span class="s1"&gt; - &lt;/span&gt;&lt;span class="si"&gt;%(levelname)s&lt;/span&gt;&lt;span class="s1"&gt; - &lt;/span&gt;&lt;span class="si"&gt;%(message)s&lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;&lt;/span&gt;
+&lt;span class="p"&gt;)&lt;/span&gt;
+
+&lt;span class="n"&gt;n&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="mi"&gt;60&lt;/span&gt;
+
+&lt;span class="n"&gt;logging&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;info&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;start sleep &lt;/span&gt;&lt;span class="si"&gt;%s&lt;/span&gt;&lt;span class="s1"&gt; seconds&amp;#39;&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;n&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+&lt;span class="n"&gt;start&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;time&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;time&lt;/span&gt;&lt;span class="p"&gt;()&lt;/span&gt;
+&lt;span class="n"&gt;time&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;sleep&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;n&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+&lt;span class="n"&gt;logging&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;info&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;end sleep &lt;/span&gt;&lt;span class="si"&gt;%s&lt;/span&gt;&lt;span class="s1"&gt; seconds, spend &lt;/span&gt;&lt;span class="si"&gt;%s&lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;n&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;time&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;time&lt;/span&gt;&lt;span class="p"&gt;()&lt;/span&gt; &lt;span class="o"&gt;-&lt;/span&gt; &lt;span class="n"&gt;start&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+&lt;/pre&gt;&lt;/div&gt;
+&lt;p&gt;测试:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+$ python time_a.py
+2017-07-16 15:29:05,323 - INFO - start sleep 60 seconds
+2017-07-16 15:30:05,327 - INFO - end sleep 60 seconds, spend 60.0042099953
+&lt;/pre&gt;
+&lt;p&gt;可以看到确实 sleep 了 60 秒。&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class="section" id="signal"&gt;
+&lt;h3 id="hidsignal"&gt;signal&lt;a class="headerlink" href="#hidsignal" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
+&lt;p&gt;给普通的 sleep 程序发个 signal 试试:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+$ python time_a.py &amp;amp;
+[1] 6208
+$ 2017-07-16 15:44:01,290 - INFO - start sleep 60 seconds
+
+$ kill -s SIGHUP 6208
+[1]+  Hangup: 1               python time_a.py
+&lt;/pre&gt;
+&lt;p&gt;因为 &lt;tt class="docutils literal"&gt;SIGHUP&lt;/tt&gt; 的默认行为就是终止程序，所以程序终止了。&lt;/p&gt;
+&lt;p&gt;我们下面来测试自定义 signal handler 的影响。&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class="section" id="signal-handler"&gt;
+&lt;h3 id="hidsignal-handler"&gt;signal handler&lt;a class="headerlink" href="#hidsignal-handler" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
+&lt;p&gt;测试程序如下：&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="err"&gt;$&lt;/span&gt; &lt;span class="n"&gt;cat&lt;/span&gt; &lt;span class="n"&gt;time_b&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;py&lt;/span&gt;
+&lt;span class="kn"&gt;import&lt;/span&gt; &lt;span class="nn"&gt;logging&lt;/span&gt;
+&lt;span class="kn"&gt;import&lt;/span&gt; &lt;span class="nn"&gt;signal&lt;/span&gt;
+&lt;span class="kn"&gt;import&lt;/span&gt; &lt;span class="nn"&gt;time&lt;/span&gt;
+
+&lt;span class="n"&gt;logging&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;basicConfig&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;
+    &lt;span class="n"&gt;level&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="n"&gt;logging&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;DEBUG&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;
+    &lt;span class="n"&gt;format&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;&lt;/span&gt;&lt;span class="si"&gt;%(asctime)-15s&lt;/span&gt;&lt;span class="s1"&gt; - &lt;/span&gt;&lt;span class="si"&gt;%(levelname)s&lt;/span&gt;&lt;span class="s1"&gt; - &lt;/span&gt;&lt;span class="si"&gt;%(message)s&lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;&lt;/span&gt;
+&lt;span class="p"&gt;)&lt;/span&gt;
+
+&lt;span class="n"&gt;n&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="mi"&gt;60&lt;/span&gt;
+
+&lt;span class="k"&gt;def&lt;/span&gt; &lt;span class="nf"&gt;handler&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;sig&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;strace&lt;/span&gt;&lt;span class="p"&gt;):&lt;/span&gt;
+    &lt;span class="n"&gt;logging&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;info&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;recived &lt;/span&gt;&lt;span class="si"&gt;%s&lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;sig&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+
+&lt;span class="n"&gt;signal&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;signal&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;signal&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;SIGHUP&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;handler&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+
+&lt;span class="n"&gt;logging&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;info&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;start sleep &lt;/span&gt;&lt;span class="si"&gt;%s&lt;/span&gt;&lt;span class="s1"&gt; seconds&amp;#39;&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;n&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+&lt;span class="n"&gt;start&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;time&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;time&lt;/span&gt;&lt;span class="p"&gt;()&lt;/span&gt;
+&lt;span class="n"&gt;time&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;sleep&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;n&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+&lt;span class="n"&gt;logging&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;info&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;end sleep &lt;/span&gt;&lt;span class="si"&gt;%s&lt;/span&gt;&lt;span class="s1"&gt; seconds, spend &lt;/span&gt;&lt;span class="si"&gt;%s&lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;n&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;time&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;time&lt;/span&gt;&lt;span class="p"&gt;()&lt;/span&gt; &lt;span class="o"&gt;-&lt;/span&gt; &lt;span class="n"&gt;start&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+&lt;/pre&gt;&lt;/div&gt;
+&lt;p&gt;测试:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+$ python time_b.py &amp;amp;
+[1] 5910
+2017-07-16 15:31:46,448 - INFO - start sleep 60 seconds
+$ kill -s SIGHUP 5910
+2017-07-16 15:31:52,180 - INFO - recived 1
+2017-07-16 15:31:52,181 - INFO - end sleep 60 seconds, spend 5.73180794716
+[1]+  Done                    python time_b.py
+&lt;/pre&gt;
+&lt;p&gt;从测试结果可以看到，当收到 signal 后，sleep 就提前结束了， 60 秒的 sleep
+实际只花了 6 秒钟。&lt;/p&gt;
+&lt;p&gt;下面再看看 Python 3 文档中提到的 handler 抛异常的情况。&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class="section" id="signal-handler-raise-exception"&gt;
+&lt;h3 id="hidsignal-handler-raise-exception"&gt;signal handler raise exception&lt;a class="headerlink" href="#hidsignal-handler-raise-exception" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
+&lt;p&gt;测试程序：&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="err"&gt;$&lt;/span&gt; &lt;span class="n"&gt;cat&lt;/span&gt; &lt;span class="n"&gt;time_c&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;py&lt;/span&gt;
+&lt;span class="kn"&gt;import&lt;/span&gt; &lt;span class="nn"&gt;logging&lt;/span&gt;
+&lt;span class="kn"&gt;import&lt;/span&gt; &lt;span class="nn"&gt;signal&lt;/span&gt;
+&lt;span class="kn"&gt;import&lt;/span&gt; &lt;span class="nn"&gt;time&lt;/span&gt;
+
+&lt;span class="n"&gt;logging&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;basicConfig&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;
+    &lt;span class="n"&gt;level&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="n"&gt;logging&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;DEBUG&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;
+    &lt;span class="n"&gt;format&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;&lt;/span&gt;&lt;span class="si"&gt;%(asctime)-15s&lt;/span&gt;&lt;span class="s1"&gt; - &lt;/span&gt;&lt;span class="si"&gt;%(levelname)s&lt;/span&gt;&lt;span class="s1"&gt; - &lt;/span&gt;&lt;span class="si"&gt;%(message)s&lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;&lt;/span&gt;
+&lt;span class="p"&gt;)&lt;/span&gt;
+
+&lt;span class="n"&gt;n&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="mi"&gt;60&lt;/span&gt;
+
+&lt;span class="k"&gt;def&lt;/span&gt; &lt;span class="nf"&gt;handler&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;sig&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;strace&lt;/span&gt;&lt;span class="p"&gt;):&lt;/span&gt;
+    &lt;span class="n"&gt;logging&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;info&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;recived &lt;/span&gt;&lt;span class="si"&gt;%s&lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;sig&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+    &lt;span class="k"&gt;raise&lt;/span&gt; &lt;span class="ne"&gt;Exception&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;test&amp;#39;&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+
+&lt;span class="n"&gt;signal&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;signal&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;signal&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;SIGHUP&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;handler&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+
+&lt;span class="n"&gt;logging&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;info&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;start sleep &lt;/span&gt;&lt;span class="si"&gt;%s&lt;/span&gt;&lt;span class="s1"&gt; seconds&amp;#39;&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;n&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+&lt;span class="n"&gt;start&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;time&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;time&lt;/span&gt;&lt;span class="p"&gt;()&lt;/span&gt;
+&lt;span class="n"&gt;time&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;sleep&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;n&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+&lt;span class="n"&gt;logging&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;info&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;end sleep &lt;/span&gt;&lt;span class="si"&gt;%s&lt;/span&gt;&lt;span class="s1"&gt; seconds, spend &lt;/span&gt;&lt;span class="si"&gt;%s&lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;n&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;time&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;time&lt;/span&gt;&lt;span class="p"&gt;()&lt;/span&gt; &lt;span class="o"&gt;-&lt;/span&gt; &lt;span class="n"&gt;start&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+&lt;/pre&gt;&lt;/div&gt;
+&lt;p&gt;测试：&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+$ python time_c.py &amp;amp;
+[1] 6390
+2017-07-16 16:09:28,459 - INFO - start sleep 60 seconds
+
+$ kill -s SIGHUP 6390
+2017-07-16 16:09:35,998 - INFO - recived 1
+Traceback (most recent call last):
+  File &amp;quot;time_c.py&amp;quot;, line 22, in &amp;lt;module&amp;gt;
+    time.sleep(n)
+  File &amp;quot;time_c.py&amp;quot;, line 15, in handler
+    raise Exception('test')
+Exception: test
+[1]+  Exit 1                  python time_c.py
+&lt;/pre&gt;
+&lt;p&gt;可以看到，当 signal handler 抛异常时，整个程序都退出了。&lt;/p&gt;
+&lt;p&gt;下面来测试 Python 3.5+ 下这四种情况的行为。&lt;/p&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;div class="section" id="python-3-5"&gt;
+&lt;h2 id="hidpython-3-5"&gt;Python 3.5+&lt;a class="headerlink" href="#hidpython-3-5" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;div class="section" id="id2"&gt;
+&lt;h3 id="hidid2"&gt;普通 sleep 程序&lt;a class="headerlink" href="#hidid2" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
+&lt;p&gt;用的还是之前的 time_a.py 文件，测试结果：&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+$ python3.6 time_a.py
+2017-07-16 16:12:28,566 - INFO - start sleep 60 seconds
+2017-07-16 16:13:28,571 - INFO - end sleep 60 seconds, spend 60.00386714935303
+&lt;/pre&gt;
+&lt;p&gt;可以看到，跟 Python 2 一样，正常 sleep.&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class="section" id="id3"&gt;
+&lt;h3 id="hidid3"&gt;signal&lt;a class="headerlink" href="#hidid3" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
+&lt;p&gt;同样试试给 time_a.py 进程发送 signal:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+$ python3.6 time_a.py  &amp;amp;
+[1] 6790
+$ 2017-07-16 16:15:53,529 - INFO - start sleep 60 seconds
+
+$ kill -s SIGHUP 6790
+[1]+  Hangup: 1               python3.6 time_a.py
+&lt;/pre&gt;
+&lt;p&gt;跟 Python 2 下也是一样，进程终止。&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class="section" id="id4"&gt;
+&lt;h3 id="hidid4"&gt;signal handler&lt;a class="headerlink" href="#hidid4" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
+&lt;p&gt;按照文档，当 signal handler 不错误的时候，应该可以正常 sleep,
+下面我们试试看：&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+$ python3.6 time_b.py &amp;amp;
+[1] 6848
+$ 2017-07-16 16:17:25,144 - INFO - start sleep 60 seconds
+
+$ kill -s SIGHUP 6848
+2017-07-16 16:17:31,252 - INFO - recived 1
+$ jobs
+[1]+  Running                 python3.6 time_b.py &amp;amp;
+$ 2017-07-16 16:18:25,147 - INFO - end sleep 60 seconds, spend 60.00310564041138
+
+[1]+  Done                    python3.6 time_b.py
+&lt;/pre&gt;
+&lt;p&gt;确实跟文档中说的一样，就算收到并处理了 signal 还是可以正常 sleep 。👍&lt;/p&gt;
+&lt;p&gt;下面再看看 signal handler raise exception 的情况。&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class="section" id="id5"&gt;
+&lt;h3 id="hidid5"&gt;signal handler raise exception&lt;a class="headerlink" href="#hidid5" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
+&lt;p&gt;测试：&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+$ python3.6 time_c.py &amp;amp;
+[1] 22702
+2017-07-16 16:20:03,939 - INFO - start sleep 60 seconds
+$ kill -s SIGHUP 22702
+2017-07-16 16:20:07,949 - INFO - recived 1
+Traceback (most recent call last):
+  File &amp;quot;time_c.py&amp;quot;, line 15, in &amp;lt;module&amp;gt;
+    time.sleep(n)
+  File &amp;quot;time_c.py&amp;quot;, line 11, in handler
+    raise Exception('test')
+Exception: test
+[1]+  Exit 1                  python3.6 time_c.py
+&lt;/pre&gt;
+&lt;p&gt;可以看到，跟在 Python 2 下一样，当 signal handler
+抛异常时，整个程序都退出了。&lt;/p&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;div class="section" id="id6"&gt;
+&lt;h2 id="hidid6"&gt;原因&lt;a class="headerlink" href="#hidid6" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;那么，为什么 Python 2 下 &lt;tt class="docutils literal"&gt;time.sleep&lt;/tt&gt; 遇到 signal
+时会出现提前返回的情况呢？&lt;/p&gt;
+&lt;p&gt;在 gevent 的一个 &lt;a class="reference external" href="https://github.com/gevent/gevent/issues/280"&gt;issue&lt;/a&gt;
+中 &lt;a class="reference external" href="https://github.com/jamadden"&gt;&amp;#64;jamadden&lt;/a&gt; 是 &lt;a class="reference external" href="https://github.com/gevent/gevent/issues/280#issuecomment-120123286"&gt;这样解释的&lt;/a&gt; :&lt;/p&gt;
+&lt;blockquote&gt;
+&lt;p&gt;The stdlib &lt;strong&gt;time.sleep&lt;/strong&gt; method is implemented by calling &lt;strong&gt;select&lt;/strong&gt;,
+passing in a timeout value, and no file descriptors to actually
+select on. The intended effect is to block in the operating system,
+sleeping until the timeout has elapsed.&lt;/p&gt;
+&lt;p&gt;However, &lt;strong&gt;select&lt;/strong&gt; is one of those system calls that is vulnerable to
+signals. When a signal is delivered to the process, &lt;strong&gt;select&lt;/strong&gt;
+prematurely wakes up and sets &lt;strong&gt;errno&lt;/strong&gt; to &lt;strong&gt;EINTR&lt;/strong&gt; (interrupted). In that
+case, &lt;strong&gt;time.sleep&lt;/strong&gt; makes no attempt to account for any unelapsed time;
+it simple returns. Therefore, &lt;strong&gt;time.sleep&lt;/strong&gt; can sometimes return early.
+&lt;a class="reference external" href="https://docs.python.org/3/library/time.html#time.sleep"&gt;This is
+documented&lt;/a&gt;.&lt;/p&gt;
+&lt;/blockquote&gt;
+&lt;p&gt;查看 python 2.7 的源代码以及 &lt;tt class="docutils literal"&gt;select&lt;/tt&gt; 的文档可以确认这个解释：&lt;/p&gt;
+&lt;p&gt;python 2.7 源码中 &lt;tt class="docutils literal"&gt;time.sleep&lt;/tt&gt; 的
+&lt;a class="reference external" href="https://github.com/python/cpython/blob/2.7/Modules/timemodule.c#L937"&gt;实现片段&lt;/a&gt;
+如下：&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="k"&gt;static&lt;/span&gt; &lt;span class="kt"&gt;int&lt;/span&gt;
+
+&lt;span class="nf"&gt;floatsleep&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="kt"&gt;double&lt;/span&gt; &lt;span class="n"&gt;secs&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+
+&lt;span class="p"&gt;{&lt;/span&gt;
+&lt;span class="cm"&gt;/* XXX Should test for MS_WINDOWS first! */&lt;/span&gt;
+&lt;span class="cp"&gt;#if defined(HAVE_SELECT) &amp;amp;&amp;amp; !defined(__BEOS__) &amp;amp;&amp;amp; !defined(__EMX__)&lt;/span&gt;
+    &lt;span class="k"&gt;struct&lt;/span&gt; &lt;span class="n"&gt;timeval&lt;/span&gt; &lt;span class="n"&gt;t&lt;/span&gt;&lt;span class="p"&gt;;&lt;/span&gt;
+    &lt;span class="kt"&gt;double&lt;/span&gt; &lt;span class="n"&gt;frac&lt;/span&gt;&lt;span class="p"&gt;;&lt;/span&gt;
+    &lt;span class="n"&gt;frac&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;fmod&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;secs&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="mf"&gt;1.0&lt;/span&gt;&lt;span class="p"&gt;);&lt;/span&gt;
+    &lt;span class="n"&gt;secs&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;floor&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;secs&lt;/span&gt;&lt;span class="p"&gt;);&lt;/span&gt;
+    &lt;span class="n"&gt;t&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="n"&gt;tv_sec&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="kt"&gt;long&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;&lt;span class="n"&gt;secs&lt;/span&gt;&lt;span class="p"&gt;;&lt;/span&gt;
+    &lt;span class="n"&gt;t&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="n"&gt;tv_usec&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="kt"&gt;long&lt;/span&gt;&lt;span class="p"&gt;)(&lt;/span&gt;&lt;span class="n"&gt;frac&lt;/span&gt;&lt;span class="o"&gt;*&lt;/span&gt;&lt;span class="mf"&gt;1000000.0&lt;/span&gt;&lt;span class="p"&gt;);&lt;/span&gt;
+    &lt;span class="n"&gt;Py_BEGIN_ALLOW_THREADS&lt;/span&gt;
+    &lt;span class="k"&gt;if&lt;/span&gt; &lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;select&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="mi"&gt;0&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;fd_set&lt;/span&gt; &lt;span class="o"&gt;*&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;&lt;span class="mi"&gt;0&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;fd_set&lt;/span&gt; &lt;span class="o"&gt;*&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;&lt;span class="mi"&gt;0&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;fd_set&lt;/span&gt; &lt;span class="o"&gt;*&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;&lt;span class="mi"&gt;0&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="o"&gt;&amp;amp;&lt;/span&gt;&lt;span class="n"&gt;t&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt; &lt;span class="o"&gt;!=&lt;/span&gt; &lt;span class="mi"&gt;0&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt; &lt;span class="p"&gt;{&lt;/span&gt;
+&lt;span class="cp"&gt;#ifdef EINTR&lt;/span&gt;
+        &lt;span class="k"&gt;if&lt;/span&gt; &lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;errno&lt;/span&gt; &lt;span class="o"&gt;!=&lt;/span&gt; &lt;span class="n"&gt;EINTR&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt; &lt;span class="p"&gt;{&lt;/span&gt;
+&lt;span class="cp"&gt;#else&lt;/span&gt;
+        &lt;span class="k"&gt;if&lt;/span&gt; &lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="mi"&gt;1&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt; &lt;span class="p"&gt;{&lt;/span&gt;
+&lt;span class="cp"&gt;#endif&lt;/span&gt;
+            &lt;span class="n"&gt;Py_BLOCK_THREADS&lt;/span&gt;
+            &lt;span class="n"&gt;PyErr_SetFromErrno&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;PyExc_IOError&lt;/span&gt;&lt;span class="p"&gt;);&lt;/span&gt;
+            &lt;span class="k"&gt;return&lt;/span&gt; &lt;span class="o"&gt;-&lt;/span&gt;&lt;span class="mi"&gt;1&lt;/span&gt;&lt;span class="p"&gt;;&lt;/span&gt;
+        &lt;span class="p"&gt;}&lt;/span&gt;
+    &lt;span class="p"&gt;}&lt;/span&gt;
+&lt;/pre&gt;&lt;/div&gt;
+&lt;p&gt;可以看到确实是用 &lt;tt class="docutils literal"&gt;select&lt;/tt&gt; 来实现的 &lt;tt class="docutils literal"&gt;time.sleep&lt;/tt&gt; 。&lt;/p&gt;
+&lt;p&gt;&lt;tt class="docutils literal"&gt;select&lt;/tt&gt; 的
+&lt;a class="reference external" href="http://man7.org/linux/man-pages/man2/select.2.html"&gt;文档&lt;/a&gt; 中关于
+signal 的说明如下：&lt;/p&gt;
+&lt;blockquote&gt;
+&lt;p&gt;The &lt;strong&gt;timeout&lt;/strong&gt; argument specifies the interval that &lt;strong&gt;select()&lt;/strong&gt; should
+block waiting for a file descriptor to become ready.  &lt;strong&gt;The call will
+block until either&lt;/strong&gt;:&lt;/p&gt;
+&lt;ul class="simple"&gt;
+&lt;li&gt;a file descriptor becomes ready;&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;the call is interrupted by a signal handler&lt;/strong&gt;; or&lt;/li&gt;
+&lt;li&gt;the timeout expires.&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/blockquote&gt;
+&lt;p&gt;通过文档我们知道， &lt;tt class="docutils literal"&gt;select&lt;/tt&gt; 的 &lt;strong&gt;timeout&lt;/strong&gt; 的阻塞效果确实会被 signal handler 所中断。&lt;/p&gt;
+&lt;p&gt;至于 Python 3.5+ 为什么不会提前返回，是因为它的 &lt;tt class="docutils literal"&gt;time.sleep&lt;/tt&gt;
+实现中对于这种情况增加了判断，&lt;a class="reference external" href="https://github.com/python/cpython/blob/3.6/Modules/timemodule.c#L1482-L1487"&gt;如果时间没到会用剩下的时间再次
+sleep&lt;/a&gt;：&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="k"&gt;static&lt;/span&gt; &lt;span class="kt"&gt;int&lt;/span&gt;
+&lt;span class="nf"&gt;pysleep&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;_PyTime_t&lt;/span&gt; &lt;span class="n"&gt;secs&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+&lt;span class="p"&gt;{&lt;/span&gt;
+     &lt;span class="c1"&gt;// ...&lt;/span&gt;
+     &lt;span class="k"&gt;do&lt;/span&gt; &lt;span class="p"&gt;{&lt;/span&gt;
+        &lt;span class="c1"&gt;// ...&lt;/span&gt;
+        &lt;span class="n"&gt;monotonic&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;_PyTime_GetMonotonicClock&lt;/span&gt;&lt;span class="p"&gt;();&lt;/span&gt;
+        &lt;span class="n"&gt;secs&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;deadline&lt;/span&gt; &lt;span class="o"&gt;-&lt;/span&gt; &lt;span class="n"&gt;monotonic&lt;/span&gt;&lt;span class="p"&gt;;&lt;/span&gt;
+        &lt;span class="k"&gt;if&lt;/span&gt; &lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;secs&lt;/span&gt; &lt;span class="o"&gt;&amp;lt;&lt;/span&gt; &lt;span class="mi"&gt;0&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+            &lt;span class="k"&gt;break&lt;/span&gt;&lt;span class="p"&gt;;&lt;/span&gt;
+        &lt;span class="cm"&gt;/* retry with the recomputed delay */&lt;/span&gt;
+    &lt;span class="p"&gt;}&lt;/span&gt; &lt;span class="k"&gt;while&lt;/span&gt; &lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="mi"&gt;1&lt;/span&gt;&lt;span class="p"&gt;);&lt;/span&gt;
+
+    &lt;span class="k"&gt;return&lt;/span&gt; &lt;span class="mi"&gt;0&lt;/span&gt;&lt;span class="p"&gt;;&lt;/span&gt;
+&lt;span class="p"&gt;}&lt;/span&gt;
+&lt;/pre&gt;&lt;/div&gt;
+&lt;/div&gt;
+&lt;div class="section" id="id7"&gt;
+&lt;h2 id="hidid7"&gt;启示&lt;a class="headerlink" href="#hidid7" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;如果想在 Python 2 下实现类似 Python 3.5+ 下的效果，可以仿照 Python 3.5+
+下的实现增加“如果时间没到会用剩下的时间再次 sleep”的逻辑：&lt;/p&gt;
+&lt;p&gt;参考代码（修改自 time_b.py）&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="err"&gt;$&lt;/span&gt; &lt;span class="n"&gt;cat&lt;/span&gt; &lt;span class="n"&gt;time_d&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;py&lt;/span&gt;
+&lt;span class="kn"&gt;import&lt;/span&gt; &lt;span class="nn"&gt;logging&lt;/span&gt;
+&lt;span class="kn"&gt;import&lt;/span&gt; &lt;span class="nn"&gt;signal&lt;/span&gt;
+&lt;span class="kn"&gt;import&lt;/span&gt; &lt;span class="nn"&gt;time&lt;/span&gt;
+
+&lt;span class="n"&gt;logging&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;basicConfig&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;
+    &lt;span class="n"&gt;level&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="n"&gt;logging&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;DEBUG&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;
+    &lt;span class="n"&gt;format&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;&lt;/span&gt;&lt;span class="si"&gt;%(asctime)-15s&lt;/span&gt;&lt;span class="s1"&gt; - &lt;/span&gt;&lt;span class="si"&gt;%(levelname)s&lt;/span&gt;&lt;span class="s1"&gt; - &lt;/span&gt;&lt;span class="si"&gt;%(message)s&lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;&lt;/span&gt;
+&lt;span class="p"&gt;)&lt;/span&gt;
+
+&lt;span class="n"&gt;n&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="mi"&gt;60&lt;/span&gt;
+
+
+&lt;span class="k"&gt;def&lt;/span&gt; &lt;span class="nf"&gt;handler&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;sig&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;strace&lt;/span&gt;&lt;span class="p"&gt;):&lt;/span&gt;
+    &lt;span class="n"&gt;logging&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;info&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;recived &lt;/span&gt;&lt;span class="si"&gt;%s&lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;sig&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+
+
+&lt;span class="n"&gt;signal&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;signal&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;signal&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;SIGHUP&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;handler&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+
+&lt;span class="n"&gt;logging&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;info&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;start sleep &lt;/span&gt;&lt;span class="si"&gt;%s&lt;/span&gt;&lt;span class="s1"&gt; seconds&amp;#39;&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;n&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+&lt;span class="n"&gt;start&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;time&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;time&lt;/span&gt;&lt;span class="p"&gt;()&lt;/span&gt;
+&lt;span class="n"&gt;remain&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;n&lt;/span&gt;
+&lt;span class="k"&gt;while&lt;/span&gt; &lt;span class="bp"&gt;True&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;
+    &lt;span class="n"&gt;time&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;sleep&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;remain&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+    &lt;span class="n"&gt;remain&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;start&lt;/span&gt; &lt;span class="o"&gt;+&lt;/span&gt; &lt;span class="n"&gt;n&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt; &lt;span class="o"&gt;-&lt;/span&gt; &lt;span class="n"&gt;time&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;time&lt;/span&gt;&lt;span class="p"&gt;()&lt;/span&gt;
+    &lt;span class="k"&gt;if&lt;/span&gt; &lt;span class="n"&gt;remain&lt;/span&gt; &lt;span class="o"&gt;&amp;lt;&lt;/span&gt; &lt;span class="mi"&gt;0&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;
+        &lt;span class="k"&gt;break&lt;/span&gt;
+    &lt;span class="k"&gt;else&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;
+        &lt;span class="n"&gt;logging&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;warn&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;retry sleep &lt;/span&gt;&lt;span class="si"&gt;%s&lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;remain&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+&lt;span class="n"&gt;logging&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;info&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;end sleep &lt;/span&gt;&lt;span class="si"&gt;%s&lt;/span&gt;&lt;span class="s1"&gt; seconds, spend &lt;/span&gt;&lt;span class="si"&gt;%s&lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;n&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;time&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;time&lt;/span&gt;&lt;span class="p"&gt;()&lt;/span&gt; &lt;span class="o"&gt;-&lt;/span&gt; &lt;span class="n"&gt;start&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+&lt;/pre&gt;&lt;/div&gt;
+&lt;p&gt;测试：&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+$ python time_d.py &amp;amp;
+[1] 14751
+$ 2017-07-16 17:10:53,235 - INFO - start sleep 60 seconds
+
+$ kill -s SIGHUP 14751
+2017-07-16 17:10:59,803 - INFO - recived 1
+2017-07-16 17:10:59,803 - WARNING - retry sleep 53.4323399067
+
+$ kill -s SIGHUP 14751
+2017-07-16 17:11:44,792 - INFO - recived 1
+2017-07-16 17:11:44,792 - WARNING - retry sleep 8.44309687614
+$ 2017-07-16 17:11:53,239 - INFO - end sleep 60 seconds, spend 60.0035960674
+
+[1]+  Done                    python time_d.py
+&lt;/pre&gt;
+&lt;p&gt;&lt;strong&gt;最重要的一点是&lt;/strong&gt; ：不要觉得 &lt;tt class="docutils literal"&gt;time.sleep&lt;/tt&gt;
+会非常的精确，它有可能变快也有可能变慢，不要对它有过高的期望，不要依赖这个功能来实现需要精确
+sleep 的需求。&lt;/p&gt;
+&lt;p&gt;目测可能也可以利用 python 2 下的这一行为实现一些特殊的需求。&lt;/p&gt;
+&lt;p&gt;好了，本文的内容就是这些了，希望这篇文章能对你有所帮助。&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class="section" id="id8"&gt;
+&lt;h2 id="hidid8"&gt;参考资料&lt;a class="headerlink" href="#hidid8" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;ul class="simple"&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://docs.python.org/2/library/time.html#time.sleep"&gt;15.3. time — Time access and conversions — Python 2.7.13
+documentation&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://docs.python.org/3/library/time.html#time.sleep"&gt;16.3. time — Time access and conversions — Python 3.6.2rc2
+documentation&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://github.com/gevent/gevent/issues/280"&gt;gevent.subprocess.Popen alters the behavior of time.sleep · Issue
+#280 · gevent/gevent&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://github.com/python/cpython/blob/2.7/Modules/timemodule.c#L937"&gt;cpython/timemodule.c at 2.7 ·
+python/cpython&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://github.com/python/cpython/blob/3.6/Modules/timemodule.c#L1482-L1487"&gt;cpython/timemodule.c at 3.6 ·
+python/cpython&lt;/a&gt;&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/div&gt;
+</description><dc:creator xmlns:dc="http://purl.org/dc/elements/1.1/">mozillazg</dc:creator><pubDate>Tue, 18 Jul 2017 00:00:00 +0000</pubDate><guid>tag:mozillazg.github.io,2017-07-18:2017/07/python-time-sleep-terminate-by-signal.html</guid><category>signal</category></item><item><title>使用 gdb 调试运行中的 Python 进程</title><link>https://mozillazg.github.io/2017/07/debug-running-python-process-with-gdb.html</link><description>&lt;p&gt;假设一个服务器上运行了下面这样的 test.py 程序，我们怎样才能知道程序是否在正常运行，运行到哪一步了呢？&lt;/p&gt;
 &lt;pre class="code python literal-block"&gt;
 &lt;span class="kn"&gt;import&lt;/span&gt; &lt;span class="nn"&gt;time&lt;/span&gt;
 
@@ -19,14 +399,14 @@
 &lt;p&gt;这个程序既没有日志也没有 print 输出，通过查看日志文件/标准输出/标准错误是没有办法确认程序状况的。
 一种可行的办法就是使用 gdb 来查看程序当前的运行状况。&lt;/p&gt;
 &lt;div class="section" id="id1"&gt;
-&lt;h2&gt;测试环境&lt;/h2&gt;
+&lt;h2 id="hidid1"&gt;测试环境&lt;a class="headerlink" href="#hidid1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;ul class="simple"&gt;
 &lt;li&gt;系统: Ubuntu 16.04.1 LTS&lt;/li&gt;
 &lt;li&gt;Python: 2.7.12&lt;/li&gt;
 &lt;/ul&gt;
 &lt;/div&gt;
 &lt;div class="section" id="id2"&gt;
-&lt;h2&gt;准备工作&lt;/h2&gt;
+&lt;h2 id="hidid2"&gt;准备工作&lt;a class="headerlink" href="#hidid2" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;p&gt;安装 gdb 和 python2.7-dbg:&lt;/p&gt;
 &lt;pre class="code shell literal-block"&gt;
 $ sudo apt-get install gdb python2.7-dbg
@@ -58,7 +438,7 @@ Reading symbols from /lib/ld-linux.so.2...Reading symbols from /usr/lib/debug//l
 &lt;/pre&gt;
 &lt;/div&gt;
 &lt;div class="section" id="core-file"&gt;
-&lt;h2&gt;生成 core file&lt;/h2&gt;
+&lt;h2 id="hidcore-file"&gt;生成 core file&lt;a class="headerlink" href="#hidcore-file" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;p&gt;为了不影响运行中的进程，可以通过生成 core file 的方式来保存进程的当前信息:&lt;/p&gt;
 &lt;pre class="code shell literal-block"&gt;
 &lt;span class="o"&gt;(&lt;/span&gt;gdb&lt;span class="o"&gt;)&lt;/span&gt; generate-core-file
@@ -90,7 +470,7 @@ Core was generated by &lt;span class="sb"&gt;`&lt;/span&gt;python&lt;span class=
 &lt;/pre&gt;
 &lt;/div&gt;
 &lt;div class="section" id="python"&gt;
-&lt;h2&gt;可用的 python 相关的命令&lt;/h2&gt;
+&lt;h2 id="hidpython"&gt;可用的 python 相关的命令&lt;a class="headerlink" href="#hidpython" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;p&gt;可以通过输入 &lt;tt class="docutils literal"&gt;py&lt;/tt&gt; 然后加 tab 键的方式来查看可用的命令:&lt;/p&gt;
 &lt;pre class="code shell literal-block"&gt;
 &lt;span class="o"&gt;(&lt;/span&gt;gdb&lt;span class="o"&gt;)&lt;/span&gt; py
@@ -104,7 +484,7 @@ Display the current python frame and all the frames within its call stack &lt;sp
 &lt;/pre&gt;
 &lt;/div&gt;
 &lt;div class="section" id="id3"&gt;
-&lt;h2&gt;当前执行位置的源码&lt;/h2&gt;
+&lt;h2 id="hidid3"&gt;当前执行位置的源码&lt;a class="headerlink" href="#hidid3" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;pre class="code shell literal-block"&gt;
 &lt;span class="o"&gt;(&lt;/span&gt;gdb&lt;span class="o"&gt;)&lt;/span&gt; py-list
    &lt;span class="m"&gt;1&lt;/span&gt;    &lt;span class="c1"&gt;# -*- coding: utf-8 -*-
@@ -123,7 +503,7 @@ Display the current python frame and all the frames within its call stack &lt;sp
 &lt;p&gt;可以看到当前正在执行 &lt;tt class="docutils literal"&gt;time.sleep(10)&lt;/tt&gt;&lt;/p&gt;
 &lt;/div&gt;
 &lt;div class="section" id="id4"&gt;
-&lt;h2&gt;当前位置的调用栈&lt;/h2&gt;
+&lt;h2 id="hidid4"&gt;当前位置的调用栈&lt;a class="headerlink" href="#hidid4" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;pre class="code shell literal-block"&gt;
 &lt;span class="o"&gt;(&lt;/span&gt;gdb&lt;span class="o"&gt;)&lt;/span&gt; py-bt
 Traceback &lt;span class="o"&gt;(&lt;/span&gt;most recent call first&lt;span class="o"&gt;)&lt;/span&gt;:
@@ -139,7 +519,7 @@ Traceback &lt;span class="o"&gt;(&lt;/span&gt;most recent call first&lt;span cla
 &lt;p&gt;可以看出来是 &lt;tt class="docutils literal"&gt;main() &lt;span class="pre"&gt;-&amp;gt;&lt;/span&gt; do(x) &lt;span class="pre"&gt;-&amp;gt;&lt;/span&gt; time.sleep(10)&lt;/tt&gt;&lt;/p&gt;
 &lt;/div&gt;
 &lt;div class="section" id="id5"&gt;
-&lt;h2&gt;查看变量的值&lt;/h2&gt;
+&lt;h2 id="hidid5"&gt;查看变量的值&lt;a class="headerlink" href="#hidid5" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;pre class="code shell literal-block"&gt;
 &lt;span class="o"&gt;(&lt;/span&gt;gdb&lt;span class="o"&gt;)&lt;/span&gt; py-list
    &lt;span class="m"&gt;1&lt;/span&gt;    &lt;span class="c1"&gt;# -*- coding: utf-8 -*-
@@ -162,7 +542,7 @@ Traceback &lt;span class="o"&gt;(&lt;/span&gt;most recent call first&lt;span cla
 &lt;/pre&gt;
 &lt;/div&gt;
 &lt;div class="section" id="id6"&gt;
-&lt;h2&gt;查看上层调用方的信息&lt;/h2&gt;
+&lt;h2 id="hidid6"&gt;查看上层调用方的信息&lt;a class="headerlink" href="#hidid6" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;pre class="code shell literal-block"&gt;
 &lt;span class="o"&gt;(&lt;/span&gt;gdb&lt;span class="o"&gt;)&lt;/span&gt; py-up
 &lt;span class="c1"&gt;#9 Frame 0xb74c0994, for file test.py, line 11, in main (x=12)
@@ -203,7 +583,7 @@ Traceback &lt;span class="o"&gt;(&lt;/span&gt;most recent call first&lt;span cla
 &lt;/pre&gt;
 &lt;/div&gt;
 &lt;div class="section" id="id7"&gt;
-&lt;h2&gt;调试多线程程序&lt;/h2&gt;
+&lt;h2 id="hidid7"&gt;调试多线程程序&lt;a class="headerlink" href="#hidid7" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;p&gt;测试程序 test2.py:&lt;/p&gt;
 &lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="c1"&gt;# -*- coding: utf-8 -*-&lt;/span&gt;
 &lt;span class="kn"&gt;from&lt;/span&gt; &lt;span class="nn"&gt;threading&lt;/span&gt; &lt;span class="kn"&gt;import&lt;/span&gt; &lt;span class="n"&gt;Thread&lt;/span&gt;
@@ -232,7 +612,7 @@ $ python test2.py &lt;span class="p"&gt;&amp;amp;&lt;/span&gt;
 &lt;span class="o"&gt;[&lt;/span&gt;2&lt;span class="o"&gt;]&lt;/span&gt; 12281
 &lt;/pre&gt;
 &lt;div class="section" id="id8"&gt;
-&lt;h3&gt;查看所有线程&lt;/h3&gt;
+&lt;h3 id="hidid8"&gt;查看所有线程&lt;a class="headerlink" href="#hidid8" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
 &lt;p&gt;&lt;tt class="docutils literal"&gt;info threads&lt;/tt&gt;&lt;/p&gt;
 &lt;pre class="code shell literal-block"&gt;
 $ gdb python core.12281
@@ -247,7 +627,7 @@ $ gdb python core.12281
 &lt;p&gt;可以看到这个程序当前有 3 个线程, 当前进入的是 1 号线程。&lt;/p&gt;
 &lt;/div&gt;
 &lt;div class="section" id="id9"&gt;
-&lt;h3&gt;切换线程&lt;/h3&gt;
+&lt;h3 id="hidid9"&gt;切换线程&lt;a class="headerlink" href="#hidid9" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
 &lt;p&gt;&lt;tt class="docutils literal"&gt;thread ID&lt;/tt&gt;&lt;/p&gt;
 &lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="o"&gt;(&lt;/span&gt;gdb&lt;span class="o"&gt;)&lt;/span&gt; thread 3
 &lt;span class="o"&gt;[&lt;/span&gt;Switching to thread &lt;span class="m"&gt;3&lt;/span&gt; &lt;span class="o"&gt;(&lt;/span&gt;Thread 0xb69ffb40 &lt;span class="o"&gt;(&lt;/span&gt;LWP 11041&lt;span class="o"&gt;))]&lt;/span&gt;
@@ -293,7 +673,7 @@ $ gdb python core.12281
 &lt;/pre&gt;&lt;/div&gt;
 &lt;/div&gt;
 &lt;div class="section" id="id10"&gt;
-&lt;h3&gt;同时操作所有线程&lt;/h3&gt;
+&lt;h3 id="hidid10"&gt;同时操作所有线程&lt;a class="headerlink" href="#hidid10" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
 &lt;p&gt;&lt;tt class="docutils literal"&gt;thread apply all CMD&lt;/tt&gt; 或 &lt;tt class="docutils literal"&gt;t a a CMD&lt;/tt&gt;&lt;/p&gt;
 &lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="o"&gt;(&lt;/span&gt;gdb&lt;span class="o"&gt;)&lt;/span&gt; thread apply all py-list
 
@@ -342,7 +722,7 @@ Thread &lt;span class="m"&gt;1&lt;/span&gt; &lt;span class="o"&gt;(&lt;/span&gt;
 &lt;/div&gt;
 &lt;/div&gt;
 &lt;div class="section" id="id11"&gt;
-&lt;h2&gt;参考资料&lt;/h2&gt;
+&lt;h2 id="hidid11"&gt;参考资料&lt;a class="headerlink" href="#hidid11" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;ul class="simple"&gt;
 &lt;li&gt;&lt;a class="reference external" href="https://wiki.python.org/moin/DebuggingWithGdb"&gt;DebuggingWithGdb - Python Wiki&lt;/a&gt;&lt;/li&gt;
 &lt;li&gt;&lt;a class="reference external" href="https://fedoraproject.org/wiki/Features/EasierPythonDebugging"&gt;Features/EasierPythonDebugging - FedoraProject&lt;/a&gt;&lt;/li&gt;
@@ -404,7 +784,7 @@ Thread &lt;span class="m"&gt;1&lt;/span&gt; &lt;span class="o"&gt;(&lt;/span&gt;
 </description><dc:creator xmlns:dc="http://purl.org/dc/elements/1.1/">mozillazg</dc:creator><pubDate>Sun, 02 Jul 2017 00:00:00 +0000</pubDate><guid>tag:mozillazg.github.io,2017-07-02:2017/07/go-intro-go-httpheader.html</guid></item><item><title>tinyq: 一个队列框架</title><link>https://mozillazg.github.io/2017/04/tinyq-a-queue-framework.html</link><description>&lt;p&gt;最近尝试着写了一个简单的队列框架，整体的功能类似 celery, rq 之类的队列框架。
 下面简单的介绍一下。&lt;/p&gt;
 &lt;div class="section" id="id1"&gt;
-&lt;h2&gt;安装&lt;/h2&gt;
+&lt;h2 id="hidid1"&gt;安装&lt;a class="headerlink" href="#hidid1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;div class="line-block"&gt;
 &lt;div class="line"&gt;项目地址： &lt;a class="reference external" href="https://github.com/mozillazg/tinyq"&gt;https://github.com/mozillazg/tinyq&lt;/a&gt;&lt;/div&gt;
 &lt;div class="line"&gt;安装：&lt;/div&gt;
@@ -415,7 +795,7 @@ pip install tinyq
 &lt;p&gt;这个框架使用 redis 作为队列服务，所以同时也需要安装 redis 服务程序。&lt;/p&gt;
 &lt;/div&gt;
 &lt;div class="section" id="hello-world"&gt;
-&lt;h2&gt;Hello World&lt;/h2&gt;
+&lt;h2 id="hidhello-world"&gt;Hello World&lt;a class="headerlink" href="#hidhello-world" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;ol class="arabic"&gt;
 &lt;li&gt;&lt;p class="first"&gt;启动 redis 服务:&lt;/p&gt;
 &lt;pre class="literal-block"&gt;
@@ -470,7 +850,7 @@ $
 &lt;/ol&gt;
 &lt;/div&gt;
 &lt;div class="section" id="id2"&gt;
-&lt;h2&gt;功能&lt;/h2&gt;
+&lt;h2 id="hidid2"&gt;功能&lt;a class="headerlink" href="#hidid2" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;p&gt;通过上面的 Hello World 示例可以看出 tinyq 的功能类似 rq/celery。
 还有一些 Hello World 中没有展示出来的功能:&lt;/p&gt;
 &lt;ul&gt;
@@ -574,7 +954,7 @@ node2 收到了 node1 选自己的广播，此时 node2 发现自己 获得了2�
 &lt;/ul&gt;
 &lt;p&gt;上面就是 FastLeader 算法选举的简单介绍了，更详细的信息可以查阅官方文档和代码。&lt;/p&gt;
 &lt;div class="section" id="id1"&gt;
-&lt;h2&gt;参考&lt;/h2&gt;
+&lt;h2 id="hidid1"&gt;参考&lt;a class="headerlink" href="#hidid1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;ul class="simple"&gt;
 &lt;li&gt;&lt;a class="reference external" href="http://codemacro.com/2014/10/19/zk-fastleaderelection/"&gt;图解zookeeper FastLeader选举算法 - loop in codes&lt;/a&gt;&lt;/li&gt;
 &lt;li&gt;&lt;a class="reference external" href="http://blog.csdn.net/xhh198781/article/details/6619203"&gt;zookeeper3.3.3源码分析(二)FastLeader选举算法 - xhh198781的专栏 - 博客频道 - CSDN.NET&lt;/a&gt;&lt;/li&gt;
@@ -586,13 +966,13 @@ node2 收到了 node1 选自己的广播，此时 node2 发现自己 获得了2�
 &lt;/ul&gt;
 &lt;/div&gt;
 </description><dc:creator xmlns:dc="http://purl.org/dc/elements/1.1/">mozillazg</dc:creator><pubDate>Sat, 11 Mar 2017 00:00:00 +0000</pubDate><guid>tag:mozillazg.github.io,2017-03-11:2017/03/zookeeper-fastleader-elect-leader.html</guid><category>zookeeper</category><category>leader选举</category></item><item><title>Python: 实现 Ruby 风格的字符串插值功能</title><link>https://mozillazg.github.io/2017/02/f-Implement-Ruby-Style-String-Interpolation.html</link><description>&lt;div class="section" id="id1"&gt;
-&lt;h2&gt;什么是字符串插值功能&lt;/h2&gt;
+&lt;h2 id="hidid1"&gt;什么是字符串插值功能&lt;a class="headerlink" href="#hidid1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;p&gt;字符串插值功能是一种定义字符串的方式，可以在字符串中包含变量、表达式，
 这些字符串中的变量/表达式会被自动替换为相应的值。&lt;/p&gt;
 &lt;p&gt;很多语言都支持字符串插值功能。下面我们来看一下 Ruby 和 Python 3.6 中字符串插值功能是什么样的。&lt;/p&gt;
 &lt;/div&gt;
 &lt;div class="section" id="ruby"&gt;
-&lt;h2&gt;Ruby 风格&lt;/h2&gt;
+&lt;h2 id="hidruby"&gt;Ruby 风格&lt;a class="headerlink" href="#hidruby" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;p&gt;Ruby 风格的字符串插值是这样的：&lt;/p&gt;
 &lt;pre class="literal-block"&gt;
 $ irb
@@ -608,7 +988,7 @@ $ irb
 &lt;p&gt;Ruby 中是通过 &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;&amp;quot;#{var}&amp;quot;&lt;/span&gt;&lt;/tt&gt; 来定义的。&lt;/p&gt;
 &lt;/div&gt;
 &lt;div class="section" id="python-3-6"&gt;
-&lt;h2&gt;Python 3.6+ 风格&lt;/h2&gt;
+&lt;h2 id="hidpython-3-6"&gt;Python 3.6+ 风格&lt;a class="headerlink" href="#hidpython-3-6" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;p&gt;Python 3.6 也增加了对字符串插值功能的支持:&lt;/p&gt;
 &lt;pre class="literal-block"&gt;
 $ python3.6
@@ -631,7 +1011,7 @@ $ python3.6
 &lt;/ul&gt;
 &lt;/div&gt;
 &lt;div class="section" id="id2"&gt;
-&lt;h2&gt;语法&lt;/h2&gt;
+&lt;h2 id="hidid2"&gt;语法&lt;a class="headerlink" href="#hidid2" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;p&gt;我们的字符串插值的语法如下:&lt;/p&gt;
 &lt;pre class="literal-block"&gt;
 f('#{var}')
@@ -642,7 +1022,7 @@ re_code = re.compile(r'#\{([^\}]+)\}')
 &lt;/pre&gt;
 &lt;/div&gt;
 &lt;div class="section" id="id3"&gt;
-&lt;h2&gt;获取上下文的变量的值&lt;/h2&gt;
+&lt;h2 id="hidid3"&gt;获取上下文的变量的值&lt;a class="headerlink" href="#hidid3" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;p&gt;可以通过 &lt;tt class="docutils literal"&gt;locals()&lt;/tt&gt; 或者当前上下文变量的值，如果要获取调用方的上下文变量的值
 可以使用 frame.&lt;/p&gt;
 &lt;p&gt;&lt;tt class="docutils literal"&gt;frame = sys._getframe()&lt;/tt&gt; 可以获取当前 frame, &lt;tt class="docutils literal"&gt;frame.f_locals&lt;/tt&gt; 可以获取该 frame
@@ -669,7 +1049,7 @@ globals:  {'__name__': '__main__', ..., 'test': &amp;lt;function test at 0x100f1
 &lt;p&gt;在上面的例子中我们可以看到，可以在 &lt;tt class="docutils literal"&gt;test&lt;/tt&gt; 函数中获取调用方所在上下文的变量 &lt;tt class="docutils literal"&gt;a&lt;/tt&gt; 的值。&lt;/p&gt;
 &lt;/div&gt;
 &lt;div class="section" id="python"&gt;
-&lt;h2&gt;把字符串当作 python 代码执行并求值&lt;/h2&gt;
+&lt;h2 id="hidpython"&gt;把字符串当作 python 代码执行并求值&lt;a class="headerlink" href="#hidpython" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;p&gt;这个可以通过 &lt;tt class="docutils literal"&gt;eval&lt;/tt&gt; 函数来实现这个功能:&lt;/p&gt;
 &lt;pre class="literal-block"&gt;
 eval(source, globals=None, locals=None, /)
@@ -693,7 +1073,7 @@ eval(source, globals=None, locals=None, /)
 &lt;/pre&gt;
 &lt;/div&gt;
 &lt;div class="section" id="f"&gt;
-&lt;h2&gt;实现 f 函数&lt;/h2&gt;
+&lt;h2 id="hidf"&gt;实现 f 函数&lt;a class="headerlink" href="#hidf" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;p&gt;下面的代码是一种 &lt;tt class="docutils literal"&gt;f&lt;/tt&gt; 函数的实现方法 :&lt;/p&gt;
 &lt;pre class="code python literal-block"&gt;
 &lt;span class="err"&gt;$&lt;/span&gt; &lt;span class="n"&gt;cat&lt;/span&gt; &lt;span class="n"&gt;f&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;py&lt;/span&gt;
@@ -749,7 +1129,7 @@ eval(source, globals=None, locals=None, /)
 &lt;/pre&gt;
 &lt;/div&gt;
 &lt;div class="section" id="id4"&gt;
-&lt;h2&gt;参考资料&lt;/h2&gt;
+&lt;h2 id="hidid4"&gt;参考资料&lt;a class="headerlink" href="#hidid4" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;ul class="simple"&gt;
 &lt;li&gt;&lt;a class="reference external" href="https://docs.python.org/3.6/library/sys.html#sys._getframe"&gt;29.1. sys — System-specific parameters and functions — Python 3.6.1 documentation&lt;/a&gt;&lt;/li&gt;
 &lt;li&gt;&lt;a class="reference external" href="https://docs.python.org/3.6/library/inspect.html#types-and-members"&gt;29.12. inspect — Inspect live objects — Python 3.6.1 documentation&lt;/a&gt;&lt;/li&gt;
@@ -759,7 +1139,7 @@ eval(source, globals=None, locals=None, /)
 &lt;/div&gt;
 </description><dc:creator xmlns:dc="http://purl.org/dc/elements/1.1/">mozillazg</dc:creator><pubDate>Thu, 16 Feb 2017 00:00:00 +0000</pubDate><guid>tag:mozillazg.github.io,2017-02-16:2017/02/f-Implement-Ruby-Style-String-Interpolation.html</guid></item><item><title>Python: super 没那么简单</title><link>https://mozillazg.github.io/2016/12/python-super-is-not-as-simple-as-you-thought.html</link><description>&lt;p&gt;说到 &lt;tt class="docutils literal"&gt;super&lt;/tt&gt;， 大家可能觉得很简单呀，不就是用来调用父类方法的嘛。如果真的这么简单的话也就不会有这篇文章了，且听我细细道来。😄&lt;/p&gt;
 &lt;div class="section" id="id1"&gt;
-&lt;h2&gt;约定&lt;/h2&gt;
+&lt;h2 id="hidid1"&gt;约定&lt;a class="headerlink" href="#hidid1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;p&gt;在开始之前我们来约定一下本文所使用的 Python 版本。默认用的是 Python 3，也就是说：本文所定义的类都是新式类。如果你用到是 Python 2 的话，记得继承 &lt;tt class="docutils literal"&gt;object&lt;/tt&gt;:&lt;/p&gt;
 &lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="c1"&gt;# 默认， Python 3&lt;/span&gt;
 &lt;span class="k"&gt;class&lt;/span&gt; &lt;span class="nc"&gt;A&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;
@@ -784,7 +1164,7 @@ eval(source, globals=None, locals=None, /)
 &lt;p&gt;如果还有其他不兼容 Python 2 的情况，我会在文中注明的。&lt;/p&gt;
 &lt;/div&gt;
 &lt;div class="section" id="id2"&gt;
-&lt;h2&gt;单继承&lt;/h2&gt;
+&lt;h2 id="hidid2"&gt;单继承&lt;a class="headerlink" href="#hidid2" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;p&gt;在单继承中 &lt;tt class="docutils literal"&gt;super&lt;/tt&gt; 就像大家所想的那样，主要是用来调用父类的方法的。&lt;/p&gt;
 &lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="k"&gt;class&lt;/span&gt; &lt;span class="nc"&gt;A&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;
     &lt;span class="k"&gt;def&lt;/span&gt; &lt;span class="nf"&gt;__init__&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="bp"&gt;self&lt;/span&gt;&lt;span class="p"&gt;):&lt;/span&gt;
@@ -824,7 +1204,7 @@ eval(source, globals=None, locals=None, /)
 &lt;p&gt;不知道这个结果是否和你想到一样呢？下面我们来看一个多继承的例子。&lt;/p&gt;
 &lt;/div&gt;
 &lt;div class="section" id="id3"&gt;
-&lt;h2&gt;多继承&lt;/h2&gt;
+&lt;h2 id="hidid3"&gt;多继承&lt;a class="headerlink" href="#hidid3" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;p&gt;这次我们再定义一个 &lt;tt class="docutils literal"&gt;class C&lt;/tt&gt;，一个 &lt;tt class="docutils literal"&gt;class D&lt;/tt&gt;:&lt;/p&gt;
 &lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="k"&gt;class&lt;/span&gt; &lt;span class="nc"&gt;C&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;A&lt;/span&gt;&lt;span class="p"&gt;):&lt;/span&gt;
     &lt;span class="k"&gt;def&lt;/span&gt; &lt;span class="nf"&gt;__init__&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="bp"&gt;self&lt;/span&gt;&lt;span class="p"&gt;):&lt;/span&gt;
@@ -867,7 +1247,7 @@ self is &amp;lt;__main__.D object at 0x10ce10e48&amp;gt; &amp;#64;A.add
 &lt;p&gt;为什么会跟预期的不一样呢？下面我们将一起来看看 &lt;tt class="docutils literal"&gt;super&lt;/tt&gt; 的奥秘。&lt;/p&gt;
 &lt;/div&gt;
 &lt;div class="section" id="super"&gt;
-&lt;h2&gt;super 是个类&lt;/h2&gt;
+&lt;h2 id="hidsuper"&gt;super 是个类&lt;a class="headerlink" href="#hidsuper" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;p&gt;当我们调用 &lt;tt class="docutils literal"&gt;super()&lt;/tt&gt; 的时候，实际上是实例化了一个 &lt;tt class="docutils literal"&gt;super&lt;/tt&gt; 类。你没看错， &lt;tt class="docutils literal"&gt;super&lt;/tt&gt; 是个类，既不是关键字也不是函数等其他数据结构:&lt;/p&gt;
 &lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="o"&gt;&amp;gt;&amp;gt;&amp;gt;&lt;/span&gt; &lt;span class="k"&gt;class&lt;/span&gt; &lt;span class="nc"&gt;A&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt; &lt;span class="k"&gt;pass&lt;/span&gt;
 &lt;span class="o"&gt;...&lt;/span&gt;
@@ -899,7 +1279,7 @@ super(C, A).foo()
 &lt;p&gt;&lt;tt class="docutils literal"&gt;super&lt;/tt&gt; 只会从 &lt;tt class="docutils literal"&gt;C&lt;/tt&gt; 之后查找，即: 只会在 &lt;tt class="docutils literal"&gt;D&lt;/tt&gt; 或 &lt;tt class="docutils literal"&gt;E&lt;/tt&gt; 或 &lt;tt class="docutils literal"&gt;object&lt;/tt&gt; 中查找 &lt;tt class="docutils literal"&gt;foo&lt;/tt&gt; 方法。&lt;/p&gt;
 &lt;/div&gt;
 &lt;div class="section" id="id4"&gt;
-&lt;h2&gt;多继承中 super 的工作方式&lt;/h2&gt;
+&lt;h2 id="hidid4"&gt;多继承中 super 的工作方式&lt;a class="headerlink" href="#hidid4" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;p&gt;再回到前面的&lt;/p&gt;
 &lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="n"&gt;d&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;D&lt;/span&gt;&lt;span class="p"&gt;()&lt;/span&gt;
 &lt;span class="n"&gt;d&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;add&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="mi"&gt;2&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
@@ -1010,7 +1390,7 @@ self is &amp;lt;__main__.D object at 0x10ce10e48&amp;gt; &amp;#64;A.add
 &lt;p&gt;That's all! 希望这篇文章能对你有所帮助 ;)&lt;/p&gt;
 &lt;/div&gt;
 &lt;div class="section" id="id5"&gt;
-&lt;h2&gt;参考资料&lt;/h2&gt;
+&lt;h2 id="hidid5"&gt;参考资料&lt;a class="headerlink" href="#hidid5" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;ul class="simple"&gt;
 &lt;li&gt;&lt;a class="reference external" href="http://sixty-north.com/blog/series/pythons-super-explained"&gt;Python's super() Explained&lt;/a&gt;&lt;/li&gt;
 &lt;li&gt;&lt;a class="reference external" href="https://docs.python.org/3/library/functions.html#super"&gt;2. Built-in Functions — Python 3.5.2 documentation&lt;/a&gt;&lt;/li&gt;
@@ -1055,7 +1435,7 @@ L[C(B1 ... BN)] = C + merge(L[B1] ... L[BN], B1 ... BN)
 &lt;/ol&gt;
 &lt;/blockquote&gt;
 &lt;div class="section" id="mro"&gt;
-&lt;h2&gt;计算 MRO&lt;/h2&gt;
+&lt;h2 id="hidmro"&gt;计算 MRO&lt;a class="headerlink" href="#hidmro" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;p&gt;先从简单的类说起：&lt;/p&gt;
 &lt;pre class="literal-block"&gt;
 class B(object): pass
@@ -1193,7 +1573,7 @@ L[A] = L[A(B, C)]
 以及 wikipedia 中的 &lt;a class="reference external" href="https://en.wikipedia.org/wiki/C3_linearization"&gt;C3 算法&lt;/a&gt;.&lt;/p&gt;
 &lt;/div&gt;
 &lt;div class="section" id="id1"&gt;
-&lt;h2&gt;参考资料&lt;/h2&gt;
+&lt;h2 id="hidid1"&gt;参考资料&lt;a class="headerlink" href="#hidid1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;ul class="simple"&gt;
 &lt;li&gt;&lt;a class="reference external" href="https://www.python.org/download/releases/2.3/mro/"&gt;The Python 2.3 Method Resolution Order | Python.org&lt;/a&gt;&lt;/li&gt;
 &lt;li&gt;&lt;a class="reference external" href="https://en.wikipedia.org/wiki/C3_linearization"&gt;C3 linearization - Wikipedia&lt;/a&gt;&lt;/li&gt;
@@ -1391,7 +1771,7 @@ ThreadWorker: release lock &amp;lt;unlocked _thread.RLock object &lt;span class=
 &lt;!-- child: got the lock &lt;_RLock owner='MainThread' count=1&gt; --&gt;
 &lt;!--  --&gt;
 &lt;div class="section" id="id1"&gt;
-&lt;h2&gt;参考资料&lt;/h2&gt;
+&lt;h2 id="hidid1"&gt;参考资料&lt;a class="headerlink" href="#hidid1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;ul class="simple"&gt;
 &lt;li&gt;&lt;a class="reference external" href="https://twiki.cern.ch/twiki/bin/view/Main/PythonLoggingThreadingMultiprocessingIntermixedStudy"&gt;PythonLoggingThreadingMultiprocessingIntermixedStudy(Using modules Python logging, threading and multiprocessing in a single application.) &amp;lt; Main &amp;lt; TWiki&lt;/a&gt;&lt;/li&gt;
 &lt;li&gt;&lt;a class="reference external" href="http://bugs.python.org/issue6721"&gt;Issue 6721: Locks in the standard library should be sanitized on fork - Python tracker&lt;/a&gt;&lt;/li&gt;
@@ -1438,7 +1818,7 @@ ThreadWorker: release lock &amp;lt;unlocked _thread.RLock object &lt;span class=
 &lt;p&gt;抽象体系中的类(&lt;tt class="docutils literal"&gt;Downloader&lt;/tt&gt;)会把实现体系中的某个类(&lt;tt class="docutils literal"&gt;OSSClient&lt;/tt&gt;)实例
 聚合进来，而这个实例将充当抽象接口与具体实现之间的桥梁(bridge)。&lt;/p&gt;
 &lt;div class="section" id="id1"&gt;
-&lt;h2&gt;参考资料&lt;/h2&gt;
+&lt;h2 id="hidid1"&gt;参考资料&lt;a class="headerlink" href="#hidid1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;ul class="simple"&gt;
 &lt;li&gt;&lt;a class="reference external" href="https://book.douban.com/subject/24390228/"&gt;《Python in Practice》&lt;/a&gt;&lt;/li&gt;
 &lt;/ul&gt;
@@ -1463,9 +1843,9 @@ ThreadWorker: release lock &amp;lt;unlocked _thread.RLock object &lt;span class=
 &lt;span class="c1"&gt;# 在类的 __new__ 方法中判断&lt;/span&gt;
 &lt;span class="k"&gt;class&lt;/span&gt; &lt;span class="nc"&gt;Singleton&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;
     &lt;span class="n"&gt;__instance&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="bp"&gt;None&lt;/span&gt;
-    &lt;span class="k"&gt;def&lt;/span&gt; &lt;span class="nf"&gt;__new__&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="bp"&gt;self&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="o"&gt;*&lt;/span&gt;&lt;span class="n"&gt;args&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="o"&gt;**&lt;/span&gt;&lt;span class="n"&gt;kwargs&lt;/span&gt;&lt;span class="p"&gt;):&lt;/span&gt;
+    &lt;span class="k"&gt;def&lt;/span&gt; &lt;span class="nf"&gt;__new__&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;cls&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="o"&gt;*&lt;/span&gt;&lt;span class="n"&gt;args&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="o"&gt;**&lt;/span&gt;&lt;span class="n"&gt;kwargs&lt;/span&gt;&lt;span class="p"&gt;):&lt;/span&gt;
         &lt;span class="k"&gt;if&lt;/span&gt; &lt;span class="n"&gt;Singleton&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;__instance&lt;/span&gt; &lt;span class="ow"&gt;is&lt;/span&gt; &lt;span class="bp"&gt;None&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;
-            &lt;span class="n"&gt;Singleton&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;__instance&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="nb"&gt;object&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;__new__&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="bp"&gt;self&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="o"&gt;*&lt;/span&gt;&lt;span class="n"&gt;args&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="o"&gt;**&lt;/span&gt;&lt;span class="n"&gt;kwargs&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+            &lt;span class="n"&gt;Singleton&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;__instance&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="nb"&gt;object&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;__new__&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;cls&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="o"&gt;*&lt;/span&gt;&lt;span class="n"&gt;args&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="o"&gt;**&lt;/span&gt;&lt;span class="n"&gt;kwargs&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
         &lt;span class="k"&gt;return&lt;/span&gt; &lt;span class="n"&gt;Singleton&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;__instance&lt;/span&gt;
 
 &lt;span class="n"&gt;s1&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;Singleton&lt;/span&gt;&lt;span class="p"&gt;()&lt;/span&gt;
@@ -1474,15 +1854,15 @@ ThreadWorker: release lock &amp;lt;unlocked _thread.RLock object &lt;span class=
 
 &lt;span class="c1"&gt;# 依附在一个可变对象上&lt;/span&gt;
 &lt;span class="k"&gt;def&lt;/span&gt; &lt;span class="nf"&gt;Singleton&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="o"&gt;*&lt;/span&gt;&lt;span class="n"&gt;args&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="o"&gt;**&lt;/span&gt;&lt;span class="n"&gt;kwargs&lt;/span&gt;&lt;span class="p"&gt;):&lt;/span&gt;
-    &lt;span class="k"&gt;if&lt;/span&gt; &lt;span class="n"&gt;singleton&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;__instance&lt;/span&gt; &lt;span class="ow"&gt;is&lt;/span&gt; &lt;span class="ow"&gt;not&lt;/span&gt; &lt;span class="bp"&gt;None&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;
-        &lt;span class="k"&gt;return&lt;/span&gt; &lt;span class="n"&gt;singleton&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;__instance&lt;/span&gt;
+    &lt;span class="k"&gt;if&lt;/span&gt; &lt;span class="n"&gt;Singleton&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;__instance&lt;/span&gt; &lt;span class="ow"&gt;is&lt;/span&gt; &lt;span class="ow"&gt;not&lt;/span&gt; &lt;span class="bp"&gt;None&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;
+        &lt;span class="k"&gt;return&lt;/span&gt; &lt;span class="n"&gt;Singleton&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;__instance&lt;/span&gt;
 
     &lt;span class="k"&gt;class&lt;/span&gt; &lt;span class="nc"&gt;_Singleton&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;
         &lt;span class="k"&gt;def&lt;/span&gt; &lt;span class="nf"&gt;__init__&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="bp"&gt;self&lt;/span&gt;&lt;span class="p"&gt;):&lt;/span&gt;
             &lt;span class="k"&gt;pass&lt;/span&gt;
 
-    &lt;span class="n"&gt;singleton&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;__instance&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;_Singleton&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="o"&gt;*&lt;/span&gt;&lt;span class="n"&gt;args&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="o"&gt;**&lt;/span&gt;&lt;span class="n"&gt;kwargs&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
-    &lt;span class="k"&gt;return&lt;/span&gt; &lt;span class="n"&gt;singleton&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;__instance&lt;/span&gt;
+    &lt;span class="n"&gt;Singleton&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;__instance&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;_Singleton&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="o"&gt;*&lt;/span&gt;&lt;span class="n"&gt;args&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="o"&gt;**&lt;/span&gt;&lt;span class="n"&gt;kwargs&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+    &lt;span class="k"&gt;return&lt;/span&gt; &lt;span class="n"&gt;Singleton&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;__instance&lt;/span&gt;
 &lt;span class="n"&gt;Singleton&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;__instance&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="bp"&gt;None&lt;/span&gt;
 
 &lt;span class="n"&gt;s1&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;Singleton&lt;/span&gt;&lt;span class="p"&gt;()&lt;/span&gt;
@@ -1502,7 +1882,7 @@ ThreadWorker: release lock &amp;lt;unlocked _thread.RLock object &lt;span class=
 &lt;/pre&gt;&lt;/div&gt;
 &lt;p&gt;更多单例模式的实现详见: &lt;a class="reference external" href="http://code.activestate.com/recipes/52558-the-singleton-pattern-implemented-with-python/"&gt;The Singleton Pattern implemented with Python « Python recipes « ActiveState Code&lt;/a&gt;&lt;/p&gt;
 &lt;div class="section" id="id1"&gt;
-&lt;h2&gt;参考资料&lt;/h2&gt;
+&lt;h2 id="hidid1"&gt;参考资料&lt;a class="headerlink" href="#hidid1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;ul class="simple"&gt;
 &lt;li&gt;&lt;a class="reference external" href="https://book.douban.com/subject/24390228/"&gt;《Python in Practice》&lt;/a&gt;&lt;/li&gt;
 &lt;li&gt;&lt;a class="reference external" href="http://code.activestate.com/recipes/52558-the-singleton-pattern-implemented-with-python/"&gt;The Singleton Pattern implemented with Python « Python recipes « ActiveState Code&lt;/a&gt;&lt;/li&gt;
@@ -1532,7 +1912,7 @@ ThreadWorker: release lock &amp;lt;unlocked _thread.RLock object &lt;span class=
 &lt;span class="n"&gt;book3&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;price&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="mf"&gt;10.5&lt;/span&gt;
 &lt;/pre&gt;&lt;/div&gt;
 &lt;div class="section" id="id1"&gt;
-&lt;h2&gt;参考资料&lt;/h2&gt;
+&lt;h2 id="hidid1"&gt;参考资料&lt;a class="headerlink" href="#hidid1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;ul class="simple"&gt;
 &lt;li&gt;&lt;a class="reference external" href="https://book.douban.com/subject/26336439/"&gt;《Mastering Python Design Patterns》&lt;/a&gt;&lt;/li&gt;
 &lt;li&gt;&lt;a class="reference external" href="https://book.douban.com/subject/24390228/"&gt;《Python in Practice》&lt;/a&gt;&lt;/li&gt;
@@ -1566,7 +1946,7 @@ ThreadWorker: release lock &amp;lt;unlocked _thread.RLock object &lt;span class=
 &lt;span class="n"&gt;download&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;client&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="s1"&gt;&amp;#39;/hello/world.json&amp;#39;&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="s1"&gt;&amp;#39;hello.json&amp;#39;&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
 &lt;/pre&gt;&lt;/div&gt;
 &lt;div class="section" id="id1"&gt;
-&lt;h2&gt;参考资料&lt;/h2&gt;
+&lt;h2 id="hidid1"&gt;参考资料&lt;a class="headerlink" href="#hidid1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;ul class="simple"&gt;
 &lt;li&gt;&lt;a class="reference external" href="https://book.douban.com/subject/26336439/"&gt;《Mastering Python Design Patterns》&lt;/a&gt;&lt;/li&gt;
 &lt;/ul&gt;
@@ -1590,7 +1970,7 @@ ThreadWorker: release lock &amp;lt;unlocked _thread.RLock object &lt;span class=
 &lt;span class="n"&gt;cached_max_age&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="mi"&gt;1&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="mi"&gt;2&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="mi"&gt;3&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="mi"&gt;0&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
 &lt;/pre&gt;&lt;/div&gt;
 &lt;div class="section" id="id1"&gt;
-&lt;h2&gt;参考资料&lt;/h2&gt;
+&lt;h2 id="hidid1"&gt;参考资料&lt;a class="headerlink" href="#hidid1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;ul class="simple"&gt;
 &lt;li&gt;&lt;a class="reference external" href="https://book.douban.com/subject/26336439/"&gt;《Mastering Python Design Patterns》&lt;/a&gt;&lt;/li&gt;
 &lt;li&gt;&lt;a class="reference external" href="https://wiki.python.org/moin/DecoratorPattern"&gt;DecoratorPattern - Python Wiki&lt;/a&gt;&lt;/li&gt;
@@ -1648,7 +2028,7 @@ ThreadWorker: release lock &amp;lt;unlocked _thread.RLock object &lt;span class=
 &lt;span class="k"&gt;print&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;computer&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
 &lt;/pre&gt;&lt;/div&gt;
 &lt;div class="section" id="id1"&gt;
-&lt;h2&gt;参考资料&lt;/h2&gt;
+&lt;h2 id="hidid1"&gt;参考资料&lt;a class="headerlink" href="#hidid1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;ul class="simple"&gt;
 &lt;li&gt;&lt;a class="reference external" href="https://book.douban.com/subject/26336439/"&gt;《Mastering Python Design Patterns》&lt;/a&gt;&lt;/li&gt;
 &lt;/ul&gt;
@@ -1656,7 +2036,7 @@ ThreadWorker: release lock &amp;lt;unlocked _thread.RLock object &lt;span class=
 </description><dc:creator xmlns:dc="http://purl.org/dc/elements/1.1/">mozillazg</dc:creator><pubDate>Sun, 21 Aug 2016 00:00:00 +0000</pubDate><guid>tag:mozillazg.github.io,2016-08-21:2016/08/python-builder-pattern.html</guid><category>design pattern</category><category>设计模式</category></item><item><title>Python 设计模式: 工厂模式(factory pattern)</title><link>https://mozillazg.github.io/2016/08/python-factory-pattern.html</link><description>&lt;p&gt;工厂模式是说调用方可以通过调用一个简单函数就可以创建
 不同的对象。工厂模式一般包含工厂方法和抽象工厂两种模式。&lt;/p&gt;
 &lt;div class="section" id="factory-method"&gt;
-&lt;h2&gt;工厂方法(factory method)&lt;/h2&gt;
+&lt;h2 id="hidfactory-method"&gt;工厂方法(factory method)&lt;a class="headerlink" href="#hidfactory-method" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;p&gt;工厂方法模式是指定义一个可以根据输入参数的不同返回不同对象的函数。&lt;/p&gt;
 &lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="k"&gt;class&lt;/span&gt; &lt;span class="nc"&gt;JSONParser&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;
     &lt;span class="k"&gt;def&lt;/span&gt; &lt;span class="nf"&gt;parse&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="bp"&gt;self&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;raw_data&lt;/span&gt;&lt;span class="p"&gt;):&lt;/span&gt;
@@ -1682,7 +2062,7 @@ ThreadWorker: release lock &amp;lt;unlocked _thread.RLock object &lt;span class=
 &lt;/pre&gt;&lt;/div&gt;
 &lt;/div&gt;
 &lt;div class="section" id="abstract-factory"&gt;
-&lt;h2&gt;抽象工厂(abstract factory)&lt;/h2&gt;
+&lt;h2 id="hidabstract-factory"&gt;抽象工厂(abstract factory)&lt;a class="headerlink" href="#hidabstract-factory" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;p&gt;一系列的工厂方法组合在一起实现了一个抽象工厂。&lt;/p&gt;
 &lt;p&gt;还是上面那个例子，我们再加一个工厂方法:&lt;/p&gt;
 &lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="k"&gt;class&lt;/span&gt; &lt;span class="nc"&gt;DBSaver&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;
@@ -1729,7 +2109,7 @@ ThreadWorker: release lock &amp;lt;unlocked _thread.RLock object &lt;span class=
 可以考虑把这些创建对象的过程合并到一个抽象工厂。&lt;/p&gt;
 &lt;/div&gt;
 &lt;div class="section" id="id1"&gt;
-&lt;h2&gt;参考资料&lt;/h2&gt;
+&lt;h2 id="hidid1"&gt;参考资料&lt;a class="headerlink" href="#hidid1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;ul class="simple"&gt;
 &lt;li&gt;&lt;a class="reference external" href="https://book.douban.com/subject/26336439/"&gt;《Mastering Python Design Patterns》&lt;/a&gt;&lt;/li&gt;
 &lt;/ul&gt;
@@ -1764,7 +2144,7 @@ ValueError: integer division or modulo by zero
 当我们捕获了第一个异常然后再抛出一个自定义异常的时候，
 实际出错位置的信息就丢失了。&lt;/p&gt;
 &lt;div class="section" id="python-2"&gt;
-&lt;h2&gt;Python 2&lt;/h2&gt;
+&lt;h2 id="hidpython-2"&gt;Python 2&lt;a class="headerlink" href="#hidpython-2" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;p&gt;那么在 Python 2 下如果我们不想丢失捕获的异常的 traceback 信息的话，应该
 怎样重新抛出异常呢？&lt;/p&gt;
 &lt;p&gt;有两种办法, 还是用上面的例子举例:&lt;/p&gt;
@@ -1860,7 +2240,7 @@ TypeError: integer division or modulo by zero
 &lt;p&gt;那么在 Python 3 下又怎么解决这个问题呢？&lt;/p&gt;
 &lt;/div&gt;
 &lt;div class="section" id="python-3"&gt;
-&lt;h2&gt;Python 3&lt;/h2&gt;
+&lt;h2 id="hidpython-3"&gt;Python 3&lt;a class="headerlink" href="#hidpython-3" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;p&gt;在 Python 3 下默认会附加上捕获的上个异常的 trackback 信息（保存在异常实例的 &lt;tt class="docutils literal"&gt;__traceback__&lt;/tt&gt; 属性中）:&lt;/p&gt;
 &lt;pre class="literal-block"&gt;
 $ cat a.py
@@ -1946,7 +2326,7 @@ ValueError: division by zero
 &lt;/pre&gt;
 &lt;/div&gt;
 &lt;div class="section" id="python-2-python-3"&gt;
-&lt;h2&gt;兼容 Python 2 和 Python 3 的写法&lt;/h2&gt;
+&lt;h2 id="hidpython-2-python-3"&gt;兼容 Python 2 和 Python 3 的写法&lt;a class="headerlink" href="#hidpython-2-python-3" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;p&gt;上面介绍了在 Python 2 和 Python 3 下的不同解决办法，那么如何写一个兼容 Python 2
 和 Python 3 的 &lt;tt class="docutils literal"&gt;reraise&lt;/tt&gt; 函数呢？&lt;/p&gt;
 &lt;p&gt;下面将介绍一种方法:&lt;/p&gt;
@@ -2063,7 +2443,7 @@ TypeError: division by zero
 &lt;p&gt;下次需要捕获一个异常然后再抛出另一个异常的时候大家可以试试本文的方法。&lt;/p&gt;
 &lt;/div&gt;
 &lt;div class="section" id="id1"&gt;
-&lt;h2&gt;参考资料&lt;/h2&gt;
+&lt;h2 id="hidid1"&gt;参考资料&lt;a class="headerlink" href="#hidid1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;ul class="simple"&gt;
 &lt;li&gt;&lt;a class="reference external" href="https://docs.python.org/2/reference/simple_stmts.html#the-raise-statement"&gt;6. Simple statements — Python 2.7.12 documentation&lt;/a&gt;&lt;/li&gt;
 &lt;li&gt;&lt;a class="reference external" href="https://docs.python.org/2/library/exceptions.html#exceptions.BaseException"&gt;6. Built-in Exceptions — Python 2.7.12 documentation&lt;/a&gt;&lt;/li&gt;
@@ -2135,7 +2515,7 @@ OperationFailure: database error: Executor error: Overflow sort stage buffered d
 到此为止我们已经实现了模板引擎所需的大部分功能。
 在本文中我们将解决一些用于生成 html 的模板引擎需要面对的一些安全问题。&lt;/p&gt;
 &lt;div class="section" id="id2"&gt;
-&lt;h2&gt;转义&lt;/h2&gt;
+&lt;h2 id="hidid2"&gt;转义&lt;a class="headerlink" href="#hidid2" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;p&gt;首先要解决的就是转义问题。到目前为止我们的模板引擎并没有对变量和表达式结果进行转义处理，
 如果用于生成 html 源码的话就会出现下面这样的问题 ( &lt;a class="reference external" href="https://github.com/mozillazg/lsbate/raw/master/part3/template3c.py"&gt;template3c.py&lt;/a&gt; ):&lt;/p&gt;
 &lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="o"&gt;&amp;gt;&amp;gt;&amp;gt;&lt;/span&gt; &lt;span class="kn"&gt;from&lt;/span&gt; &lt;span class="nn"&gt;template3c&lt;/span&gt; &lt;span class="kn"&gt;import&lt;/span&gt; &lt;span class="n"&gt;Template&lt;/span&gt;
@@ -2244,7 +2624,7 @@ OperationFailure: database error: Executor error: Overflow sort stage buffered d
 &lt;/pre&gt;&lt;/div&gt;
 &lt;/div&gt;
 &lt;div class="section" id="exec"&gt;
-&lt;h2&gt;exec 的安全问题&lt;/h2&gt;
+&lt;h2 id="hidexec"&gt;exec 的安全问题&lt;a class="headerlink" href="#hidexec" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;p&gt;由于我们的模板引擎是使用 &lt;tt class="docutils literal"&gt;exec&lt;/tt&gt; 函数来执行生成的代码的，所以就需要注意一下
 &lt;tt class="docutils literal"&gt;exec&lt;/tt&gt; 函数的安全问题，预防可能的服务端模板注入攻击（详见 &lt;a class="reference external" href="https://mozillazg.com/2016/05/python-some-security-problems-about-use-exec-function.rst.html"&gt;使用 exec 函数时需要注意的一些安全问题&lt;/a&gt; ）。&lt;/p&gt;
 &lt;p&gt;首先要限制的是在模板中使用内置函数和执行时上下文变量( &lt;a class="reference external" href="https://github.com/mozillazg/lsbate/raw/master/part4/template4b.py"&gt;template4b.py&lt;/a&gt; ):&lt;/p&gt;
@@ -2366,7 +2746,7 @@ OperationFailure: database error: Executor error: Overflow sort stage buffered d
 &lt;/pre&gt;&lt;/div&gt;
 &lt;p&gt;&lt;tt class="docutils literal"&gt;exec&lt;/tt&gt; 函数的这个功能很是强大，慎用。如果一定要用的话，那么就需要注意一下下面这些安全相关的问题。&lt;/p&gt;
 &lt;div class="section" id="id1"&gt;
-&lt;h2&gt;全局变量和内置函数&lt;/h2&gt;
+&lt;h2 id="hidid1"&gt;全局变量和内置函数&lt;a class="headerlink" href="#hidid1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;p&gt;在 &lt;tt class="docutils literal"&gt;exec&lt;/tt&gt; 执行的代码中，默认可以访问执行 &lt;tt class="docutils literal"&gt;exec&lt;/tt&gt; 时的局部变量和全局变量，
 同样也会修改全局变量。如果 exec 执行的代码是根据用户提交的数据生产的话，这种默认行为就是一个安全隐患。&lt;/p&gt;
 &lt;p&gt;如何更改这种默认行为呢？可以通过执行 &lt;tt class="docutils literal"&gt;exec&lt;/tt&gt; 函数的时候再传两个参数的方式来
@@ -2403,7 +2783,7 @@ OperationFailure: database error: Executor error: Overflow sort stage buffered d
 然而并非如此，还是可以通过其他的方式来获取内置函数甚至 &lt;tt class="docutils literal"&gt;os.system&lt;/tt&gt; 函数。&lt;/p&gt;
 &lt;/div&gt;
 &lt;div class="section" id="os-system"&gt;
-&lt;h2&gt;另辟蹊径获取内置函数和 os.system&lt;/h2&gt;
+&lt;h2 id="hidos-system"&gt;另辟蹊径获取内置函数和 os.system&lt;a class="headerlink" href="#hidos-system" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;p&gt;通过函数对象:&lt;/p&gt;
 &lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="o"&gt;&amp;gt;&amp;gt;&amp;gt;&lt;/span&gt; &lt;span class="k"&gt;def&lt;/span&gt; &lt;span class="nf"&gt;a&lt;/span&gt;&lt;span class="p"&gt;():&lt;/span&gt; &lt;span class="k"&gt;pass&lt;/span&gt;
 &lt;span class="o"&gt;...&lt;/span&gt;
@@ -2651,7 +3031,7 @@ python
 &amp;gt;&amp;gt;&amp;gt;
 &lt;/pre&gt;&lt;/div&gt;
 &lt;div class="section" id="id1"&gt;
-&lt;h2&gt;参考资料&lt;/h2&gt;
+&lt;h2 id="hidid1"&gt;参考资料&lt;a class="headerlink" href="#hidid1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;ul class="simple"&gt;
 &lt;li&gt;&lt;a class="reference external" href="http://forum.dato.com/discussion/1125/importerror-libunity-shared-so-undefined-symbol-gzopen64"&gt;ImportError: ../libunity_shared.so: undefined symbol: gzopen64 - Dato Forum&lt;/a&gt;&lt;/li&gt;
 &lt;/ul&gt;
@@ -2664,7 +3044,7 @@ python
 &lt;li&gt;sitecustomize.py&lt;/li&gt;
 &lt;/ul&gt;
 &lt;div class="section" id="sys-meta-path"&gt;
-&lt;h2&gt;sys.meta_path&lt;/h2&gt;
+&lt;h2 id="hidsys-meta-path"&gt;sys.meta_path&lt;a class="headerlink" href="#hidsys-meta-path" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;p&gt;&lt;tt class="docutils literal"&gt;sys.meta_path&lt;/tt&gt; 这个简单的来说就是可以实现 import hook 的功能，
 当执行 import 相关的操作时，会触发 &lt;tt class="docutils literal"&gt;sys.meta_path&lt;/tt&gt; 列表中定义的对象。
 关于 &lt;tt class="docutils literal"&gt;sys.meta_path&lt;/tt&gt; 更详细的资料请查阅 python 文档中 &lt;a class="reference external" href="https://docs.python.org/3/library/sys.html#sys.meta_path"&gt;sys.meta_path&lt;/a&gt; 相关内容以及
@@ -2823,7 +3203,7 @@ spent 3.004966974258423s
 答案就是可以通过定义 sitecustomize.py 的方式来实现这个功能。&lt;/p&gt;
 &lt;/div&gt;
 &lt;div class="section" id="sitecustomize-py"&gt;
-&lt;h2&gt;sitecustomize.py&lt;/h2&gt;
+&lt;h2 id="hidsitecustomize-py"&gt;sitecustomize.py&lt;a class="headerlink" href="#hidsitecustomize-py" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;p&gt;简单的说就是，python 解释器初始化的时候会自动 import &lt;tt class="docutils literal"&gt;PYTHONPATH&lt;/tt&gt; 下存在的
 &lt;tt class="docutils literal"&gt;sitecustomize&lt;/tt&gt; 和 &lt;tt class="docutils literal"&gt;usercustomize&lt;/tt&gt; 模块:&lt;/p&gt;
 &lt;p&gt;实验项目的目录结构如下(代码可以从 github 上下载 &lt;a class="reference external" href="https://github.com/mozillazg/apm-python-agent-principle/tree/master/part4"&gt;part4&lt;/a&gt;)&lt;/p&gt;
@@ -2897,7 +3277,7 @@ spent 3.005002021789551s
 &lt;p&gt;下面我们也要来实现一个类似的命令行程序，就叫 &lt;tt class="docutils literal"&gt;agent.py&lt;/tt&gt; 吧。&lt;/p&gt;
 &lt;/div&gt;
 &lt;div class="section" id="agent"&gt;
-&lt;h2&gt;agent&lt;/h2&gt;
+&lt;h2 id="hidagent"&gt;agent&lt;a class="headerlink" href="#hidagent" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;p&gt;还是在上一个程序的基础上修改。先调整一个目录结构，把 hook 操作放到一个单独的目录下，
 方便设置 &lt;tt class="docutils literal"&gt;PYTHONPATH&lt;/tt&gt; 后不会有其他的干扰（代码可以从 github 上下载 &lt;a class="reference external" href="https://github.com/mozillazg/apm-python-agent-principle/tree/master/part6"&gt;part6&lt;/a&gt; ）。&lt;/p&gt;
 &lt;pre class="literal-block"&gt;
@@ -2978,7 +3358,7 @@ spent 3.005035161972046s
 问题：如何实现支持 &lt;tt class="docutils literal"&gt;include&lt;/tt&gt; 和 &lt;tt class="docutils literal"&gt;extends&lt;/tt&gt; 的标签功能。&lt;/p&gt;
 &lt;p&gt;在本篇文章中我们将一起来动手实现这两个功能。&lt;/p&gt;
 &lt;div class="section" id="include"&gt;
-&lt;h2&gt;include&lt;/h2&gt;
+&lt;h2 id="hidinclude"&gt;include&lt;a class="headerlink" href="#hidinclude" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;p&gt;&lt;tt class="docutils literal"&gt;include&lt;/tt&gt; 标签对语法是这样的：假设有一个 item.html 模板文件，它的内容如下:&lt;/p&gt;
 &lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="p"&gt;&amp;lt;&lt;/span&gt;&lt;span class="nt"&gt;li&lt;/span&gt;&lt;span class="p"&gt;&amp;gt;&lt;/span&gt;&lt;span class="cp"&gt;{{&lt;/span&gt; &lt;span class="nv"&gt;item&lt;/span&gt; &lt;span class="cp"&gt;}}&lt;/span&gt;&lt;span class="p"&gt;&amp;lt;/&lt;/span&gt;&lt;span class="nt"&gt;li&lt;/span&gt;&lt;span class="p"&gt;&amp;gt;&lt;/span&gt;
 &lt;/pre&gt;&lt;/div&gt;
@@ -3126,7 +3506,7 @@ spent 3.005035161972046s
 &lt;p&gt;&lt;tt class="docutils literal"&gt;include&lt;/tt&gt; 已经实现了，下面让我们一起来实现 &lt;tt class="docutils literal"&gt;extends&lt;/tt&gt; 功能。&lt;/p&gt;
 &lt;/div&gt;
 &lt;div class="section" id="extends"&gt;
-&lt;h2&gt;extends&lt;/h2&gt;
+&lt;h2 id="hidextends"&gt;extends&lt;a class="headerlink" href="#hidextends" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;p&gt;&lt;tt class="docutils literal"&gt;extends&lt;/tt&gt; 标签实现的是模板继承的功能，并且只能在第一行出现，语法如下:&lt;/p&gt;
 &lt;p&gt;假设有一个 parent.html 文件它的内容是:&lt;/p&gt;
 &lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="p"&gt;&amp;lt;&lt;/span&gt;&lt;span class="nt"&gt;div&lt;/span&gt; &lt;span class="na"&gt;id&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="s"&gt;&amp;quot;header&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;&amp;gt;&lt;/span&gt;&lt;span class="cp"&gt;{%&lt;/span&gt; &lt;span class="k"&gt;block&lt;/span&gt; &lt;span class="nv"&gt;header&lt;/span&gt; &lt;span class="cp"&gt;%}&lt;/span&gt; parent_header &lt;span class="cp"&gt;{%&lt;/span&gt; &lt;span class="k"&gt;endblock&lt;/span&gt; &lt;span class="nv"&gt;header&lt;/span&gt; &lt;span class="cp"&gt;%}&lt;/span&gt;&lt;span class="p"&gt;&amp;lt;/&lt;/span&gt;&lt;span class="nt"&gt;div&lt;/span&gt;&lt;span class="p"&gt;&amp;gt;&lt;/span&gt;
@@ -3240,7 +3620,7 @@ spent 3.005035161972046s
 &lt;p&gt;&lt;tt class="docutils literal"&gt;extends&lt;/tt&gt; 的基本功能就这样实现了。下面再实现一下 &lt;tt class="docutils literal"&gt;{{ block.super }}&lt;/tt&gt; 功能。&lt;/p&gt;
 &lt;/div&gt;
 &lt;div class="section" id="block-super"&gt;
-&lt;h2&gt;block.super&lt;/h2&gt;
+&lt;h2 id="hidblock-super"&gt;block.super&lt;a class="headerlink" href="#hidblock-super" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;p&gt;&lt;tt class="docutils literal"&gt;{{ block.super }}&lt;/tt&gt; 类似 Python &lt;tt class="docutils literal"&gt;class&lt;/tt&gt; 里的 &lt;tt class="docutils literal"&gt;super&lt;/tt&gt; 用来实现对父 &lt;tt class="docutils literal"&gt;block&lt;/tt&gt;
 的引用，让子模板可以重用父 &lt;tt class="docutils literal"&gt;block&lt;/tt&gt; 中定义的内容。
 只要改一下 &lt;tt class="docutils literal"&gt;_replace_parent_blocks&lt;/tt&gt; 中的 &lt;tt class="docutils literal"&gt;replace&lt;/tt&gt; 函数让它支持 &lt;tt class="docutils literal"&gt;{{ block.super }}&lt;/tt&gt;
@@ -3311,7 +3691,7 @@ that make you thinner!    &lt;br /&gt;
 &lt;/pre&gt;&lt;/div&gt;
 &lt;p&gt;在本篇文章中我们将一起来实现这个功能。&lt;/p&gt;
 &lt;div class="section" id="if-elif-else-endif"&gt;
-&lt;h2&gt;if ... elif ... else ... endif&lt;/h2&gt;
+&lt;h2 id="hidif-elif-else-endif"&gt;if ... elif ... else ... endif&lt;a class="headerlink" href="#hidif-elif-else-endif" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;p&gt;首先我们来实现对 &lt;tt class="docutils literal"&gt;if&lt;/tt&gt; 语句的支持。 &lt;tt class="docutils literal"&gt;if&lt;/tt&gt; 语句的语法如下:&lt;/p&gt;
 &lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="cp"&gt;{%&lt;/span&gt; &lt;span class="k"&gt;if&lt;/span&gt; &lt;span class="kp"&gt;True&lt;/span&gt; &lt;span class="cp"&gt;%}&lt;/span&gt;
 ...
@@ -3421,7 +3801,7 @@ that make you thinner!    &lt;br /&gt;
 &lt;p&gt;对 &lt;tt class="docutils literal"&gt;if&lt;/tt&gt; 语句的支持就这样实现了。有了这次经验下面让我们一起来实现对 &lt;tt class="docutils literal"&gt;for&lt;/tt&gt; 循环的支持吧。&lt;/p&gt;
 &lt;/div&gt;
 &lt;div class="section" id="for-endfor"&gt;
-&lt;h2&gt;for ... endfor&lt;/h2&gt;
+&lt;h2 id="hidfor-endfor"&gt;for ... endfor&lt;a class="headerlink" href="#hidfor-endfor" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;p&gt;模板中的 &lt;tt class="docutils literal"&gt;for&lt;/tt&gt; 循环的语法如下:&lt;/p&gt;
 &lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="cp"&gt;{%&lt;/span&gt; &lt;span class="k"&gt;for&lt;/span&gt; &lt;span class="nv"&gt;name&lt;/span&gt; &lt;span class="k"&gt;in&lt;/span&gt; &lt;span class="nv"&gt;names&lt;/span&gt; &lt;span class="cp"&gt;%}&lt;/span&gt;
     ...
@@ -3523,7 +3903,7 @@ that make you thinner!    &lt;br /&gt;
 至于生成的代码里的换行和空格暂时先不管，留待之后优化代码的时候再处理。&lt;/p&gt;
 &lt;/div&gt;
 &lt;div class="section" id="id2"&gt;
-&lt;h2&gt;重构&lt;/h2&gt;
+&lt;h2 id="hidid2"&gt;重构&lt;a class="headerlink" href="#hidid2" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;p&gt;我们的 &lt;tt class="docutils literal"&gt;Template._parse_text&lt;/tt&gt; 方法代码随着功能的增加已经变成下面这样了:&lt;/p&gt;
 &lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="k"&gt;def&lt;/span&gt; &lt;span class="nf"&gt;_parse_text&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="bp"&gt;self&lt;/span&gt;&lt;span class="p"&gt;):&lt;/span&gt;
     &lt;span class="sd"&gt;&amp;quot;&amp;quot;&amp;quot;解析模板&amp;quot;&amp;quot;&amp;quot;&lt;/span&gt;
@@ -3760,7 +4140,7 @@ nasty germs, son.     &lt;br /&gt;
 &lt;/pre&gt;&lt;/div&gt;
 &lt;p&gt;本系列文章要讲的就是如何从零开始实现一个这样的模板引擎( &lt;tt class="docutils literal"&gt;Template&lt;/tt&gt; )。&lt;/p&gt;
 &lt;div class="section" id="id2"&gt;
-&lt;h2&gt;使用技术&lt;/h2&gt;
+&lt;h2 id="hidid2"&gt;使用技术&lt;a class="headerlink" href="#hidid2" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;p&gt;我们将使用将模板编译为 python 代码的方式来解析和渲染模板。
 比如上面的模板将被编译为如下 python 代码:&lt;/p&gt;
 &lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="k"&gt;def&lt;/span&gt; &lt;span class="nf"&gt;render_function&lt;/span&gt;&lt;span class="p"&gt;():&lt;/span&gt;
@@ -3796,7 +4176,7 @@ nasty germs, son.     &lt;br /&gt;
 &lt;p&gt;模板引擎的核心技术之一就是这个，下面让我们一步一步的实现它吧。&lt;/p&gt;
 &lt;/div&gt;
 &lt;div class="section" id="codebuilder"&gt;
-&lt;h2&gt;CodeBuilder&lt;/h2&gt;
+&lt;h2 id="hidcodebuilder"&gt;CodeBuilder&lt;a class="headerlink" href="#hidcodebuilder" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;p&gt;我们都知道 python 代码是高度依赖缩进的，所以我们需要一个对象用来保存我们生成代码时的当前缩进情况，
 同时也保存已经生成的代码行（可以直接在 github 上下载 &lt;a class="reference external" href="https://github.com/mozillazg/lsbate/raw/master/part1/template1a.py"&gt;template1a.py&lt;/a&gt; ）:&lt;/p&gt;
 &lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="c1"&gt;# -*- coding: utf-8 -*-&lt;/span&gt;
@@ -3841,7 +4221,7 @@ if age &amp;gt; 13:      # 生成完这一行以后，需要切换缩进了 ``fo
 &lt;/pre&gt;
 &lt;/div&gt;
 &lt;div class="section" id="template"&gt;
-&lt;h2&gt;Template&lt;/h2&gt;
+&lt;h2 id="hidtemplate"&gt;Template&lt;a class="headerlink" href="#hidtemplate" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;p&gt;这个模板引擎的核心部分就是一个 &lt;tt class="docutils literal"&gt;Template&lt;/tt&gt; 类，用法:&lt;/p&gt;
 &lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="c1"&gt;# 实例化一个 Template 对象&lt;/span&gt;
 &lt;span class="n"&gt;template&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;Template&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;&amp;#39;&amp;#39;&lt;/span&gt;
@@ -3913,7 +4293,7 @@ if age &amp;gt; 13:      # 生成完这一行以后，需要切换缩进了 ``fo
 &lt;p&gt;可以看到跟上面[使用技术]那节所说生成的代码是类似的。下面我们就一起来实现这个 &lt;tt class="docutils literal"&gt;_parse_text&lt;/tt&gt; 方法。&lt;/p&gt;
 &lt;/div&gt;
 &lt;div class="section" id="id3"&gt;
-&lt;h2&gt;变量&lt;/h2&gt;
+&lt;h2 id="hidid3"&gt;变量&lt;a class="headerlink" href="#hidid3" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;p&gt;首先要实现是对变量的支持，模板语法是 &lt;tt class="docutils literal"&gt;{{ variable }}&lt;/tt&gt; 。
 既然要支持变量，首先要做的就是把变量从模板中找出来，这里我们可以使用正则表达式来实现:&lt;/p&gt;
 &lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="n"&gt;re_variable&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;re&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;compile&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="s1"&gt;r&amp;#39;\{\{ .*? \}\}&amp;#39;&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
@@ -3988,7 +4368,7 @@ if age &amp;gt; 13:      # 生成完这一行以后，需要切换缩进了 ``fo
 &lt;p&gt;既然支持了 &lt;tt class="docutils literal"&gt;{{ }}&lt;/tt&gt; 那么支持注释也就非常好实现了。&lt;/p&gt;
 &lt;/div&gt;
 &lt;div class="section" id="id4"&gt;
-&lt;h2&gt;注释&lt;/h2&gt;
+&lt;h2 id="hidid4"&gt;注释&lt;a class="headerlink" href="#hidid4" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;p&gt;打算支持的注释模板语法是 &lt;tt class="docutils literal"&gt;{# comments #}&lt;/tt&gt; ，有了上面实现 &lt;tt class="docutils literal"&gt;{{ variable }}&lt;/tt&gt;
 的经验，实现注释是类似的代码
 （可以直接在 github 上下载 &lt;a class="reference external" href="https://github.com/mozillazg/lsbate/raw/master/part1/template1d.py"&gt;template1d.py&lt;/a&gt; ）:&lt;/p&gt;
@@ -4109,7 +4489,7 @@ hello
 $
 &lt;/pre&gt;&lt;/div&gt;
 &lt;div class="section" id="id1"&gt;
-&lt;h2&gt;参考资料&lt;/h2&gt;
+&lt;h2 id="hidid1"&gt;参考资料&lt;a class="headerlink" href="#hidid1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;ul class="simple"&gt;
 &lt;li&gt;&lt;a class="reference external" href="https://godoc.org/golang.org/x/crypto/ssh/terminal"&gt;terminal - GoDoc&lt;/a&gt;&lt;/li&gt;
 &lt;li&gt;&lt;a class="reference external" href="https://godoc.org/os"&gt;os - GoDoc&lt;/a&gt;&lt;/li&gt;
@@ -4148,7 +4528,7 @@ hello
 $
 &lt;/pre&gt;&lt;/div&gt;
 &lt;div class="section" id="id1"&gt;
-&lt;h2&gt;参考资料&lt;/h2&gt;
+&lt;h2 id="hidid1"&gt;参考资料&lt;a class="headerlink" href="#hidid1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;ul class="simple"&gt;
 &lt;li&gt;&lt;a class="reference external" href="https://docs.python.org/3/library/sys.html#sys.stdin"&gt;29.1. sys — System-specific parameters and functions — Python 3.5.1 documentation&lt;/a&gt;&lt;/li&gt;
 &lt;/ul&gt;
@@ -4170,7 +4550,7 @@ $
 &lt;/ul&gt;
 &lt;p&gt;下面将举例说明指定 &lt;tt class="docutils literal"&gt;globals&lt;/tt&gt; 和 &lt;tt class="docutils literal"&gt;locals&lt;/tt&gt; 时的效果。&lt;/p&gt;
 &lt;div class="section" id="globals"&gt;
-&lt;h2&gt;globals&lt;/h2&gt;
+&lt;h2 id="hidglobals"&gt;globals&lt;a class="headerlink" href="#hidglobals" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;p&gt;&lt;tt class="docutils literal"&gt;globals&lt;/tt&gt; 是个 &lt;tt class="docutils literal"&gt;dict&lt;/tt&gt; 对象，用来指定代码执行时可以使用的全局变量以及收集代码执行后的全局变量:&lt;/p&gt;
 &lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="o"&gt;&amp;gt;&amp;gt;&amp;gt;&lt;/span&gt; &lt;span class="n"&gt;age&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="mi"&gt;10&lt;/span&gt;
 &lt;span class="o"&gt;&amp;gt;&amp;gt;&amp;gt;&lt;/span&gt; &lt;span class="k"&gt;exec&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;abc = age + 1&amp;#39;&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
@@ -4200,7 +4580,7 @@ python 会自动加一个指向 &lt;a class="reference external" href="https://d
 &lt;/pre&gt;&lt;/div&gt;
 &lt;/div&gt;
 &lt;div class="section" id="locals"&gt;
-&lt;h2&gt;locals&lt;/h2&gt;
+&lt;h2 id="hidlocals"&gt;locals&lt;a class="headerlink" href="#hidlocals" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;p&gt;&lt;tt class="docutils literal"&gt;locals&lt;/tt&gt; 可以是任何 mapping 对象，用来指定代码执行时的局部变量以及收集代码执行后的局部变量:&lt;/p&gt;
 &lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="o"&gt;&amp;gt;&amp;gt;&amp;gt;&lt;/span&gt; &lt;span class="k"&gt;exec&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;abc = age + 1&amp;#39;&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="p"&gt;{},&lt;/span&gt; &lt;span class="p"&gt;{&lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;age&amp;#39;&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt; &lt;span class="mi"&gt;2&lt;/span&gt;&lt;span class="p"&gt;})&lt;/span&gt;
 &lt;span class="o"&gt;&amp;gt;&amp;gt;&amp;gt;&lt;/span&gt;
@@ -4215,7 +4595,7 @@ python 会自动加一个指向 &lt;a class="reference external" href="https://d
 &lt;/pre&gt;&lt;/div&gt;
 &lt;/div&gt;
 &lt;div class="section" id="id1"&gt;
-&lt;h2&gt;参考资料&lt;/h2&gt;
+&lt;h2 id="hidid1"&gt;参考资料&lt;a class="headerlink" href="#hidid1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;ul class="simple"&gt;
 &lt;li&gt;&lt;a class="reference external" href="https://docs.python.org/3/library/functions.html#exec"&gt;2. Built-in Functions — Python 3.5.1 documentation&lt;/a&gt;&lt;/li&gt;
 &lt;/ul&gt;
@@ -4237,7 +4617,7 @@ python 会自动加一个指向 &lt;a class="reference external" href="https://d
 &lt;li&gt;&lt;tt class="docutils literal"&gt;keyword.kwlist&lt;/tt&gt;: 返回解释器定义的所有关键字列表&lt;/li&gt;
 &lt;/ul&gt;
 &lt;div class="section" id="id1"&gt;
-&lt;h2&gt;参考资料&lt;/h2&gt;
+&lt;h2 id="hidid1"&gt;参考资料&lt;a class="headerlink" href="#hidid1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;ul class="simple"&gt;
 &lt;li&gt;&lt;a class="reference external" href="https://docs.python.org/3/library/keyword.html"&gt;32.6. keyword — Testing for Python keywords — Python 3.5.1 documentation&lt;/a&gt;&lt;/li&gt;
 &lt;/ul&gt;
@@ -4339,7 +4719,7 @@ pip install psycopg2  # 如果需要 orm 功能
 &lt;li&gt;psycopg2&lt;/li&gt;
 &lt;/ul&gt;
 &lt;div class="section" id="hello-world"&gt;
-&lt;h2&gt;Hello World&lt;/h2&gt;
+&lt;h2 id="hidhello-world"&gt;Hello World&lt;a class="headerlink" href="#hidhello-world" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;p&gt;&lt;a class="reference external" href="https://github.com/mozillazg/bustard"&gt;bustard&lt;/a&gt; 参考了 &lt;a class="reference external" href="https://github.com/mitsuhiko/flask"&gt;Flask&lt;/a&gt; 和 &lt;a class="reference external" href="https://github.com/django/django"&gt;Django&lt;/a&gt; 的设计，路由风格跟 &lt;a class="reference external" href="https://github.com/mitsuhiko/flask"&gt;Flask&lt;/a&gt;
 类似采用装饰器风格，view 风格跟 &lt;a class="reference external" href="https://github.com/django/django"&gt;Django&lt;/a&gt; 类似采用显示传入 &lt;tt class="docutils literal"&gt;request&lt;/tt&gt;
 的方式。 :&lt;/p&gt;
@@ -4357,7 +4737,7 @@ pip install psycopg2  # 如果需要 orm 功能
 &lt;/pre&gt;&lt;/div&gt;
 &lt;/div&gt;
 &lt;div class="section" id="id1"&gt;
-&lt;h2&gt;路由&lt;/h2&gt;
+&lt;h2 id="hidid1"&gt;路由&lt;a class="headerlink" href="#hidid1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;p&gt;支持以下三种方式的路由:&lt;/p&gt;
 &lt;ul&gt;
 &lt;li&gt;&lt;p class="first"&gt;静态路由 :&lt;/p&gt;
@@ -4386,7 +4766,7 @@ pip install psycopg2  # 如果需要 orm 功能
 &lt;/pre&gt;&lt;/div&gt;
 &lt;/div&gt;
 &lt;div class="section" id="request"&gt;
-&lt;h2&gt;Request&lt;/h2&gt;
+&lt;h2 id="hidrequest"&gt;Request&lt;a class="headerlink" href="#hidrequest" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;p&gt;&lt;tt class="docutils literal"&gt;request&lt;/tt&gt; 对象跟 &lt;a class="reference external" href="https://github.com/mitsuhiko/flask"&gt;Flask&lt;/a&gt; 里的 &lt;tt class="docutils literal"&gt;request&lt;/tt&gt; 对象类似，常用的方法和属性如下:&lt;/p&gt;
 &lt;ul class="simple"&gt;
 &lt;li&gt;&lt;tt class="docutils literal"&gt;request.headers&lt;/tt&gt;: url 参数&lt;/li&gt;
@@ -4398,7 +4778,7 @@ pip install psycopg2  # 如果需要 orm 功能
 &lt;/ul&gt;
 &lt;/div&gt;
 &lt;div class="section" id="response"&gt;
-&lt;h2&gt;Response&lt;/h2&gt;
+&lt;h2 id="hidresponse"&gt;Response&lt;a class="headerlink" href="#hidresponse" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="n"&gt;response&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;Response&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;b&lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;data&amp;#39;&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;status_code&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="mi"&gt;200&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;content_type&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;text/html&amp;#39;&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;
                     &lt;span class="n"&gt;headers&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="p"&gt;{&lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;X-Total&amp;#39;&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt; &lt;span class="mi"&gt;23&lt;/span&gt;&lt;span class="p"&gt;})&lt;/span&gt;
 &lt;/pre&gt;&lt;/div&gt;
@@ -4413,14 +4793,14 @@ pip install psycopg2  # 如果需要 orm 功能
 &lt;/ul&gt;
 &lt;/div&gt;
 &lt;div class="section" id="session"&gt;
-&lt;h2&gt;Session&lt;/h2&gt;
+&lt;h2 id="hidsession"&gt;Session&lt;a class="headerlink" href="#hidsession" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;p&gt;访问 &lt;tt class="docutils literal"&gt;request.session&lt;/tt&gt; 来获取 &lt;tt class="docutils literal"&gt;session&lt;/tt&gt; 数据，它是一个类 &lt;tt class="docutils literal"&gt;dict&lt;/tt&gt; 对象`:&lt;/p&gt;
 &lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="n"&gt;user_id&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;request&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;session&lt;/span&gt;&lt;span class="p"&gt;[&lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;user_id&amp;#39;&lt;/span&gt;&lt;span class="p"&gt;]&lt;/span&gt;
 &lt;span class="n"&gt;request&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;session&lt;/span&gt;&lt;span class="p"&gt;[&lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;name&amp;#39;&lt;/span&gt;&lt;span class="p"&gt;]&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="s1"&gt;&amp;#39;Tom&amp;#39;&lt;/span&gt;
 &lt;/pre&gt;&lt;/div&gt;
 &lt;/div&gt;
 &lt;div class="section" id="orm"&gt;
-&lt;h2&gt;ORM&lt;/h2&gt;
+&lt;h2 id="hidorm"&gt;ORM&lt;a class="headerlink" href="#hidorm" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;p&gt;&lt;tt class="docutils literal"&gt;ORM&lt;/tt&gt; 只支持 &lt;a class="reference external" href="http://www.postgresql.org/docs/9.5/static/index.html"&gt;postgresql&lt;/a&gt; 数据库，用法类似 &lt;a class="reference external" href="https://github.com/django/django"&gt;Django&lt;/a&gt; ORM 和 &lt;a class="reference external" href="https://bitbucket.org/zzzeek/sqlalchemy/"&gt;SQLAlchemy&lt;/a&gt; 的结合体:&lt;/p&gt;
 &lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="kn"&gt;from&lt;/span&gt; &lt;span class="nn"&gt;bustard.orm&lt;/span&gt; &lt;span class="kn"&gt;import&lt;/span&gt; &lt;span class="p"&gt;(&lt;/span&gt;
     &lt;span class="n"&gt;Model&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;Engine&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;Session&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;AutoField&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;CharField&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;BooleanField&lt;/span&gt;
@@ -4465,7 +4845,7 @@ pip install psycopg2  # 如果需要 orm 功能
 &lt;/pre&gt;&lt;/div&gt;
 &lt;/div&gt;
 &lt;div class="section" id="id2"&gt;
-&lt;h2&gt;模版&lt;/h2&gt;
+&lt;h2 id="hidid2"&gt;模版&lt;a class="headerlink" href="#hidid2" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;p&gt;模版语法类似 &lt;a class="reference external" href="http://jinja.pocoo.org"&gt;Jinja2&lt;/a&gt; :&lt;/p&gt;
 &lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="cp"&gt;{%&lt;/span&gt; &lt;span class="k"&gt;for&lt;/span&gt; &lt;span class="nv"&gt;user&lt;/span&gt; &lt;span class="k"&gt;in&lt;/span&gt; &lt;span class="nv"&gt;users&lt;/span&gt; &lt;span class="cp"&gt;%}&lt;/span&gt;
     &lt;span class="cp"&gt;{{&lt;/span&gt; &lt;span class="nv"&gt;user.name&lt;/span&gt; &lt;span class="cp"&gt;}}&lt;/span&gt;
@@ -5889,14 +6269,14 @@ needs to be clean...      &lt;br /&gt;
 的信息，比如：将 jssdk 的调用改为 debug 模式，
 替换页面内容为本地修改后的内容等等&lt;/p&gt;
 &lt;div class="section" id="id1"&gt;
-&lt;h2&gt;mitmproxy 介绍&lt;/h2&gt;
+&lt;h2 id="hidid1"&gt;mitmproxy 介绍&lt;a class="headerlink" href="#hidid1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;blockquote&gt;
 &lt;p&gt;mitmproxy is a console tool that allows interactive examination and modification of HTTP traffic. It differs from mitmdump in that all flows are kept in memory, which means that it’s intended for taking and manipulating small-ish samples. Use the ? shortcut key to view, context-sensitive documentation from any mitmproxy screen.&lt;/p&gt;
 &lt;p class="attribution"&gt;&amp;mdash;— 摘自 &lt;a class="reference external" href="http://docs.mitmproxy.org/en/latest/mitmproxy.html"&gt;官网&lt;/a&gt;&lt;/p&gt;
 &lt;/blockquote&gt;
 &lt;/div&gt;
 &lt;div class="section" id="id2"&gt;
-&lt;h2&gt;安装 mitmproxy&lt;/h2&gt;
+&lt;h2 id="hidid2"&gt;安装 mitmproxy&lt;a class="headerlink" href="#hidid2" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;p&gt;我们这里使用 mitmproxy 在 github 上的最新代码&lt;/p&gt;
 &lt;pre class="literal-block"&gt;
 $ git clone git&amp;#64;github.com:mitmproxy/mitmproxy.git --depth=1
@@ -5908,7 +6288,7 @@ $
 &lt;/pre&gt;
 &lt;/div&gt;
 &lt;div class="section" id="hello-word"&gt;
-&lt;h2&gt;hello word&lt;/h2&gt;
+&lt;h2 id="hidhello-word"&gt;hello word&lt;a class="headerlink" href="#hidhello-word" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;p&gt;直接执行 &lt;tt class="docutils literal"&gt;mitmproxy&lt;/tt&gt; 命令就会启动一个监听 &lt;tt class="docutils literal"&gt;0.0.0.0:8080&lt;/tt&gt; 的代理服务器:&lt;/p&gt;
 &lt;p&gt;&lt;img alt="Snip20151116_1.png" src="/static/images/mitmproxy/Snip20151116_1.png" /&gt;
 &lt;img alt="Snip20151116_2.png" src="/static/images/mitmproxy/Snip20151116_2.png" /&gt;&lt;/p&gt;
@@ -5925,7 +6305,7 @@ $
 &lt;p&gt;下面我就讲几个微信开发中应该会用到的调试方式（以 “语音云开放平台”这个公众号为例）。&lt;/p&gt;
 &lt;/div&gt;
 &lt;div class="section" id="wx-config-debug-true"&gt;
-&lt;h2&gt;修改 wx.config, 将 debug 参数改为 true&lt;/h2&gt;
+&lt;h2 id="hidwx-config-debug-true"&gt;修改 wx.config, 将 debug 参数改为 true&lt;a class="headerlink" href="#hidwx-config-debug-true" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;p&gt;上线后的公众号网页内的 &lt;tt class="docutils literal"&gt;wx.config&lt;/tt&gt; 中 &lt;tt class="docutils literal"&gt;debug&lt;/tt&gt; 参数的值都是 &lt;tt class="docutils literal"&gt;false&lt;/tt&gt;，
 既然我要调试问题自然就要开启调试模式了。&lt;/p&gt;
 &lt;p&gt;比如修改【我的应用】-【个人资料】这个页面的 &lt;tt class="docutils literal"&gt;wx.config&lt;/tt&gt;。
@@ -5969,7 +6349,7 @@ def response(context, flow):
 &lt;p&gt;下面我再举一些例子，更多例子请参考 &lt;a class="reference external" href="https://github.com/mitmproxy/mitmproxy/tree/master/examples"&gt;官方仓库的 example 目录&lt;/a&gt;&lt;/p&gt;
 &lt;/div&gt;
 &lt;div class="section" id="id3"&gt;
-&lt;h2&gt;禁用本地缓存&lt;/h2&gt;
+&lt;h2 id="hidid3"&gt;禁用本地缓存&lt;a class="headerlink" href="#hidid3" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;pre class="literal-block"&gt;
 def request(context, flow):
     headers = flow.request.headers
@@ -5979,7 +6359,7 @@ def request(context, flow):
 &lt;p&gt;如果这样还不行的话，可以尝试修改 response：替换 headers 以及修改 html 中与 cache 有关的 meta 标签内容。&lt;/p&gt;
 &lt;/div&gt;
 &lt;div class="section" id="id4"&gt;
-&lt;h2&gt;替换为本地文件内容&lt;/h2&gt;
+&lt;h2 id="hidid4"&gt;替换为本地文件内容&lt;a class="headerlink" href="#hidid4" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;pre class="literal-block"&gt;
 def response(context, flow):
     if flow.request.pretty_url == 'http://www.baidu.com':
@@ -5989,7 +6369,7 @@ def response(context, flow):
 &lt;/pre&gt;
 &lt;/div&gt;
 &lt;div class="section" id="id5"&gt;
-&lt;h2&gt;终止连接&lt;/h2&gt;
+&lt;h2 id="hidid5"&gt;终止连接&lt;a class="headerlink" href="#hidid5" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;pre class="literal-block"&gt;
 def request(context, flow):
     if flow.request.path.startswith('/static/images/'):
@@ -5998,7 +6378,7 @@ def request(context, flow):
 &lt;p&gt;更详细的用法请查阅 &lt;a class="reference external" href="http://docs.mitmproxy.org/en/stable/scripting/inlinescripts.html"&gt;官方文档&lt;/a&gt;&lt;/p&gt;
 &lt;/div&gt;
 &lt;div class="section" id="id6"&gt;
-&lt;h2&gt;参考资料&lt;/h2&gt;
+&lt;h2 id="hidid6"&gt;参考资料&lt;a class="headerlink" href="#hidid6" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;ul class="simple"&gt;
 &lt;li&gt;&lt;a class="reference external" href="http://docs.mitmproxy.org/en/stable/index.html"&gt;mitmproxy 官方文档&lt;/a&gt;&lt;/li&gt;
 &lt;li&gt;&lt;a class="reference external" href="https://github.com/mitmproxy/mitmproxy"&gt;https://github.com/mitmproxy/mitmproxy&lt;/a&gt;&lt;/li&gt;
@@ -6164,7 +6544,7 @@ is coming right at me!        &lt;br /&gt;
  &lt;span class="o"&gt;&amp;lt;&lt;/span&gt;&lt;span class="n"&gt;Question&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt; &lt;span class="n"&gt;who&lt;/span&gt; &lt;span class="n"&gt;are&lt;/span&gt; &lt;span class="n"&gt;you&lt;/span&gt;&lt;span class="o"&gt;&amp;gt;&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="o"&gt;&amp;lt;&lt;/span&gt;&lt;span class="n"&gt;Question&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt; &lt;span class="n"&gt;who&lt;/span&gt; &lt;span class="n"&gt;am&lt;/span&gt; &lt;span class="n"&gt;i&lt;/span&gt;&lt;span class="o"&gt;&amp;gt;&lt;/span&gt;&lt;span class="p"&gt;]&lt;/span&gt;
 &lt;/pre&gt;&lt;/div&gt;
 &lt;div class="section" id="and"&gt;
-&lt;h2&gt;AND 查询&lt;/h2&gt;
+&lt;h2 id="hidand"&gt;AND 查询&lt;a class="headerlink" href="#hidand" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;p&gt;将多个 &lt;tt class="docutils literal"&gt;Q&lt;/tt&gt; 对象作为非关键参数或使用 &lt;tt class="docutils literal"&gt;&amp;amp;&lt;/tt&gt; 联结即可实现 &lt;tt class="docutils literal"&gt;AND&lt;/tt&gt; 查询:&lt;/p&gt;
 &lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="o"&gt;&amp;gt;&amp;gt;&amp;gt;&lt;/span&gt; &lt;span class="kn"&gt;from&lt;/span&gt; &lt;span class="nn"&gt;django.db.models&lt;/span&gt; &lt;span class="kn"&gt;import&lt;/span&gt; &lt;span class="n"&gt;Q&lt;/span&gt;
 &lt;span class="c1"&gt;# Q(...)&lt;/span&gt;
@@ -6181,7 +6561,7 @@ is coming right at me!        &lt;br /&gt;
 &lt;/pre&gt;&lt;/div&gt;
 &lt;/div&gt;
 &lt;div class="section" id="or"&gt;
-&lt;h2&gt;OR 查询&lt;/h2&gt;
+&lt;h2 id="hidor"&gt;OR 查询&lt;a class="headerlink" href="#hidor" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;p&gt;使用 &lt;tt class="docutils literal"&gt;|&lt;/tt&gt; 联结两个 &lt;tt class="docutils literal"&gt;Q&lt;/tt&gt; 对象即可实现 &lt;tt class="docutils literal"&gt;OR&lt;/tt&gt; 查询:&lt;/p&gt;
 &lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="c1"&gt;# Q(...) | Q(...)&lt;/span&gt;
 &lt;span class="o"&gt;&amp;gt;&amp;gt;&amp;gt;&lt;/span&gt; &lt;span class="n"&gt;Question&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;objects&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;filter&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;Q&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;question_text__contains&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;you&amp;#39;&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt; &lt;span class="o"&gt;|&lt;/span&gt; &lt;span class="n"&gt;Q&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;question_text__contains&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;who&amp;#39;&lt;/span&gt;&lt;span class="p"&gt;))&lt;/span&gt;
@@ -6189,7 +6569,7 @@ is coming right at me!        &lt;br /&gt;
 &lt;/pre&gt;&lt;/div&gt;
 &lt;/div&gt;
 &lt;div class="section" id="not"&gt;
-&lt;h2&gt;NOT 查询&lt;/h2&gt;
+&lt;h2 id="hidnot"&gt;NOT 查询&lt;a class="headerlink" href="#hidnot" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;p&gt;使用 &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;~Q(...)&lt;/span&gt;&lt;/tt&gt; 客户实现 &lt;tt class="docutils literal"&gt;NOT&lt;/tt&gt; 查询:&lt;/p&gt;
 &lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="c1"&gt;# ~Q(...)&lt;/span&gt;
 &lt;span class="o"&gt;&amp;gt;&amp;gt;&amp;gt;&lt;/span&gt; &lt;span class="n"&gt;Question&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;objects&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;filter&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="o"&gt;~&lt;/span&gt;&lt;span class="n"&gt;Q&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;question_text__contains&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;you&amp;#39;&lt;/span&gt;&lt;span class="p"&gt;))&lt;/span&gt;
@@ -6197,7 +6577,7 @@ is coming right at me!        &lt;br /&gt;
 &lt;/pre&gt;&lt;/div&gt;
 &lt;/div&gt;
 &lt;div class="section" id="id1"&gt;
-&lt;h2&gt;与关键字参数共用&lt;/h2&gt;
+&lt;h2 id="hidid1"&gt;与关键字参数共用&lt;a class="headerlink" href="#hidid1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;p&gt;记得要把 &lt;tt class="docutils literal"&gt;Q&lt;/tt&gt; 对象放前面:&lt;/p&gt;
 &lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="c1"&gt;# Q(...), key=value&lt;/span&gt;
 &lt;span class="o"&gt;&amp;gt;&amp;gt;&amp;gt;&lt;/span&gt; &lt;span class="n"&gt;Question&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;objects&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;filter&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;Q&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;question_text__contains&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;you&amp;#39;&lt;/span&gt;&lt;span class="p"&gt;),&lt;/span&gt; &lt;span class="n"&gt;question_text__contains&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;who&amp;#39;&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
@@ -6205,7 +6585,7 @@ is coming right at me!        &lt;br /&gt;
 &lt;/pre&gt;&lt;/div&gt;
 &lt;/div&gt;
 &lt;div class="section" id="or-and-not"&gt;
-&lt;h2&gt;OR, AND, NOT 多条件查询&lt;/h2&gt;
+&lt;h2 id="hidor-and-not"&gt;OR, AND, NOT 多条件查询&lt;a class="headerlink" href="#hidor-and-not" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;p&gt;这几个条件可以自由组合使用:&lt;/p&gt;
 &lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="c1"&gt;# (A OR B) AND C AND (NOT D)&lt;/span&gt;
 &lt;span class="o"&gt;&amp;gt;&amp;gt;&amp;gt;&lt;/span&gt; &lt;span class="n"&gt;Question&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;objects&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;filter&lt;/span&gt;&lt;span class="p"&gt;((&lt;/span&gt;&lt;span class="n"&gt;Q&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;question_text__contains&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;you&amp;#39;&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt; &lt;span class="o"&gt;|&lt;/span&gt; &lt;span class="n"&gt;Q&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;question_text__contains&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;who&amp;#39;&lt;/span&gt;&lt;span class="p"&gt;))&lt;/span&gt; &lt;span class="o"&gt;&amp;amp;&lt;/span&gt; &lt;span class="n"&gt;Q&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;question_text__contains&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;what&amp;#39;&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt; &lt;span class="o"&gt;&amp;amp;&lt;/span&gt; &lt;span class="o"&gt;~&lt;/span&gt;&lt;span class="n"&gt;Q&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;question_text__contains&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;are&amp;#39;&lt;/span&gt;&lt;span class="p"&gt;))&lt;/span&gt;
@@ -6213,7 +6593,7 @@ is coming right at me!        &lt;br /&gt;
 &lt;/pre&gt;&lt;/div&gt;
 &lt;/div&gt;
 &lt;div class="section" id="id2"&gt;
-&lt;h2&gt;动态构建查询条件&lt;/h2&gt;
+&lt;h2 id="hidid2"&gt;动态构建查询条件&lt;a class="headerlink" href="#hidid2" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;p&gt;比如你定义了一个包含一些 &lt;tt class="docutils literal"&gt;Q&lt;/tt&gt; 对象的列表，如何使用这个列表构建 &lt;tt class="docutils literal"&gt;AND&lt;/tt&gt; 或 &lt;tt class="docutils literal"&gt;OR&lt;/tt&gt; 查询呢？
 可以使用 &lt;tt class="docutils literal"&gt;operator&lt;/tt&gt; 和 &lt;tt class="docutils literal"&gt;reduce&lt;/tt&gt;：&lt;/p&gt;
 &lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="o"&gt;&amp;gt;&amp;gt;&amp;gt;&lt;/span&gt; &lt;span class="n"&gt;lst&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="p"&gt;[&lt;/span&gt;&lt;span class="n"&gt;Q&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;question_text__contains&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;you&amp;#39;&lt;/span&gt;&lt;span class="p"&gt;),&lt;/span&gt; &lt;span class="n"&gt;Q&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;question_text__contains&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;who&amp;#39;&lt;/span&gt;&lt;span class="p"&gt;)]&lt;/span&gt;
@@ -6238,7 +6618,7 @@ is coming right at me!        &lt;br /&gt;
 &lt;/pre&gt;&lt;/div&gt;
 &lt;/div&gt;
 &lt;div class="section" id="id3"&gt;
-&lt;h2&gt;参考资料&lt;/h2&gt;
+&lt;h2 id="hidid3"&gt;参考资料&lt;a class="headerlink" href="#hidid3" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;ul class="simple"&gt;
 &lt;li&gt;&lt;a class="reference external" href="http://www.michelepasin.org/blog/2010/07/20/the-power-of-djangos-q-objects/"&gt;Parerga und Paralipomena » Blog Archive » The power of django’s Q objects&lt;/a&gt;&lt;/li&gt;
 &lt;li&gt;&lt;a class="reference external" href="https://docs.djangoproject.com/en/1.8/topics/db/queries/#complex-lookups-with-q-objects"&gt;Making queries | Django documentation | Django&lt;/a&gt;&lt;/li&gt;
@@ -10062,7 +10442,7 @@ default_app_config = 'foo.apps.FooConfig'
 &lt;/ol&gt;
 &lt;p&gt;Demo 下载： &lt;a class="reference external" href="https://github.com/mozillazg/django-simple-projects/tree/master/projects/custom_app_name"&gt;https://github.com/mozillazg/django-simple-projects/tree/master/projects/custom_app_name&lt;/a&gt;&lt;/p&gt;
 &lt;div class="section" id="id1"&gt;
-&lt;h2&gt;参考资料&lt;/h2&gt;
+&lt;h2 id="hidid1"&gt;参考资料&lt;a class="headerlink" href="#hidid1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;ul class="simple"&gt;
 &lt;li&gt;&lt;a class="reference external" href="https://docs.djangoproject.com/en/1.8/ref/applications/#configuring-applications"&gt;Applications | Django documentation | Django&lt;/a&gt;&lt;/li&gt;
 &lt;/ul&gt;
@@ -10194,7 +10574,7 @@ shape of my life!     &lt;br /&gt;
 我已经早有准备！&lt;/p&gt;</description><dc:creator xmlns:dc="http://purl.org/dc/elements/1.1/">mozillazg</dc:creator><pubDate>Wed, 24 Jun 2015 00:00:00 +0000</pubDate><guid>tag:mozillazg.github.io,2015-06-24:2015/06/3964.prepared.zh-cn.html</guid><category>Cyanide and Happiness</category></item><item><title>JSON Web Token (JWT) 简介</title><link>https://mozillazg.github.io/2015/06/hello-jwt.html</link><description>&lt;p&gt;&lt;a class="reference external" href="http://tools.ietf.org/html/rfc7519"&gt;JSON Web Token (JWT)&lt;/a&gt;
 是一种基于 token 的认证方案。&lt;/p&gt;
 &lt;div class="section" id="json-web-token"&gt;
-&lt;h2&gt;JSON Web Token 的结构&lt;/h2&gt;
+&lt;h2 id="hidjson-web-token"&gt;JSON Web Token 的结构&lt;a class="headerlink" href="#hidjson-web-token" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;p&gt;一个 JWT token 看起来是这样的:&lt;/p&gt;
 &lt;pre class="literal-block"&gt;
 eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjEzODY4OTkxMzEsImlzcyI6ImppcmE6MTU0ODk1OTUiLCJxc2giOiI4MDYzZmY0Y2ExZTQxZGY3YmM5MGM4YWI2ZDBmNjIwN2Q0OTFjZjZkYWQ3YzY2ZWE3OTdiNDYxNGI3MTkyMmU5IiwiaWF0IjoxMzg2ODk4OTUxfQ.uKqU9dTB6gKwG6jQCuXYAiMNdfNRw98Hw_IWuA5MaMo
@@ -10205,7 +10585,7 @@ base64url_encode(Header) + '.' + base64url_encode(Claims) + '.' + base64url_enco
 &lt;/pre&gt;
 &lt;/div&gt;
 &lt;div class="section" id="header"&gt;
-&lt;h2&gt;Header&lt;/h2&gt;
+&lt;h2 id="hidheader"&gt;Header&lt;a class="headerlink" href="#hidheader" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;p&gt;Header 包含了一些元数据，至少会表明 token 类型以及 签名方法。比如&lt;/p&gt;
 &lt;pre class="literal-block"&gt;
 {
@@ -10219,7 +10599,7 @@ base64url_encode(Header) + '.' + base64url_encode(Claims) + '.' + base64url_enco
 &lt;/ul&gt;
 &lt;/div&gt;
 &lt;div class="section" id="claims-payload"&gt;
-&lt;h2&gt;Claims (Payload)&lt;/h2&gt;
+&lt;h2 id="hidclaims-payload"&gt;Claims (Payload)&lt;a class="headerlink" href="#hidclaims-payload" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;p&gt;Claims 部分包含了一些跟这个 token 有关的重要信息。
 JWT 标准规定了一些字段，下面节选一些字段:&lt;/p&gt;
 &lt;ul class="simple"&gt;
@@ -10241,7 +10621,7 @@ JWT 标准规定了一些字段，下面节选一些字段:&lt;/p&gt;
 &lt;/pre&gt;
 &lt;/div&gt;
 &lt;div class="section" id="signature"&gt;
-&lt;h2&gt;Signature&lt;/h2&gt;
+&lt;h2 id="hidsignature"&gt;Signature&lt;a class="headerlink" href="#hidsignature" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;p&gt;JWT 标准遵照 JSON Web Signature (JWS) 标准来生成签名。签名主要用于验证 token 是否有效，是否被篡改。 签名时可以 这些算法进行签名，比如 HMAC SHA-256:&lt;/p&gt;
 &lt;pre class="literal-block"&gt;
 content = base64url_encode(Header) + '.' + base64url_encode(Claims)
@@ -10253,7 +10633,7 @@ signature = hmacsha256.hash(content)
 然后在进行 base64url_encode 操作。&lt;/p&gt;
 &lt;/div&gt;
 &lt;div class="section" id="python"&gt;
-&lt;h2&gt;Python 实现&lt;/h2&gt;
+&lt;h2 id="hidpython"&gt;Python 实现&lt;a class="headerlink" href="#hidpython" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;p&gt;&lt;strong&gt;已有的轮子&lt;/strong&gt;: 上 PyPI 上 &lt;a class="reference external" href="https://pypi.python.org/pypi?%3Aaction=search&amp;amp;term=JWT&amp;amp;submit=search"&gt;搜索 JWT&lt;/a&gt; 即可。
 用的比较多是 &lt;a class="reference external" href="https://pypi.python.org/pypi/PyJWT/"&gt;PyJWT&lt;/a&gt; 。&lt;/p&gt;
 &lt;p&gt;&lt;strong&gt;手动简单实现&lt;/strong&gt;&lt;/p&gt;
@@ -10292,7 +10672,7 @@ eyJhbGciOiAiSFMyNTYiLCAidHlwIjogIkpXVCJ9.eyJpc3MiOiAibW96aWxsYXpnLmNvbSIsICJmb28
 &lt;p&gt;再次提示， &lt;strong&gt;claims 的值并没有被加密&lt;/strong&gt;，就算不知道 secert_key 的值也可以得到 claims 的值。&lt;/p&gt;
 &lt;/div&gt;
 &lt;div class="section" id="id1"&gt;
-&lt;h2&gt;参考资料&lt;/h2&gt;
+&lt;h2 id="hidid1"&gt;参考资料&lt;a class="headerlink" href="#hidid1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;ul class="simple"&gt;
 &lt;li&gt;&lt;a class="reference external" href="http://jwt.io/"&gt;http://jwt.io/&lt;/a&gt;&lt;/li&gt;
 &lt;li&gt;&lt;a class="reference external" href="http://self-issued.info/docs/draft-ietf-oauth-json-web-token.html"&gt;http://self-issued.info/docs/draft-ietf-oauth-json-web-token.html&lt;/a&gt;&lt;/li&gt;
@@ -10514,7 +10894,7 @@ def strip2(s, chars):
 &lt;!-- &gt;&gt;&gt; '12345-abc-12345-defg-54321'.replace('12345', '', 1) --&gt;
 &lt;!-- '-abc-12345-defg-54321' --&gt;
 </description><dc:creator xmlns:dc="http://purl.org/dc/elements/1.1/">mozillazg</dc:creator><pubDate>Mon, 08 Jun 2015 00:00:00 +0000</pubDate><guid>tag:mozillazg.github.io,2015-06-08:2015/06/python-str-strip-lstrip-rstrip-warnning.html</guid></item><item><title>微信开发过程中遇到的问题</title><link>https://mozillazg.github.io/2015/06/wechat-develop-note.html</link><description>&lt;div class="section" id="jssdk"&gt;
-&lt;h2&gt;JSSDK&lt;/h2&gt;
+&lt;h2 id="hidjssdk"&gt;JSSDK&lt;a class="headerlink" href="#hidjssdk" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;p&gt;&lt;strong&gt;invalid signature&lt;/strong&gt;, 排查:&lt;/p&gt;
 &lt;p&gt;前端：&lt;/p&gt;
 &lt;ul&gt;
@@ -10573,7 +10953,7 @@ signType         // 新版是 MD5
 &lt;/ul&gt;
 &lt;/div&gt;
 &lt;div class="section" id="id2"&gt;
-&lt;h2&gt;微信支付&lt;/h2&gt;
+&lt;h2 id="hidid2"&gt;微信支付&lt;a class="headerlink" href="#hidid2" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;p&gt;使用 &lt;tt class="docutils literal"&gt;requests&lt;/tt&gt; 模块发送请求时，如何使用商户证书?&lt;/p&gt;
 &lt;pre class="literal-block"&gt;
 cert = ('/path/to/apiclient_cert.pem', '/path/to/apiclient_key.pem')
@@ -10594,7 +10974,7 @@ requests.post(url, data=xml.encode('utf8'), cert=cert)
 &lt;/pre&gt;
 &lt;/div&gt;
 &lt;div class="section" id="id3"&gt;
-&lt;h2&gt;企业付款&lt;/h2&gt;
+&lt;h2 id="hidid3"&gt;企业付款&lt;a class="headerlink" href="#hidid3" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;p&gt;&lt;strong&gt;参数错误:输入的商户号有误&lt;/strong&gt;&lt;/p&gt;
 &lt;ul&gt;
 &lt;li&gt;&lt;p class="first"&gt;检查提交的参数名称是否有误:&lt;/p&gt;
@@ -11572,7 +11952,7 @@ client.submit_job(u&amp;quot;task1&amp;quot;)  # error: Received non-binary argu
 client.submit_job(b&amp;quot;task1&amp;quot;)  # ok
 &lt;/pre&gt;
 &lt;div class="section" id="id1"&gt;
-&lt;h2&gt;参考资料&lt;/h2&gt;
+&lt;h2 id="hidid1"&gt;参考资料&lt;a class="headerlink" href="#hidid1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;ul class="simple"&gt;
 &lt;li&gt;&lt;a class="reference external" href="https://github.com/Yelp/python-gearman/blob/740a23f20f39f0f0d557e25afe998e56cc72a9bf/gearman/protocol.py#L246"&gt;python-gearman/protocol.py at 740a23f20f39f0f0d557e25afe998e56cc72a9bf · Yelp/python-gearman&lt;/a&gt;&lt;/li&gt;
 &lt;/ul&gt;
@@ -11761,7 +12141,7 @@ to do to keep me occupied         &lt;br /&gt;
 &lt;span class="p"&gt;}&lt;/span&gt;
 &lt;/pre&gt;&lt;/div&gt;
 &lt;div class="section" id="id1"&gt;
-&lt;h2&gt;效果&lt;/h2&gt;
+&lt;h2 id="hidid1"&gt;效果&lt;a class="headerlink" href="#hidid1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;p&gt;未输入用户名和密码的情况下，提示未认证：&lt;/p&gt;
 &lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="go"&gt; ~$ curl -i http://127.0.0.1:8000/hello&lt;/span&gt;
 &lt;span class="go"&gt;HTTP/1.1 401 Unauthorized&lt;/span&gt;
@@ -11781,7 +12161,7 @@ to do to keep me occupied         &lt;br /&gt;
 &lt;/pre&gt;&lt;/div&gt;
 &lt;/div&gt;
 &lt;div class="section" id="id2"&gt;
-&lt;h2&gt;参考资料&lt;/h2&gt;
+&lt;h2 id="hidid2"&gt;参考资料&lt;a class="headerlink" href="#hidid2" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;ul class="simple"&gt;
 &lt;li&gt;&lt;a class="reference external" href="https://godoc.org/net/http"&gt;https://godoc.org/net/http&lt;/a&gt;&lt;/li&gt;
 &lt;li&gt;&lt;a class="reference external" href="http://tools.ietf.org/html/rfc2617#section-2"&gt;http://tools.ietf.org/html/rfc2617#section-2&lt;/a&gt;&lt;/li&gt;
@@ -11869,7 +12249,7 @@ this, but... i can't see you anymore.     &lt;br /&gt;
 &lt;span class="c1"&gt;# == SELECT name, COUNT(DISTINCT date(created_at)) AS count FROM event GROUP BY name&lt;/span&gt;
 &lt;/pre&gt;&lt;/div&gt;
 &lt;div class="section" id="id1"&gt;
-&lt;h2&gt;参考资料&lt;/h2&gt;
+&lt;h2 id="hidid1"&gt;参考资料&lt;a class="headerlink" href="#hidid1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;ul class="simple"&gt;
 &lt;li&gt;&lt;a class="reference external" href="https://github.com/django/django/blob/1.8c1/django/db/models/aggregates.py"&gt;django/aggregates.py at 1.8c1 · django/django&lt;/a&gt;&lt;/li&gt;
 &lt;li&gt;&lt;a class="reference external" href="http://coder.cl/2011/09/custom-aggregates-on-django/"&gt;custom aggregates on django | coder . cl（其他版本可以参考这个）&lt;/a&gt;&lt;/li&gt;
@@ -11987,7 +12367,7 @@ upstream tornado_server {
 &lt;/li&gt;
 &lt;/ol&gt;
 &lt;div class="section" id="id1"&gt;
-&lt;h2&gt;参考资料&lt;/h2&gt;
+&lt;h2 id="hidid1"&gt;参考资料&lt;a class="headerlink" href="#hidid1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;ul class="simple"&gt;
 &lt;li&gt;&lt;a class="reference external" href="http://www.tornadoweb.org/en/stable/guide/running.html"&gt;Running and deploying —— Tornado documentation&lt;/a&gt;&lt;/li&gt;
 &lt;li&gt;&lt;a class="reference external" href="http://nginx.org/en/docs/http/ngx_http_upstream_module.html"&gt;Module ngx_http_upstream_module&lt;/a&gt;&lt;/li&gt;
@@ -12010,7 +12390,7 @@ to your family.   &lt;br /&gt;
 &lt;p&gt;&lt;strong&gt;note&lt;/strong&gt;: 如果你需要一个更详实的例子的话，可以参考使用 peewee 和 Flask 框架的一个教程： &lt;a class="reference external" href="http://docs.peewee-orm.com/en/latest/peewee/example.html#example-app"&gt;创建一个 twitter 风格的 web app&lt;/a&gt;&lt;/p&gt;
 &lt;p&gt;我 &lt;strong&gt;强烈&lt;/strong&gt; 推荐你打开一个解释器 shell 会话并运行本文的代码。这种方式可以让你直观的感受到查询操作的效果。&lt;/p&gt;
 &lt;div class="section" id="model"&gt;
-&lt;h2&gt;定义 Model&lt;/h2&gt;
+&lt;h2 id="hidmodel"&gt;定义 Model&lt;a class="headerlink" href="#hidmodel" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;p&gt;Model 类，Field 以及 model 实例与数据库的对应关系如下：&lt;/p&gt;
 &lt;table border="1" class="docutils"&gt;
 &lt;colgroup&gt;
@@ -12069,7 +12449,7 @@ to your family.   &lt;br /&gt;
 &lt;/pre&gt;&lt;/div&gt;
 &lt;/div&gt;
 &lt;div class="section" id="id5"&gt;
-&lt;h2&gt;存储数据&lt;/h2&gt;
+&lt;h2 id="hidid5"&gt;存储数据&lt;a class="headerlink" href="#hidid5" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;p&gt;让我们在数据库里存一些 people 数据。可以使用 &lt;a class="reference external" href="http://docs.peewee-orm.com/en/latest/peewee/api.html#Model.save"&gt;save&lt;/a&gt; 和 &lt;a class="reference external" href="http://docs.peewee-orm.com/en/latest/peewee/api.html#Model.create"&gt;create&lt;/a&gt; 方法来添加和更新 people 记录：&lt;/p&gt;
 &lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="o"&gt;&amp;gt;&amp;gt;&amp;gt;&lt;/span&gt; &lt;span class="kn"&gt;from&lt;/span&gt; &lt;span class="nn"&gt;datetime&lt;/span&gt; &lt;span class="kn"&gt;import&lt;/span&gt; &lt;span class="n"&gt;date&lt;/span&gt;
 &lt;span class="o"&gt;&amp;gt;&amp;gt;&amp;gt;&lt;/span&gt; &lt;span class="n"&gt;uncle_bob&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;Person&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;name&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;Bob&amp;#39;&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;birthday&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="n"&gt;date&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="mi"&gt;1960&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="mi"&gt;1&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="mi"&gt;15&lt;/span&gt;&lt;span class="p"&gt;),&lt;/span&gt; &lt;span class="n"&gt;is_relative&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="bp"&gt;True&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
@@ -12104,10 +12484,10 @@ to your family.   &lt;br /&gt;
 &lt;/pre&gt;&lt;/div&gt;
 &lt;/div&gt;
 &lt;div class="section" id="id7"&gt;
-&lt;h2&gt;检索数据&lt;/h2&gt;
+&lt;h2 id="hidid7"&gt;检索数据&lt;a class="headerlink" href="#hidid7" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;p&gt;下面讲解如何通过查询的方式检索数据。关系型数据库非常适合进行特定的查询操作。&lt;/p&gt;
 &lt;div class="section" id="id8"&gt;
-&lt;h3&gt;获取单条记录&lt;/h3&gt;
+&lt;h3 id="hidid8"&gt;获取单条记录&lt;a class="headerlink" href="#hidid8" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
 &lt;p&gt;让我们从数据库中检索 Grandma 的数据。使用 &lt;a class="reference external" href="http://docs.peewee-orm.com/en/latest/peewee/api.html#SelectQuery.get"&gt;SelectQuery.get()&lt;/a&gt; 从数据库中获取单条记录。&lt;/p&gt;
 &lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="o"&gt;&amp;gt;&amp;gt;&amp;gt;&lt;/span&gt; &lt;span class="n"&gt;grandma&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;Person&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;select&lt;/span&gt;&lt;span class="p"&gt;()&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;where&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;Person&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;name&lt;/span&gt; &lt;span class="o"&gt;==&lt;/span&gt; &lt;span class="s1"&gt;&amp;#39;Grandma L.&amp;#39;&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;get&lt;/span&gt;&lt;span class="p"&gt;()&lt;/span&gt;
 &lt;/pre&gt;&lt;/div&gt;
@@ -12116,7 +12496,7 @@ to your family.   &lt;br /&gt;
 &lt;/pre&gt;&lt;/div&gt;
 &lt;/div&gt;
 &lt;div class="section" id="id11"&gt;
-&lt;h3&gt;罗列记录&lt;/h3&gt;
+&lt;h3 id="hidid11"&gt;罗列记录&lt;a class="headerlink" href="#hidid11" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
 &lt;p&gt;列出数据库中所有的 people 记录：&lt;/p&gt;
 &lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="o"&gt;&amp;gt;&amp;gt;&amp;gt;&lt;/span&gt; &lt;span class="k"&gt;for&lt;/span&gt; &lt;span class="n"&gt;person&lt;/span&gt; &lt;span class="ow"&gt;in&lt;/span&gt; &lt;span class="n"&gt;Person&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;select&lt;/span&gt;&lt;span class="p"&gt;():&lt;/span&gt;
 &lt;span class="o"&gt;...&lt;/span&gt;     &lt;span class="k"&gt;print&lt;/span&gt; &lt;span class="n"&gt;person&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;name&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;person&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;is_relative&lt;/span&gt;
@@ -12252,7 +12632,7 @@ to your family.   &lt;br /&gt;
 &lt;/div&gt;
 &lt;/div&gt;
 &lt;div class="section" id="id20"&gt;
-&lt;h2&gt;作用于已存在的数据库&lt;/h2&gt;
+&lt;h2 id="hidid20"&gt;作用于已存在的数据库&lt;a class="headerlink" href="#hidid20" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;p&gt;如果你已经拥有了一个数据库，你可以使用 &lt;a class="reference external" href="http://docs.peewee-orm.com/en/latest/peewee/playhouse.html#pwiz"&gt;pwiz, a model generator.&lt;/a&gt; 自动生成 peewee models。
 比如，我有一个名字叫 charles_blog 的 postgresql 数据库，我就可以这样运行:&lt;/p&gt;
 &lt;pre class="literal-block"&gt;
@@ -12260,7 +12640,7 @@ python -m pwiz -e postgresql charles_blog &amp;gt; blog_models.py
 &lt;/pre&gt;
 &lt;/div&gt;
 &lt;div class="section" id="id22"&gt;
-&lt;h2&gt;下一步？&lt;/h2&gt;
+&lt;h2 id="hidid22"&gt;下一步？&lt;a class="headerlink" href="#hidid22" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;p&gt;这里的内容只是用于快速上手。 如果你想找一个更完整的 web app 的示例的话，可以看一下  &lt;a class="reference external" href="http://docs.peewee-orm.com/en/latest/peewee/example.html#example-app"&gt;Example app&lt;/a&gt; .&lt;/p&gt;
 &lt;/div&gt;
 </description><dc:creator xmlns:dc="http://purl.org/dc/elements/1.1/">mozillazg</dc:creator><pubDate>Thu, 26 Mar 2015 00:00:00 +0000</pubDate><guid>tag:mozillazg.github.io,2015-03-26:2015/03/peewee-quickstart-zh-cn.html</guid></item><item><title>[译][漫]Cyanide &amp; Happiness #3010：所有</title><link>https://mozillazg.github.io/2015/03/3010.all.zh-cn.html</link><description>&lt;p&gt;译自：&lt;a href="http://explosm.net/comics/3010/"&gt;Cyanide &amp;amp; Happiness #3010 - Explosm.net&lt;/a&gt;&lt;/p&gt;
@@ -12536,7 +12916,7 @@ Could not parse the remainder: '#stooges' from '#stooges'
 &lt;span class="p"&gt;&amp;lt;/&lt;/span&gt;&lt;span class="nt"&gt;script&lt;/span&gt;&lt;span class="p"&gt;&amp;gt;&lt;/span&gt;
 &lt;/pre&gt;&lt;/div&gt;
 &lt;div class="section" id="id3"&gt;
-&lt;h2&gt;参考资料&lt;/h2&gt;
+&lt;h2 id="hidid3"&gt;参考资料&lt;a class="headerlink" href="#hidid3" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;ul class="simple"&gt;
 &lt;li&gt;&lt;a class="reference external" href="http://stackoverflow.com/questions/7985594/django-and-mustache-use-the-same-syntax-for-template"&gt;http://stackoverflow.com/questions/7985594/django-and-mustache-use-the-same-syntax-for-template&lt;/a&gt;&lt;/li&gt;
 &lt;li&gt;&lt;a class="reference external" href="https://docs.djangoproject.com/en/1.7/ref/templates/builtins/"&gt;https://docs.djangoproject.com/en/1.7/ref/templates/builtins/&lt;/a&gt;&lt;/li&gt;
@@ -12548,7 +12928,7 @@ Could not parse the remainder: '#stooges' from '#stooges'
 &lt;p&gt;&lt;img alt="2030.sbTotal.zh-cn.png" src="/static/images/comics/2030.sbTotal.zh-cn.png" /&gt;&lt;/p&gt;</description><dc:creator xmlns:dc="http://purl.org/dc/elements/1.1/">mozillazg</dc:creator><pubDate>Thu, 05 Mar 2015 00:00:00 +0000</pubDate><guid>tag:mozillazg.github.io,2015-03-05:2015/03/2030.sbTotal.zh-cn.html</guid><category>Cyanide and Happiness</category></item><item><title>[译][漫]Cyanide &amp; Happiness #3855</title><link>https://mozillazg.github.io/2015/03/3855.tv.zh-cn.html</link><description>&lt;p&gt;译自：&lt;a href="http://explosm.net/comics/3855/"&gt;Cyanide &amp;amp; Happiness #3855 - Explosm.net&lt;/a&gt;&lt;/p&gt;
 &lt;p&gt;&lt;img alt="3855.tv.zh-cn.png" src="/static/images/comics/3855.tv.zh-cn.png" /&gt;&lt;/p&gt;</description><dc:creator xmlns:dc="http://purl.org/dc/elements/1.1/">mozillazg</dc:creator><pubDate>Wed, 04 Mar 2015 00:00:00 +0000</pubDate><guid>tag:mozillazg.github.io,2015-03-04:2015/03/3855.tv.zh-cn.html</guid><category>Cyanide and Happiness</category></item><item><title>[go]regexp 包所支持的正则表达式语法</title><link>https://mozillazg.github.io/2015/03/go-regexp-supported-regular-expression-syntax.html</link><description>&lt;p&gt;本文内容整理自: &lt;a class="reference external" href="http://code.google.com/p/re2/wiki/Syntax"&gt;http://code.google.com/p/re2/wiki/Syntax&lt;/a&gt;&lt;/p&gt;
 &lt;div class="section" id="single-characters"&gt;
-&lt;h2&gt;Single characters&lt;/h2&gt;
+&lt;h2 id="hidsingle-characters"&gt;Single characters&lt;a class="headerlink" href="#hidsingle-characters" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;table border="1" class="docutils"&gt;
 &lt;colgroup&gt;
 &lt;col width="25%" /&gt;
@@ -12592,7 +12972,7 @@ Could not parse the remainder: '#stooges' from '#stooges'
 &lt;/table&gt;
 &lt;/div&gt;
 &lt;div class="section" id="composites"&gt;
-&lt;h2&gt;Composites&lt;/h2&gt;
+&lt;h2 id="hidcomposites"&gt;Composites&lt;a class="headerlink" href="#hidcomposites" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;table border="1" class="docutils"&gt;
 &lt;colgroup&gt;
 &lt;col width="29%" /&gt;
@@ -12609,7 +12989,7 @@ Could not parse the remainder: '#stooges' from '#stooges'
 &lt;/table&gt;
 &lt;/div&gt;
 &lt;div class="section" id="repetitions"&gt;
-&lt;h2&gt;Repetitions&lt;/h2&gt;
+&lt;h2 id="hidrepetitions"&gt;Repetitions&lt;a class="headerlink" href="#hidrepetitions" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;table border="1" class="docutils"&gt;
 &lt;colgroup&gt;
 &lt;col width="29%" /&gt;
@@ -12671,7 +13051,7 @@ reject forms that create a minimum or maximum repetition count above 1000.
 Unlimited repetitions are not subject to this restriction.&lt;/p&gt;
 &lt;/div&gt;
 &lt;div class="section" id="possessive-repetitions"&gt;
-&lt;h2&gt;Possessive repetitions&lt;/h2&gt;
+&lt;h2 id="hidpossessive-repetitions"&gt;Possessive repetitions&lt;a class="headerlink" href="#hidpossessive-repetitions" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;table border="1" class="docutils"&gt;
 &lt;colgroup&gt;
 &lt;col width="19%" /&gt;
@@ -12700,7 +13080,7 @@ Unlimited repetitions are not subject to this restriction.&lt;/p&gt;
 &lt;/table&gt;
 &lt;/div&gt;
 &lt;div class="section" id="grouping"&gt;
-&lt;h2&gt;Grouping&lt;/h2&gt;
+&lt;h2 id="hidgrouping"&gt;Grouping&lt;a class="headerlink" href="#hidgrouping" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;table border="1" class="docutils"&gt;
 &lt;colgroup&gt;
 &lt;col width="24%" /&gt;
@@ -12747,7 +13127,7 @@ Unlimited repetitions are not subject to this restriction.&lt;/p&gt;
 &lt;/table&gt;
 &lt;/div&gt;
 &lt;div class="section" id="flags"&gt;
-&lt;h2&gt;Flags&lt;/h2&gt;
+&lt;h2 id="hidflags"&gt;Flags&lt;a class="headerlink" href="#hidflags" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;table border="1" class="docutils"&gt;
 &lt;colgroup&gt;
 &lt;col width="11%" /&gt;
@@ -12771,7 +13151,7 @@ Unlimited repetitions are not subject to this restriction.&lt;/p&gt;
 &lt;p&gt;Flag syntax is &lt;tt class="docutils literal"&gt;xyz&lt;/tt&gt; (set) or &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;-xyz&lt;/span&gt;&lt;/tt&gt; (clear) or &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;xy-z&lt;/span&gt;&lt;/tt&gt; (set xy, clear z).&lt;/p&gt;
 &lt;/div&gt;
 &lt;div class="section" id="empty-strings"&gt;
-&lt;h2&gt;Empty strings&lt;/h2&gt;
+&lt;h2 id="hidempty-strings"&gt;Empty strings&lt;a class="headerlink" href="#hidempty-strings" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;table border="1" class="docutils"&gt;
 &lt;colgroup&gt;
 &lt;col width="12%" /&gt;
@@ -12866,7 +13246,7 @@ Unlimited repetitions are not subject to this restriction.&lt;/p&gt;
 &lt;/table&gt;
 &lt;/div&gt;
 &lt;div class="section" id="escape-sequences"&gt;
-&lt;h2&gt;Escape sequences&lt;/h2&gt;
+&lt;h2 id="hidescape-sequences"&gt;Escape sequences&lt;a class="headerlink" href="#hidescape-sequences" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;table border="1" class="docutils"&gt;
 &lt;colgroup&gt;
 &lt;col width="18%" /&gt;
@@ -12991,7 +13371,7 @@ Unlimited repetitions are not subject to this restriction.&lt;/p&gt;
 &lt;/table&gt;
 &lt;/div&gt;
 &lt;div class="section" id="character-class-elements"&gt;
-&lt;h2&gt;Character class elements&lt;/h2&gt;
+&lt;h2 id="hidcharacter-class-elements"&gt;Character class elements&lt;a class="headerlink" href="#hidcharacter-class-elements" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;table border="1" class="docutils"&gt;
 &lt;colgroup&gt;
 &lt;col width="25%" /&gt;
@@ -13020,7 +13400,7 @@ Unlimited repetitions are not subject to this restriction.&lt;/p&gt;
 &lt;/table&gt;
 &lt;/div&gt;
 &lt;div class="section" id="named-character-classes-as-character-class-elements"&gt;
-&lt;h2&gt;Named character classes as character class elements&lt;/h2&gt;
+&lt;h2 id="hidnamed-character-classes-as-character-class-elements"&gt;Named character classes as character class elements&lt;a class="headerlink" href="#hidnamed-character-classes-as-character-class-elements" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;table border="1" class="docutils"&gt;
 &lt;colgroup&gt;
 &lt;col width="18%" /&gt;
@@ -13055,7 +13435,7 @@ Unlimited repetitions are not subject to this restriction.&lt;/p&gt;
 &lt;/table&gt;
 &lt;/div&gt;
 &lt;div class="section" id="perl-character-classes-all-ascii-only"&gt;
-&lt;h2&gt;Perl character classes (all ASCII-only)&lt;/h2&gt;
+&lt;h2 id="hidperl-character-classes-all-ascii-only"&gt;Perl character classes (all ASCII-only)&lt;a class="headerlink" href="#hidperl-character-classes-all-ascii-only" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;table border="1" class="docutils"&gt;
 &lt;colgroup&gt;
 &lt;col width="15%" /&gt;
@@ -13096,7 +13476,7 @@ Unlimited repetitions are not subject to this restriction.&lt;/p&gt;
 &lt;/table&gt;
 &lt;/div&gt;
 &lt;div class="section" id="ascii-character-classes"&gt;
-&lt;h2&gt;ASCII character classes&lt;/h2&gt;
+&lt;h2 id="hidascii-character-classes"&gt;ASCII character classes&lt;a class="headerlink" href="#hidascii-character-classes" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;table border="1" class="docutils"&gt;
 &lt;colgroup&gt;
 &lt;col width="19%" /&gt;
@@ -13149,7 +13529,7 @@ Unlimited repetitions are not subject to this restriction.&lt;/p&gt;
 &lt;/table&gt;
 &lt;/div&gt;
 &lt;div class="section" id="unicode-character-class-names-general-category"&gt;
-&lt;h2&gt;Unicode character class names--general category&lt;/h2&gt;
+&lt;h2 id="hidunicode-character-class-names-general-category"&gt;Unicode character class names--general category&lt;a class="headerlink" href="#hidunicode-character-class-names-general-category" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;table border="1" class="docutils"&gt;
 &lt;colgroup&gt;
 &lt;col width="16%" /&gt;
@@ -13277,7 +13657,7 @@ Unlimited repetitions are not subject to this restriction.&lt;/p&gt;
 &lt;/table&gt;
 &lt;/div&gt;
 &lt;div class="section" id="unicode-character-class-names-scripts"&gt;
-&lt;h2&gt;Unicode character class names--scripts&lt;/h2&gt;
+&lt;h2 id="hidunicode-character-class-names-scripts"&gt;Unicode character class names--scripts&lt;a class="headerlink" href="#hidunicode-character-class-names-scripts" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;table border="1" class="docutils"&gt;
 &lt;colgroup&gt;
 &lt;col width="41%" /&gt;
@@ -13585,7 +13965,7 @@ Unlimited repetitions are not subject to this restriction.&lt;/p&gt;
 &lt;/table&gt;
 &lt;/div&gt;
 &lt;div class="section" id="vim-character-classes"&gt;
-&lt;h2&gt;Vim character classes&lt;/h2&gt;
+&lt;h2 id="hidvim-character-classes"&gt;Vim character classes&lt;a class="headerlink" href="#hidvim-character-classes" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;table border="1" class="docutils"&gt;
 &lt;colgroup&gt;
 &lt;col width="11%" /&gt;
@@ -13677,7 +14057,7 @@ Unlimited repetitions are not subject to this restriction.&lt;/p&gt;
 &lt;/table&gt;
 &lt;/div&gt;
 &lt;div class="section" id="vim-flags"&gt;
-&lt;h2&gt;Vim flags&lt;/h2&gt;
+&lt;h2 id="hidvim-flags"&gt;Vim flags&lt;a class="headerlink" href="#hidvim-flags" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;table border="1" class="docutils"&gt;
 &lt;colgroup&gt;
 &lt;col width="10%" /&gt;
@@ -13709,7 +14089,7 @@ Unlimited repetitions are not subject to this restriction.&lt;/p&gt;
 &lt;/table&gt;
 &lt;/div&gt;
 &lt;div class="section" id="magic"&gt;
-&lt;h2&gt;Magic&lt;/h2&gt;
+&lt;h2 id="hidmagic"&gt;Magic&lt;a class="headerlink" href="#hidmagic" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;table border="1" class="docutils"&gt;
 &lt;colgroup&gt;
 &lt;col width="29%" /&gt;
@@ -14407,7 +14787,7 @@ Request:
     &lt;span class="k"&gt;return&lt;/span&gt; &lt;span class="s1"&gt;&amp;#39;&amp;#39;&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;join&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;s&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
 &lt;/pre&gt;&lt;/div&gt;
 &lt;div class="section" id="id1"&gt;
-&lt;h2&gt;参考资料&lt;/h2&gt;
+&lt;h2 id="hidid1"&gt;参考资料&lt;a class="headerlink" href="#hidid1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;ul class="simple"&gt;
 &lt;li&gt;&lt;a class="reference external" href="http://flask.pocoo.org/docs/0.10/errorhandling/"&gt;Logging Application Errors — Flask Documentation (0.10)&lt;/a&gt;&lt;/li&gt;
 &lt;li&gt;&lt;a class="reference external" href="https://docs.python.org/2/library/logging.html"&gt;15.7. logging — Logging facility for Python — Python 2.7.9 documentation&lt;/a&gt;&lt;/li&gt;
@@ -14438,13 +14818,13 @@ Request:
 &lt;span class="k"&gt;print&lt;/span&gt; &lt;span class="n"&gt;user&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;name&lt;/span&gt;  &lt;span class="c1"&gt;# Eric&lt;/span&gt;
 &lt;/pre&gt;&lt;/div&gt;
 &lt;div class="section" id="id1"&gt;
-&lt;h2&gt;参考资料&lt;/h2&gt;
+&lt;h2 id="hidid1"&gt;参考资料&lt;a class="headerlink" href="#hidid1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;ul class="simple"&gt;
 &lt;li&gt;&lt;a class="reference external" href="https://flask-webtest.readthedocs.org/en/latest/#using-flask-webtest-with-flask-sqlalchemy"&gt;https://flask-webtest.readthedocs.org/en/latest/#using-flask-webtest-with-flask-sqlalchemy&lt;/a&gt;&lt;/li&gt;
 &lt;/ul&gt;
 &lt;/div&gt;
 </description><dc:creator xmlns:dc="http://purl.org/dc/elements/1.1/">mozillazg</dc:creator><pubDate>Mon, 22 Dec 2014 00:00:00 +0000</pubDate><guid>tag:mozillazg.github.io,2014-12-22:2014/12/python-sqlalchemy-fix-Instance-is-not-bound-to-a-Session-error.html</guid></item><item><title>[python] redis-py 模块使用时需要注意的一些事情</title><link>https://mozillazg.github.io/2014/12/python-redis-py-notes.html</link><description>&lt;div class="section" id="redis-strictredis"&gt;
-&lt;h2&gt;Redis 类 与 StrictRedis 类&lt;/h2&gt;
+&lt;h2 id="hidredis-strictredis"&gt;Redis 类 与 StrictRedis 类&lt;a class="headerlink" href="#hidredis-strictredis" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;p&gt;&lt;tt class="docutils literal"&gt;Redis&lt;/tt&gt; 类 与 &lt;tt class="docutils literal"&gt;StrictRedis&lt;/tt&gt; 类方法的一些差异（&lt;tt class="docutils literal"&gt;StrictRedis&lt;/tt&gt; 实现的是标准 redis 命令）：&lt;/p&gt;
 &lt;table border="1" class="docutils"&gt;
 &lt;colgroup&gt;
@@ -14485,7 +14865,7 @@ Request:
 &lt;/table&gt;
 &lt;/div&gt;
 &lt;div class="section" id="responseerror-wrong-number-of-arguments-for-xxx-command"&gt;
-&lt;h2&gt;ResponseError: wrong number of arguments for 'xxx' command&lt;/h2&gt;
+&lt;h2 id="hidresponseerror-wrong-number-of-arguments-for-xxx-command"&gt;ResponseError: wrong number of arguments for 'xxx' command&lt;a class="headerlink" href="#hidresponseerror-wrong-number-of-arguments-for-xxx-command" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;p&gt;当使用 &lt;tt class="docutils literal"&gt;*args&lt;/tt&gt;, &lt;tt class="docutils literal"&gt;**kwargs&lt;/tt&gt; 参数时容易出现这个 &lt;tt class="docutils literal"&gt;ResponseError&lt;/tt&gt; 错误。
 使用前需要先检查 &lt;tt class="docutils literal"&gt;args&lt;/tt&gt; 和 &lt;tt class="docutils literal"&gt;kwargs&lt;/tt&gt; 是否为空:&lt;/p&gt;
 &lt;pre class="literal-block"&gt;
@@ -14494,7 +14874,7 @@ if keys:
 &lt;/pre&gt;
 &lt;/div&gt;
 &lt;div class="section" id="id1"&gt;
-&lt;h2&gt;参考资料&lt;/h2&gt;
+&lt;h2 id="hidid1"&gt;参考资料&lt;a class="headerlink" href="#hidid1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;ul class="simple"&gt;
 &lt;li&gt;&lt;a class="reference external" href="https://github.com/andymccurdy/redis-py"&gt;https://github.com/andymccurdy/redis-py&lt;/a&gt;&lt;/li&gt;
 &lt;li&gt;&lt;a class="reference external" href="http://redis-py.readthedocs.org/en/latest/"&gt;http://redis-py.readthedocs.org/en/latest/&lt;/a&gt;&lt;/li&gt;
@@ -14685,7 +15065,7 @@ mysql&amp;gt;show create table child;
 &lt;p&gt;&lt;a class="reference external" href="http://alembic.readthedocs.org/en/latest/ops.html#alembic.operations.Operations.drop_constraint"&gt;drop_constraint&lt;/a&gt; 和 &lt;a class="reference external" href="http://alembic.readthedocs.org/en/latest/ops.html#alembic.operations.Operations.create_foreign_key"&gt;create_foreign_key&lt;/a&gt; 的基本用法已经在上面的注释中有说明了，
 想要更详细的用法，请阅读相应的官方文档。&lt;/p&gt;
 &lt;div class="section" id="id3"&gt;
-&lt;h2&gt;参考资料&lt;/h2&gt;
+&lt;h2 id="hidid3"&gt;参考资料&lt;a class="headerlink" href="#hidid3" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;ul class="simple"&gt;
 &lt;li&gt;&lt;a class="reference external" href="http://alembic.readthedocs.org/en/latest/ops.html#alembic.operations.Operations.create_foreign_key"&gt;create_foreign_key Operation Reference — Alembic 0.7.0 documentation&lt;/a&gt;&lt;/li&gt;
 &lt;li&gt;&lt;a class="reference external" href="http://alembic.readthedocs.org/en/latest/ops.html#alembic.operations.Operations.drop_constraint"&gt;drop_constraint Operation Reference — Alembic 0.7.0 documentation&lt;/a&gt;&lt;/li&gt;
@@ -14746,7 +15126,7 @@ UPDATE alembic_version SET version_num='4475103466d3';
 &lt;p&gt;通过 &lt;tt class="docutils literal"&gt;alter_column&lt;/tt&gt; 方法进行重命名的基本用法就是 &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;alter_column('表名',&lt;/span&gt; '先有的列名', &lt;span class="pre"&gt;new_column_name='重命名后的列名',&lt;/span&gt; existring_type=字段类型)&lt;/tt&gt;&lt;/p&gt;
 &lt;p&gt;通过 &lt;tt class="docutils literal"&gt;alter_column&lt;/tt&gt; 方法可以更多的 &lt;tt class="docutils literal"&gt;ALTER TABLE&lt;/tt&gt; 操作，详见 &lt;a class="reference external" href="http://alembic.readthedocs.org/en/latest/ops.html#alembic.operations.Operations.alter_column"&gt;文档&lt;/a&gt;&lt;/p&gt;
 &lt;div class="section" id="id2"&gt;
-&lt;h2&gt;参考&lt;/h2&gt;
+&lt;h2 id="hidid2"&gt;参考&lt;a class="headerlink" href="#hidid2" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;ul class="simple"&gt;
 &lt;li&gt;&lt;a class="reference external" href="http://alembic.readthedocs.org/en/latest/ops.html#alembic.operations.Operations.alter_column"&gt;Operation Reference — Alembic 0.7.0 documentation&lt;/a&gt;&lt;/li&gt;
 &lt;/ul&gt;
@@ -14850,7 +15230,7 @@ rpm -Uvh http://dl.iuscommunity.org/pub/ius/stable/CentOS/7/x86_64/ius-release-1
 &lt;/pre&gt;&lt;/div&gt;
 &lt;p&gt;在线演示地址： &lt;a class="reference external" href="http://play.golang.org/p/SB8LeLNdA8"&gt;http://play.golang.org/p/SB8LeLNdA8&lt;/a&gt;&lt;/p&gt;
 &lt;div class="section" id="id1"&gt;
-&lt;h2&gt;参考资料&lt;/h2&gt;
+&lt;h2 id="hidid1"&gt;参考资料&lt;a class="headerlink" href="#hidid1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;ul class="simple"&gt;
 &lt;li&gt;&lt;a class="reference external" href="http://stackoverflow.com/questions/24534072/golang-how-to-compare-struct-slice-map-is-equal"&gt;go - golang - how to compare struct, slice, map is equal? - Stack Overflow&lt;/a&gt;&lt;/li&gt;
 &lt;/ul&gt;
@@ -14904,7 +15284,7 @@ Query Error: AUTOINCREMENT is only allowed on an INTEGER PRIMARY KEY Unable to e
     &lt;span class="k"&gt;return&lt;/span&gt; &lt;span class="s2"&gt;&amp;quot;INTEGER&amp;quot;&lt;/span&gt;
 &lt;/pre&gt;&lt;/div&gt;
 &lt;div class="section" id="id1"&gt;
-&lt;h2&gt;参考资料&lt;/h2&gt;
+&lt;h2 id="hidid1"&gt;参考资料&lt;a class="headerlink" href="#hidid1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;ul class="simple"&gt;
 &lt;li&gt;&lt;a class="reference external" href="https://bitbucket.org/zzzeek/sqlalchemy/issue/2074/map-biginteger-type-to-integer-to-allow"&gt;zzzeek / sqlalchemy / issues / #2074 - Map BigInteger type to INTEGER to allow AUTOINCREMENT to work —— Bitbucket&lt;/a&gt;&lt;/li&gt;
 &lt;li&gt;&lt;a class="reference external" href="http://docs.sqlalchemy.org/en/rel_0_9/core/compiler.html?highlight=ext.compiler#sqlalchemy.ext.compiler.compiles"&gt;Custom SQL Constructs and Compilation Extension —— SQLAlchemy 0.9 Documentation&lt;/a&gt;&lt;/li&gt;
@@ -14947,7 +15327,7 @@ Query Error: AUTOINCREMENT is only allowed on an INTEGER PRIMARY KEY Unable to e
 &lt;span class="n"&gt;reqparse&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;add_argument&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;description&amp;#39;&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="nb"&gt;type&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="nb"&gt;unicode&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;required&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="bp"&gt;False&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;nullable&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="bp"&gt;True&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
 &lt;/pre&gt;&lt;/div&gt;
 &lt;div class="section" id="id1"&gt;
-&lt;h2&gt;参考资料&lt;/h2&gt;
+&lt;h2 id="hidid1"&gt;参考资料&lt;a class="headerlink" href="#hidid1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;ul class="simple"&gt;
 &lt;li&gt;&lt;a class="reference external" href="https://github.com/twilio/flask-restful/blob/master/flask_restful/reqparse.py"&gt;flask-restful/reqparse.py at master · twilio/flask-restful&lt;/a&gt;&lt;/li&gt;
 &lt;/ul&gt;
@@ -15012,7 +15392,7 @@ Query Error: AUTOINCREMENT is only allowed on an INTEGER PRIMARY KEY Unable to e
 &lt;/pre&gt;&lt;/div&gt;
 &lt;p&gt;在线演示地址：&lt;a class="reference external" href="http://play.golang.org/p/fECMMK8Rja"&gt;http://play.golang.org/p/fECMMK8Rja&lt;/a&gt;&lt;/p&gt;
 &lt;div class="section" id="id1"&gt;
-&lt;h2&gt;参考资料&lt;/h2&gt;
+&lt;h2 id="hidid1"&gt;参考资料&lt;a class="headerlink" href="#hidid1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;ul class="simple"&gt;
 &lt;li&gt;&lt;a class="reference external" href="http://stackoverflow.com/questions/18207772/how-to-wait-for-all-goroutines-to-finish-without-using-time-sleep"&gt;http://stackoverflow.com/questions/18207772/how-to-wait-for-all-goroutines-to-finish-without-using-time-sleep&lt;/a&gt;&lt;/li&gt;
 &lt;li&gt;&lt;a class="reference external" href="http://nathanleclaire.com/blog/2014/02/15/how-to-wait-for-all-goroutines-to-finish-executing-before-continuing/"&gt;http://nathanleclaire.com/blog/2014/02/15/how-to-wait-for-all-goroutines-to-finish-executing-before-continuing/&lt;/a&gt;&lt;/li&gt;
@@ -15057,7 +15437,7 @@ Query Error: AUTOINCREMENT is only allowed on an INTEGER PRIMARY KEY Unable to e
  &lt;span class="n"&gt;MyClass&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;query&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;filter&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;MyClass&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;name&lt;/span&gt; &lt;span class="o"&gt;!=&lt;/span&gt; &lt;span class="s1"&gt;&amp;#39;jim&amp;#39;&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
 &lt;/pre&gt;&lt;/div&gt;
 &lt;div class="section" id="id1"&gt;
-&lt;h2&gt;参考资料&lt;/h2&gt;
+&lt;h2 id="hidid1"&gt;参考资料&lt;a class="headerlink" href="#hidid1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;ul class="simple"&gt;
 &lt;li&gt;&lt;a class="reference external" href="http://docs.sqlalchemy.org/en/rel_0_8/orm/query.html#sqlalchemy.orm.query.Query.filte"&gt;Querying — SQLAlchemy 0.8 Documentation&lt;/a&gt;&lt;/li&gt;
 &lt;li&gt;&lt;a class="reference external" href="http://stackoverflow.com/questions/16093475/flask-sqlalchemy-querying-a-column-with-not-equals"&gt;python - flask sqlalchemy querying a column with not equals - Stack Overflow&lt;/a&gt;&lt;/li&gt;
@@ -15179,7 +15559,7 @@ AddVMOption -Xmx512M
 &lt;/ul&gt;</description><dc:creator xmlns:dc="http://purl.org/dc/elements/1.1/">mozillazg</dc:creator><pubDate>Thu, 17 Jul 2014 00:00:00 +0000</pubDate><guid>tag:mozillazg.github.io,2014-07-17:2014/07/fix-Unable-to-create-an-instance-of-the-Java-Virtual-Machine-Located-at-path-error-for-oracle-sqldeveloper.html</guid><category>sqldeveloper</category></item><item><title>[译][漫]Cyanide &amp; Happiness #1954</title><link>https://mozillazg.github.io/2014/07/what's-he-saying.zh-cn.html</link><description>&lt;p&gt;译自：&lt;a href="http://explosm.net/comics/1954/"&gt;http://explosm.net/comics/1954/&lt;/a&gt;&lt;/p&gt;
 &lt;p&gt;&lt;img alt="what's-he-saying.zh-cn.png" src="/static/images/comics/what's-he-saying.zh-cn.png" /&gt;&lt;/p&gt;</description><dc:creator xmlns:dc="http://purl.org/dc/elements/1.1/">mozillazg</dc:creator><pubDate>Thu, 17 Jul 2014 00:00:00 +0000</pubDate><guid>tag:mozillazg.github.io,2014-07-17:2014/07/what's-he-saying.zh-cn.html</guid><category>comics</category><category>Cyanide and Happiness</category><category>Explosm.net</category><category>漫画</category><category>中文翻译</category><category>汉化</category></item><item><title>[译][漫]Cyanide &amp; Happiness #3621</title><link>https://mozillazg.github.io/2014/07/3621.friends2.zh-cn.html</link><description>&lt;p&gt;译自：&lt;a href="http://explosm.net/comics/3621/"&gt;Cyanide &amp;amp; Happiness #3621 - Explosm.net&lt;/a&gt;&lt;/p&gt;
 &lt;p&gt;&lt;img alt="3621.friends2.zh-cn.png" src="/static/images/comics/3621.friends2.zh-cn.png" /&gt;&lt;/p&gt;</description><dc:creator xmlns:dc="http://purl.org/dc/elements/1.1/">mozillazg</dc:creator><pubDate>Wed, 16 Jul 2014 00:00:00 +0000</pubDate><guid>tag:mozillazg.github.io,2014-07-16:2014/07/3621.friends2.zh-cn.html</guid><category>comics</category><category>Cyanide and Happiness</category><category>Explosm.net</category><category>漫画</category><category>中文翻译</category><category>汉化</category></item><item><title>[python]使用 tox 测试代码在不同环境下的兼容性</title><link>https://mozillazg.github.io/2014/07/python-use-tox-test-code.html</link><description>&lt;div class="section" id="tox"&gt;
-&lt;h2&gt;Tox 是什么？&lt;/h2&gt;
+&lt;h2 id="hidtox"&gt;Tox 是什么？&lt;a class="headerlink" href="#hidtox" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;p&gt;Tox 是个标准的 &lt;a class="reference external" href="https://pypi.python.org/pypi/virtualenv"&gt;virtualenv&lt;/a&gt; 管理器和命令行测试工具。你可以用于:&lt;/p&gt;
 &lt;ul class="simple"&gt;
 &lt;li&gt;检查你的软件包能否在不同的 Python 版本或解释器下正常安装&lt;/li&gt;
@@ -15188,11 +15568,11 @@ AddVMOption -Xmx512M
 &lt;/ul&gt;
 &lt;/div&gt;
 &lt;div class="section" id="id1"&gt;
-&lt;h2&gt;安装&lt;/h2&gt;
+&lt;h2 id="hidid1"&gt;安装&lt;a class="headerlink" href="#hidid1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;p&gt;&lt;tt class="docutils literal"&gt;pip install tox&lt;/tt&gt;&lt;/p&gt;
 &lt;/div&gt;
 &lt;div class="section" id="id2"&gt;
-&lt;h2&gt;简单使用&lt;/h2&gt;
+&lt;h2 id="hidid2"&gt;简单使用&lt;a class="headerlink" href="#hidid2" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;p&gt;&lt;strong&gt;使用前，请确保系统中已经安装了不同版本的 Python 解释器&lt;/strong&gt; :&lt;/p&gt;
 &lt;pre class="literal-block"&gt;
  ~$ python -V
@@ -15224,7 +15604,7 @@ setup(
 &lt;/pre&gt;
 &lt;p&gt;下面将演示如何使用 tox 测试这个程序。&lt;/p&gt;
 &lt;div class="section" id="id3"&gt;
-&lt;h3&gt;建立配置文件&lt;/h3&gt;
+&lt;h3 id="hidid3"&gt;建立配置文件&lt;a class="headerlink" href="#hidid3" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
 &lt;p&gt;可以通过 &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;tox-quickstart&lt;/span&gt;&lt;/tt&gt; 命令或文本编辑器在 &lt;strong&gt;项目根目录/setup.py 所在目录&lt;/strong&gt; 建立配置文件 tox.ini :&lt;/p&gt;
 &lt;pre class="literal-block"&gt;
 # content of: tox.ini , put in same dir as setup.py
@@ -15293,9 +15673,9 @@ ERROR:   py34: commands failed
 &lt;/div&gt;
 &lt;/div&gt;
 &lt;div class="section" id="id4"&gt;
-&lt;h2&gt;高级使用&lt;/h2&gt;
+&lt;h2 id="hidid4"&gt;高级使用&lt;a class="headerlink" href="#hidid4" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;div class="section" id="id5"&gt;
-&lt;h3&gt;自定义环境&lt;/h3&gt;
+&lt;h3 id="hidid5"&gt;自定义环境&lt;a class="headerlink" href="#hidid5" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
 &lt;p&gt;默认支持如下环境名称：&lt;/p&gt;
 &lt;ul class="simple"&gt;
 &lt;li&gt;py24  (python 2.4)&lt;/li&gt;
@@ -15486,7 +15866,7 @@ Check your configuration in config/configuration.yml.
 &lt;/blockquote&gt;
 &lt;p&gt;下面介绍三种定义抽象基类的方法。&lt;/p&gt;
 &lt;div class="section" id="assert"&gt;
-&lt;h2&gt;使用 assert 语句&lt;/h2&gt;
+&lt;h2 id="hidassert"&gt;使用 assert 语句&lt;a class="headerlink" href="#hidassert" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="k"&gt;class&lt;/span&gt; &lt;span class="nc"&gt;BaseClass&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="nb"&gt;object&lt;/span&gt;&lt;span class="p"&gt;):&lt;/span&gt;
     &lt;span class="k"&gt;def&lt;/span&gt; &lt;span class="nf"&gt;action&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="bp"&gt;self&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;foobar&lt;/span&gt;&lt;span class="p"&gt;):&lt;/span&gt;
         &lt;span class="k"&gt;assert&lt;/span&gt; &lt;span class="bp"&gt;False&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="s1"&gt;&amp;#39;subclasses of BaseClass must provide an action() method&amp;#39;&lt;/span&gt;
@@ -15506,7 +15886,7 @@ Check your configuration in config/configuration.yml.
 &lt;/pre&gt;&lt;/div&gt;
 &lt;/div&gt;
 &lt;div class="section" id="notimplementederror"&gt;
-&lt;h2&gt;使用 NotImplementedError 异常&lt;/h2&gt;
+&lt;h2 id="hidnotimplementederror"&gt;使用 NotImplementedError 异常&lt;a class="headerlink" href="#hidnotimplementederror" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="k"&gt;class&lt;/span&gt; &lt;span class="nc"&gt;BaseClass&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="nb"&gt;object&lt;/span&gt;&lt;span class="p"&gt;):&lt;/span&gt;
     &lt;span class="k"&gt;def&lt;/span&gt; &lt;span class="nf"&gt;action&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="bp"&gt;self&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;foobar&lt;/span&gt;&lt;span class="p"&gt;):&lt;/span&gt;
         &lt;span class="k"&gt;raise&lt;/span&gt; &lt;span class="ne"&gt;NotImplementedError&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;subclasses of BaseClass must provide an action() method&amp;#39;&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
@@ -15526,7 +15906,7 @@ Check your configuration in config/configuration.yml.
 &lt;/pre&gt;&lt;/div&gt;
 &lt;/div&gt;
 &lt;div class="section" id="abc"&gt;
-&lt;h2&gt;使用 abc 模块&lt;/h2&gt;
+&lt;h2 id="hidabc"&gt;使用 abc 模块&lt;a class="headerlink" href="#hidabc" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;p&gt;python 2.6, 2.7:&lt;/p&gt;
 &lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="kn"&gt;from&lt;/span&gt; &lt;span class="nn"&gt;abc&lt;/span&gt; &lt;span class="kn"&gt;import&lt;/span&gt; &lt;span class="n"&gt;ABCMeta&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;abstractmethod&lt;/span&gt;
 
@@ -15556,7 +15936,7 @@ Check your configuration in config/configuration.yml.
 &lt;p&gt;推荐使用 &lt;tt class="docutils literal"&gt;abc&lt;/tt&gt; 模块，&lt;tt class="docutils literal"&gt;NotImplementedError&lt;/tt&gt; 也比较常用。&lt;/p&gt;
 &lt;/div&gt;
 &lt;div class="section" id="id1"&gt;
-&lt;h2&gt;参考资料&lt;/h2&gt;
+&lt;h2 id="hidid1"&gt;参考资料&lt;a class="headerlink" href="#hidid1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;ul class="simple"&gt;
 &lt;li&gt;&lt;a class="reference external" href="http://book.douban.com/subject/6049132/"&gt;《Python 学习手册第4版》第 695 ~ 697 页&lt;/a&gt;&lt;/li&gt;
 &lt;li&gt;&lt;a class="reference external" href="http://pymotw.com/2/abc/"&gt;abc – Abstract Base Classes - Python Module of the Week&lt;/a&gt;&lt;/li&gt;
@@ -15814,14 +16194,14 @@ print x
 &lt;/li&gt;
 &lt;/ul&gt;
 &lt;div class="section" id="id1"&gt;
-&lt;h2&gt;参考&lt;/h2&gt;
+&lt;h2 id="hidid1"&gt;参考&lt;a class="headerlink" href="#hidid1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;ul class="simple"&gt;
 &lt;li&gt;&lt;a class="reference external" href="http://book.douban.com/subject/6049132/"&gt;《Python 学习手册第4版》第 612 ~ 613 页&lt;/a&gt;&lt;/li&gt;
 &lt;/ul&gt;
 &lt;/div&gt;
 </description><dc:creator xmlns:dc="http://purl.org/dc/elements/1.1/">mozillazg</dc:creator><pubDate>Mon, 02 Jun 2014 00:00:00 +0000</pubDate><guid>tag:mozillazg.github.io,2014-06-02:2014/06/python-import-xy.html</guid></item><item><title>[python] 函数陷阱</title><link>https://mozillazg.github.io/2014/05/python-function-xyz.html</link><description>&lt;p&gt;本文说的这几个问题适用于 &lt;tt class="docutils literal"&gt;python 2.6+&lt;/tt&gt;  。&lt;/p&gt;
 &lt;div class="section" id="unboundlocalerror"&gt;
-&lt;h2&gt;UnboundLocalError&lt;/h2&gt;
+&lt;h2 id="hidunboundlocalerror"&gt;UnboundLocalError&lt;a class="headerlink" href="#hidunboundlocalerror" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="n"&gt;In&lt;/span&gt; &lt;span class="p"&gt;[&lt;/span&gt;&lt;span class="mi"&gt;1&lt;/span&gt;&lt;span class="p"&gt;]:&lt;/span&gt; &lt;span class="n"&gt;a&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="mi"&gt;1&lt;/span&gt;
 &lt;span class="n"&gt;In&lt;/span&gt; &lt;span class="p"&gt;[&lt;/span&gt;&lt;span class="mi"&gt;2&lt;/span&gt;&lt;span class="p"&gt;]:&lt;/span&gt; &lt;span class="k"&gt;def&lt;/span&gt; &lt;span class="nf"&gt;func&lt;/span&gt;&lt;span class="p"&gt;():&lt;/span&gt;
    &lt;span class="o"&gt;...&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;     &lt;span class="k"&gt;print&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;a&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
@@ -15887,7 +16267,7 @@ print x
 &lt;/pre&gt;&lt;/div&gt;
 &lt;/div&gt;
 &lt;div class="section" id="id1"&gt;
-&lt;h2&gt;使用可变类型作为默认参数&lt;/h2&gt;
+&lt;h2 id="hidid1"&gt;使用可变类型作为默认参数&lt;a class="headerlink" href="#hidid1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;p&gt;将可变类型设为函数的默认参数会导致出现背离我们初衷的情况：&lt;/p&gt;
 &lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="n"&gt;In&lt;/span&gt; &lt;span class="p"&gt;[&lt;/span&gt;&lt;span class="mi"&gt;1&lt;/span&gt;&lt;span class="p"&gt;]:&lt;/span&gt; &lt;span class="k"&gt;def&lt;/span&gt; &lt;span class="nf"&gt;func&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;a&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="p"&gt;[]):&lt;/span&gt;
    &lt;span class="o"&gt;...&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;     &lt;span class="n"&gt;a&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;append&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="mi"&gt;1&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
@@ -15962,7 +16342,7 @@ print x
 &lt;/ul&gt;
 &lt;/div&gt;
 &lt;div class="section" id="id2"&gt;
-&lt;h2&gt;嵌套作用域的循环变量&lt;/h2&gt;
+&lt;h2 id="hidid2"&gt;嵌套作用域的循环变量&lt;a class="headerlink" href="#hidid2" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;p&gt;在进行嵌套函数作用域查找时，&lt;strong&gt;处理在循环中被改变的嵌套变量时要小心，所有的引用都将会使用在最后的循环迭代中对应的值&lt;/strong&gt; 。作为替代，请使用默认参数来保存循环变量的值。&lt;/p&gt;
 &lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="n"&gt;In&lt;/span&gt; &lt;span class="p"&gt;[&lt;/span&gt;&lt;span class="mi"&gt;43&lt;/span&gt;&lt;span class="p"&gt;]:&lt;/span&gt; &lt;span class="k"&gt;def&lt;/span&gt; &lt;span class="nf"&gt;func&lt;/span&gt;&lt;span class="p"&gt;():&lt;/span&gt;
    &lt;span class="o"&gt;....&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;     &lt;span class="n"&gt;a&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="p"&gt;[]&lt;/span&gt;
@@ -16002,7 +16382,7 @@ print x
 &lt;/pre&gt;&lt;/div&gt;
 &lt;/div&gt;
 &lt;div class="section" id="id3"&gt;
-&lt;h2&gt;参考&lt;/h2&gt;
+&lt;h2 id="hidid3"&gt;参考&lt;a class="headerlink" href="#hidid3" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;ul class="simple"&gt;
 &lt;li&gt;&lt;a class="reference external" href="http://book.douban.com/subject/6049132/"&gt;《Python 学习手册第4版》第 16 ~ 20 章&lt;/a&gt;&lt;/li&gt;
 &lt;/ul&gt;
@@ -16127,7 +16507,7 @@ class Foo(models.Model):
     txt = UTF8TextFileField(u'文本文件')
 &lt;/pre&gt;
 &lt;div class="section" id="id1"&gt;
-&lt;h2&gt;参考资料&lt;/h2&gt;
+&lt;h2 id="hidid1"&gt;参考资料&lt;a class="headerlink" href="#hidid1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;ul class="simple"&gt;
 &lt;li&gt;&lt;a class="reference external" href="https://github.com/django/django/blob/master/django/core/files/base.py"&gt;django/django/core/files/base.py at master · django/django · GitHub&lt;/a&gt;&lt;/li&gt;
 &lt;li&gt;&lt;a class="reference external" href="http://south.readthedocs.org/en/latest/tutorial/part4.html#part-4-custom-fields"&gt;Part 4: Custom Fields — South 0.8.4 documentation&lt;/a&gt;&lt;/li&gt;
@@ -16176,7 +16556,7 @@ class Foo(models.Model):
     &lt;span class="n"&gt;f&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;write&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="s1"&gt;u&amp;#39;a&amp;#39;&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
 &lt;/pre&gt;&lt;/div&gt;
 &lt;div class="section" id="id1"&gt;
-&lt;h2&gt;参考资料&lt;/h2&gt;
+&lt;h2 id="hidid1"&gt;参考资料&lt;a class="headerlink" href="#hidid1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;ul class="simple"&gt;
 &lt;li&gt;&lt;a class="reference external" href="http://stackoverflow.com/questions/8466460/how-to-read-a-file-that-can-be-saved-as-either-ansi-or-unicode-in-python"&gt;how to read a file that can be saved as either ansi or unicode in python?&lt;/a&gt;&lt;/li&gt;
 &lt;li&gt;&lt;a class="reference external" href="http://docs.python.org/2/library/codecs.html#standard-encodings"&gt;7.8. codecs — Codec registry and base classes — Python v2.7.6 documentation&lt;/a&gt;&lt;/li&gt;
@@ -16198,7 +16578,7 @@ $ git branch -r | awk '{print $1}' | egrep -v -f /dev/fd/0 &amp;lt;(git branch -
  已删除分支 hotfix-xx（曾为 5c13813）。
 &lt;/pre&gt;
 &lt;div class="section" id="id1"&gt;
-&lt;h2&gt;参考资料&lt;/h2&gt;
+&lt;h2 id="hidid1"&gt;参考资料&lt;a class="headerlink" href="#hidid1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;ul class="simple"&gt;
 &lt;li&gt;&lt;a class="reference external" href="http://stackoverflow.com/questions/1072171/how-do-you-remove-an-invalid-remote-branch-reference-from-git"&gt;How do you remove an invalid remote branch reference from Git? - Stack Overflow&lt;/a&gt;&lt;/li&gt;
 &lt;li&gt;&lt;a class="reference external" href="http://stackoverflow.com/questions/13064613/git-how-to-prune-local-tracking-branches-that-do-not-exist-on-remote-anymore"&gt;Git: How to prune local tracking branches that do not exist on remote anymore - Stack Overflow&lt;/a&gt;&lt;/li&gt;
@@ -16273,7 +16653,7 @@ $ git branch -r | awk '{print $1}' | egrep -v -f /dev/fd/0 &amp;lt;(git branch -
 &lt;p&gt;通过定义 &lt;tt class="docutils literal"&gt;__slots__&lt;/tt&gt; 替换掉了类的实例的 &lt;tt class="docutils literal"&gt;__dict__&lt;/tt&gt; 属性，阻止新增属性。
 通过覆盖 &lt;tt class="docutils literal"&gt;__setattr__&lt;/tt&gt; 方法，阻止修改现有属性的值。&lt;/p&gt;
 &lt;div class="section" id="id1"&gt;
-&lt;h2&gt;参考资料&lt;/h2&gt;
+&lt;h2 id="hidid1"&gt;参考资料&lt;a class="headerlink" href="#hidid1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;ul class="simple"&gt;
 &lt;li&gt;&lt;a class="reference external" href="http://www.blog.pythonlibrary.org/2014/01/17/how-to-create-immutable-classes-in-python/"&gt;How to Create “Immutable” Classes in Python « The Mouse Vs. The Python&lt;/a&gt;&lt;/li&gt;
 &lt;li&gt;&lt;a class="reference external" href="http://stackoverflow.com/questions/472000/python-slots"&gt;Python __slots__ - Stack Overflow&lt;/a&gt;&lt;/li&gt;
@@ -16304,7 +16684,7 @@ $ git branch -r | awk '{print $1}' | egrep -v -f /dev/fd/0 &amp;lt;(git branch -
 &lt;span class="go"&gt;你好&lt;/span&gt;
 &lt;/pre&gt;&lt;/div&gt;
 &lt;div class="section" id="id1"&gt;
-&lt;h2&gt;参考资料&lt;/h2&gt;
+&lt;h2 id="hidid1"&gt;参考资料&lt;a class="headerlink" href="#hidid1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;ul class="simple"&gt;
 &lt;li&gt;&lt;a class="reference external" href="http://www.cnblogs.com/bamanzi/archive/2012/08/16/python-encoding-when-redirection.html"&gt;Python脚本重定向其输出时的编码问题 - 巴蛮子 - 博客园&lt;/a&gt;&lt;/li&gt;
 &lt;li&gt;&lt;a class="reference external" href="https://wiki.python.org/moin/PrintFails"&gt;PrintFails - Python Wiki&lt;/a&gt;&lt;/li&gt;
@@ -16358,7 +16738,7 @@ $ git branch -r | awk '{print $1}' | egrep -v -f /dev/fd/0 &amp;lt;(git branch -
 &lt;/pre&gt;&lt;/div&gt;
 &lt;p&gt;以后遇到要加速 for 循环的时候，可以试试 &lt;tt class="docutils literal"&gt;multiprocessing.dummy&lt;/tt&gt; 。&lt;/p&gt;
 &lt;div class="section" id="id1"&gt;
-&lt;h2&gt;参考资料&lt;/h2&gt;
+&lt;h2 id="hidid1"&gt;参考资料&lt;a class="headerlink" href="#hidid1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;ul class="simple"&gt;
 &lt;li&gt;&lt;a class="reference external" href="https://medium.com/p/40e9b2b36148"&gt;A Better Model for Day to Day Threading Tasks — Medium&lt;/a&gt;&lt;/li&gt;
 &lt;li&gt;&lt;a class="reference external" href="http://docs.python.org/2/library/multiprocessing.html"&gt;16.6. multiprocessing — Process-based “threading” interface — Python v2.7.6 documentation&lt;/a&gt;&lt;/li&gt;
@@ -16408,7 +16788,7 @@ $ git branch -r | awk '{print $1}' | egrep -v -f /dev/fd/0 &amp;lt;(git branch -
 &lt;/pre&gt;&lt;/div&gt;
 &lt;p&gt;穿越跳板机的原理是： &lt;a class="reference external" href="http://en.wikipedia.org/wiki/Tunneling_protocol"&gt;SSH 隧道技术&lt;/a&gt; 。&lt;/p&gt;
 &lt;div class="section" id="id1"&gt;
-&lt;h2&gt;参考资料&lt;/h2&gt;
+&lt;h2 id="hidid1"&gt;参考资料&lt;a class="headerlink" href="#hidid1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;ul class="simple"&gt;
 &lt;li&gt;&lt;a class="reference external" href="http://docs.fabfile.org/en/latest/usage/env.html#gateway"&gt;The environment dictionary, env — Fabric 1.8.1 documentation&lt;/a&gt;&lt;/li&gt;
 &lt;li&gt;&lt;a class="reference external" href="https://github.com/fabric/fabric/issues/976"&gt;Pre-filling env.passwords no longer works in 1.7 · Issue #976 · fabric/fabric · GitHub&lt;/a&gt;&lt;/li&gt;
@@ -16439,7 +16819,7 @@ $ git branch -r | awk '{print $1}' | egrep -v -f /dev/fd/0 &amp;lt;(git branch -
 &lt;span class="err"&gt;你好&lt;/span&gt;
 &lt;/pre&gt;&lt;/div&gt;
 &lt;div class="section" id="id1"&gt;
-&lt;h2&gt;参考资料&lt;/h2&gt;
+&lt;h2 id="hidid1"&gt;参考资料&lt;a class="headerlink" href="#hidid1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;ul class="simple"&gt;
 &lt;li&gt;&lt;a class="reference external" href="http://docs.python.org/2/library/codecs.html#python-specific-encodings"&gt;7.8. codecs — Codec registry and base classes — Python v2.7.6 documentation&lt;/a&gt;&lt;/li&gt;
 &lt;/ul&gt;
@@ -16518,7 +16898,7 @@ $ git branch -r | awk '{print $1}' | egrep -v -f /dev/fd/0 &amp;lt;(git branch -
     &lt;span class="n"&gt;conf&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;readfp&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;StringIO&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;content&lt;/span&gt;&lt;span class="p"&gt;))&lt;/span&gt;
 &lt;/pre&gt;&lt;/div&gt;
 &lt;div class="section" id="id1"&gt;
-&lt;h2&gt;参考&lt;/h2&gt;
+&lt;h2 id="hidid1"&gt;参考&lt;a class="headerlink" href="#hidid1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;ul class="simple"&gt;
 &lt;li&gt;&lt;a class="reference external" href="http://bugs.python.org/issue7519"&gt;Issue 7519: ConfigParser can't read files with BOM markers - Python tracker&lt;/a&gt;&lt;/li&gt;
 &lt;li&gt;&lt;a class="reference external" href="http://docs.python.org/2/library/configparser.html"&gt;13.2. ConfigParser — Configuration file parser — Python v2.7.5 documentation&lt;/a&gt;&lt;/li&gt;
@@ -16675,7 +17055,7 @@ $ git branch -r | awk '{print $1}' | egrep -v -f /dev/fd/0 &amp;lt;(git branch -
 &lt;/tbody&gt;
 &lt;/table&gt;
 &lt;div class="section" id="id1"&gt;
-&lt;h2&gt;参考&lt;/h2&gt;
+&lt;h2 id="hidid1"&gt;参考&lt;a class="headerlink" href="#hidid1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;ul class="simple"&gt;
 &lt;li&gt;&lt;a class="reference external" href="http://superuser.com/questions/619016/what-is-the-difference-between-command-command-and-command-command"&gt;linux - what is the difference between &amp;quot;command &amp;amp;&amp;amp; command&amp;quot; and &amp;quot;command ; command&amp;quot; - Super User&lt;/a&gt;&lt;/li&gt;
 &lt;/ul&gt;

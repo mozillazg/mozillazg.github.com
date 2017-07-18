@@ -14,15 +14,19 @@
 
         <meta name="author" content="mozillazg" />
         <meta name="keywords" content="import,sys.meta_path,sitecustomize,usercustomize,探针,APM" />
-        <meta name="description" content="本文将简单讲述一下 Python 探针的实现原理。 同时为了验证这个原理，我们也会一起来实现一个简单的统计指定函数执行时间的探针程序。 探针的实现主要涉及以下几个知识点: sys.meta_path sitecustomize.py sys.meta_path sys.meta_path 这个简单的来说就是可以实现 import hook 的功能， 当执行 import 相关的操作时，会触发 sys.meta_path 列表中定义的对象。 关于 sys.meta_path 更详细的资料请查阅 python 文档中 sys.meta_path 相关内容以及 PEP 0302 。 sys.meta_path 中的对象需要实现一个 find_module 方法， 这个 find_module 方法返回 None 或一个实现了 load_module 方法的对象 (代码可以从 github …" />
+        <meta name="description" content="本文将简单讲述一下 Python 探针的实现原理。 同时为了验证这个原理，我们也会一起来实现一个简单的统计指定函数执行时间的探针程序。 探针的实现主要涉及以下几个知识点: sys.meta_path sitecustomize.py sys.meta_path¶ sys.meta_path 这个简单的来说就是可以实现 import hook 的功能， 当执行 import 相关的操作时，会触发 sys.meta_path 列表中定义的对象。 关于 sys.meta_path 更详细的资料请查阅 python 文档中 sys.meta_path 相关内容以及 PEP 0302 。 sys.meta_path 中的对象需要实现一个 find_module 方法， 这个 find_module 方法返回 None 或一个实现了 load_module 方法的对象 (代码可以从 github …" />
 
-    <link href="https://mozillazg.github.io/theme/css/tocbot.css" rel="stylesheet">
+    <style>
+      .js-toc {
+        margin-bottom: 20px;
+      }
+    </style>
 
         <meta property="og:site_name" content="Huang Huang 的博客" />
         <meta property="og:type" content="article"/>
         <meta property="og:title" content="Python 探针实现原理"/>
         <meta property="og:url" content="https://mozillazg.github.io/2016/04/apm-python-agent-principle.html"/>
-        <meta property="og:description" content="本文将简单讲述一下 Python 探针的实现原理。 同时为了验证这个原理，我们也会一起来实现一个简单的统计指定函数执行时间的探针程序。 探针的实现主要涉及以下几个知识点: sys.meta_path sitecustomize.py sys.meta_path sys.meta_path 这个简单的来说就是可以实现 import hook 的功能， 当执行 import 相关的操作时，会触发 sys.meta_path 列表中定义的对象。 关于 sys.meta_path 更详细的资料请查阅 python 文档中 sys.meta_path 相关内容以及 PEP 0302 。 sys.meta_path 中的对象需要实现一个 find_module 方法， 这个 find_module 方法返回 None 或一个实现了 load_module 方法的对象 (代码可以从 github …"/>
+        <meta property="og:description" content="本文将简单讲述一下 Python 探针的实现原理。 同时为了验证这个原理，我们也会一起来实现一个简单的统计指定函数执行时间的探针程序。 探针的实现主要涉及以下几个知识点: sys.meta_path sitecustomize.py sys.meta_path¶ sys.meta_path 这个简单的来说就是可以实现 import hook 的功能， 当执行 import 相关的操作时，会触发 sys.meta_path 列表中定义的对象。 关于 sys.meta_path 更详细的资料请查阅 python 文档中 sys.meta_path 相关内容以及 PEP 0302 。 sys.meta_path 中的对象需要实现一个 find_module 方法， 这个 find_module 方法返回 None 或一个实现了 load_module 方法的对象 (代码可以从 github …"/>
         <meta property="article:published_time" content="2016-04-04" />
             <meta property="article:section" content="python" />
             <meta property="article:tag" content="import" />
@@ -88,7 +92,7 @@ Huang Huang 的博客            </a>
 <!-- End Banner -->
 <div class="container">
     <div class="row">
-        <div class="col-lg-11">
+        <div class="col-lg-12">
     <section id="content" class="yue">
         <article>
             <header class="text-center">
@@ -125,6 +129,7 @@ Huang Huang 的博客            </a>
 	<a href="https://mozillazg.github.io/tag/apm.html">APM</a>
     
 </footer><!-- /.post-info -->                </div>
+                <div class="js-toc"></div>
                 <div>
                 <p>本文将简单讲述一下 Python 探针的实现原理。
 同时为了验证这个原理，我们也会一起来实现一个简单的统计指定函数执行时间的探针程序。</p>
@@ -134,7 +139,7 @@ Huang Huang 的博客            </a>
 <li>sitecustomize.py</li>
 </ul>
 <div class="section" id="sys-meta-path">
-<h2>sys.meta_path</h2>
+<h2 id="hidsys-meta-path">sys.meta_path<a class="headerlink" href="#hidsys-meta-path" title="Permalink to this headline">¶</a></h2>
 <p><tt class="docutils literal">sys.meta_path</tt> 这个简单的来说就是可以实现 import hook 的功能，
 当执行 import 相关的操作时，会触发 <tt class="docutils literal">sys.meta_path</tt> 列表中定义的对象。
 关于 <tt class="docutils literal">sys.meta_path</tt> 更详细的资料请查阅 python 文档中 <a class="reference external" href="https://docs.python.org/3/library/sys.html#sys.meta_path">sys.meta_path</a> 相关内容以及
@@ -293,7 +298,7 @@ spent 3.004966974258423s
 答案就是可以通过定义 sitecustomize.py 的方式来实现这个功能。</p>
 </div>
 <div class="section" id="sitecustomize-py">
-<h2>sitecustomize.py</h2>
+<h2 id="hidsitecustomize-py">sitecustomize.py<a class="headerlink" href="#hidsitecustomize-py" title="Permalink to this headline">¶</a></h2>
 <p>简单的说就是，python 解释器初始化的时候会自动 import <tt class="docutils literal">PYTHONPATH</tt> 下存在的
 <tt class="docutils literal">sitecustomize</tt> 和 <tt class="docutils literal">usercustomize</tt> 模块:</p>
 <p>实验项目的目录结构如下(代码可以从 github 上下载 <a class="reference external" href="https://github.com/mozillazg/apm-python-agent-principle/tree/master/part4">part4</a>)</p>
@@ -367,7 +372,7 @@ spent 3.005002021789551s
 <p>下面我们也要来实现一个类似的命令行程序，就叫 <tt class="docutils literal">agent.py</tt> 吧。</p>
 </div>
 <div class="section" id="agent">
-<h2>agent</h2>
+<h2 id="hidagent">agent<a class="headerlink" href="#hidagent" title="Permalink to this headline">¶</a></h2>
 <p>还是在上一个程序的基础上修改。先调整一个目录结构，把 hook 操作放到一个单独的目录下，
 方便设置 <tt class="docutils literal">PYTHONPATH</tt> 后不会有其他的干扰（代码可以从 github 上下载 <a class="reference external" href="https://github.com/mozillazg/apm-python-agent-principle/tree/master/part6">part6</a> ）。</p>
 <pre class="literal-block">
@@ -545,7 +550,56 @@ $(document).ready(function(){
     // Where to grab the headings to build the table of contents.
     contentSelector: '.entry-content',
     // Which headings to grab inside of the contentSelector element.
-    headingSelector: 'h2, h3, h4, h5',
+    headingSelector: 'h2, h3, h4,h5',
+    // Headings that match the ignoreSelector will be skipped.
+    ignoreSelector: '.js-toc-ignore',
+    // Main class to add to links.
+    linkClass: 'toc-link',
+    // Extra classes to add to links.
+    extraLinkClasses: '',
+    // Class to add to active links,
+    // the link corresponding to the top most heading on the page.
+    activeLinkClass: 'is-active-link',
+    // Main class to add to lists.
+    listClass: 'toc-list',
+    // Extra classes to add to lists.
+    extraListClasses: '',
+    // Class that gets added when a list should be collapsed.
+    isCollapsedClass: 'is-collapsed',
+    // Class that gets added when a list should be able
+    // to be collapsed but isn't necessarily collpased.
+    collapsibleClass: 'is-collapsible',
+    // Class to add to list items.
+    listItemClass: 'toc-list-item',
+    // How many heading levels should not be collpased.
+    // For example, number 6 will show everything since
+    // there are only 6 heading levels and number 0 will collpase them all.
+    // The sections that are hidden will open
+    // and close as you scroll to headings within them.
+    collapseDepth: 6,
+    // Smooth scrolling enabled.
+    smoothScroll: true,
+    // Smooth scroll duration.
+    smoothScrollDuration: 420,
+    // Callback for scroll end (requires: smoothScroll).
+    scrollEndCallback: function (e) {},
+    // Headings offset between the headings and the top of the document (this is meant for minor adjustments).
+    headingsOffset: 0,
+    // Timeout between events firing to make sure it's
+    // not too rapid (for performance reasons).
+    throttleTimeout: 50,
+    // Element to add the positionFixedClass to.
+    positionFixedSelector: null,
+    // Fixed position class to add to make sidebar fixed after scrolling
+    // down past the fixedSidebarOffset.
+    positionFixedClass: 'is-position-fixed',
+    // fixedSidebarOffset can be any number but by default is set
+    // to auto which sets the fixedSidebarOffset to the sidebar
+    // element's offsetTop from the top of the document on init.
+    fixedSidebarOffset: 'auto',
+    // includeHtml can be set to true to include the HTML markup from the
+    // heading node instead of just including the textContent.
+    includeHtml: false
   });
 });
 </script>
