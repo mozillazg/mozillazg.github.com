@@ -1,5 +1,175 @@
 <?xml version="1.0" encoding="utf-8"?>
-<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom"><channel><title>Huang Huang 的博客</title><link>https://mozillazg.github.io/</link><description></description><atom:link href="https://mozillazg.github.io/feeds/all.rss.xml" rel="self"></atom:link><lastBuildDate>Tue, 18 Jul 2017 00:00:00 +0000</lastBuildDate><item><title>Python: time.sleep 与 signal 一起使用可能会出现 time.sleep 失效的情况</title><link>https://mozillazg.github.io/2017/07/python-time-sleep-terminate-by-signal.html</link><description>&lt;p&gt;如题所述，当 &lt;tt class="docutils literal"&gt;time.sleep&lt;/tt&gt; 与 &lt;tt class="docutils literal"&gt;signal&lt;/tt&gt; 一起使用时可能会出现 &lt;tt class="docutils literal"&gt;time.sleep&lt;/tt&gt;
+<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom"><channel><title>Huang Huang 的博客</title><link>https://mozillazg.github.io/</link><description></description><atom:link href="https://mozillazg.github.io/feeds/all.rss.xml" rel="self"></atom:link><lastBuildDate>Thu, 20 Jul 2017 00:00:00 +0000</lastBuildDate><item><title>Python: 僵尸进程的产生和清除方法</title><link>https://mozillazg.github.io/2017/07/python-how-to-generate-kill-clean-zombie-process.html</link><description>&lt;div class="section" id="id1"&gt;
+&lt;h2 id="hidid1"&gt;僵尸进程产生的原因&lt;a class="headerlink" href="#hidid1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;在 unix 或 unix-like
+的系统中，当一个子进程退出后，它就会变成一个僵尸进程，如果父进程没有通过
+&lt;tt class="docutils literal"&gt;wait&lt;/tt&gt;
+系统调用来读取这个子进程的退出状态的话，这个子进程就会一直维持僵尸进程状态。&lt;/p&gt;
+&lt;p&gt;&lt;a class="reference external" href="https://en.wikipedia.org/wiki/Zombie_process"&gt;Zombie process -
+Wikipedia&lt;/a&gt;
+中是这样描述的：&lt;/p&gt;
+&lt;blockquote&gt;
+On Unix and Unix-like computer operating systems, a zombie process
+or defunct process is a process that has completed execution (via
+the exit system call) but still has an entry in the process table:
+it is a process in the &amp;quot;Terminated state&amp;quot;. This occurs for child
+processes, where the entry is still needed to allow the parent
+process to read its child's exit status: once the exit status is
+read via the wait system call, the zombie's entry is removed from
+the process table and it is said to be &amp;quot;reaped&amp;quot;. A child process
+always first becomes a zombie before being removed from the resource
+table. In most cases, under normal system operation zombies are
+immediately waited on by their parent and then reaped by the system
+– processes that stay zombies for a long time are generally an error
+and cause a resource leak.&lt;/blockquote&gt;
+&lt;p&gt;并且僵尸进程无法通过 &lt;tt class="docutils literal"&gt;kill&lt;/tt&gt; 命令来清除。&lt;/p&gt;
+&lt;p&gt;本文将探讨如何手动制造一个僵尸进程以及清除僵尸进程的办法。&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class="section" id="id2"&gt;
+&lt;h2 id="hidid2"&gt;手动制造一个僵尸进程&lt;a class="headerlink" href="#hidid2" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;为了便于后面讲解清除僵尸进程的方法，我们使用日常开发中经常使用的
+&lt;tt class="docutils literal"&gt;multiprocessing&lt;/tt&gt;
+模块来制造僵尸进程（准确的来说是制造一个长时间维持僵尸进程状态的子进程）：&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+$ cat test_a.py
+from multiprocessing import Process, current_process
+import logging
+import os
+import time
+
+logging.basicConfig(
+    level=logging.DEBUG,
+    format='%(asctime)-15s - %(levelname)s - %(message)s'
+)
+
+
+def run():
+    logging.info('exit child process %s', current_process().pid)
+    os._exit(3)
+
+p = Process(target=run)
+p.start()
+time.sleep(100)
+&lt;/pre&gt;
+&lt;p&gt;测试：&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+$ python test_a.py &amp;amp;
+[1] 10091
+$ 2017-07-20 21:28:14,792 - INFO - exit child process 10106
+
+$ ps aux |grep 10106
+mozillazg              10126   0.0  0.0  2434836    740 s006  R+    0:00.00 grep 10106
+mozillazg              10106   0.0  0.0        0      0 s006  Z     0:00.00 (Python)
+&lt;/pre&gt;
+&lt;p&gt;可以看到，子进程 &lt;tt class="docutils literal"&gt;10091&lt;/tt&gt; 变成了僵尸进程。&lt;/p&gt;
+&lt;p&gt;既然已经可以控制僵尸进程的产生了，那我们就可以进入下一步如何清除僵尸进程了。&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class="section" id="id3"&gt;
+&lt;h2 id="hidid3"&gt;清除僵尸进程&lt;a class="headerlink" href="#hidid3" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;清除僵尸进程有两种方法：&lt;/p&gt;
+&lt;ul class="simple"&gt;
+&lt;li&gt;第一种方法就是结束父进程。当父进程退出的时候僵尸进程随后也会被清除。&lt;/li&gt;
+&lt;li&gt;第二种方法就是通过 &lt;tt class="docutils literal"&gt;wait&lt;/tt&gt;
+调用来读取子进程退出状态。我们可以通过处理 &lt;tt class="docutils literal"&gt;SIGCHLD&lt;/tt&gt;
+信号，在处理程序中调用 &lt;tt class="docutils literal"&gt;wait&lt;/tt&gt; 系统调用来清除僵尸进程。&lt;/li&gt;
+&lt;/ul&gt;
+&lt;div class="section" id="sigchld"&gt;
+&lt;h3&gt;处理 &lt;tt class="docutils literal"&gt;SIGCHLD&lt;/tt&gt; 信号&lt;/h3&gt;
+&lt;p&gt;子进程退出时系统会向父进程发送 &lt;tt class="docutils literal"&gt;SIGCHLD&lt;/tt&gt; 信号，父进程可以通过注册
+&lt;tt class="docutils literal"&gt;SIGCHLD&lt;/tt&gt; 信号处理程序，在信号处理程序中调用 &lt;tt class="docutils literal"&gt;wait&lt;/tt&gt;
+系统调用来清理僵尸进程。&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+$ cat test_b.py
+import errno
+from multiprocessing import Process, current_process
+import logging
+import os
+import signal
+import time
+
+logging.basicConfig(
+    level=logging.DEBUG,
+    format='%(asctime)-15s - %(levelname)s - %(message)s'
+)
+
+
+def run():
+    exitcode = 3
+    logging.info('exit child process %s with exitcode %s',
+                 current_process().pid, exitcode)
+    os._exit(exitcode)
+
+
+def wait_child(signum, frame):
+    logging.info('receive SIGCHLD')
+    try:
+        while True:
+            # -1 表示任意子进程
+            # os.WNOHANG 表示如果没有可用的需要 wait 退出状态的子进程，立即返回不阻塞
+            cpid, status = os.waitpid(-1, os.WNOHANG)
+            if cpid == 0:
+                logging.info('no child process was immediately available')
+                break
+            exitcode = status &amp;gt;&amp;gt; 8
+            logging.info('child process %s exit with exitcode %s', cpid, exitcode)
+    except OSError as e:
+        if e.errno == errno.ECHILD:
+            logging.error('current process has no existing unwaited-for child processes.')
+        else:
+            raise
+    logging.info('handle SIGCHLD end')
+
+signal.signal(signal.SIGCHLD, wait_child)
+
+p = Process(target=run)
+p.start()
+
+while True:
+    time.sleep(100)
+&lt;/pre&gt;
+&lt;p&gt;效果：&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+$ python test_b.py  &amp;amp;
+[1] 10159
+$ 2017-07-20 21:28:56,085 - INFO - exit child process 10174 with exitcode 3
+2017-07-20 21:28:56,088 - INFO - receive SIGCHLD
+2017-07-20 21:28:56,089 - INFO - child process 10174 exit with exitcode 3
+2017-07-20 21:28:56,090 - ERROR - current process has no existing unwaited-for child processes.
+2017-07-20 21:28:56,090 - INFO - handle SIGCHLD end
+
+$ ps aux |grep 10174
+mozillazg              10194   0.0  0.0  2432788    556 s006  R+    0:00.00 grep 10174
+&lt;/pre&gt;
+&lt;p&gt;可以看到，子进程退出变成僵尸进程后，系统给父进程发送了 &lt;tt class="docutils literal"&gt;SIGCHLD&lt;/tt&gt;
+信号，我们在 &lt;tt class="docutils literal"&gt;SIGCHLD&lt;/tt&gt; 信号的处理程序中通过 &lt;tt class="docutils literal"&gt;os.waitpid&lt;/tt&gt; 调用
+&lt;tt class="docutils literal"&gt;wait&lt;/tt&gt;
+系统调用后阻止了子进程一直处于僵尸进程状态，从而实现了清除僵尸进程的效果。&lt;/p&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;div class="section" id="id4"&gt;
+&lt;h2 id="hidid4"&gt;结语&lt;a class="headerlink" href="#hidid4" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;希望本文能对你有所帮助。&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class="section" id="id5"&gt;
+&lt;h2 id="hidid5"&gt;参考资料&lt;a class="headerlink" href="#hidid5" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;ul class="simple"&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://docs.python.org/3/library/os.html#os._exit"&gt;16.1. os — Miscellaneous operating system interfaces — Python 3.6.2
+documentation&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://docs.python.org/3/library/os.html#os.waitpid"&gt;16.1. os — Miscellaneous operating system interfaces — Python 3.6.2
+documentation&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://linux.die.net/man/3/waitpid"&gt;waitpid(3) - Linux man page&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://www.ibm.com/support/knowledgecenter/ssw_i5_54/apis/waitpid.htm"&gt;IBM Knowledgecenter - waitpid()--Wait for Specific Child
+Process&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://github.com/benoitc/gunicorn/blob/19.7.1/gunicorn/arbiter.py#L506"&gt;gunicorn/arbiter.py at 19.7.1 ·
+benoitc/gunicorn&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://github.com/python/cpython/blob/13e96cc596d158b98996db3fa291086ea4afecd9/Lib/multiprocessing/forkserver.py#L198-L223"&gt;cpython/forkserver.py at 13e96cc596d158b98996db3fa291086ea4afecd9 ·
+python/cpython&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="http://blog.csdn.net/wallwind/article/details/6998602"&gt;深入浅出---unix多进程编程之wait()和waitpid()函数 - wintree的专栏 -
+CSDN博客&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://en.wikipedia.org/wiki/Zombie_process"&gt;Zombie process - Wikipedia&lt;/a&gt;&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/div&gt;
+</description><dc:creator xmlns:dc="http://purl.org/dc/elements/1.1/">mozillazg</dc:creator><pubDate>Thu, 20 Jul 2017 00:00:00 +0000</pubDate><guid>tag:mozillazg.github.io,2017-07-20:2017/07/python-how-to-generate-kill-clean-zombie-process.html</guid><category>process</category><category>zombie</category></item><item><title>Python: time.sleep 与 signal 一起使用可能会出现 sleep 被提前终止的情况</title><link>https://mozillazg.github.io/2017/07/python-time-sleep-terminate-by-signal.html</link><description>&lt;p&gt;如题所述，当 &lt;tt class="docutils literal"&gt;time.sleep&lt;/tt&gt; 与 &lt;tt class="docutils literal"&gt;signal&lt;/tt&gt; 一起使用时可能会出现 &lt;tt class="docutils literal"&gt;time.sleep&lt;/tt&gt;
 失效，提前结束 sleep 的问题。&lt;/p&gt;
 &lt;p&gt;我们先来看一下 &lt;tt class="docutils literal"&gt;time.sleep&lt;/tt&gt; 的文档:&lt;/p&gt;
 &lt;p&gt;Python 2.7.13:&lt;/p&gt;
