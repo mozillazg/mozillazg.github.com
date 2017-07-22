@@ -14,7 +14,7 @@
 
         <meta name="author" content="mozillazg" />
         <meta name="keywords" content="process,zombie" />
-        <meta name="description" content="僵尸进程产生的原因¶ 在 unix 或 unix-like 的系统中，当一个子进程退出后，它就会变成一个僵尸进程，如果父进程没有通过 wait 系统调用来读取这个子进程的退出状态的话，这个子进程就会一直维持僵尸进程状态。 Zombie process - Wikipedia 中是这样描述的： On Unix and Unix-like computer operating systems, a zombie process or defunct process is a process that has completed execution (via the exit system call) but still has an entry in the process table …" />
+    <meta name="description" content="僵尸进程产生的原因¶ 在 unix 或 unix-like 的系统中，当一个子进程退出后，它就会变成一个僵尸进程，如果父进程没有通过 wait 系统调用来读取这个子进程的退出状态的话，这个子进程就会一直维持僵尸进程状态。 Zombie process - Wikipedia 中是这样描述的： On Unix and Unix-like computer operating systems, a zombie process or defunct process is a process that has completed execution (via the exit system call) but still has an entry in the process table: it is a process in the &#34;Terminated state&#34;. This occurs for child processes, where the entry is still needed to allow the parent process to read its child&#39;s exit status: once the exit status is read via the wait system call, the zombie&#39;s entry is removed from the process table and it is said to be &#34;reaped&#34;. A child process always first becomes a zombie before being removed from the resource table. In most cases, under normal system operation zombies are immediately waited on by their parent and then reaped by the system – processes that stay zombies for a long time are generally an error and cause a resource leak. 并且僵尸进程无法通过 kill 命令来清除。 本文将探讨如何手动制造一个僵尸进程以及清除僵尸进程的办法。 手动制造一个僵尸进程¶ 为了便于后面讲解清除僵尸进程的方法，我们使用日常开发中经常使用的 multiprocessing 模块来制造僵尸进程（准确的来说是制造一个长时间维持僵尸进程状态的子进程）： $ cat test_a.py from multiprocessing import Process, current_process import logging import os import time logging.basicConfig( level=logging.DEBUG, format=&#39;%(asctime)-15s - %(levelname)s - %(message)s&#39; ) def run(): logging.info(&#39;exit child process %s&#39;, current_process().pid) os._exit(3) p = Process(target=run) p.start() time.sleep(100) 测试： $ python test_a.py &amp; [1] 10091 $ 2017-07-20 21:28:14,792 - INFO - exit child process 10106 $ ps aux |grep 10106 mozillazg 10126 0.0 0.0 2434836 740 s006 R+ 0:00.00 grep 10106 mozillazg 10106 0.0 0.0 0 0 s006 Z 0:00.00 (Python) 可以看到，子进程 10106 变成了僵尸进程。 既然已经可以控制僵尸进程的产生了，那我们就可以进入下一步如何清除僵尸进程了。 清除僵尸进程¶ 清除僵尸进程有两种方法： 第一种方法就是结束父进程。当父进程退出的时候僵尸进程随后也会被清除。 第二种方法就是通过 wait 调用来读取子进程退出状态。我们可以通过处理 SIGCHLD 信号，在处理程序中调用 wait 系统调用来清除僵尸进程。 处理 SIGCHLD 信号 子进程退出时系统会向父进程发送 SIGCHLD 信号，父进程可以通过注册 SIGCHLD 信号处理程序，在信号处理程序中调用 wait 系统调用来清理僵尸进程。 $ cat test_b.py import errno from multiprocessing import Process, current_process import logging import os import signal import time logging.basicConfig( level=logging.DEBUG, format=&#39;%(asctime)-15s - %(levelname)s - %(message)s&#39; ) def run(): exitcode = 3 logging.info(&#39;exit child process %s with exitcode %s&#39;, current_process().pid, exitcode) os._exit(exitcode) def wait_child(signum, frame): logging.info(&#39;receive SIGCHLD&#39;) try: while True: # -1 表示任意子进程 # os.WNOHANG 表示如果没有可用的需要 wait 退出状态的子进程，立即返回不阻塞 cpid, status = os.waitpid(-1, os.WNOHANG) if cpid == 0: logging.info(&#39;no child process was immediately available&#39;) break exitcode = status &gt;&gt; 8 logging.info(&#39;child process %s exit with exitcode %s&#39;, cpid, exitcode) except OSError as e: if e.errno == errno.ECHILD: logging.warning(&#39;current process has no existing unwaited-for child processes.&#39;) else: raise logging.info(&#39;handle SIGCHLD end&#39;) signal.signal(signal.SIGCHLD, wait_child) p = Process(target=run) p.start() while True: time.sleep(100) 效果： $ python test_b.py &amp; [1] 10159 $ 2017-07-20 21:28:56,085 - INFO - exit child process 10174 with exitcode 3 2017-07-20 21:28:56,088 - INFO - receive SIGCHLD 2017-07-20 21:28:56,089 - INFO - child process 10174 exit with exitcode 3 2017-07-20 21:28:56,090 - WARNING - current process has no existing unwaited-for child processes. 2017-07-20 21:28:56,090 - INFO - handle SIGCHLD end $ ps aux |grep 10174 mozillazg 10194 0.0 0.0 2432788 556 s006 R+ 0:00.00 grep 10174 可以看到，子进程退出变成僵尸进程后，系统给父进程发送了 SIGCHLD 信号，我们在 SIGCHLD 信号的处理程序中通过 os.waitpid 调用 wait 系统调用后阻止了子进程一直处于僵尸进程状态，从而实现了清除僵尸进程的效果。 结语¶ 希望本文能对你有所帮助。 参考资料¶ 16.1. os — Miscellaneous operating system interfaces — Python 3.6.2 documentation 16.1. os — Miscellaneous operating system interfaces — Python 3.6.2 documentation waitpid(3) - Linux man page IBM Knowledgecenter - waitpid()--Wait for Specific Child Process gunicorn/arbiter.py at 19.7.1 · benoitc/gunicorn cpython/forkserver.py at 13e96cc596d158b98996db3fa291086ea4afecd9 · python/cpython 深入浅出---unix多进程编程之wait()和waitpid()函数 - wintree的专栏 - CSDN博客 Zombie process - Wikipedia" />
 
     <style>
       .js-toc {
@@ -26,7 +26,7 @@
         <meta property="og:type" content="article"/>
         <meta property="og:title" content="Python: 僵尸进程的产生和清除方法"/>
         <meta property="og:url" content="https://mozillazg.github.io/2017/07/python-how-to-generate-kill-clean-zombie-process.html"/>
-        <meta property="og:description" content="僵尸进程产生的原因¶ 在 unix 或 unix-like 的系统中，当一个子进程退出后，它就会变成一个僵尸进程，如果父进程没有通过 wait 系统调用来读取这个子进程的退出状态的话，这个子进程就会一直维持僵尸进程状态。 Zombie process - Wikipedia 中是这样描述的： On Unix and Unix-like computer operating systems, a zombie process or defunct process is a process that has completed execution (via the exit system call) but still has an entry in the process table …"/>
+        <meta property="og:description" content="僵尸进程产生的原因¶ 在 unix 或 unix-like 的系统中，当一个子进程退出后，它就会变成一个僵尸进程，如果父进程没有通过 wait 系统调用来读取这个子进程的退出状态的话，这个子进程就会一直维持僵尸进程状态。 Zombie process - Wikipedia 中是这样描述的： On Unix and Unix-like computer operating systems, a zombie process or defunct process is a process that has completed execution (via the exit system call) but still has an entry in the process table: it is a process in the &#34;Terminated state&#34;. This occurs for child processes, where the entry is still needed to allow the parent process to read its child&#39;s exit status: once the exit status is read via the wait system call, the zombie&#39;s entry is removed from the process table and it is said to be &#34;reaped&#34;. A child process always first becomes a zombie before being removed from the resource table. In most cases, under normal system operation zombies are immediately waited on by their parent and then reaped by the system – processes that stay zombies for a long time are generally an error and cause a resource leak. 并且僵尸进程无法通过 kill 命令来清除。 本文将探讨如何手动制造一个僵尸进程以及清除僵尸进程的办法。 手动制造一个僵尸进程¶ 为了便于后面讲解清除僵尸进程的方法，我们使用日常开发中经常使用的 multiprocessing 模块来制造僵尸进程（准确的来说是制造一个长时间维持僵尸进程状态的子进程）： $ cat test_a.py from multiprocessing import Process, current_process import logging import os import time logging.basicConfig( level=logging.DEBUG, format=&#39;%(asctime)-15s - %(levelname)s - %(message)s&#39; ) def run(): logging.info(&#39;exit child process %s&#39;, current_process().pid) os._exit(3) p = Process(target=run) p.start() time.sleep(100) 测试： $ python test_a.py &amp; [1] 10091 $ 2017-07-20 21:28:14,792 - INFO - exit child process 10106 $ ps aux |grep 10106 mozillazg 10126 0.0 0.0 2434836 740 s006 R+ 0:00.00 grep 10106 mozillazg 10106 0.0 0.0 0 0 s006 Z 0:00.00 (Python) 可以看到，子进程 10106 变成了僵尸进程。 既然已经可以控制僵尸进程的产生了，那我们就可以进入下一步如何清除僵尸进程了。 清除僵尸进程¶ 清除僵尸进程有两种方法： 第一种方法就是结束父进程。当父进程退出的时候僵尸进程随后也会被清除。 第二种方法就是通过 wait 调用来读取子进程退出状态。我们可以通过处理 SIGCHLD 信号，在处理程序中调用 wait 系统调用来清除僵尸进程。 处理 SIGCHLD 信号 子进程退出时系统会向父进程发送 SIGCHLD 信号，父进程可以通过注册 SIGCHLD 信号处理程序，在信号处理程序中调用 wait 系统调用来清理僵尸进程。 $ cat test_b.py import errno from multiprocessing import Process, current_process import logging import os import signal import time logging.basicConfig( level=logging.DEBUG, format=&#39;%(asctime)-15s - %(levelname)s - %(message)s&#39; ) def run(): exitcode = 3 logging.info(&#39;exit child process %s with exitcode %s&#39;, current_process().pid, exitcode) os._exit(exitcode) def wait_child(signum, frame): logging.info(&#39;receive SIGCHLD&#39;) try: while True: # -1 表示任意子进程 # os.WNOHANG 表示如果没有可用的需要 wait 退出状态的子进程，立即返回不阻塞 cpid, status = os.waitpid(-1, os.WNOHANG) if cpid == 0: logging.info(&#39;no child process was immediately available&#39;) break exitcode = status &gt;&gt; 8 logging.info(&#39;child process %s exit with exitcode %s&#39;, cpid, exitcode) except OSError as e: if e.errno == errno.ECHILD: logging.warning(&#39;current process has no existing unwaited-for child processes.&#39;) else: raise logging.info(&#39;handle SIGCHLD end&#39;) signal.signal(signal.SIGCHLD, wait_child) p = Process(target=run) p.start() while True: time.sleep(100) 效果： $ python test_b.py &amp; [1] 10159 $ 2017-07-20 21:28:56,085 - INFO - exit child process 10174 with exitcode 3 2017-07-20 21:28:56,088 - INFO - receive SIGCHLD 2017-07-20 21:28:56,089 - INFO - child process 10174 exit with exitcode 3 2017-07-20 21:28:56,090 - WARNING - current process has no existing unwaited-for child processes. 2017-07-20 21:28:56,090 - INFO - handle SIGCHLD end $ ps aux |grep 10174 mozillazg 10194 0.0 0.0 2432788 556 s006 R+ 0:00.00 grep 10174 可以看到，子进程退出变成僵尸进程后，系统给父进程发送了 SIGCHLD 信号，我们在 SIGCHLD 信号的处理程序中通过 os.waitpid 调用 wait 系统调用后阻止了子进程一直处于僵尸进程状态，从而实现了清除僵尸进程的效果。 结语¶ 希望本文能对你有所帮助。 参考资料¶ 16.1. os — Miscellaneous operating system interfaces — Python 3.6.2 documentation 16.1. os — Miscellaneous operating system interfaces — Python 3.6.2 documentation waitpid(3) - Linux man page IBM Knowledgecenter - waitpid()--Wait for Specific Child Process gunicorn/arbiter.py at 19.7.1 · benoitc/gunicorn cpython/forkserver.py at 13e96cc596d158b98996db3fa291086ea4afecd9 · python/cpython 深入浅出---unix多进程编程之wait()和waitpid()函数 - wintree的专栏 - CSDN博客 Zombie process - Wikipedia"/>
         <meta property="article:published_time" content="2017-07-20" />
             <meta property="article:section" content="python" />
             <meta property="article:tag" content="process" />
@@ -150,27 +150,26 @@ and cause a resource leak.</blockquote>
 <p>为了便于后面讲解清除僵尸进程的方法，我们使用日常开发中经常使用的
 <tt class="docutils literal">multiprocessing</tt>
 模块来制造僵尸进程（准确的来说是制造一个长时间维持僵尸进程状态的子进程）：</p>
-<pre class="literal-block">
-$ cat test_a.py
-from multiprocessing import Process, current_process
-import logging
-import os
-import time
+<div class="highlight"><pre><span></span><span class="err">$</span> <span class="n">cat</span> <span class="n">test_a</span><span class="o">.</span><span class="n">py</span>
+<span class="kn">from</span> <span class="nn">multiprocessing</span> <span class="kn">import</span> <span class="n">Process</span><span class="p">,</span> <span class="n">current_process</span>
+<span class="kn">import</span> <span class="nn">logging</span>
+<span class="kn">import</span> <span class="nn">os</span>
+<span class="kn">import</span> <span class="nn">time</span>
 
-logging.basicConfig(
-    level=logging.DEBUG,
-    format='%(asctime)-15s - %(levelname)s - %(message)s'
-)
+<span class="n">logging</span><span class="o">.</span><span class="n">basicConfig</span><span class="p">(</span>
+    <span class="n">level</span><span class="o">=</span><span class="n">logging</span><span class="o">.</span><span class="n">DEBUG</span><span class="p">,</span>
+    <span class="n">format</span><span class="o">=</span><span class="s1">&#39;</span><span class="si">%(asctime)-15s</span><span class="s1"> - </span><span class="si">%(levelname)s</span><span class="s1"> - </span><span class="si">%(message)s</span><span class="s1">&#39;</span>
+<span class="p">)</span>
 
 
-def run():
-    logging.info('exit child process %s', current_process().pid)
-    os._exit(3)
+<span class="k">def</span> <span class="nf">run</span><span class="p">():</span>
+    <span class="n">logging</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s1">&#39;exit child process </span><span class="si">%s</span><span class="s1">&#39;</span><span class="p">,</span> <span class="n">current_process</span><span class="p">()</span><span class="o">.</span><span class="n">pid</span><span class="p">)</span>
+    <span class="n">os</span><span class="o">.</span><span class="n">_exit</span><span class="p">(</span><span class="mi">3</span><span class="p">)</span>
 
-p = Process(target=run)
-p.start()
-time.sleep(100)
-</pre>
+<span class="n">p</span> <span class="o">=</span> <span class="n">Process</span><span class="p">(</span><span class="n">target</span><span class="o">=</span><span class="n">run</span><span class="p">)</span>
+<span class="n">p</span><span class="o">.</span><span class="n">start</span><span class="p">()</span>
+<span class="n">time</span><span class="o">.</span><span class="n">sleep</span><span class="p">(</span><span class="mi">100</span><span class="p">)</span>
+</pre></div>
 <p>测试：</p>
 <pre class="literal-block">
 $ python test_a.py &amp;
@@ -181,7 +180,7 @@ $ ps aux |grep 10106
 mozillazg              10126   0.0  0.0  2434836    740 s006  R+    0:00.00 grep 10106
 mozillazg              10106   0.0  0.0        0      0 s006  Z     0:00.00 (Python)
 </pre>
-<p>可以看到，子进程 <tt class="docutils literal">10091</tt> 变成了僵尸进程。</p>
+<p>可以看到，子进程 <tt class="docutils literal">10106</tt> 变成了僵尸进程。</p>
 <p>既然已经可以控制僵尸进程的产生了，那我们就可以进入下一步如何清除僵尸进程了。</p>
 </div>
 <div class="section" id="id3">
@@ -198,55 +197,54 @@ mozillazg              10106   0.0  0.0        0      0 s006  Z     0:00.00 (Pyt
 <p>子进程退出时系统会向父进程发送 <tt class="docutils literal">SIGCHLD</tt> 信号，父进程可以通过注册
 <tt class="docutils literal">SIGCHLD</tt> 信号处理程序，在信号处理程序中调用 <tt class="docutils literal">wait</tt>
 系统调用来清理僵尸进程。</p>
-<pre class="literal-block">
-$ cat test_b.py
-import errno
-from multiprocessing import Process, current_process
-import logging
-import os
-import signal
-import time
+<div class="highlight"><pre><span></span><span class="err">$</span> <span class="n">cat</span> <span class="n">test_b</span><span class="o">.</span><span class="n">py</span>
+<span class="kn">import</span> <span class="nn">errno</span>
+<span class="kn">from</span> <span class="nn">multiprocessing</span> <span class="kn">import</span> <span class="n">Process</span><span class="p">,</span> <span class="n">current_process</span>
+<span class="kn">import</span> <span class="nn">logging</span>
+<span class="kn">import</span> <span class="nn">os</span>
+<span class="kn">import</span> <span class="nn">signal</span>
+<span class="kn">import</span> <span class="nn">time</span>
 
-logging.basicConfig(
-    level=logging.DEBUG,
-    format='%(asctime)-15s - %(levelname)s - %(message)s'
-)
-
-
-def run():
-    exitcode = 3
-    logging.info('exit child process %s with exitcode %s',
-                 current_process().pid, exitcode)
-    os._exit(exitcode)
+<span class="n">logging</span><span class="o">.</span><span class="n">basicConfig</span><span class="p">(</span>
+    <span class="n">level</span><span class="o">=</span><span class="n">logging</span><span class="o">.</span><span class="n">DEBUG</span><span class="p">,</span>
+    <span class="n">format</span><span class="o">=</span><span class="s1">&#39;</span><span class="si">%(asctime)-15s</span><span class="s1"> - </span><span class="si">%(levelname)s</span><span class="s1"> - </span><span class="si">%(message)s</span><span class="s1">&#39;</span>
+<span class="p">)</span>
 
 
-def wait_child(signum, frame):
-    logging.info('receive SIGCHLD')
-    try:
-        while True:
-            # -1 表示任意子进程
-            # os.WNOHANG 表示如果没有可用的需要 wait 退出状态的子进程，立即返回不阻塞
-            cpid, status = os.waitpid(-1, os.WNOHANG)
-            if cpid == 0:
-                logging.info('no child process was immediately available')
-                break
-            exitcode = status &gt;&gt; 8
-            logging.info('child process %s exit with exitcode %s', cpid, exitcode)
-    except OSError as e:
-        if e.errno == errno.ECHILD:
-            logging.error('current process has no existing unwaited-for child processes.')
-        else:
-            raise
-    logging.info('handle SIGCHLD end')
+<span class="k">def</span> <span class="nf">run</span><span class="p">():</span>
+    <span class="n">exitcode</span> <span class="o">=</span> <span class="mi">3</span>
+    <span class="n">logging</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s1">&#39;exit child process </span><span class="si">%s</span><span class="s1"> with exitcode </span><span class="si">%s</span><span class="s1">&#39;</span><span class="p">,</span>
+                 <span class="n">current_process</span><span class="p">()</span><span class="o">.</span><span class="n">pid</span><span class="p">,</span> <span class="n">exitcode</span><span class="p">)</span>
+    <span class="n">os</span><span class="o">.</span><span class="n">_exit</span><span class="p">(</span><span class="n">exitcode</span><span class="p">)</span>
 
-signal.signal(signal.SIGCHLD, wait_child)
 
-p = Process(target=run)
-p.start()
+<span class="k">def</span> <span class="nf">wait_child</span><span class="p">(</span><span class="n">signum</span><span class="p">,</span> <span class="n">frame</span><span class="p">):</span>
+    <span class="n">logging</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s1">&#39;receive SIGCHLD&#39;</span><span class="p">)</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="k">while</span> <span class="bp">True</span><span class="p">:</span>
+            <span class="c1"># -1 表示任意子进程</span>
+            <span class="c1"># os.WNOHANG 表示如果没有可用的需要 wait 退出状态的子进程，立即返回不阻塞</span>
+            <span class="n">cpid</span><span class="p">,</span> <span class="n">status</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">waitpid</span><span class="p">(</span><span class="o">-</span><span class="mi">1</span><span class="p">,</span> <span class="n">os</span><span class="o">.</span><span class="n">WNOHANG</span><span class="p">)</span>
+            <span class="k">if</span> <span class="n">cpid</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+                <span class="n">logging</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s1">&#39;no child process was immediately available&#39;</span><span class="p">)</span>
+                <span class="k">break</span>
+            <span class="n">exitcode</span> <span class="o">=</span> <span class="n">status</span> <span class="o">&gt;&gt;</span> <span class="mi">8</span>
+            <span class="n">logging</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s1">&#39;child process </span><span class="si">%s</span><span class="s1"> exit with exitcode </span><span class="si">%s</span><span class="s1">&#39;</span><span class="p">,</span> <span class="n">cpid</span><span class="p">,</span> <span class="n">exitcode</span><span class="p">)</span>
+    <span class="k">except</span> <span class="ne">OSError</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+        <span class="k">if</span> <span class="n">e</span><span class="o">.</span><span class="n">errno</span> <span class="o">==</span> <span class="n">errno</span><span class="o">.</span><span class="n">ECHILD</span><span class="p">:</span>
+            <span class="n">logging</span><span class="o">.</span><span class="n">warning</span><span class="p">(</span><span class="s1">&#39;current process has no existing unwaited-for child processes.&#39;</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="k">raise</span>
+    <span class="n">logging</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s1">&#39;handle SIGCHLD end&#39;</span><span class="p">)</span>
 
-while True:
-    time.sleep(100)
-</pre>
+<span class="n">signal</span><span class="o">.</span><span class="n">signal</span><span class="p">(</span><span class="n">signal</span><span class="o">.</span><span class="n">SIGCHLD</span><span class="p">,</span> <span class="n">wait_child</span><span class="p">)</span>
+
+<span class="n">p</span> <span class="o">=</span> <span class="n">Process</span><span class="p">(</span><span class="n">target</span><span class="o">=</span><span class="n">run</span><span class="p">)</span>
+<span class="n">p</span><span class="o">.</span><span class="n">start</span><span class="p">()</span>
+
+<span class="k">while</span> <span class="bp">True</span><span class="p">:</span>
+    <span class="n">time</span><span class="o">.</span><span class="n">sleep</span><span class="p">(</span><span class="mi">100</span><span class="p">)</span>
+</pre></div>
 <p>效果：</p>
 <pre class="literal-block">
 $ python test_b.py  &amp;
@@ -254,7 +252,7 @@ $ python test_b.py  &amp;
 $ 2017-07-20 21:28:56,085 - INFO - exit child process 10174 with exitcode 3
 2017-07-20 21:28:56,088 - INFO - receive SIGCHLD
 2017-07-20 21:28:56,089 - INFO - child process 10174 exit with exitcode 3
-2017-07-20 21:28:56,090 - ERROR - current process has no existing unwaited-for child processes.
+2017-07-20 21:28:56,090 - WARNING - current process has no existing unwaited-for child processes.
 2017-07-20 21:28:56,090 - INFO - handle SIGCHLD end
 
 $ ps aux |grep 10174
