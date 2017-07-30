@@ -67,13 +67,14 @@ mozillazg              10106   0.0  0.0        0      0 s006  Z     0:00.00 (Pyt
 &lt;h2 id="hidid3"&gt;清除僵尸进程&lt;a class="headerlink" href="#hidid3" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;p&gt;清除僵尸进程有两种方法：&lt;/p&gt;
 &lt;ul class="simple"&gt;
-&lt;li&gt;第一种方法就是结束父进程。当父进程退出的时候僵尸进程随后也会被清除。&lt;/li&gt;
+&lt;li&gt;第一种方法就是结束父进程（一般是主进程）。当父进程退出的时候僵尸进程随后也会被清除。&lt;/li&gt;
 &lt;li&gt;第二种方法就是通过 &lt;tt class="docutils literal"&gt;wait&lt;/tt&gt;
 调用来读取子进程退出状态。我们可以通过处理 &lt;tt class="docutils literal"&gt;SIGCHLD&lt;/tt&gt;
 信号，在处理程序中调用 &lt;tt class="docutils literal"&gt;wait&lt;/tt&gt; 系统调用来清除僵尸进程。&lt;/li&gt;
+&lt;li&gt;第三种办法就说把进程变成孤儿进程，这样进程就会自动交由 init 进程（pid 为 1 的进程）来处理，一般 init 进程都包含对僵尸进程进行处理的逻辑。（这里有个坑，那就是 docker 容器中一般 pid 为 1 进程就是主程序的进程，而不是我们预期的 init 进程。如果要使用这种方法的话，需要注意一下类似的场景）&lt;/li&gt;
 &lt;/ul&gt;
 &lt;div class="section" id="sigchld"&gt;
-&lt;h3&gt;处理 &lt;tt class="docutils literal"&gt;SIGCHLD&lt;/tt&gt; 信号&lt;/h3&gt;
+&lt;h3 id="hidsigchld"&gt;处理 SIGCHLD 信号&lt;a class="headerlink" href="#hidsigchld" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
 &lt;p&gt;子进程退出时系统会向父进程发送 &lt;tt class="docutils literal"&gt;SIGCHLD&lt;/tt&gt; 信号，父进程可以通过注册
 &lt;tt class="docutils literal"&gt;SIGCHLD&lt;/tt&gt; 信号处理程序，在信号处理程序中调用 &lt;tt class="docutils literal"&gt;wait&lt;/tt&gt;
 系统调用来清理僵尸进程。&lt;/p&gt;
@@ -143,13 +144,72 @@ mozillazg              10194   0.0  0.0  2432788    556 s006  R+    0:00.00 grep
 &lt;tt class="docutils literal"&gt;wait&lt;/tt&gt;
 系统调用后阻止了子进程一直处于僵尸进程状态，从而实现了清除僵尸进程的效果。&lt;/p&gt;
 &lt;/div&gt;
-&lt;/div&gt;
 &lt;div class="section" id="id4"&gt;
-&lt;h2 id="hidid4"&gt;结语&lt;a class="headerlink" href="#hidid4" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
-&lt;p&gt;希望本文能对你有所帮助。&lt;/p&gt;
+&lt;h3 id="hidid4"&gt;把进程变成孤儿进程&lt;a class="headerlink" href="#hidid4" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
+&lt;p&gt;什么是孤儿进程：当父进程已经退出但是子进程仍旧在运行时，这个子进程就变成了孤儿进程。
+系统会把孤儿进程的父进程设置为 init 进程，将由 init 进程来管理这个孤儿进程。&lt;/p&gt;
+&lt;p&gt;我们修改一下前面的程序，改成由子进程的子进程来执行具体逻辑：&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="err"&gt;$&lt;/span&gt; &lt;span class="n"&gt;cat&lt;/span&gt; &lt;span class="n"&gt;test_c&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;py&lt;/span&gt;
+&lt;span class="kn"&gt;from&lt;/span&gt; &lt;span class="nn"&gt;multiprocessing&lt;/span&gt; &lt;span class="kn"&gt;import&lt;/span&gt; &lt;span class="n"&gt;Process&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;current_process&lt;/span&gt;
+&lt;span class="kn"&gt;import&lt;/span&gt; &lt;span class="nn"&gt;logging&lt;/span&gt;
+&lt;span class="kn"&gt;import&lt;/span&gt; &lt;span class="nn"&gt;os&lt;/span&gt;
+&lt;span class="kn"&gt;import&lt;/span&gt; &lt;span class="nn"&gt;time&lt;/span&gt;
+
+&lt;span class="n"&gt;logging&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;basicConfig&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;
+    &lt;span class="n"&gt;level&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="n"&gt;logging&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;DEBUG&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;
+    &lt;span class="n"&gt;format&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;&lt;/span&gt;&lt;span class="si"&gt;%(asctime)-15s&lt;/span&gt;&lt;span class="s1"&gt; - &lt;/span&gt;&lt;span class="si"&gt;%(levelname)s&lt;/span&gt;&lt;span class="s1"&gt; - &lt;/span&gt;&lt;span class="si"&gt;%(message)s&lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;&lt;/span&gt;
+&lt;span class="p"&gt;)&lt;/span&gt;
+
+
+&lt;span class="k"&gt;def&lt;/span&gt; &lt;span class="nf"&gt;run&lt;/span&gt;&lt;span class="p"&gt;():&lt;/span&gt;
+    &lt;span class="n"&gt;time&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;sleep&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="mi"&gt;30&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+    &lt;span class="n"&gt;logging&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;info&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;exit grandchild process &lt;/span&gt;&lt;span class="si"&gt;%s&lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;current_process&lt;/span&gt;&lt;span class="p"&gt;()&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;pid&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+    &lt;span class="n"&gt;os&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;_exit&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="mi"&gt;3&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+
+
+&lt;span class="k"&gt;def&lt;/span&gt; &lt;span class="nf"&gt;worker&lt;/span&gt;&lt;span class="p"&gt;():&lt;/span&gt;
+    &lt;span class="n"&gt;p&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;Process&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;target&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="n"&gt;run&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+    &lt;span class="n"&gt;p&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;start&lt;/span&gt;&lt;span class="p"&gt;()&lt;/span&gt;
+    &lt;span class="n"&gt;logging&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;info&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;exit worker process &lt;/span&gt;&lt;span class="si"&gt;%s&lt;/span&gt;&lt;span class="s1"&gt;, grandchild is &lt;/span&gt;&lt;span class="si"&gt;%s&lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;
+                 &lt;span class="n"&gt;current_process&lt;/span&gt;&lt;span class="p"&gt;()&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;pid&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;p&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;pid&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+    &lt;span class="n"&gt;os&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;_exit&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="mi"&gt;1&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+
+
+&lt;span class="n"&gt;p&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;Process&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;target&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="n"&gt;worker&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+&lt;span class="n"&gt;p&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;start&lt;/span&gt;&lt;span class="p"&gt;()&lt;/span&gt;
+&lt;span class="n"&gt;p&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;join&lt;/span&gt;&lt;span class="p"&gt;()&lt;/span&gt;
+&lt;span class="n"&gt;time&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;sleep&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="mi"&gt;100&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+&lt;/pre&gt;&lt;/div&gt;
+&lt;p&gt;效果:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+$ python test_c.py &amp;amp;
+[1] 79565
+2017-07-30 18:18:27,680 - INFO - exit worker process 79585, grandchild is 79586
+
+$ ps -f |grep test_c.py
+  mozillazg 79565 62003   0  6:18PM ttys009    0:00.06 python test_c.py
+  mozillazg 79586     1   0  6:18PM ttys009    0:00.00 python test_c.py
+  mozillazg 79611 62003   0  6:18PM ttys009    0:00.00 grep test_c.py
+
+$ 2017-07-30 18:18:57,681 - INFO - exit grandchild process 79586
+
+$ ps -f |grep 79586
+  mozillazg 79697 62003   0  6:19PM ttys009    0:00.00 grep 79586
+
+$ ps -f |grep test_c.py
+  mozillazg 79565 62003   0  6:18PM ttys009    0:00.06 python test_c.py
+  mozillazg 79741 62003   0  6:19PM ttys009    0:00.00 grep test_c.py
+&lt;/pre&gt;
+&lt;p&gt;可以看到当结束了进程 &lt;tt class="docutils literal"&gt;79585&lt;/tt&gt; 之后，它的子进程 &lt;tt class="docutils literal"&gt;79586&lt;/tt&gt; 的父进程的 pid 就变成了 &lt;tt class="docutils literal"&gt;1&lt;/tt&gt; ，
+随后退出 &lt;tt class="docutils literal"&gt;79586&lt;/tt&gt; 进程后，进程 &lt;tt class="docutils literal"&gt;79586&lt;/tt&gt; 并没有出现一直维持僵尸进程状态的情况。&lt;/p&gt;
+&lt;/div&gt;
 &lt;/div&gt;
 &lt;div class="section" id="id5"&gt;
-&lt;h2 id="hidid5"&gt;参考资料&lt;a class="headerlink" href="#hidid5" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;h2 id="hidid5"&gt;结语&lt;a class="headerlink" href="#hidid5" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;希望本文能对你有所帮助。&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class="section" id="id6"&gt;
+&lt;h2 id="hidid6"&gt;参考资料&lt;a class="headerlink" href="#hidid6" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;ul class="simple"&gt;
 &lt;li&gt;&lt;a class="reference external" href="https://docs.python.org/3/library/os.html#os._exit"&gt;16.1. os — Miscellaneous operating system interfaces — Python 3.6.2
 documentation&lt;/a&gt;&lt;/li&gt;
@@ -165,6 +225,7 @@ python/cpython&lt;/a&gt;&lt;/li&gt;
 &lt;li&gt;&lt;a class="reference external" href="http://blog.csdn.net/wallwind/article/details/6998602"&gt;深入浅出---unix多进程编程之wait()和waitpid()函数 - wintree的专栏 -
 CSDN博客&lt;/a&gt;&lt;/li&gt;
 &lt;li&gt;&lt;a class="reference external" href="https://en.wikipedia.org/wiki/Zombie_process"&gt;Zombie process - Wikipedia&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://en.wikipedia.org/wiki/Orphan_process"&gt;Orphan process - Wikipedia&lt;/a&gt;&lt;/li&gt;
 &lt;/ul&gt;
 &lt;/div&gt;
 </summary><category term="process"></category><category term="zombie"></category></entry><entry><title>Python: time.sleep 与 signal 一起使用可能会出现 sleep 被提前终止的情况</title><link href="https://mozillazg.github.io/2017/07/python-time-sleep-terminate-by-signal.html" rel="alternate"></link><updated>2017-07-18T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.github.io,2017-07-18:2017/07/python-time-sleep-terminate-by-signal.html</id><summary type="html">&lt;p&gt;如题所述，当 &lt;tt class="docutils literal"&gt;time.sleep&lt;/tt&gt; 与 &lt;tt class="docutils literal"&gt;signal&lt;/tt&gt; 一起使用时可能会出现 &lt;tt class="docutils literal"&gt;time.sleep&lt;/tt&gt;
@@ -957,7 +1018,7 @@ Thread &lt;span class="m"&gt;1&lt;/span&gt; &lt;span class="o"&gt;(&lt;/span&gt;
 &lt;/pre&gt;&lt;/div&gt;
 &lt;p&gt;更多信息详见项目文档：&lt;a class="reference external" href="https://godoc.org/github.com/mozillazg/go-httpheader"&gt;https://godoc.org/github.com/mozillazg/go-httpheader&lt;/a&gt;&lt;/p&gt;
 &lt;p&gt;希望能对有同样需求的人有所帮助。&lt;/p&gt;
-</summary></entry><entry><title>tinyq: 一个队列框架</title><link href="https://mozillazg.github.io/2017/04/tinyq-a-queue-framework.html" rel="alternate"></link><updated>2017-04-10T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.github.io,2017-04-10:2017/04/tinyq-a-queue-framework.html</id><summary type="html">&lt;p&gt;最近尝试着写了一个简单的队列框架，整体的功能类似 celery, rq 之类的队列框架。
+</summary></entry><entry><title>tinyq: 一个任务队列框架</title><link href="https://mozillazg.github.io/2017/04/tinyq-a-queue-framework.html" rel="alternate"></link><updated>2017-04-10T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.github.io,2017-04-10:2017/04/tinyq-a-queue-framework.html</id><summary type="html">&lt;p&gt;最近尝试着写了一个简单的任务队列框架，整体的功能类似 celery, rq 之类的任务队列框架。
 下面简单的介绍一下。&lt;/p&gt;
 &lt;div class="section" id="id1"&gt;
 &lt;h2 id="hidid1"&gt;安装&lt;a class="headerlink" href="#hidid1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
