@@ -29,12 +29,16 @@
         <meta property="article:published_time" content="2016-08-16" />
             <meta property="article:section" content="python" />
             <meta property="article:author" content="mozillazg" />
+            <meta property="og:image"
+                  content="https://mozillazg.github.io/static/avatar.jpeg"/>
 
 
     <meta name="twitter:card" content="summary">
         <meta name="twitter:site" content="@mozillazg">
         <meta name="twitter:creator" content="@mozillazg">
     <meta name="twitter:domain" content="https://mozillazg.github.io">
+            <meta property="twitter:image"
+                  content="https://mozillazg.github.io/static/avatar.jpeg"/>
 
     <!-- Bootstrap -->
         <link rel="stylesheet" href="https://mozillazg.github.io/theme/css/bootstrap.min.css" type="text/css"/>
@@ -53,6 +57,36 @@
 
         <link href="https://mozillazg.github.io/feeds/python.atom.xml" type="application/atom+xml" rel="alternate"
               title="Huang Huang 的博客 python ATOM Feed"/>
+
+
+    <script type="application/ld+json">
+    {
+        "@context": "https://schema.org",
+        "@type": "Website",
+        "publisher": {
+            "@type": "Person",
+            "name": "mozillazg",
+            "logo": "https://mozillazg.github.io/static/avatar.jpeg"
+        },
+        "author": {
+            "@type": "Person",
+            "name": "mozillazg",
+            "image": "https://mozillazg.github.io/static/avatar.jpeg",
+            "url": "https://mozillazg.github.io",
+            "sameAs": []
+        },
+        // "headline": "",
+        "url": "https://mozillazg.github.io/2016/08/python-the-right-way-to-catch-exception-then-reraise-another-exception.html",
+        "datePublished": "2016-08-16",
+        // "dateModified": "",
+        "image": "https://mozillazg.github.io/static/avatar.jpeg",
+        "description": "一般大家实现捕获异常然后再抛出另一个异常的方法是下面这样的: def div(): 2 / 0 try: div() except ZeroDivisionError as e: raise ValueError(e) 不知道大家有没有注意到这样抛出异常的方式有一个很严重的问题，那就是 在重新抛出另一个异常的时候，捕获的上一个异常的 traceback 信息丢失了(python2): $ cat a.py def div(): 2 / 0 try: div() except ZeroDivisionError as e: raise ValueError(e) $ python2 a.py Traceback (most recent call last): File &#34;a.py&#34;, line 6, in &lt;module&gt; raise ValueError(e) ValueError: integer division or modulo by zero 这样的话非常不利于查找问题: 比如上面的例子中实际出错的代码是第二行，但是 当我们捕获了第一个异常然后再抛出一个自定义异常的时候， 实际出错位置的信息就丢失了。 Python 2¶ 那么在 Python 2 下如果我们不想丢失捕获的异常的 traceback 信息的话，应该 怎样重新抛出异常呢？ 有两种办法, 还是用上面的例子举例: 一种办法是直接 raise: $ cat a.py def div(): 2 / 0 try: div() except ZeroDivisionError as e: raise $ python2 a.py Traceback (most recent call last): File &#34;a.py&#34;, line 4, in &lt;module&gt; div() File &#34;a.py&#34;, line 2, in div 2 / 0 ZeroDivisionError: integer division or modulo by zero 另一种办法就是 raise 另一个异常时指定上一个异常的 traceback 信息 (通过 sys.exc_info() 获取当前捕获的异常信息): $ cat a.py import sys def div(): 2 / 0 try: div() except ZeroDivisionError as e: raise ValueError(e), None, sys.exc_info()[2] $ python2 a.py Traceback (most recent call last): File &#34;a.py&#34;, line 6, in &lt;module&gt; div() File &#34;a.py&#34;, line 4, in div 2 / 0 ValueError: integer division or modulo by zero 这个是 raise 的高级用法: raise exception, value, traceback exception: 异常类实例/异常类 value: 初始化异常类的参数值/异常类实例（使用这个实例作为 raise 的异常实例）/元组/None traceback: traceback 对象/None 下面我们来看看上面的方法是否可以应对多层异常捕获然后再抛出的情况: $ cat a.py import sys def div(): 2 / 0 def foo(): try: div() except ZeroDivisionError as e: raise ValueError(e), None, sys.exc_info()[2] def bar(): try: foo() except ValueError as e: raise TypeError(e), None, sys.exc_info()[2] def foobar(): try: bar() except TypeError as e: raise foobar() $ python2 a.py Traceback (most recent call last): File &#34;a.py&#34;, line 23, in &lt;module&gt; foobar() File &#34;a.py&#34;, line 20, in foobar bar() File &#34;a.py&#34;, line 14, in bar foo() File &#34;a.py&#34;, line 8, in foo div() File &#34;a.py&#34;, line 4, in div 2 / 0 TypeError: integer division or modulo by zero 从上面的结果可以看到这两种方法是支持多层异常 traceback 信息传递的。 那么在 Python 3 下又怎么解决这个问题呢？ Python 3¶ 在 Python 3 下默认会附加上捕获的上个异常的 trackback 信息（保存在异常实例的 __traceback__ 属性中）: $ cat a.py def div(): 2 / 0 try: div() except ZeroDivisionError as e: raise ValueError(e) $ python3 a.py Traceback (most recent call last): File &#34;a.py&#34;, line 4, in &lt;module&gt; div() File &#34;a.py&#34;, line 2, in div 2 / 0 ZeroDivisionError: division by zero During handling of the above exception, another exception occurred: Traceback (most recent call last): File &#34;a.py&#34;, line 6, in &lt;module&gt; raise ValueError(e) ValueError: division by zero 也支持指定使用哪个异常实例的 traceback 信息: raise ... from ... $ cat a.py def div(): 2 / 0 try: div() except ZeroDivisionError as e: raise ValueError(e) from e $ python a.py Traceback (most recent call last): File &#34;a.py&#34;, line 5, in &lt;module&gt; div() File &#34;a.py&#34;, line 2, in div 2 / 0 ZeroDivisionError: division by zero The above exception was the direct cause of the following exception: Traceback (most recent call last): File &#34;a.py&#34;, line 7, in &lt;module&gt; raise ValueError(e) from e ValueError: division by zero 也可以指定使用的 traceback 对象: raise exception.with_traceback(traceback) $ cat a.py import sys def div(): 2 / 0 try: div() except ZeroDivisionError as e: raise ValueError(e).with_traceback(sys.exc_info()[2]) $ python a.py Traceback (most recent call last): File &#34;a.py&#34;, line 7, in &lt;module&gt; div() File &#34;a.py&#34;, line 4, in div 2 / 0 ZeroDivisionError: division by zero During handling of the above exception, another exception occurred: Traceback (most recent call last): File &#34;a.py&#34;, line 9, in &lt;module&gt; raise ValueError(e).with_traceback(sys.exc_info()[2]) File &#34;a.py&#34;, line 7, in &lt;module&gt; div() File &#34;a.py&#34;, line 4, in div 2 / 0 ValueError: division by zero 兼容 Python 2 和 Python 3 的写法¶ 上面介绍了在 Python 2 和 Python 3 下的不同解决办法，那么如何写一个兼容 Python 2 和 Python 3 的 reraise 函数呢？ 下面将介绍一种方法: PY3 = sys.version_info[0] == 3 if PY3: def reraise(tp, value, tb=None): if value.__traceback__ is not tb: raise value.with_traceback(tb) else: raise value else: exec(&#39;&#39;&#39;def reraise(tp, value, tb=None): raise tp, value, tb &#39;&#39;&#39;) 这里的 reraise 函数我们约定了 vlaue 参数的值是一个异常类的实例。 上面 else 中之所以用 exec 去定义 reraise 函数是因为 raise tp, value, tb 在 Python 3 下会报语法错误，所以用 exec 来 绕过 Python 3 下的语法错误检查。 下面我们来看一下效果: $ cat a.py ef div(): 2 / 0 def foo(): try: div() except ZeroDivisionError as e: reraise(ValueError, ValueError(e), sys.exc_info()[2]) def bar(): try: foo() except ValueError as e: reraise(TypeError, TypeError(e), sys.exc_info()[2]) def foobar(): try: bar() except TypeError: raise foobar() Python 2: $ python2 a.py Traceback (most recent call last): File &#34;a.py&#34;, line 34, in &lt;module&gt; foobar() File &#34;a.py&#34;, line 31, in foobar bar() File &#34;a.py&#34;, line 27, in bar reraise(TypeError, TypeError(e), sys.exc_info()[2]) File &#34;a.py&#34;, line 25, in bar foo() File &#34;a.py&#34;, line 21, in foo reraise(ValueError, ValueError(e), sys.exc_info()[2]) File &#34;a.py&#34;, line 19, in foo div() File &#34;a.py&#34;, line 15, in div 2 / 0 TypeError: integer division or modulo by zero Python 3: $ python3 a.py Traceback (most recent call last): File &#34;a.py&#34;, line 19, in foo div() File &#34;a.py&#34;, line 15, in div 2 / 0 ZeroDivisionError: division by zero During handling of the above exception, another exception occurred: Traceback (most recent call last): File &#34;a.py&#34;, line 25, in bar foo() File &#34;a.py&#34;, line 21, in foo reraise(ValueError, ValueError(e), sys.exc_info()[2]) File &#34;a.py&#34;, line 6, in reraise raise value.with_traceback(tb) File &#34;a.py&#34;, line 19, in foo div() File &#34;a.py&#34;, line 15, in div 2 / 0 ValueError: division by zero During handling of the above exception, another exception occurred: Traceback (most recent call last): File &#34;a.py&#34;, line 34, in &lt;module&gt; foobar() File &#34;a.py&#34;, line 31, in foobar bar() File &#34;a.py&#34;, line 27, in bar reraise(TypeError, TypeError(e), sys.exc_info()[2]) File &#34;a.py&#34;, line 6, in reraise raise value.with_traceback(tb) File &#34;a.py&#34;, line 25, in bar foo() File &#34;a.py&#34;, line 21, in foo reraise(ValueError, ValueError(e), sys.exc_info()[2]) File &#34;a.py&#34;, line 6, in reraise raise value.with_traceback(tb) File &#34;a.py&#34;, line 19, in foo div() File &#34;a.py&#34;, line 15, in div 2 / 0 TypeError: division by zero 下次需要捕获一个异常然后再抛出另一个异常的时候大家可以试试本文的方法。 参考资料¶ 6. Simple statements — Python 2.7.12 documentation 6. Built-in Exceptions — Python 2.7.12 documentation 7. Simple statements — Python 3.5.2 documentation 5. Built-in Exceptions — Python 3.5.2 documentation PEP 3109 -- Raising Exceptions in Python 3000 | Python.org bottle/bottle.py at cafc15419cbb4a6cb748e6ecdccf92893bb25ce5 · bottlepy/bottle flask/_compat.py at 6e46d0cd3969f6c13ff61c95c81a975192232fed · pallets/flask",
+        "mainEntityOfPage": {
+            "@type": "WebPage",
+            "@id": "https://mozillazg.github.io"
+        }
+    }
+    </script>
 
 </head>
 <body>
