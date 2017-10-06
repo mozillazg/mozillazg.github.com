@@ -8,9 +8,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
 
-    <link href="https://mozillazg.github.io/favicon.ico" rel="icon">
+    <link href="http://127.0.0.1:8000/favicon.ico" rel="icon">
 
-<link rel="canonical" href="https://mozillazg.github.io/2015/11/postgresql-full-text-search-search-chinese-notice-text-search-query-contains-only-stop-words-or-doesn-t-contain-lexemes-ignored.html">
+<link rel="canonical" href="http://127.0.0.1:8000/2015/11/postgresql-full-text-search-search-chinese-notice-text-search-query-contains-only-stop-words-or-doesn-t-contain-lexemes-ignored.html">
 
         <meta name="author" content="mozillazg" />
         <meta name="keywords" content="postgresql" />
@@ -25,39 +25,39 @@
         <meta property="og:site_name" content="Huang Huang 的博客" />
         <meta property="og:type" content="article"/>
         <meta property="og:title" content="postgresql 全文检索功能搜索中文提示 “text-search query contains only stop words or doesn&#39;t contain lexemes, ignored”的解决办法"/>
-        <meta property="og:url" content="https://mozillazg.github.io/2015/11/postgresql-full-text-search-search-chinese-notice-text-search-query-contains-only-stop-words-or-doesn-t-contain-lexemes-ignored.html"/>
+        <meta property="og:url" content="http://127.0.0.1:8000/2015/11/postgresql-full-text-search-search-chinese-notice-text-search-query-contains-only-stop-words-or-doesn-t-contain-lexemes-ignored.html"/>
         <meta property="og:description" content="图片来源: http://derpinews.tumblr.com/post/132078326118/were-back 最近使用了一下 postgresql 的 full text search 功能，在开发机器上可以实现简单的搜索中文的功能， 但是到其他服务器上后总是出现可以搜索英文但是搜索中文却没有结果的情况。 通过在 postgres 的 shell 中执行程序生成的搜索语句后发现：当搜索条件是中文时，总是提示： NOTICE: text-search query contains only stop words or doesn&#39;t contain lexemes, ignored 通过大半天的查资料，验证之后，终于解决了这个问题。如果你也出现类似问题的话，可以检查是否有一样的问题： 数据库编码不是 UTF-8 之类的支持中文的编码。 P.S. 如果搜索英文也有这个问题的话，可以把搜索时的解释器由 english 改成 simple: postgres=# SELECT to_tsvector(&#39;somthing&#39;) @@ to_tsquery(&#39;english&#39;, &#39;s:*&#39;); NOTICE: text-search query contains only stop words or doesn&#39;t contain lexemes, ignored ?column? ---------- f (1 row) postgres=# SELECT to_tsvector(&#39;somthing&#39;) @@ to_tsquery(&#39;simple&#39;, &#39;s:*&#39;); ?column? ---------- t (1 row) simple 。如果你搜索时使用的解释器是 `english` 的话改成 `simple` 或者安装的其他支持中文的解释器: --&gt; 数据库编码 默认 postgresql 内的数据库编码是 SQL_ASCII 编码，这个导致进行全文检索的时候没法搜索中文。 请看下面这个两个数据库，一个是 SQL_ASCII 编码，一个是 UTF8 编码。 相同的搜索语句结果也不一样： postgres=# \l List of databases Name | Owner | Encoding | Collate | Ctype | Access privileges -----------+----------+-----------+-------------+-------------+----------------------- db1 | owner | UTF8 | en_US.UTF-8 | en_US.UTF-8 | =Tc/owner + | | | | | owner=CTc/owner db2 | owner | SQL_ASCII | C | C | =Tc/owner + postgres=# \c db1 db1=# db1=# SELECT to_tsvector(&#39;我们&#39;) @@ to_tsquery(&#39;我:*&#39;); ?column? ---------- t (1 row) db1=# db1=# \c db2 db2=# db2=# SELECT to_tsvector(&#39;我们&#39;) @@ to_tsquery(&#39;我:*&#39;); NOTICE: text-search query contains only stop words or doesn&#39;t contain lexemes, ignored ?column? ---------- f (1 row) db2=# 下面讲一下如何将数据库转换为 UTF-8 编码。 修改数据库 Encoding, Collate, Ctype 备份要转换的数据库: pg_dump --format=t -d db_name -U user_name -W -h 127.0.0.1 &gt; dump.sql 更新 template1 的编码: update pg_database set encoding = 6, datcollate = &#39;en_US.UTF8&#39;, datctype = &#39;en_US.UTF8&#39; where datname = &#39;template1&#39;; drop 原有的数据库或者改名: /* 改名 */ ALTER DATABASE db_name RENAME TO db_name_bak; /* 删除 */ drop database db_name; 重新创建数据库，指定编码： CREATE DATABASE db_name WITH ENCODING &#39;UTF8&#39; LC_COLLATE=&#39;en_US.UTF-8&#39; LC_CTYPE=&#39;en_US.UTF-8&#39; owner user_name TEMPLATE=template1; 数据库权限: GRANT ALL PRIVILEGES ON DATABASE db_name to user_name; \c db_name; ALTER SCHEMA public OWNER to user_name; GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO user_name; GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO user_name; 恢复数据库数据： pg_restore -d db_name -h 127.0.0.1 -U user_name &lt; dump.sql 现在再试一下应该已经可以正常搜索中文了。 参考资料 http://stackoverflow.com/questions/16736891/pgerror-error-new-encoding-utf8-is-incompatible http://www.postgresql.org/docs/9.4/static/multibyte.html http://stackoverflow.com/questions/380924/how-can-i-change-database-encoding-for-a-postgresql-database-using-sql-or-phppga https://coderwall.com/p/j-_mia/make-postgres-default-to-utf8 https://github.com/wvanbergen/scoped_search/issues/23 https://github.com/ckan/ckan/pull/1838 https://ruby-china.org/topics/14607 https://github.com/kvesteri/sqlalchemy-searchable/issues/33"/>
         <meta property="article:published_time" content="2015-11-23" />
             <meta property="article:section" content="database" />
             <meta property="article:tag" content="postgresql" />
             <meta property="article:author" content="mozillazg" />
             <meta property="og:image"
-                  content="https://mozillazg.github.io/static/avatar.jpeg"/>
+                  content="http://127.0.0.1:8000/static/avatar.jpeg"/>
 
 
     <meta name="twitter:card" content="summary">
         <meta name="twitter:site" content="@mozillazg">
         <meta name="twitter:creator" content="@mozillazg">
-    <meta name="twitter:domain" content="https://mozillazg.github.io">
+    <meta name="twitter:domain" content="http://127.0.0.1:8000">
             <meta property="twitter:image"
-                  content="https://mozillazg.github.io/static/avatar.jpeg"/>
+                  content="http://127.0.0.1:8000/static/avatar.jpeg"/>
 
     <!-- Bootstrap -->
-        <link rel="stylesheet" href="https://mozillazg.github.io/theme/css/bootstrap.min.css" type="text/css"/>
-    <link href="https://mozillazg.github.io/theme/css/font-awesome.min.css" rel="stylesheet">
+        <link rel="stylesheet" href="http://127.0.0.1:8000/theme/css/bootstrap.min.css" type="text/css"/>
+    <link href="http://127.0.0.1:8000/theme/css/font-awesome.min.css" rel="stylesheet">
 
-    <link href="https://mozillazg.github.io/theme/css/pygments/github.css" rel="stylesheet">
-    <link rel="stylesheet" href="https://mozillazg.github.io/theme/css/style.css" type="text/css"/>
-            <link href="https://mozillazg.github.io/static/custom.css" rel="stylesheet">
+    <link href="http://127.0.0.1:8000/theme/css/pygments/github.css" rel="stylesheet">
+    <link rel="stylesheet" href="http://127.0.0.1:8000/theme/css/style.css" type="text/css"/>
+            <link href="http://127.0.0.1:8000/static/custom.css" rel="stylesheet">
 
-        <link href="https://mozillazg.github.io/feeds/all.atom.xml" type="application/atom+xml" rel="alternate"
+        <link href="http://127.0.0.1:8000/feeds/all.atom.xml" type="application/atom+xml" rel="alternate"
               title="Huang Huang 的博客 ATOM Feed"/>
 
-        <link href="https://mozillazg.github.io/feeds/all.rss.xml" type="application/rss+xml" rel="alternate"
+        <link href="http://127.0.0.1:8000/feeds/all.rss.xml" type="application/rss+xml" rel="alternate"
               title="Huang Huang 的博客 RSS Feed"/>
 
 
-        <link href="https://mozillazg.github.io/feeds/database.atom.xml" type="application/atom+xml" rel="alternate"
+        <link href="http://127.0.0.1:8000/feeds/database.atom.xml" type="application/atom+xml" rel="alternate"
               title="Huang Huang 的博客 database ATOM Feed"/>
 
 
@@ -68,25 +68,25 @@
         "publisher": {
             "@type": "Person",
             "name": "mozillazg",
-            "logo": "https://mozillazg.github.io/static/avatar.jpeg"
+            "logo": "http://127.0.0.1:8000/static/avatar.jpeg"
         },
         "author": {
             "@type": "Person",
             "name": "mozillazg",
-            "image": "https://mozillazg.github.io/static/avatar.jpeg",
-            "url": "https://mozillazg.github.io",
+            "image": "http://127.0.0.1:8000/static/avatar.jpeg",
+            "url": "http://127.0.0.1:8000",
             "sameAs": []
         },
         // "headline": "",
-        "url": "https://mozillazg.github.io/2015/11/postgresql-full-text-search-search-chinese-notice-text-search-query-contains-only-stop-words-or-doesn-t-contain-lexemes-ignored.html",
+        "url": "http://127.0.0.1:8000/2015/11/postgresql-full-text-search-search-chinese-notice-text-search-query-contains-only-stop-words-or-doesn-t-contain-lexemes-ignored.html",
         "datePublished": "2015-11-23",
         // "dateModified": "",
-        "image": "https://mozillazg.github.io/static/avatar.jpeg",
+        "image": "http://127.0.0.1:8000/static/avatar.jpeg",
         "keywords": "postgresql",
         "description": "图片来源: http://derpinews.tumblr.com/post/132078326118/were-back 最近使用了一下 postgresql 的 full text search 功能，在开发机器上可以实现简单的搜索中文的功能， 但是到其他服务器上后总是出现可以搜索英文但是搜索中文却没有结果的情况。 通过在 postgres 的 shell 中执行程序生成的搜索语句后发现：当搜索条件是中文时，总是提示： NOTICE: text-search query contains only stop words or doesn&#39;t contain lexemes, ignored 通过大半天的查资料，验证之后，终于解决了这个问题。如果你也出现类似问题的话，可以检查是否有一样的问题： 数据库编码不是 UTF-8 之类的支持中文的编码。 P.S. 如果搜索英文也有这个问题的话，可以把搜索时的解释器由 english 改成 simple: postgres=# SELECT to_tsvector(&#39;somthing&#39;) @@ to_tsquery(&#39;english&#39;, &#39;s:*&#39;); NOTICE: text-search query contains only stop words or doesn&#39;t contain lexemes, ignored ?column? ---------- f (1 row) postgres=# SELECT to_tsvector(&#39;somthing&#39;) @@ to_tsquery(&#39;simple&#39;, &#39;s:*&#39;); ?column? ---------- t (1 row) simple 。如果你搜索时使用的解释器是 `english` 的话改成 `simple` 或者安装的其他支持中文的解释器: --&gt; 数据库编码 默认 postgresql 内的数据库编码是 SQL_ASCII 编码，这个导致进行全文检索的时候没法搜索中文。 请看下面这个两个数据库，一个是 SQL_ASCII 编码，一个是 UTF8 编码。 相同的搜索语句结果也不一样： postgres=# \l List of databases Name | Owner | Encoding | Collate | Ctype | Access privileges -----------+----------+-----------+-------------+-------------+----------------------- db1 | owner | UTF8 | en_US.UTF-8 | en_US.UTF-8 | =Tc/owner + | | | | | owner=CTc/owner db2 | owner | SQL_ASCII | C | C | =Tc/owner + postgres=# \c db1 db1=# db1=# SELECT to_tsvector(&#39;我们&#39;) @@ to_tsquery(&#39;我:*&#39;); ?column? ---------- t (1 row) db1=# db1=# \c db2 db2=# db2=# SELECT to_tsvector(&#39;我们&#39;) @@ to_tsquery(&#39;我:*&#39;); NOTICE: text-search query contains only stop words or doesn&#39;t contain lexemes, ignored ?column? ---------- f (1 row) db2=# 下面讲一下如何将数据库转换为 UTF-8 编码。 修改数据库 Encoding, Collate, Ctype 备份要转换的数据库: pg_dump --format=t -d db_name -U user_name -W -h 127.0.0.1 &gt; dump.sql 更新 template1 的编码: update pg_database set encoding = 6, datcollate = &#39;en_US.UTF8&#39;, datctype = &#39;en_US.UTF8&#39; where datname = &#39;template1&#39;; drop 原有的数据库或者改名: /* 改名 */ ALTER DATABASE db_name RENAME TO db_name_bak; /* 删除 */ drop database db_name; 重新创建数据库，指定编码： CREATE DATABASE db_name WITH ENCODING &#39;UTF8&#39; LC_COLLATE=&#39;en_US.UTF-8&#39; LC_CTYPE=&#39;en_US.UTF-8&#39; owner user_name TEMPLATE=template1; 数据库权限: GRANT ALL PRIVILEGES ON DATABASE db_name to user_name; \c db_name; ALTER SCHEMA public OWNER to user_name; GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO user_name; GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO user_name; 恢复数据库数据： pg_restore -d db_name -h 127.0.0.1 -U user_name &lt; dump.sql 现在再试一下应该已经可以正常搜索中文了。 参考资料 http://stackoverflow.com/questions/16736891/pgerror-error-new-encoding-utf8-is-incompatible http://www.postgresql.org/docs/9.4/static/multibyte.html http://stackoverflow.com/questions/380924/how-can-i-change-database-encoding-for-a-postgresql-database-using-sql-or-phppga https://coderwall.com/p/j-_mia/make-postgres-default-to-utf8 https://github.com/wvanbergen/scoped_search/issues/23 https://github.com/ckan/ckan/pull/1838 https://ruby-china.org/topics/14607 https://github.com/kvesteri/sqlalchemy-searchable/issues/33",
         "mainEntityOfPage": {
             "@type": "WebPage",
-            "@id": "https://mozillazg.github.io"
+            "@id": "http://127.0.0.1:8000"
         }
     }
     </script>
@@ -103,16 +103,16 @@
                 <span class="icon-bar"></span>
                 <span class="icon-bar"></span>
             </button>
-            <a href="https://mozillazg.github.io/" class="navbar-brand">
+            <a href="http://127.0.0.1:8000/" class="navbar-brand">
 Huang Huang 的博客            </a>
         </div>
         <div class="collapse navbar-collapse navbar-ex1-collapse">
             <ul class="nav navbar-nav">
-                    <li><a href="https://mozillazg.github.io/feeds/all.atom.xml">Feed</a></li>
+                    <li><a href="http://127.0.0.1:8000/feeds/all.atom.xml">Feed</a></li>
                     <li><a href="/2014/10/pages/about-me.html">About</a></li>
             </ul>
             <ul class="nav navbar-nav navbar-right">
-              <li><a href="https://mozillazg.github.io/archives.html"><i class="fa fa-th-list"></i><span class="icon-label">Archives</span></a></li>
+              <li><a href="http://127.0.0.1:8000/archives.html"><i class="fa fa-th-list"></i><span class="icon-label">Archives</span></a></li>
             </ul>
         </div>
         <!-- /.navbar-collapse -->
@@ -127,7 +127,7 @@ Huang Huang 的博客            </a>
         <article>
             <header class="text-center">
                 <h1>
-                    <a href="https://mozillazg.github.io/2015/11/postgresql-full-text-search-search-chinese-notice-text-search-query-contains-only-stop-words-or-doesn-t-contain-lexemes-ignored.html"
+                    <a href="http://127.0.0.1:8000/2015/11/postgresql-full-text-search-search-chinese-notice-text-search-query-contains-only-stop-words-or-doesn-t-contain-lexemes-ignored.html"
                        rel="bookmark"
                        title="Permalink to postgresql 全文检索功能搜索中文提示 “text-search query contains only stop words or doesn't contain lexemes, ignored”的解决办法">
                         postgresql 全文检索功能搜索中文提示 “text-search query contains only stop words or doesn't contain lexemes, ignored”的解决办法
@@ -142,11 +142,11 @@ Huang Huang 的博客            </a>
             <div class="entry-content">
                 <div class="well-sm article-info">
 <footer class="post-info">
-        <a href="https://mozillazg.github.io/category/database.html">database</a>
+        <a href="http://127.0.0.1:8000/category/database.html">database</a>
 
 
 <span class="label label-default hide">Tags</span>
-	<a href="https://mozillazg.github.io/tag/postgresql.html">postgresql</a>
+	<a href="http://127.0.0.1:8000/tag/postgresql.html">postgresql</a>
     
 </footer><!-- /.post-info -->                </div>
                 <div class="js-toc"></div>
@@ -291,14 +291,20 @@ GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO user_name;
                 </div>
             </div>
             <!-- /.entry-content -->
+<section class="text-center">
+  
+<p>有任何意见欢迎在下方留言或者加我微信交流</p>
+<img src="/static/wechat.png" height="200px" width="200px"/>
+
+</section>
 <section class="well" id="related-posts">
     <p>Related Posts:</p>
     <ul>
-        <li><a href="https://mozillazg.github.io/2016/02/psycopg2-how-to-get-lastrowid-when-insert-a-new-row.html">psycopg2 插入数据时如何获取新纪录的主键值</a></li>
-        <li><a href="https://mozillazg.github.io/2014/06/hello-postgresql.html">[database] postgresql 常用操作</a></li>
-        <li><a href="https://mozillazg.github.io/2016/01/sqlalchemy-use-postgresql-uuid.html">使用 sqlalchemy 时如何配置使用 postgresql 的 uuid 类型</a></li>
-        <li><a href="https://mozillazg.github.io/2016/01/install-postgresql-9.5-on-centos-7.html">如何在 centos 7 上安装 postgresql 9.5</a></li>
-        <li><a href="https://mozillazg.github.io/2015/04/postgresql-dealing-date_trunc-function-with-timezone.html">[postgreqsql] 处理 date_trunc 函数的时区问题</a></li>
+        <li><a href="http://127.0.0.1:8000/2016/01/sqlalchemy-use-postgresql-uuid.html">使用 sqlalchemy 时如何配置使用 postgresql 的 uuid 类型</a></li>
+        <li><a href="http://127.0.0.1:8000/2014/06/hello-postgresql.html">[database] postgresql 常用操作</a></li>
+        <li><a href="http://127.0.0.1:8000/2016/02/psycopg2-how-to-get-lastrowid-when-insert-a-new-row.html">psycopg2 插入数据时如何获取新纪录的主键值</a></li>
+        <li><a href="http://127.0.0.1:8000/2016/01/install-postgresql-9.5-on-centos-7.html">如何在 centos 7 上安装 postgresql 9.5</a></li>
+        <li><a href="http://127.0.0.1:8000/2015/04/postgresql-dealing-date_trunc-function-with-timezone.html">[postgreqsql] 处理 date_trunc 函数的时区问题</a></li>
     </ul>
 </section>
     <hr/>
@@ -311,7 +317,7 @@ GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO user_name;
             var disqus_shortname = 'my-github-blog'; // required: replace example with your forum shortname
 
                     var disqus_identifier = 'postgresql-full-text-search-search-chinese-notice-text-search-query-contains-only-stop-words-or-doesn-t-contain-lexemes-ignored';
-                var disqus_url = 'https://mozillazg.github.io/2015/11/postgresql-full-text-search-search-chinese-notice-text-search-query-contains-only-stop-words-or-doesn-t-contain-lexemes-ignored.html';
+                var disqus_url = 'http://127.0.0.1:8000/2015/11/postgresql-full-text-search-search-chinese-notice-text-search-query-contains-only-stop-words-or-doesn-t-contain-lexemes-ignored.html';
 
             var disqus_config = function () {
                 this.language = "zh-hans";
@@ -345,7 +351,7 @@ GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO user_name;
             &middot; Powered by <a href="https://github.com/DandyDev/pelican-bootstrap3" target="_blank">pelican-bootstrap3</a>,
             <a href="http://docs.getpelican.com/" target="_blank">Pelican</a>,
             <a href="http://getbootstrap.com" target="_blank">Bootstrap</a>              <p><small>  <a rel="license" href="http://creativecommons.org/licenses/by-sa/4.0/"><img alt="Creative Commons License" style="border-width:0" src="/static/images/by-sa-80x15.png" /></a>
-    &quot;<span xmlns:dct="http://purl.org/dc/terms/" property="dct:title">Huang Huang 的博客</span>&quot; by <a xmlns:cc="http://creativecommons.org/ns#" href="https://mozillazg.github.io" property="cc:attributionName" rel="cc:attributionURL">mozillazg</a> is
+    &quot;<span xmlns:dct="http://purl.org/dc/terms/" property="dct:title">Huang Huang 的博客</span>&quot; by <a xmlns:cc="http://creativecommons.org/ns#" href="http://127.0.0.1:8000" property="cc:attributionName" rel="cc:attributionURL">mozillazg</a> is
   licensed under a <a rel="license" href="http://creativecommons.org/licenses/by-sa/4.0/">Creative Commons Attribution-ShareAlike 4.0 International License</a>, except where indicated otherwise.
 </small></p>
          </div>
@@ -353,13 +359,13 @@ GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO user_name;
       </div>
    </div>
 </footer>
-<script src="https://mozillazg.github.io/theme/js/jquery.min.js"></script>
+<script src="http://127.0.0.1:8000/theme/js/jquery.min.js"></script>
 
 <!-- Include all compiled plugins (below), or include individual files as needed -->
-<script src="https://mozillazg.github.io/theme/js/bootstrap.min.js"></script>
+<script src="http://127.0.0.1:8000/theme/js/bootstrap.min.js"></script>
 
 <!-- Enable responsive features in IE8 with Respond.js (https://github.com/scottjehl/Respond) -->
-<script src="https://mozillazg.github.io/theme/js/respond.min.js"></script>
+<script src="http://127.0.0.1:8000/theme/js/respond.min.js"></script>
 
     <!-- Disqus -->
     <script type="text/javascript">
@@ -389,7 +395,7 @@ GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO user_name;
     <!-- End Google Analytics Universal Code -->
 
 
-<script src="https://mozillazg.github.io/theme/js/tocbot.min.js"></script>
+<script src="http://127.0.0.1:8000/theme/js/tocbot.min.js"></script>
 <script>
 $(document).ready(function(){
   tocbot.init({
