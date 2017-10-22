@@ -8,9 +8,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
 
-    <link href="http://127.0.0.1:8000/favicon.ico" rel="icon">
+    <link href="https://mozillazg.github.io/favicon.ico" rel="icon">
 
-<link rel="canonical" href="http://127.0.0.1:8000/2013/06/mysql-master-master.html">
+<link rel="canonical" href="https://mozillazg.github.io/2013/06/mysql-master-master.html">
 
         <meta name="author" content="mozillazg" />
         <meta name="keywords" content="mysql,replication" />
@@ -25,7 +25,7 @@
         <meta property="og:site_name" content="Huang Huang 的博客" />
         <meta property="og:type" content="article"/>
         <meta property="og:title" content="mysql 基于 master-master 的双机热备配置"/>
-        <meta property="og:url" content="http://127.0.0.1:8000/2013/06/mysql-master-master.html"/>
+        <meta property="og:url" content="https://mozillazg.github.io/2013/06/mysql-master-master.html"/>
         <meta property="og:description" content="[TOC] master-master 就是两台服务器互为主从： master1-slave(master2) &amp;&amp; master2-slave(master1) master1: 192.168.100.191 master2: 192.168.100.166 master1-slave(master2) mysql 版本最好一致 设置 master1 创建给 slave 登录用的用户名密码: mysql&gt; GRANT REPLICATION SLAVE ON *.* TO &#39;backup&#39;@&#39;192.168.100.166&#39; IDENTIFIED BY &#39;yNZE7fK9*@aMA?*ppF&#39;; # humanreadable mysql&gt; # grant replication slave on *.* to &#39;backup&#39;@&#39;192.168.100.166&#39; identified by &#39;yNZE7fK9*@aMA?*ppF&#39;; mysql&gt; create database hello default charset utf8; 配置 my.cnf # vim /etc/my.cnf [mysqld] server-id=1 #主机id，整数 #开启二进制日志，并且名称为 /var/lib/mysql/mysql-bin.*** # 如果是个路径则，保存到该路径下(log-bin=/var/log/mysql-bin.log -&gt; /var/log/mysql-bin.***) log-bin=mysql-bin read-only=0 #主机读写权限，读写都可以 binlog-do-db=hello #记录日志的数据库：需要的备份数据，多个写多行 # binlog-do-db=hello2 binlog-ignore-db=mysql #不记录日志的数据库：不需要备份的数据库，多个写多行 binlog-ignore-db=test binlog-ignore-db=information_schema # 自增字段奇数递增，防止冲突（1, 3, 5, ...,） auto-increment-increment = 2 # 每次递增的步长 auto-increment-offset = 1 # 初始值 重启 mysql: serivce mysqld restart 导出数据库 锁定数据库，不要退出 mysql shell mysql&gt;FLUSH TABLES WITH READ LOCK; mysql&gt;# flush tables with read lock; 新开一个终端，导出数据库 mysqldump --master-data -uroot -p hello &gt; hello.sql 查看主服务器的状态 mysql&gt; show master status\G; *************************** 1. row *************************** File: mysql-bin.000001 Position: 98 Binlog_Do_DB: hello Binlog_Ignore_DB: mysql,test,information_schema 1 row in set (0.00 sec) ERROR: No query specified 记下 Position 和 File 的值。 解锁 mysql&gt; UNLOCK TABLES; mysql&gt; # unlock tables; 设置 slave(master2) 编辑 my.cnf # vim /etc/my.cnf [mysqld] server-id=2 log-bin=mysql-bin replicate-do-db =hello #只复制某个库，多个写多行 replicate-ignore-db=mysql #不复制某个库 replicate-ignore-db=test replicate-ignore-db=information_schema relay-log=mysqld-relay-bin # 开启日志中继 log-slave-updates # slave将复制事件写进自己的二进制日志 #5.5 #log-slave-updates = ON #5.1 #log-slave-updates = 1 导入 master 导出的数据库： mysql&gt; create database hello default charset utf8; mysql -uroot -p hello &lt; hello.sql 配置 master 信息： mysql&gt; slave stop; mysql&gt; CHANGE MASTER TO -&gt; MASTER_HOST=&#39;192.168.100.191&#39;, //主服务器的IP地址 -&gt; MASTER_USER=&#39;backup&#39;, //同步数据库的用户 -&gt; MASTER_PASSWORD=&#39;yNZE7fK9*@aMA?*ppF&#39;, //同步数据库的密码 -&gt; MASTER_CONNECT_RETRY=60, // 如果从服务器发现主服务器断掉，重新连接的时间差(秒) -&gt; MASTER_LOG_FILE=&#39;mysql-bin.000001&#39;, //主服务器二进制日志的文件名(前面要求记住的 File 参数) -&gt; MASTER_LOG_POS=98; //日志文件的开始位置(前面要求记住的 Position 参数) mysql&gt; CHANGE MASTER TO MASTER_HOST=&#39;192.168.100.191&#39;, MASTER_USER=&#39;backup&#39;, MASTER_PASSWORD=&#39;yNZE7fK9*@aMA?*ppF&#39;, MASTER_CONNECT_RETRY=60, MASTER_LOG_FILE=&#39;mysql-bin.000001&#39;, MASTER_LOG_POS=98; mysql &gt; slave start; 重启 master, slave: service mysqld restart 查看 slave 状态： 进入 slave mysql: mysql&gt; show slave status\G; *************************** 1. row *************************** Slave_IO_State: Connecting to master Master_Host: 192.168.100.191 Master_User: backup Master_Port: 3306 Connect_Retry: 60 Master_Log_File: mysql-bin.000001 Read_Master_Log_Pos: 98 Relay_Log_File: mysqld-relay-bin.000001 Relay_Log_Pos: 98 Relay_Master_Log_File: mysql-bin.000001 Slave_IO_Running: Yes Slave_SQL_Running: Yes Replicate_Do_DB: hello Replicate_Ignore_DB: mysql,test,information_schema Exec_Master_Log_Pos: 98 Relay_Log_Space: 98 Until_Log_Pos: 0 Seconds_Behind_Master: NULL 1 row in set (0.00 sec) 注意一定要有下面两项，没有的话查看错误日志(less /var/log/mysqld.log)： Slave_IO_Running: Yes Slave_SQL_Running: Yes 测试 master 服务器 mysql&gt; use hello; Database changed mysql&gt; create table test(id int); mysql&gt; insert int test set id=1; mysql&gt; show master status\G; *************************** 1. row *************************** File: mysql-bin.000002 # 注意这里 Position: 276 # 注意这里 Binlog_Do_DB: hello Binlog_Ignore_DB: mysql,test,information_schema 1 row in set (0.00 sec) slave 服务器 mysql&gt; use hello; mysql&gt; show tables; +-----------------+ | Tables_in_hello | +-----------------+ | test | +-----------------+ 1 row in set (0.00 sec) mysql&gt; select * from test; +------+ | id | +------+ | 1 | +------+ 1 row in set (0.00 sec) mysql&gt; show slave status\G; *************************** 1. row *************************** Slave_IO_State: Waiting for master to send event Master_Host: 192.168.100.191 Master_User: backup Master_Port: 3306 Connect_Retry: 60 Master_Log_File: mysql-bin.000002 # 跟 master 一样 Read_Master_Log_Pos: 276 # 跟 master 一样 Relay_Log_File: mysqld-relay-bin.000003 Relay_Log_Pos: 413 Relay_Master_Log_File: mysql-bin.000002 Slave_IO_Running: Yes Slave_SQL_Running: Yes Replicate_Do_DB: hello Replicate_Ignore_DB: mysql,test,information_schema Last_Errno: 0 Last_Error: Skip_Counter: 0 Exec_Master_Log_Pos: 276 Relay_Log_Space: 413 Seconds_Behind_Master: 0 1 row in set (0.00 sec) master2-slave(master1) master2: mysql&gt; grant replication slave on *.* to &#39;backup&#39;@&#39;192.168.100.191&#39; identified by &#39;yNZE7fK9*@aMA?*ppF&#39;; mysql&gt; flush tables with read lock; mysql&gt; show master status\G; *************************** 1. row *************************** File: mysql-bin.000002 Position: 276 Binlog_Do_DB: Binlog_Ignore_DB: mysql&gt; unlock tables; vim /etc/my.cnf: # as master #开启二进制日志，并且名称为 /var/log/mysql/mysql-bin.*** log-bin=mysql-bin read-only=0 #主机读写权限，读写都可以 binlog-do-db=hello #记录日志的数据库：需要的备份数据，多个写多行 binlog-ignore-db=mysql #不记录日志的数据库：不需要备份的数据库，多个写多行 binlog-ignore-db=test binlog-ignore-db=information_schema # 自增字段偶数递增，防止冲突（2, 4, 6, ...,） auto-increment-increment = 2 # 每次递增的步长 auto-increment-offset = 2 # 初始值 service mysqld restart slave: mysql&gt; slave stop; mysql&gt; CHANGE MASTER TO MASTER_HOST=&#39;192.168.100.166&#39;, MASTER_USER=&#39;backup&#39;, MASTER_PASSWORD=&#39;yNZE7fK9*@aMA?*ppF&#39;, MASTER_CONNECT_RETRY=60, MASTER_LOG_FILE=&#39;mysql-bin.000002, MASTER_LOG_POS=276&#39;; mysql&gt; slave start; vim /etc/my.cnf # as slave replicate-do-db =hello #只复制某个库，多个写多行 replicate-ignore-db=mysql #不复制某个库 replicate-ignore-db=test replicate-ignore-db=information_schema relay-log=mysqld-relay-bin # 开启日志中继 log-slave-updates # slave将复制事件写进自己的二进制日志 serivce mysqld restart 测试 master2: mysql&gt; use hello; mysql&gt; insert into test set id=2; mysql&gt; select * from test; +------+ | id | +------+ | 1 | | 2 | +------+ 2 rows in set (0.00 sec) mysql&gt; show master status\G; *************************** 1. row *************************** File: mysql-bin.000003 Position: 187 Binlog_Do_DB: hello Binlog_Ignore_DB: mysql,test,information_schema 1 row in set (0.00 sec) slave: mysql&gt; show slave status \G; *************************** 1. row *************************** Slave_IO_State: Waiting for master to send event Master_Host: 192.168.100.166 Master_User: backup Master_Port: 3306 Connect_Retry: 60 Master_Log_File: mysql-bin.000003 Read_Master_Log_Pos: 187 Relay_Log_File: mysqld-relay-bin.000003 Relay_Log_Pos: 324 Relay_Master_Log_File: mysql-bin.000003 Slave_IO_Running: Yes Slave_SQL_Running: Yes Replicate_Do_DB: hello Replicate_Ignore_DB: mysql,test,information_schema Last_Errno: 0 Last_Error: Skip_Counter: 0 Exec_Master_Log_Pos: 187 Relay_Log_Space: 324 Until_Condition: None Until_Log_File: Until_Log_Pos: 0 Seconds_Behind_Master: 0 mysql&gt; use hello; mysql&gt; select * from test; +------+ | id | +------+ | 1 | | 2 | +------+ 2 rows in set (0.00 sec) 最后的配置文件 master1: # /etc/my.cnf [mysqld] # as master server-id=1 #主机id，整数 #开启二进制日志，并且名称为 /var/lib/mysql/mysql-bin.*** log-bin=mysql-bin read-only=0 #主机读写权限，读写都可以 binlog-do-db=hello #记录日志的数据库：需要的备份数据，多个写多行 # binlog-do-db=hello2 binlog-ignore-db=mysql #不记录日志的数据库：不需要备份的数据库，多个写多行 binlog-ignore-db=test binlog-ignore-db=information_schema # as slave replicate-do-db =hello #只复制某个库，多个写多行 replicate-ignore-db=mysql #不复制某个库 replicate-ignore-db=test replicate-ignore-db=information_schema relay-log=mysqld-relay-bin # 开启日志中继 log-slave-updates # slave将复制事件写进自己的二进制日志 # 自增字段奇数递增，防止冲突（1, 3, 5, ...,） auto-increment-increment = 2 # 每次递增的步长 auto-increment-offset = 1 # 初始值 master2: # /etc/my.cnf [mysqld] # as slave server-id=2 log-bin=mysql-bin replicate-do-db =hello #只复制某个库，多个写多行 replicate-ignore-db=mysql #不复制某个库 replicate-ignore-db=test replicate-ignore-db=information_schema relay-log=mysqld-relay-bin # 开启日志中继 log-slave-updates # 示slave将复制事件写进自己的二进制日志 # as master #开启二进制日志，并且名称为 /var/lib/mysql/mysql-bin.*** log-bin=mysql-bin read-only=0 #主机读写权限，读写都可以 binlog-do-db=hello #记录日志的数据库：需要的备份数据，多个写多行 # binlog-do-db=hello2 binlog-ignore-db=mysql #不记录日志的数据库：不需要备份的数据库，多个写多行 binlog-ignore-db=test binlog-ignore-db=information_schema # 自增字段偶数递增，防止冲突（2, 4, 6, ...,） auto-increment-increment = 2 # 每次递增的步长 auto-increment-offset = 2 # 初始值 参考 MYSQL 主从服务器配置 | 无影的博客 Mysql 数据库双机热备的配置 - 51CTO.COM MySQL Master-Master Replication of ALL databases. How? - Server Fault MySQL :: MySQL 5.1 Reference Manual :: 16 Replication MySqL的主从复制和读写分离 - ZhouLS的个人空间 - 开源中国社区 高性能Mysql主从架构的复制原理及配置详解 - guisu，程序人生。 - 博客频道 - CSDN.NET MySQL master slave 安装部署及常见问题-桥-搜狐博客 三台Mysql实现数据同步及主从模式 - 情感个人博客站 - Powered by Sablog-X MYSQL中的auto_increment_increment和auto_increment_offset - 朝着梦想 渐行前进 - 博客频道 - CSDN.NET auto increment - How is the MySQL auto_increment step size determined - Stack Overflow MySQL :: MySQL 5.1 Reference Manual :: 16.1.3.2 Replication Master Options and Variables"/>
         <meta property="article:published_time" content="2013-06-21" />
             <meta property="article:section" content="database" />
@@ -33,32 +33,32 @@
             <meta property="article:tag" content="replication" />
             <meta property="article:author" content="mozillazg" />
             <meta property="og:image"
-                  content="http://127.0.0.1:8000/static/avatar.jpeg"/>
+                  content="https://mozillazg.github.io/static/avatar.jpeg"/>
 
 
     <meta name="twitter:card" content="summary">
         <meta name="twitter:site" content="@mozillazg">
         <meta name="twitter:creator" content="@mozillazg">
-    <meta name="twitter:domain" content="http://127.0.0.1:8000">
+    <meta name="twitter:domain" content="https://mozillazg.github.io">
             <meta property="twitter:image"
-                  content="http://127.0.0.1:8000/static/avatar.jpeg"/>
+                  content="https://mozillazg.github.io/static/avatar.jpeg"/>
 
     <!-- Bootstrap -->
-        <link rel="stylesheet" href="http://127.0.0.1:8000/theme/css/bootstrap.min.css" type="text/css"/>
-    <link href="http://127.0.0.1:8000/theme/css/font-awesome.min.css" rel="stylesheet">
+        <link rel="stylesheet" href="https://mozillazg.github.io/theme/css/bootstrap.min.css" type="text/css"/>
+    <link href="https://mozillazg.github.io/theme/css/font-awesome.min.css" rel="stylesheet">
 
-    <link href="http://127.0.0.1:8000/theme/css/pygments/github.css" rel="stylesheet">
-    <link rel="stylesheet" href="http://127.0.0.1:8000/theme/css/style.css" type="text/css"/>
-            <link href="http://127.0.0.1:8000/static/custom.css" rel="stylesheet">
+    <link href="https://mozillazg.github.io/theme/css/pygments/github.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://mozillazg.github.io/theme/css/style.css" type="text/css"/>
+            <link href="https://mozillazg.github.io/static/custom.css" rel="stylesheet">
 
-        <link href="http://127.0.0.1:8000/feeds/all.atom.xml" type="application/atom+xml" rel="alternate"
+        <link href="https://mozillazg.github.io/feeds/all.atom.xml" type="application/atom+xml" rel="alternate"
               title="Huang Huang 的博客 ATOM Feed"/>
 
-        <link href="http://127.0.0.1:8000/feeds/all.rss.xml" type="application/rss+xml" rel="alternate"
+        <link href="https://mozillazg.github.io/feeds/all.rss.xml" type="application/rss+xml" rel="alternate"
               title="Huang Huang 的博客 RSS Feed"/>
 
 
-        <link href="http://127.0.0.1:8000/feeds/database.atom.xml" type="application/atom+xml" rel="alternate"
+        <link href="https://mozillazg.github.io/feeds/database.atom.xml" type="application/atom+xml" rel="alternate"
               title="Huang Huang 的博客 database ATOM Feed"/>
 
 
@@ -69,25 +69,25 @@
         "publisher": {
             "@type": "Person",
             "name": "mozillazg",
-            "logo": "http://127.0.0.1:8000/static/avatar.jpeg"
+            "logo": "https://mozillazg.github.io/static/avatar.jpeg"
         },
         "author": {
             "@type": "Person",
             "name": "mozillazg",
-            "image": "http://127.0.0.1:8000/static/avatar.jpeg",
-            "url": "http://127.0.0.1:8000",
+            "image": "https://mozillazg.github.io/static/avatar.jpeg",
+            "url": "https://mozillazg.github.io",
             "sameAs": []
         },
         // "headline": "",
-        "url": "http://127.0.0.1:8000/2013/06/mysql-master-master.html",
+        "url": "https://mozillazg.github.io/2013/06/mysql-master-master.html",
         "datePublished": "2013-06-21",
         // "dateModified": "",
-        "image": "http://127.0.0.1:8000/static/avatar.jpeg",
+        "image": "https://mozillazg.github.io/static/avatar.jpeg",
         "keywords": "mysql, replication",
         "description": "[TOC] master-master 就是两台服务器互为主从： master1-slave(master2) &amp;&amp; master2-slave(master1) master1: 192.168.100.191 master2: 192.168.100.166 master1-slave(master2) mysql 版本最好一致 设置 master1 创建给 slave 登录用的用户名密码: mysql&gt; GRANT REPLICATION SLAVE ON *.* TO &#39;backup&#39;@&#39;192.168.100.166&#39; IDENTIFIED BY &#39;yNZE7fK9*@aMA?*ppF&#39;; # humanreadable mysql&gt; # grant replication slave on *.* to &#39;backup&#39;@&#39;192.168.100.166&#39; identified by &#39;yNZE7fK9*@aMA?*ppF&#39;; mysql&gt; create database hello default charset utf8; 配置 my.cnf # vim /etc/my.cnf [mysqld] server-id=1 #主机id，整数 #开启二进制日志，并且名称为 /var/lib/mysql/mysql-bin.*** # 如果是个路径则，保存到该路径下(log-bin=/var/log/mysql-bin.log -&gt; /var/log/mysql-bin.***) log-bin=mysql-bin read-only=0 #主机读写权限，读写都可以 binlog-do-db=hello #记录日志的数据库：需要的备份数据，多个写多行 # binlog-do-db=hello2 binlog-ignore-db=mysql #不记录日志的数据库：不需要备份的数据库，多个写多行 binlog-ignore-db=test binlog-ignore-db=information_schema # 自增字段奇数递增，防止冲突（1, 3, 5, ...,） auto-increment-increment = 2 # 每次递增的步长 auto-increment-offset = 1 # 初始值 重启 mysql: serivce mysqld restart 导出数据库 锁定数据库，不要退出 mysql shell mysql&gt;FLUSH TABLES WITH READ LOCK; mysql&gt;# flush tables with read lock; 新开一个终端，导出数据库 mysqldump --master-data -uroot -p hello &gt; hello.sql 查看主服务器的状态 mysql&gt; show master status\G; *************************** 1. row *************************** File: mysql-bin.000001 Position: 98 Binlog_Do_DB: hello Binlog_Ignore_DB: mysql,test,information_schema 1 row in set (0.00 sec) ERROR: No query specified 记下 Position 和 File 的值。 解锁 mysql&gt; UNLOCK TABLES; mysql&gt; # unlock tables; 设置 slave(master2) 编辑 my.cnf # vim /etc/my.cnf [mysqld] server-id=2 log-bin=mysql-bin replicate-do-db =hello #只复制某个库，多个写多行 replicate-ignore-db=mysql #不复制某个库 replicate-ignore-db=test replicate-ignore-db=information_schema relay-log=mysqld-relay-bin # 开启日志中继 log-slave-updates # slave将复制事件写进自己的二进制日志 #5.5 #log-slave-updates = ON #5.1 #log-slave-updates = 1 导入 master 导出的数据库： mysql&gt; create database hello default charset utf8; mysql -uroot -p hello &lt; hello.sql 配置 master 信息： mysql&gt; slave stop; mysql&gt; CHANGE MASTER TO -&gt; MASTER_HOST=&#39;192.168.100.191&#39;, //主服务器的IP地址 -&gt; MASTER_USER=&#39;backup&#39;, //同步数据库的用户 -&gt; MASTER_PASSWORD=&#39;yNZE7fK9*@aMA?*ppF&#39;, //同步数据库的密码 -&gt; MASTER_CONNECT_RETRY=60, // 如果从服务器发现主服务器断掉，重新连接的时间差(秒) -&gt; MASTER_LOG_FILE=&#39;mysql-bin.000001&#39;, //主服务器二进制日志的文件名(前面要求记住的 File 参数) -&gt; MASTER_LOG_POS=98; //日志文件的开始位置(前面要求记住的 Position 参数) mysql&gt; CHANGE MASTER TO MASTER_HOST=&#39;192.168.100.191&#39;, MASTER_USER=&#39;backup&#39;, MASTER_PASSWORD=&#39;yNZE7fK9*@aMA?*ppF&#39;, MASTER_CONNECT_RETRY=60, MASTER_LOG_FILE=&#39;mysql-bin.000001&#39;, MASTER_LOG_POS=98; mysql &gt; slave start; 重启 master, slave: service mysqld restart 查看 slave 状态： 进入 slave mysql: mysql&gt; show slave status\G; *************************** 1. row *************************** Slave_IO_State: Connecting to master Master_Host: 192.168.100.191 Master_User: backup Master_Port: 3306 Connect_Retry: 60 Master_Log_File: mysql-bin.000001 Read_Master_Log_Pos: 98 Relay_Log_File: mysqld-relay-bin.000001 Relay_Log_Pos: 98 Relay_Master_Log_File: mysql-bin.000001 Slave_IO_Running: Yes Slave_SQL_Running: Yes Replicate_Do_DB: hello Replicate_Ignore_DB: mysql,test,information_schema Exec_Master_Log_Pos: 98 Relay_Log_Space: 98 Until_Log_Pos: 0 Seconds_Behind_Master: NULL 1 row in set (0.00 sec) 注意一定要有下面两项，没有的话查看错误日志(less /var/log/mysqld.log)： Slave_IO_Running: Yes Slave_SQL_Running: Yes 测试 master 服务器 mysql&gt; use hello; Database changed mysql&gt; create table test(id int); mysql&gt; insert int test set id=1; mysql&gt; show master status\G; *************************** 1. row *************************** File: mysql-bin.000002 # 注意这里 Position: 276 # 注意这里 Binlog_Do_DB: hello Binlog_Ignore_DB: mysql,test,information_schema 1 row in set (0.00 sec) slave 服务器 mysql&gt; use hello; mysql&gt; show tables; +-----------------+ | Tables_in_hello | +-----------------+ | test | +-----------------+ 1 row in set (0.00 sec) mysql&gt; select * from test; +------+ | id | +------+ | 1 | +------+ 1 row in set (0.00 sec) mysql&gt; show slave status\G; *************************** 1. row *************************** Slave_IO_State: Waiting for master to send event Master_Host: 192.168.100.191 Master_User: backup Master_Port: 3306 Connect_Retry: 60 Master_Log_File: mysql-bin.000002 # 跟 master 一样 Read_Master_Log_Pos: 276 # 跟 master 一样 Relay_Log_File: mysqld-relay-bin.000003 Relay_Log_Pos: 413 Relay_Master_Log_File: mysql-bin.000002 Slave_IO_Running: Yes Slave_SQL_Running: Yes Replicate_Do_DB: hello Replicate_Ignore_DB: mysql,test,information_schema Last_Errno: 0 Last_Error: Skip_Counter: 0 Exec_Master_Log_Pos: 276 Relay_Log_Space: 413 Seconds_Behind_Master: 0 1 row in set (0.00 sec) master2-slave(master1) master2: mysql&gt; grant replication slave on *.* to &#39;backup&#39;@&#39;192.168.100.191&#39; identified by &#39;yNZE7fK9*@aMA?*ppF&#39;; mysql&gt; flush tables with read lock; mysql&gt; show master status\G; *************************** 1. row *************************** File: mysql-bin.000002 Position: 276 Binlog_Do_DB: Binlog_Ignore_DB: mysql&gt; unlock tables; vim /etc/my.cnf: # as master #开启二进制日志，并且名称为 /var/log/mysql/mysql-bin.*** log-bin=mysql-bin read-only=0 #主机读写权限，读写都可以 binlog-do-db=hello #记录日志的数据库：需要的备份数据，多个写多行 binlog-ignore-db=mysql #不记录日志的数据库：不需要备份的数据库，多个写多行 binlog-ignore-db=test binlog-ignore-db=information_schema # 自增字段偶数递增，防止冲突（2, 4, 6, ...,） auto-increment-increment = 2 # 每次递增的步长 auto-increment-offset = 2 # 初始值 service mysqld restart slave: mysql&gt; slave stop; mysql&gt; CHANGE MASTER TO MASTER_HOST=&#39;192.168.100.166&#39;, MASTER_USER=&#39;backup&#39;, MASTER_PASSWORD=&#39;yNZE7fK9*@aMA?*ppF&#39;, MASTER_CONNECT_RETRY=60, MASTER_LOG_FILE=&#39;mysql-bin.000002, MASTER_LOG_POS=276&#39;; mysql&gt; slave start; vim /etc/my.cnf # as slave replicate-do-db =hello #只复制某个库，多个写多行 replicate-ignore-db=mysql #不复制某个库 replicate-ignore-db=test replicate-ignore-db=information_schema relay-log=mysqld-relay-bin # 开启日志中继 log-slave-updates # slave将复制事件写进自己的二进制日志 serivce mysqld restart 测试 master2: mysql&gt; use hello; mysql&gt; insert into test set id=2; mysql&gt; select * from test; +------+ | id | +------+ | 1 | | 2 | +------+ 2 rows in set (0.00 sec) mysql&gt; show master status\G; *************************** 1. row *************************** File: mysql-bin.000003 Position: 187 Binlog_Do_DB: hello Binlog_Ignore_DB: mysql,test,information_schema 1 row in set (0.00 sec) slave: mysql&gt; show slave status \G; *************************** 1. row *************************** Slave_IO_State: Waiting for master to send event Master_Host: 192.168.100.166 Master_User: backup Master_Port: 3306 Connect_Retry: 60 Master_Log_File: mysql-bin.000003 Read_Master_Log_Pos: 187 Relay_Log_File: mysqld-relay-bin.000003 Relay_Log_Pos: 324 Relay_Master_Log_File: mysql-bin.000003 Slave_IO_Running: Yes Slave_SQL_Running: Yes Replicate_Do_DB: hello Replicate_Ignore_DB: mysql,test,information_schema Last_Errno: 0 Last_Error: Skip_Counter: 0 Exec_Master_Log_Pos: 187 Relay_Log_Space: 324 Until_Condition: None Until_Log_File: Until_Log_Pos: 0 Seconds_Behind_Master: 0 mysql&gt; use hello; mysql&gt; select * from test; +------+ | id | +------+ | 1 | | 2 | +------+ 2 rows in set (0.00 sec) 最后的配置文件 master1: # /etc/my.cnf [mysqld] # as master server-id=1 #主机id，整数 #开启二进制日志，并且名称为 /var/lib/mysql/mysql-bin.*** log-bin=mysql-bin read-only=0 #主机读写权限，读写都可以 binlog-do-db=hello #记录日志的数据库：需要的备份数据，多个写多行 # binlog-do-db=hello2 binlog-ignore-db=mysql #不记录日志的数据库：不需要备份的数据库，多个写多行 binlog-ignore-db=test binlog-ignore-db=information_schema # as slave replicate-do-db =hello #只复制某个库，多个写多行 replicate-ignore-db=mysql #不复制某个库 replicate-ignore-db=test replicate-ignore-db=information_schema relay-log=mysqld-relay-bin # 开启日志中继 log-slave-updates # slave将复制事件写进自己的二进制日志 # 自增字段奇数递增，防止冲突（1, 3, 5, ...,） auto-increment-increment = 2 # 每次递增的步长 auto-increment-offset = 1 # 初始值 master2: # /etc/my.cnf [mysqld] # as slave server-id=2 log-bin=mysql-bin replicate-do-db =hello #只复制某个库，多个写多行 replicate-ignore-db=mysql #不复制某个库 replicate-ignore-db=test replicate-ignore-db=information_schema relay-log=mysqld-relay-bin # 开启日志中继 log-slave-updates # 示slave将复制事件写进自己的二进制日志 # as master #开启二进制日志，并且名称为 /var/lib/mysql/mysql-bin.*** log-bin=mysql-bin read-only=0 #主机读写权限，读写都可以 binlog-do-db=hello #记录日志的数据库：需要的备份数据，多个写多行 # binlog-do-db=hello2 binlog-ignore-db=mysql #不记录日志的数据库：不需要备份的数据库，多个写多行 binlog-ignore-db=test binlog-ignore-db=information_schema # 自增字段偶数递增，防止冲突（2, 4, 6, ...,） auto-increment-increment = 2 # 每次递增的步长 auto-increment-offset = 2 # 初始值 参考 MYSQL 主从服务器配置 | 无影的博客 Mysql 数据库双机热备的配置 - 51CTO.COM MySQL Master-Master Replication of ALL databases. How? - Server Fault MySQL :: MySQL 5.1 Reference Manual :: 16 Replication MySqL的主从复制和读写分离 - ZhouLS的个人空间 - 开源中国社区 高性能Mysql主从架构的复制原理及配置详解 - guisu，程序人生。 - 博客频道 - CSDN.NET MySQL master slave 安装部署及常见问题-桥-搜狐博客 三台Mysql实现数据同步及主从模式 - 情感个人博客站 - Powered by Sablog-X MYSQL中的auto_increment_increment和auto_increment_offset - 朝着梦想 渐行前进 - 博客频道 - CSDN.NET auto increment - How is the MySQL auto_increment step size determined - Stack Overflow MySQL :: MySQL 5.1 Reference Manual :: 16.1.3.2 Replication Master Options and Variables",
         "mainEntityOfPage": {
             "@type": "WebPage",
-            "@id": "http://127.0.0.1:8000"
+            "@id": "https://mozillazg.github.io"
         }
     }
     </script>
@@ -104,16 +104,16 @@
                 <span class="icon-bar"></span>
                 <span class="icon-bar"></span>
             </button>
-            <a href="http://127.0.0.1:8000/" class="navbar-brand">
+            <a href="https://mozillazg.github.io/" class="navbar-brand">
 Huang Huang 的博客            </a>
         </div>
         <div class="collapse navbar-collapse navbar-ex1-collapse">
             <ul class="nav navbar-nav">
-                    <li><a href="http://127.0.0.1:8000/feeds/all.atom.xml">Feed</a></li>
+                    <li><a href="https://mozillazg.github.io/feeds/all.atom.xml">Feed</a></li>
                     <li><a href="/2014/10/pages/about-me.html">About</a></li>
             </ul>
             <ul class="nav navbar-nav navbar-right">
-              <li><a href="http://127.0.0.1:8000/archives.html"><i class="fa fa-th-list"></i><span class="icon-label">Archives</span></a></li>
+              <li><a href="https://mozillazg.github.io/archives.html"><i class="fa fa-th-list"></i><span class="icon-label">Archives</span></a></li>
             </ul>
         </div>
         <!-- /.navbar-collapse -->
@@ -128,7 +128,7 @@ Huang Huang 的博客            </a>
         <article>
             <header class="text-center">
                 <h1>
-                    <a href="http://127.0.0.1:8000/2013/06/mysql-master-master.html"
+                    <a href="https://mozillazg.github.io/2013/06/mysql-master-master.html"
                        rel="bookmark"
                        title="Permalink to mysql 基于 master-master 的双机热备配置">
                         mysql 基于 master-master 的双机热备配置
@@ -143,13 +143,13 @@ Huang Huang 的博客            </a>
             <div class="entry-content">
                 <div class="well-sm article-info">
 <footer class="post-info">
-        <a href="http://127.0.0.1:8000/category/database.html">database</a>
+        <a href="https://mozillazg.github.io/category/database.html">database</a>
 
 
 <span class="label label-default hide">Tags</span>
-	<a href="http://127.0.0.1:8000/tag/mysql.html">mysql</a>
+	<a href="https://mozillazg.github.io/tag/mysql.html">mysql</a>
         /
-	<a href="http://127.0.0.1:8000/tag/replication.html">replication</a>
+	<a href="https://mozillazg.github.io/tag/replication.html">replication</a>
     
 </footer><!-- /.post-info -->                </div>
                 <div class="js-toc"></div>
@@ -590,11 +590,11 @@ auto-increment-offset <span class="o">=</span> <span class="m">2</span>  <span c
 <section class="well" id="related-posts">
     <p>Related Posts:</p>
     <ul>
-        <li><a href="http://127.0.0.1:8000/2014/03/centos-how-to-install-percona-toolkit.html">[linux] CentOS 下安装 percona-toolkit</a></li>
-        <li><a href="http://127.0.0.1:8000/2013/02/change-phpmyadmin-default-visit-port.html">更改 phpMyAdmin 默认访问端口(apache2)</a></li>
-        <li><a href="http://127.0.0.1:8000/2013/06/django-let-bigintegerfield-auto-increment.html">[django]让 BigIntegerField 字段自增长</a></li>
-        <li><a href="http://127.0.0.1:8000/2013/03/python-fix-zmysqlda-2.0.8-no-module-named-imagefile.html">[python]修复 ZMySQLDA-2.0.8 出现的“ImportError: No module named ImageFile”错误</a></li>
-        <li><a href="http://127.0.0.1:8000/2013/09/mysql-DatabaseError-1061-Duplicate-key-name.html">[MySQL]修复 DatabaseError: (1061, "Duplicate key name 'bar_xxx_uniq'") 错误</a></li>
+        <li><a href="https://mozillazg.github.io/2013/02/change-phpmyadmin-default-visit-port.html">更改 phpMyAdmin 默认访问端口(apache2)</a></li>
+        <li><a href="https://mozillazg.github.io/2013/03/python-fix-zmysqlda-2.0.8-no-module-named-imagefile.html">[python]修复 ZMySQLDA-2.0.8 出现的“ImportError: No module named ImageFile”错误</a></li>
+        <li><a href="https://mozillazg.github.io/2013/09/mysql-DatabaseError-1061-Duplicate-key-name.html">[MySQL]修复 DatabaseError: (1061, "Duplicate key name 'bar_xxx_uniq'") 错误</a></li>
+        <li><a href="https://mozillazg.github.io/2013/06/django-let-bigintegerfield-auto-increment.html">[django]让 BigIntegerField 字段自增长</a></li>
+        <li><a href="https://mozillazg.github.io/2014/03/centos-how-to-install-percona-toolkit.html">[linux] CentOS 下安装 percona-toolkit</a></li>
     </ul>
 </section>
     <hr/>
@@ -607,7 +607,7 @@ auto-increment-offset <span class="o">=</span> <span class="m">2</span>  <span c
             var disqus_shortname = 'my-github-blog'; // required: replace example with your forum shortname
 
                     var disqus_identifier = 'mysql-master-master';
-                var disqus_url = 'http://127.0.0.1:8000/2013/06/mysql-master-master.html';
+                var disqus_url = 'https://mozillazg.github.io/2013/06/mysql-master-master.html';
 
             var disqus_config = function () {
                 this.language = "zh-hans";
@@ -641,7 +641,7 @@ auto-increment-offset <span class="o">=</span> <span class="m">2</span>  <span c
             &middot; Powered by <a href="https://github.com/DandyDev/pelican-bootstrap3" target="_blank">pelican-bootstrap3</a>,
             <a href="http://docs.getpelican.com/" target="_blank">Pelican</a>,
             <a href="http://getbootstrap.com" target="_blank">Bootstrap</a>              <p><small>  <a rel="license" href="http://creativecommons.org/licenses/by-sa/4.0/"><img alt="Creative Commons License" style="border-width:0" src="/static/images/by-sa-80x15.png" /></a>
-    &quot;<span xmlns:dct="http://purl.org/dc/terms/" property="dct:title">Huang Huang 的博客</span>&quot; by <a xmlns:cc="http://creativecommons.org/ns#" href="http://127.0.0.1:8000" property="cc:attributionName" rel="cc:attributionURL">mozillazg</a> is
+    &quot;<span xmlns:dct="http://purl.org/dc/terms/" property="dct:title">Huang Huang 的博客</span>&quot; by <a xmlns:cc="http://creativecommons.org/ns#" href="https://mozillazg.github.io" property="cc:attributionName" rel="cc:attributionURL">mozillazg</a> is
   licensed under a <a rel="license" href="http://creativecommons.org/licenses/by-sa/4.0/">Creative Commons Attribution-ShareAlike 4.0 International License</a>, except where indicated otherwise.
 </small></p>
          </div>
@@ -649,13 +649,13 @@ auto-increment-offset <span class="o">=</span> <span class="m">2</span>  <span c
       </div>
    </div>
 </footer>
-<script src="http://127.0.0.1:8000/theme/js/jquery.min.js"></script>
+<script src="https://mozillazg.github.io/theme/js/jquery.min.js"></script>
 
 <!-- Include all compiled plugins (below), or include individual files as needed -->
-<script src="http://127.0.0.1:8000/theme/js/bootstrap.min.js"></script>
+<script src="https://mozillazg.github.io/theme/js/bootstrap.min.js"></script>
 
 <!-- Enable responsive features in IE8 with Respond.js (https://github.com/scottjehl/Respond) -->
-<script src="http://127.0.0.1:8000/theme/js/respond.min.js"></script>
+<script src="https://mozillazg.github.io/theme/js/respond.min.js"></script>
 
     <!-- Disqus -->
     <script type="text/javascript">
@@ -685,7 +685,7 @@ auto-increment-offset <span class="o">=</span> <span class="m">2</span>  <span c
     <!-- End Google Analytics Universal Code -->
 
 
-<script src="http://127.0.0.1:8000/theme/js/tocbot.min.js"></script>
+<script src="https://mozillazg.github.io/theme/js/tocbot.min.js"></script>
 <script>
 $(document).ready(function(){
   tocbot.init({

@@ -1,0 +1,95 @@
+<?xml version="1.0" encoding="utf-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom"><title>Huang Huang 的博客</title><link href="https://mozillazg.github.io/" rel="alternate"></link><link href="https://mozillazg.github.io/feeds/rust.atom.xml" rel="self"></link><id>https://mozillazg.github.io/</id><updated>2017-10-06T00:00:00+00:00</updated><entry><title>Rust: Cargo 使用本地的 crate（本地包代码）</title><link href="https://mozillazg.github.io/2017/10/rust-cargo-use-local-crate-package.html" rel="alternate"></link><updated>2017-10-06T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.github.io,2017-10-06:2017/10/rust-cargo-use-local-crate-package.html</id><summary type="html">&lt;p&gt;默认在 Cargo.toml 中指定了包以后，Cargo build 的时候会从 crates.io 上下载远程
+的对应包代码。本文将介绍如何在 Cargo.toml 中指定使用本地机器上某个目录下的包，
+方便调试本地开发的包或者在没网的环境下开发和调试。&lt;/p&gt;
+&lt;div class="section" id="id1"&gt;
+&lt;h2 id="hidid1"&gt;待调用的本地包&lt;a class="headerlink" href="#hidid1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;假设我们要使用的包是 hello, 通过 &lt;tt class="docutils literal"&gt;cargo new hello&lt;/tt&gt; 创建：&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="gp"&gt;$&lt;/span&gt; cargo new hello
+&lt;span class="go"&gt; Created library `hello` project&lt;/span&gt;
+
+&lt;span class="gp"&gt;$&lt;/span&gt; tree hello
+&lt;span class="go"&gt;hello&lt;/span&gt;
+&lt;span class="go"&gt;├── Cargo.toml&lt;/span&gt;
+&lt;span class="go"&gt;└── src&lt;/span&gt;
+&lt;span class="go"&gt;    └── lib.rs&lt;/span&gt;
+
+&lt;span class="go"&gt;1 directory, 2 files&lt;/span&gt;
+&lt;/pre&gt;&lt;/div&gt;
+&lt;p&gt;我们给这个包加一个 &lt;tt class="docutils literal"&gt;hi&lt;/tt&gt; 函数:&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="c1"&gt;// cat hello/src/lib.rs&lt;/span&gt;
+&lt;span class="k"&gt;pub&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="k"&gt;fn&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;hi&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;name&lt;/span&gt;&lt;span class="o"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;&amp;amp;&lt;/span&gt;&lt;span class="kt"&gt;str&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="p"&gt;{&lt;/span&gt;&lt;span class="w"&gt;&lt;/span&gt;
+&lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="n"&gt;println&lt;/span&gt;&lt;span class="o"&gt;!&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="s"&gt;&amp;quot;hi {}!&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;name&lt;/span&gt;&lt;span class="p"&gt;);&lt;/span&gt;&lt;span class="w"&gt;&lt;/span&gt;
+&lt;span class="p"&gt;}&lt;/span&gt;&lt;span class="w"&gt;&lt;/span&gt;
+&lt;/pre&gt;&lt;/div&gt;
+&lt;p&gt;现在我们要在别的地方使用 &lt;tt class="docutils literal"&gt;hello&lt;/tt&gt; 这个包，比如调用 &lt;tt class="docutils literal"&gt;hello.hi&lt;/tt&gt; 函数，该如何设置呢？&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class="section" id="id2"&gt;
+&lt;h2 id="hidid2"&gt;配置使用本地包&lt;a class="headerlink" href="#hidid2" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;假设我们在 hello 的同级目录有一个 &lt;tt class="docutils literal"&gt;demo&lt;/tt&gt; 项目，这个项目将使用 &lt;tt class="docutils literal"&gt;hello&lt;/tt&gt; 包里的函数。&lt;/p&gt;
+&lt;p&gt;先创建这个 &lt;tt class="docutils literal"&gt;demo&lt;/tt&gt; 项目:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+$ cargo new demo --bin
+ Created binary (application) `demo` project
+&lt;/pre&gt;
+&lt;p&gt;然后在项目中增加调用代码:&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="c1"&gt;// cat demo/src/main.rs&lt;/span&gt;
+&lt;span class="k"&gt;extern&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="k"&gt;crate&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;hello&lt;/span&gt;&lt;span class="p"&gt;;&lt;/span&gt;&lt;span class="w"&gt;&lt;/span&gt;
+
+&lt;span class="k"&gt;fn&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;main&lt;/span&gt;&lt;span class="p"&gt;()&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="p"&gt;{&lt;/span&gt;&lt;span class="w"&gt;&lt;/span&gt;
+&lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="n"&gt;hello&lt;/span&gt;&lt;span class="o"&gt;::&lt;/span&gt;&lt;span class="n"&gt;hi&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="s"&gt;&amp;quot;mozillazg&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;);&lt;/span&gt;&lt;span class="w"&gt;&lt;/span&gt;
+&lt;span class="p"&gt;}&lt;/span&gt;&lt;span class="w"&gt;&lt;/span&gt;
+&lt;/pre&gt;&lt;/div&gt;
+&lt;p&gt;最后关键的一步就是配置 Cargo.toml 使用本地的 &lt;tt class="docutils literal"&gt;hello&lt;/tt&gt; 包。&lt;/p&gt;
+&lt;p&gt;先来看一下当前的目录结构:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+$ tree .
+.
+├── demo
+│&amp;nbsp;&amp;nbsp; ├── Cargo.toml
+│&amp;nbsp;&amp;nbsp; └── src
+│&amp;nbsp;&amp;nbsp;     └── main.rs
+└── hello
+    ├── Cargo.toml
+    └── src
+        └── lib.rs
+
+4 directories, 4 files
+&lt;/pre&gt;
+&lt;p&gt;可以看出来， &lt;tt class="docutils literal"&gt;hello&lt;/tt&gt; &lt;strong&gt;相对于&lt;/strong&gt; &lt;tt class="docutils literal"&gt;demo/Cargo.toml&lt;/tt&gt; 的目录位置是 &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;../hello&lt;/span&gt;&lt;/tt&gt; 。
+然后我们配置一下 &lt;tt class="docutils literal"&gt;demo/Cargo.toml&lt;/tt&gt; 指定使用这个目录下的 &lt;tt class="docutils literal"&gt;hello&lt;/tt&gt; 包:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+[dependencies]
+hello = { path = &amp;quot;../hello&amp;quot; }
+&lt;/pre&gt;
+&lt;p&gt;在 &lt;tt class="docutils literal"&gt;demo&lt;/tt&gt; 项目目录下执行 &lt;tt class="docutils literal"&gt;cargo run&lt;/tt&gt; 看看效果:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+# ~/demo
+$ cargo run
+   Compiling hello v0.1.0 (file:///Users/mozillazg/hello)
+   Compiling demo v0.1.0 (file:///Users/mozillazg/demo)
+    Finished dev [unoptimized + debuginfo] target(s) in 0.47 secs
+     Running `target/debug/demo`
+hi mozillazg!
+&lt;/pre&gt;
+&lt;p&gt;可以看到 &lt;tt class="docutils literal"&gt;demo&lt;/tt&gt; 确实使用了本地的 &lt;tt class="docutils literal"&gt;hello&lt;/tt&gt; 包的代码。👍&lt;/p&gt;
+&lt;p&gt;P.S. 上面的:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+[dependencies]
+hello = { path = &amp;quot;../hello&amp;quot; }
+&lt;/pre&gt;
+&lt;p&gt;也可以改为:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+[dependencies.hello]
+path = &amp;quot;../hello&amp;quot;
+&lt;/pre&gt;
+&lt;p&gt;😁&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class="section" id="id3"&gt;
+&lt;h2 id="hidid3"&gt;参考资料&lt;a class="headerlink" href="#hidid3" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;ul class="simple"&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://github.com/rust-lang/cargo/issues/640"&gt;Documentation should include exemples of depending on local modules · Issue #640 · rust-lang/cargo&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="http://doc.crates.io/specifying-dependencies.html#specifying-path-dependencies"&gt;Specifying Dependencies&lt;/a&gt;&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/div&gt;
+</summary><category term="crate"></category><category term="cargo"></category></entry></feed>
