@@ -1,5 +1,540 @@
 <?xml version="1.0" encoding="utf-8"?>
-<feed xmlns="http://www.w3.org/2005/Atom"><title>Huang Huang 的博客</title><link href="https://mozillazg.github.io/" rel="alternate"></link><link href="https://mozillazg.github.io/feeds/python.atom.xml" rel="self"></link><id>https://mozillazg.github.io/</id><updated>2017-08-26T00:00:00+00:00</updated><entry><title>asyncio 学习笔记：使用抽象类 Protocol 实现异步 I/O</title><link href="https://mozillazg.github.io/2017/08/python-asyncio-note-io-protocol.html" rel="alternate"></link><updated>2017-08-26T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.github.io,2017-08-26:2017/08/python-asyncio-note-io-protocol.html</id><summary type="html">&lt;p&gt;本文是 &lt;a class="reference external" href="https://pymotw.com/3/asyncio/io_protocol.html"&gt;https://pymotw.com/3/asyncio/io_protocol.html&lt;/a&gt;
+<feed xmlns="http://www.w3.org/2005/Atom"><title>Huang Huang 的博客</title><link href="https://mozillazg.github.io/" rel="alternate"></link><link href="https://mozillazg.github.io/feeds/python.atom.xml" rel="self"></link><id>https://mozillazg.github.io/</id><updated>2017-12-10T00:00:00+00:00</updated><entry><title>Python: 获取并发程序的 traceback 信息（threading/gevent/asyncio）</title><link href="https://mozillazg.github.io/2017/12/python-get-concurrency-programm-all-tracebacks-threading-gevent-asyncio-etc.html" rel="alternate"></link><updated>2017-12-10T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.github.io,2017-12-10:2017/12/python-get-concurrency-programm-all-tracebacks-threading-gevent-asyncio-etc.html</id><summary type="html">&lt;p&gt;本文记录如何获取多线程、多协程(gevent)、asyncio 程序中所有当前线程/协程的 traceback 信息。&lt;/p&gt;
+&lt;div class="section" id="traceback"&gt;
+&lt;h2 id="hidtraceback"&gt;获取所有线程的 traceback 信息&lt;a class="headerlink" href="#hidtraceback" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;可以通过 &lt;a class="reference external" href="https://docs.python.org/3/library/threading.html#threading.enumerate"&gt;threading.enumerate()&lt;/a&gt; 获取所有线程信息，
+通过 &lt;a class="reference external" href="https://docs.python.org/3/library/sys.html#sys._current_frames"&gt;sys._current_frames()&lt;/a&gt; 获取线程 traceback 信息。&lt;/p&gt;
+&lt;p&gt;测试程序：&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="kn"&gt;import&lt;/span&gt; &lt;span class="nn"&gt;sys&lt;/span&gt;
+&lt;span class="kn"&gt;import&lt;/span&gt; &lt;span class="nn"&gt;traceback&lt;/span&gt;
+&lt;span class="kn"&gt;import&lt;/span&gt; &lt;span class="nn"&gt;threading&lt;/span&gt;
+&lt;span class="kn"&gt;import&lt;/span&gt; &lt;span class="nn"&gt;time&lt;/span&gt;
+
+
+&lt;span class="k"&gt;def&lt;/span&gt; &lt;span class="nf"&gt;do&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;x&lt;/span&gt;&lt;span class="p"&gt;):&lt;/span&gt;
+    &lt;span class="n"&gt;x&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;x&lt;/span&gt; &lt;span class="o"&gt;*&lt;/span&gt; &lt;span class="mi"&gt;3&lt;/span&gt;
+    &lt;span class="n"&gt;time&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;sleep&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;x&lt;/span&gt; &lt;span class="o"&gt;*&lt;/span&gt; &lt;span class="mi"&gt;60&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+
+
+&lt;span class="k"&gt;def&lt;/span&gt; &lt;span class="nf"&gt;main&lt;/span&gt;&lt;span class="p"&gt;():&lt;/span&gt;
+    &lt;span class="n"&gt;threads&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="p"&gt;[]&lt;/span&gt;
+    &lt;span class="k"&gt;for&lt;/span&gt; &lt;span class="n"&gt;x&lt;/span&gt; &lt;span class="ow"&gt;in&lt;/span&gt; &lt;span class="nb"&gt;range&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="mi"&gt;3&lt;/span&gt;&lt;span class="p"&gt;):&lt;/span&gt;
+        &lt;span class="n"&gt;t&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;threading&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;Thread&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;target&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="n"&gt;do&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;args&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;x&lt;/span&gt;&lt;span class="p"&gt;,),&lt;/span&gt; &lt;span class="n"&gt;name&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;thread-{}&amp;#39;&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;format&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;x&lt;/span&gt;&lt;span class="p"&gt;))&lt;/span&gt;
+        &lt;span class="n"&gt;t&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;start&lt;/span&gt;&lt;span class="p"&gt;()&lt;/span&gt;
+
+
+&lt;span class="k"&gt;if&lt;/span&gt; &lt;span class="n"&gt;__name__&lt;/span&gt; &lt;span class="o"&gt;==&lt;/span&gt; &lt;span class="s1"&gt;&amp;#39;__main__&amp;#39;&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;
+    &lt;span class="n"&gt;main&lt;/span&gt;&lt;span class="p"&gt;()&lt;/span&gt;
+    &lt;span class="n"&gt;id2thread&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="p"&gt;{}&lt;/span&gt;
+    &lt;span class="k"&gt;for&lt;/span&gt; &lt;span class="n"&gt;thread&lt;/span&gt; &lt;span class="ow"&gt;in&lt;/span&gt; &lt;span class="n"&gt;threading&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;enumerate&lt;/span&gt;&lt;span class="p"&gt;():&lt;/span&gt;
+        &lt;span class="n"&gt;id2thread&lt;/span&gt;&lt;span class="p"&gt;[&lt;/span&gt;&lt;span class="n"&gt;thread&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;ident&lt;/span&gt;&lt;span class="p"&gt;]&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;thread&lt;/span&gt;
+    &lt;span class="k"&gt;for&lt;/span&gt; &lt;span class="n"&gt;thread_id&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;stack&lt;/span&gt; &lt;span class="ow"&gt;in&lt;/span&gt; &lt;span class="n"&gt;sys&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;_current_frames&lt;/span&gt;&lt;span class="p"&gt;()&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;items&lt;/span&gt;&lt;span class="p"&gt;():&lt;/span&gt;
+        &lt;span class="n"&gt;stack_list&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;traceback&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;format_list&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;traceback&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;extract_stack&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;stack&lt;/span&gt;&lt;span class="p"&gt;))&lt;/span&gt;
+        &lt;span class="k"&gt;print&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;thread {}:&amp;#39;&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;format&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;id2thread&lt;/span&gt;&lt;span class="p"&gt;[&lt;/span&gt;&lt;span class="n"&gt;thread_id&lt;/span&gt;&lt;span class="p"&gt;]))&lt;/span&gt;
+        &lt;span class="k"&gt;print&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;&amp;#39;&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;join&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;stack_list&lt;/span&gt;&lt;span class="p"&gt;))&lt;/span&gt;
+&lt;/pre&gt;&lt;/div&gt;
+&lt;p&gt;运行结果:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+$ python test.py
+thread &amp;lt;Thread(thread-2, started 123145466843136)&amp;gt;:
+  File &amp;quot;/xxx/lib/python3.6/threading.py&amp;quot;, line 884, in _bootstrap
+    self._bootstrap_inner()
+  File &amp;quot;/xxx/lib/python3.6/threading.py&amp;quot;, line 916, in _bootstrap_inner
+    self.run()
+  File &amp;quot;/xxx/lib/python3.6/threading.py&amp;quot;, line 864, in run
+    self._target(*self._args, **self._kwargs)
+  File &amp;quot;test.py&amp;quot;, line 9, in do
+    time.sleep(x * 60)
+
+thread &amp;lt;Thread(thread-1, started 123145461587968)&amp;gt;:
+  File &amp;quot;/xxx/lib/python3.6/threading.py&amp;quot;, line 884, in _bootstrap
+    self._bootstrap_inner()
+  File &amp;quot;/xxx/lib/python3.6/threading.py&amp;quot;, line 916, in _bootstrap_inner
+    self.run()
+  File &amp;quot;/xxx/lib/python3.6/threading.py&amp;quot;, line 864, in run
+    self._target(*self._args, **self._kwargs)
+  File &amp;quot;test.py&amp;quot;, line 9, in do
+    time.sleep(x * 60)
+
+thread &amp;lt;_MainThread(MainThread, started 140736955184064)&amp;gt;:
+  File &amp;quot;test.py&amp;quot;, line 27, in &amp;lt;module&amp;gt;
+    stack_list = traceback.format_list(traceback.extract_stack(stack))
+&lt;/pre&gt;
+&lt;/div&gt;
+&lt;div class="section" id="gevent-traceback"&gt;
+&lt;h2 id="hidgevent-traceback"&gt;获取所有协程（gevent）的 traceback 信息&lt;a class="headerlink" href="#hidgevent-traceback" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;可以通过 &lt;tt class="docutils literal"&gt;gc.get_objects()&lt;/tt&gt; 获取所有对象，然后从中过滤出所有的协程对象(&lt;tt class="docutils literal"&gt;greenlet.greenlet&lt;/tt&gt;)，
+然后通过 greenlet 对象的 &lt;tt class="docutils literal"&gt;gr_frame&lt;/tt&gt; 属性获取 traceback 信息。&lt;/p&gt;
+&lt;p&gt;测试程序:&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="kn"&gt;import&lt;/span&gt; &lt;span class="nn"&gt;gc&lt;/span&gt;
+&lt;span class="kn"&gt;import&lt;/span&gt; &lt;span class="nn"&gt;traceback&lt;/span&gt;
+
+&lt;span class="kn"&gt;import&lt;/span&gt; &lt;span class="nn"&gt;gevent&lt;/span&gt;
+&lt;span class="kn"&gt;import&lt;/span&gt; &lt;span class="nn"&gt;greenlet&lt;/span&gt;
+
+
+&lt;span class="k"&gt;def&lt;/span&gt; &lt;span class="nf"&gt;foo&lt;/span&gt;&lt;span class="p"&gt;():&lt;/span&gt;
+    &lt;span class="k"&gt;while&lt;/span&gt; &lt;span class="bp"&gt;True&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;
+        &lt;span class="k"&gt;for&lt;/span&gt; &lt;span class="n"&gt;x&lt;/span&gt; &lt;span class="ow"&gt;in&lt;/span&gt; &lt;span class="nb"&gt;range&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="mi"&gt;10&lt;/span&gt;&lt;span class="p"&gt;):&lt;/span&gt;
+            &lt;span class="n"&gt;gevent&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;sleep&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;x&lt;/span&gt; &lt;span class="o"&gt;*&lt;/span&gt; &lt;span class="mi"&gt;10&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+
+
+&lt;span class="k"&gt;def&lt;/span&gt; &lt;span class="nf"&gt;bar&lt;/span&gt;&lt;span class="p"&gt;():&lt;/span&gt;
+    &lt;span class="k"&gt;while&lt;/span&gt; &lt;span class="bp"&gt;True&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;
+        &lt;span class="k"&gt;for&lt;/span&gt; &lt;span class="n"&gt;x&lt;/span&gt; &lt;span class="ow"&gt;in&lt;/span&gt; &lt;span class="nb"&gt;range&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="mi"&gt;5&lt;/span&gt;&lt;span class="p"&gt;):&lt;/span&gt;
+            &lt;span class="n"&gt;gevent&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;sleep&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;x&lt;/span&gt; &lt;span class="o"&gt;*&lt;/span&gt; &lt;span class="mi"&gt;20&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+
+
+&lt;span class="k"&gt;def&lt;/span&gt; &lt;span class="nf"&gt;main&lt;/span&gt;&lt;span class="p"&gt;():&lt;/span&gt;
+    &lt;span class="k"&gt;for&lt;/span&gt; &lt;span class="n"&gt;func&lt;/span&gt; &lt;span class="ow"&gt;in&lt;/span&gt; &lt;span class="p"&gt;[&lt;/span&gt;&lt;span class="n"&gt;foo&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;bar&lt;/span&gt;&lt;span class="p"&gt;]:&lt;/span&gt;
+        &lt;span class="n"&gt;t&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;gevent&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;spawn&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;func&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+        &lt;span class="n"&gt;t&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;start&lt;/span&gt;&lt;span class="p"&gt;()&lt;/span&gt;
+
+
+&lt;span class="k"&gt;def&lt;/span&gt; &lt;span class="nf"&gt;get_traceback&lt;/span&gt;&lt;span class="p"&gt;():&lt;/span&gt;
+    &lt;span class="k"&gt;for&lt;/span&gt; &lt;span class="n"&gt;obj&lt;/span&gt; &lt;span class="ow"&gt;in&lt;/span&gt; &lt;span class="n"&gt;gc&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;get_objects&lt;/span&gt;&lt;span class="p"&gt;():&lt;/span&gt;
+        &lt;span class="k"&gt;if&lt;/span&gt; &lt;span class="nb"&gt;isinstance&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;obj&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;greenlet&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;greenlet&lt;/span&gt;&lt;span class="p"&gt;):&lt;/span&gt;
+            &lt;span class="n"&gt;stack_list&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;traceback&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;format_list&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;
+                &lt;span class="n"&gt;traceback&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;extract_stack&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;obj&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;gr_frame&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+            &lt;span class="p"&gt;)&lt;/span&gt;
+            &lt;span class="k"&gt;print&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;greenlet {}:&amp;#39;&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;format&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;obj&lt;/span&gt;&lt;span class="p"&gt;))&lt;/span&gt;
+            &lt;span class="k"&gt;print&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;&amp;#39;&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;join&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;stack_list&lt;/span&gt;&lt;span class="p"&gt;))&lt;/span&gt;
+
+
+&lt;span class="k"&gt;if&lt;/span&gt; &lt;span class="n"&gt;__name__&lt;/span&gt; &lt;span class="o"&gt;==&lt;/span&gt; &lt;span class="s1"&gt;&amp;#39;__main__&amp;#39;&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;
+    &lt;span class="n"&gt;main&lt;/span&gt;&lt;span class="p"&gt;()&lt;/span&gt;
+    &lt;span class="n"&gt;gevent&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;spawn&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;get_traceback&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;join&lt;/span&gt;&lt;span class="p"&gt;()&lt;/span&gt;
+&lt;/pre&gt;&lt;/div&gt;
+&lt;p&gt;运行结果如下:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+$ python test.py
+greenlet &amp;lt;Greenlet at 0x103f4ca60: bar&amp;gt;:
+  File &amp;quot;/xxx/lib/python3.6/site-packages/gevent/greenlet.py&amp;quot;, line 536, in run
+    result = self._run(*self.args, **self.kwargs)
+  File &amp;quot;test.py&amp;quot;, line 17, in bar
+    gevent.sleep(x * 20)
+  File &amp;quot;/xxx/lib/python3.6/site-packages/gevent/hub.py&amp;quot;, line 167, in sleep
+    waiter.get()
+  File &amp;quot;/xxx/lib/python3.6/site-packages/gevent/hub.py&amp;quot;, line 898, in get
+    return self.hub.switch()
+  File &amp;quot;/xxx/lib/python3.6/site-packages/gevent/hub.py&amp;quot;, line 630, in switch
+    return RawGreenlet.switch(self)
+
+greenlet &amp;lt;Greenlet at 0x103f4caf8: get_traceback&amp;gt;:
+  File &amp;quot;/xxx/lib/python3.6/site-packages/gevent/greenlet.py&amp;quot;, line 536, in run
+    result = self._run(*self.args, **self.kwargs)
+  File &amp;quot;test.py&amp;quot;, line 30, in get_traceback
+    traceback.extract_stack(obj.gr_frame)
+
+greenlet &amp;lt;greenlet.greenlet object at 0x103f4c0e0&amp;gt;:
+  File &amp;quot;test.py&amp;quot;, line 38, in &amp;lt;module&amp;gt;
+    gevent.spawn(get_traceback).join()
+  File &amp;quot;/xxx/lib/python3.6/site-packages/gevent/greenlet.py&amp;quot;, line 496, in join
+    result = self.parent.switch()
+  File &amp;quot;/xxx/lib/python3.6/site-packages/gevent/hub.py&amp;quot;, line 630, in switch
+    return RawGreenlet.switch(self)
+
+greenlet &amp;lt;Greenlet at 0x103f4c930: foo&amp;gt;:
+  File &amp;quot;/xxx/lib/python3.6/site-packages/gevent/greenlet.py&amp;quot;, line 536, in run
+    result = self._run(*self.args, **self.kwargs)
+  File &amp;quot;test.py&amp;quot;, line 11, in foo
+    gevent.sleep(x * 10)
+  File &amp;quot;/xxx/lib/python3.6/site-packages/gevent/hub.py&amp;quot;, line 167, in sleep
+    waiter.get()
+  File &amp;quot;/xxx/lib/python3.6/site-packages/gevent/hub.py&amp;quot;, line 898, in get
+    return self.hub.switch()
+  File &amp;quot;/xxx/lib/python3.6/site-packages/gevent/hub.py&amp;quot;, line 630, in switch
+    return RawGreenlet.switch(self)
+
+greenlet &amp;lt;Hub at 0x103f4c9c8 select default pending=0 ref=2&amp;gt;:
+  File &amp;quot;/xxx/lib/python3.6/site-packages/gevent/hub.py&amp;quot;, line 688, in run
+    loop.run()
+&lt;/pre&gt;
+&lt;/div&gt;
+&lt;div class="section" id="asyncio-task-traceback"&gt;
+&lt;h2 id="hidasyncio-task-traceback"&gt;获取所有 asyncio task 的 traceback 信息&lt;a class="headerlink" href="#hidasyncio-task-traceback" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;可以通过 &lt;tt class="docutils literal"&gt;asyncio.Task.all_tasks()&lt;/tt&gt; 获取所有 asyncio task 对象，
+然后通过 task 对象的 &lt;tt class="docutils literal"&gt;get_stack()&lt;/tt&gt; 方法获取 traceback 信息。&lt;/p&gt;
+&lt;p&gt;测试程序:&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="kn"&gt;import&lt;/span&gt; &lt;span class="nn"&gt;asyncio&lt;/span&gt;
+&lt;span class="kn"&gt;import&lt;/span&gt; &lt;span class="nn"&gt;traceback&lt;/span&gt;
+
+
+&lt;span class="n"&gt;async&lt;/span&gt; &lt;span class="k"&gt;def&lt;/span&gt; &lt;span class="nf"&gt;foo&lt;/span&gt;&lt;span class="p"&gt;():&lt;/span&gt;
+    &lt;span class="k"&gt;while&lt;/span&gt; &lt;span class="bp"&gt;True&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;
+        &lt;span class="k"&gt;for&lt;/span&gt; &lt;span class="n"&gt;x&lt;/span&gt; &lt;span class="ow"&gt;in&lt;/span&gt; &lt;span class="nb"&gt;range&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="mi"&gt;10&lt;/span&gt;&lt;span class="p"&gt;):&lt;/span&gt;
+            &lt;span class="k"&gt;print&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;foo&amp;#39;&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+            &lt;span class="n"&gt;await&lt;/span&gt; &lt;span class="n"&gt;asyncio&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;sleep&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;x&lt;/span&gt; &lt;span class="o"&gt;*&lt;/span&gt; &lt;span class="mi"&gt;10&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+
+
+&lt;span class="n"&gt;async&lt;/span&gt; &lt;span class="k"&gt;def&lt;/span&gt; &lt;span class="nf"&gt;bar&lt;/span&gt;&lt;span class="p"&gt;():&lt;/span&gt;
+    &lt;span class="k"&gt;while&lt;/span&gt; &lt;span class="bp"&gt;True&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;
+        &lt;span class="k"&gt;for&lt;/span&gt; &lt;span class="n"&gt;x&lt;/span&gt; &lt;span class="ow"&gt;in&lt;/span&gt; &lt;span class="nb"&gt;range&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="mi"&gt;5&lt;/span&gt;&lt;span class="p"&gt;):&lt;/span&gt;
+            &lt;span class="k"&gt;print&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;bar&amp;#39;&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+            &lt;span class="n"&gt;await&lt;/span&gt; &lt;span class="n"&gt;asyncio&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;sleep&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;x&lt;/span&gt; &lt;span class="o"&gt;*&lt;/span&gt; &lt;span class="mi"&gt;20&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+
+
+&lt;span class="n"&gt;async&lt;/span&gt; &lt;span class="k"&gt;def&lt;/span&gt; &lt;span class="nf"&gt;get_traceback&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;loop&lt;/span&gt;&lt;span class="p"&gt;):&lt;/span&gt;
+    &lt;span class="n"&gt;await&lt;/span&gt; &lt;span class="n"&gt;asyncio&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;sleep&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="mi"&gt;1&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+    &lt;span class="k"&gt;for&lt;/span&gt; &lt;span class="n"&gt;task&lt;/span&gt; &lt;span class="ow"&gt;in&lt;/span&gt; &lt;span class="n"&gt;asyncio&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;Task&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;all_tasks&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;loop&lt;/span&gt;&lt;span class="p"&gt;):&lt;/span&gt;
+        &lt;span class="n"&gt;stack_list&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="p"&gt;[]&lt;/span&gt;
+        &lt;span class="k"&gt;for&lt;/span&gt; &lt;span class="n"&gt;stack&lt;/span&gt; &lt;span class="ow"&gt;in&lt;/span&gt; &lt;span class="n"&gt;task&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;get_stack&lt;/span&gt;&lt;span class="p"&gt;():&lt;/span&gt;
+            &lt;span class="n"&gt;stack_list&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;extend&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;
+                &lt;span class="n"&gt;traceback&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;format_list&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;traceback&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;extract_stack&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;stack&lt;/span&gt;&lt;span class="p"&gt;))&lt;/span&gt;
+            &lt;span class="p"&gt;)&lt;/span&gt;
+        &lt;span class="k"&gt;print&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;asyncio task {}:&amp;#39;&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;format&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;task&lt;/span&gt;&lt;span class="p"&gt;))&lt;/span&gt;
+        &lt;span class="k"&gt;print&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;&amp;#39;&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;join&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;stack_list&lt;/span&gt;&lt;span class="p"&gt;))&lt;/span&gt;
+
+
+&lt;span class="k"&gt;if&lt;/span&gt; &lt;span class="n"&gt;__name__&lt;/span&gt; &lt;span class="o"&gt;==&lt;/span&gt; &lt;span class="s1"&gt;&amp;#39;__main__&amp;#39;&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;
+    &lt;span class="n"&gt;event_loop&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;asyncio&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;get_event_loop&lt;/span&gt;&lt;span class="p"&gt;()&lt;/span&gt;
+    &lt;span class="k"&gt;try&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;
+        &lt;span class="n"&gt;tasks&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="p"&gt;[&lt;/span&gt;&lt;span class="n"&gt;foo&lt;/span&gt;&lt;span class="p"&gt;(),&lt;/span&gt; &lt;span class="n"&gt;bar&lt;/span&gt;&lt;span class="p"&gt;(),&lt;/span&gt; &lt;span class="n"&gt;get_traceback&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;event_loop&lt;/span&gt;&lt;span class="p"&gt;)]&lt;/span&gt;
+        &lt;span class="n"&gt;event_loop&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;run_until_complete&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;asyncio&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;wait&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;tasks&lt;/span&gt;&lt;span class="p"&gt;))&lt;/span&gt;
+    &lt;span class="k"&gt;finally&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;
+        &lt;span class="n"&gt;event_loop&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;close&lt;/span&gt;&lt;span class="p"&gt;()&lt;/span&gt;
+&lt;/pre&gt;&lt;/div&gt;
+&lt;p&gt;运行结果如下:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+bar
+foo
+bar
+foo
+asyncio task &amp;lt;Task pending coro=&amp;lt;wait() running at /xxx/lib/python3.6/asyncio/tasks.py:307&amp;gt; wait_for=&amp;lt;Future pending cb=[&amp;lt;TaskWakeupMethWrapper object at 0x10c57c258&amp;gt;()]&amp;gt; cb=[_run_until_complete_cb() at /xxx/lib/python3.6/asyncio/base_events.py:176]&amp;gt;:
+  File &amp;quot;/xxx/lib/python3.6/asyncio/tasks.py&amp;quot;, line 307, in wait
+    return (yield from _wait(fs, timeout, return_when, loop))
+
+asyncio task &amp;lt;Task pending coro=&amp;lt;bar() running at test.py:16&amp;gt; wait_for=&amp;lt;Future pending cb=[&amp;lt;TaskWakeupMethWrapper object at 0x10c57c378&amp;gt;()]&amp;gt; cb=[_wait.&amp;lt;locals&amp;gt;._on_completion() at /xxx/lib/python3.6/asyncio/tasks.py:374]&amp;gt;:
+  File &amp;quot;test.py&amp;quot;, line 16, in bar
+    await asyncio.sleep(x * 20)
+
+asyncio task &amp;lt;Task pending coro=&amp;lt;get_traceback() running at test.py:27&amp;gt; cb=[_wait.&amp;lt;locals&amp;gt;._on_completion() at /xxx/lib/python3.6/asyncio/tasks.py:374]&amp;gt;:
+  File &amp;quot;test.py&amp;quot;, line 35, in &amp;lt;module&amp;gt;
+    event_loop.run_until_complete(asyncio.wait(tasks))
+  File &amp;quot;test.py&amp;quot;, line 35, in &amp;lt;module&amp;gt;
+    event_loop.run_until_complete(asyncio.wait(tasks))
+  File &amp;quot;/xxx/lib/python3.6/asyncio/base_events.py&amp;quot;, line 454, in run_until_complete
+    self.run_forever()
+  File &amp;quot;test.py&amp;quot;, line 35, in &amp;lt;module&amp;gt;
+    event_loop.run_until_complete(asyncio.wait(tasks))
+  File &amp;quot;/xxx/lib/python3.6/asyncio/base_events.py&amp;quot;, line 454, in run_until_complete
+    self.run_forever()
+  File &amp;quot;/xxx/lib/python3.6/asyncio/base_events.py&amp;quot;, line 421, in run_forever
+    self._run_once()
+  File &amp;quot;test.py&amp;quot;, line 35, in &amp;lt;module&amp;gt;
+    event_loop.run_until_complete(asyncio.wait(tasks))
+  File &amp;quot;/xxx/lib/python3.6/asyncio/base_events.py&amp;quot;, line 454, in run_until_complete
+    self.run_forever()
+  File &amp;quot;/xxx/lib/python3.6/asyncio/base_events.py&amp;quot;, line 421, in run_forever
+    self._run_once()
+  File &amp;quot;/xxx/lib/python3.6/asyncio/base_events.py&amp;quot;, line 1425, in _run_once
+    handle._run()
+  File &amp;quot;test.py&amp;quot;, line 35, in &amp;lt;module&amp;gt;
+    event_loop.run_until_complete(asyncio.wait(tasks))
+  File &amp;quot;/xxx/lib/python3.6/asyncio/base_events.py&amp;quot;, line 454, in run_until_complete
+    self.run_forever()
+  File &amp;quot;/xxx/lib/python3.6/asyncio/base_events.py&amp;quot;, line 421, in run_forever
+    self._run_once()
+  File &amp;quot;/xxx/lib/python3.6/asyncio/base_events.py&amp;quot;, line 1425, in _run_once
+    handle._run()
+  File &amp;quot;/xxx/lib/python3.6/asyncio/events.py&amp;quot;, line 126, in _run
+    self._callback(*self._args)
+  File &amp;quot;test.py&amp;quot;, line 35, in &amp;lt;module&amp;gt;
+    event_loop.run_until_complete(asyncio.wait(tasks))
+  File &amp;quot;/xxx/lib/python3.6/asyncio/base_events.py&amp;quot;, line 454, in run_until_complete
+    self.run_forever()
+  File &amp;quot;/xxx/lib/python3.6/asyncio/base_events.py&amp;quot;, line 421, in run_forever
+    self._run_once()
+  File &amp;quot;/xxx/lib/python3.6/asyncio/base_events.py&amp;quot;, line 1425, in _run_once
+    handle._run()
+  File &amp;quot;/xxx/lib/python3.6/asyncio/events.py&amp;quot;, line 126, in _run
+    self._callback(*self._args)
+  File &amp;quot;test.py&amp;quot;, line 25, in get_traceback
+    traceback.format_list(traceback.extract_stack(stack))
+
+asyncio task &amp;lt;Task pending coro=&amp;lt;foo() running at test.py:9&amp;gt; wait_for=&amp;lt;Future pending cb=[&amp;lt;TaskWakeupMethWrapper object at 0x10c57c3d8&amp;gt;()]&amp;gt; cb=[_wait.&amp;lt;locals&amp;gt;._on_completion() at /xxx/lib/python3.6/asyncio/tasks.py:374]&amp;gt;:
+  File &amp;quot;test.py&amp;quot;, line 9, in foo
+    await asyncio.sleep(x * 10)
+&lt;/pre&gt;
+&lt;p&gt;知道了获取 traceback 信息的方法后有啥用呢？traceback 信息对我们调试程序有非常大的帮助，尤其是调试运行中的进程。&lt;/p&gt;
+&lt;p&gt;如果觉得 traceback 信息里包含的东西有点少的话，可以对 traceback 进行加工：
+使用 &lt;a class="reference external" href="https://github.com/getsentry/raven-python"&gt;raven&lt;/a&gt; 展开 traceback 信息，并把这些信息发送到 &lt;a class="reference external" href="https://sentry.io/"&gt;sentry&lt;/a&gt; 。&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class="section" id="raven-traceback"&gt;
+&lt;h2 id="hidraven-traceback"&gt;使用 raven 展开和收集 traceback 信息&lt;a class="headerlink" href="#hidraven-traceback" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;通过 &lt;a class="reference external" href="https://github.com/getsentry/raven-python"&gt;raven&lt;/a&gt; 可以获取 traceback 信息中的源代码及局部变量，
+这些信息对应快速诊断问题非常的有帮助。同时我们还可以通过 &lt;a class="reference external" href="https://github.com/getsentry/raven-python"&gt;raven&lt;/a&gt; 把信息发送到
+&lt;a class="reference external" href="https://sentry.io/"&gt;sentry&lt;/a&gt; 中方便归档及可视化查看 traceback 信息。&lt;/p&gt;
+&lt;p&gt;测试程序：&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="kn"&gt;import&lt;/span&gt; &lt;span class="nn"&gt;sys&lt;/span&gt;
+&lt;span class="kn"&gt;import&lt;/span&gt; &lt;span class="nn"&gt;threading&lt;/span&gt;
+&lt;span class="kn"&gt;import&lt;/span&gt; &lt;span class="nn"&gt;time&lt;/span&gt;
+&lt;span class="kn"&gt;import&lt;/span&gt; &lt;span class="nn"&gt;traceback&lt;/span&gt;
+
+&lt;span class="kn"&gt;from&lt;/span&gt; &lt;span class="nn"&gt;raven&lt;/span&gt; &lt;span class="kn"&gt;import&lt;/span&gt; &lt;span class="n"&gt;Client&lt;/span&gt;
+&lt;span class="kn"&gt;from&lt;/span&gt; &lt;span class="nn"&gt;raven.utils.stacks&lt;/span&gt; &lt;span class="kn"&gt;import&lt;/span&gt; &lt;span class="n"&gt;get_stack_info&lt;/span&gt;
+
+
+&lt;span class="k"&gt;def&lt;/span&gt; &lt;span class="nf"&gt;foo&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;n&lt;/span&gt;&lt;span class="p"&gt;):&lt;/span&gt;
+    &lt;span class="k"&gt;while&lt;/span&gt; &lt;span class="bp"&gt;True&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;
+        &lt;span class="k"&gt;for&lt;/span&gt; &lt;span class="n"&gt;x&lt;/span&gt; &lt;span class="ow"&gt;in&lt;/span&gt; &lt;span class="nb"&gt;range&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;n&lt;/span&gt;&lt;span class="p"&gt;):&lt;/span&gt;
+            &lt;span class="k"&gt;print&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;foo&amp;#39;&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+            &lt;span class="n"&gt;time&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;sleep&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;x&lt;/span&gt; &lt;span class="o"&gt;*&lt;/span&gt; &lt;span class="mf"&gt;0.5&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+
+
+&lt;span class="k"&gt;def&lt;/span&gt; &lt;span class="nf"&gt;bar&lt;/span&gt;&lt;span class="p"&gt;():&lt;/span&gt;
+    &lt;span class="n"&gt;foo&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="mi"&gt;233&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+
+
+&lt;span class="k"&gt;def&lt;/span&gt; &lt;span class="nf"&gt;main&lt;/span&gt;&lt;span class="p"&gt;():&lt;/span&gt;
+    &lt;span class="n"&gt;t&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;threading&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;Thread&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;target&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="n"&gt;bar&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;name&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;bar&amp;#39;&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+    &lt;span class="k"&gt;return&lt;/span&gt; &lt;span class="n"&gt;t&lt;/span&gt;
+
+
+&lt;span class="k"&gt;def&lt;/span&gt; &lt;span class="nf"&gt;get_traceback&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;raven_client&lt;/span&gt;&lt;span class="p"&gt;):&lt;/span&gt;
+    &lt;span class="n"&gt;id2thread&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="p"&gt;{}&lt;/span&gt;
+    &lt;span class="k"&gt;for&lt;/span&gt; &lt;span class="n"&gt;thread&lt;/span&gt; &lt;span class="ow"&gt;in&lt;/span&gt; &lt;span class="n"&gt;threading&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;enumerate&lt;/span&gt;&lt;span class="p"&gt;():&lt;/span&gt;
+        &lt;span class="n"&gt;id2thread&lt;/span&gt;&lt;span class="p"&gt;[&lt;/span&gt;&lt;span class="n"&gt;thread&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;ident&lt;/span&gt;&lt;span class="p"&gt;]&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;thread&lt;/span&gt;
+    &lt;span class="k"&gt;for&lt;/span&gt; &lt;span class="n"&gt;thread_id&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;stack&lt;/span&gt; &lt;span class="ow"&gt;in&lt;/span&gt; &lt;span class="n"&gt;sys&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;_current_frames&lt;/span&gt;&lt;span class="p"&gt;()&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;items&lt;/span&gt;&lt;span class="p"&gt;():&lt;/span&gt;
+        &lt;span class="n"&gt;frames&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;traceback&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;walk_stack&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;stack&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+        &lt;span class="n"&gt;stacktrace&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;get_stack_info&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;frames&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+        &lt;span class="n"&gt;thread&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;id2thread&lt;/span&gt;&lt;span class="p"&gt;[&lt;/span&gt;&lt;span class="n"&gt;thread_id&lt;/span&gt;&lt;span class="p"&gt;]&lt;/span&gt;
+        &lt;span class="k"&gt;print&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;thread: {}&amp;#39;&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;format&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;thread&lt;/span&gt;&lt;span class="p"&gt;))&lt;/span&gt;
+        &lt;span class="k"&gt;print&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;raven_client&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;captureMessage&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;
+            &lt;span class="s1"&gt;&amp;#39;traceback from {}&amp;#39;&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;format&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;thread&lt;/span&gt;&lt;span class="p"&gt;),&lt;/span&gt;
+            &lt;span class="n"&gt;stack&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="bp"&gt;True&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;
+            &lt;span class="n"&gt;data&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="p"&gt;{&lt;/span&gt;
+                &lt;span class="s1"&gt;&amp;#39;stacktrace&amp;#39;&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt; &lt;span class="n"&gt;stacktrace&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;
+            &lt;span class="p"&gt;},&lt;/span&gt;
+            &lt;span class="n"&gt;extra&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="p"&gt;{&lt;/span&gt;
+                &lt;span class="s1"&gt;&amp;#39;thread&amp;#39;&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt; &lt;span class="n"&gt;thread&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;
+            &lt;span class="p"&gt;}&lt;/span&gt;
+        &lt;span class="p"&gt;))&lt;/span&gt;
+
+
+&lt;span class="k"&gt;if&lt;/span&gt; &lt;span class="n"&gt;__name__&lt;/span&gt; &lt;span class="o"&gt;==&lt;/span&gt; &lt;span class="s1"&gt;&amp;#39;__main__&amp;#39;&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;
+    &lt;span class="n"&gt;raven_client&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;Client&lt;/span&gt;&lt;span class="p"&gt;()&lt;/span&gt;
+    &lt;span class="n"&gt;t&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;main&lt;/span&gt;&lt;span class="p"&gt;()&lt;/span&gt;
+    &lt;span class="n"&gt;t&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;start&lt;/span&gt;&lt;span class="p"&gt;()&lt;/span&gt;
+    &lt;span class="n"&gt;time&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;sleep&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="mi"&gt;1&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+    &lt;span class="n"&gt;get_traceback&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;raven_client&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+    &lt;span class="n"&gt;t&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;join&lt;/span&gt;&lt;span class="p"&gt;()&lt;/span&gt;
+&lt;/pre&gt;&lt;/div&gt;
+&lt;p&gt;测试结果：&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+$ python test2.py
+foo
+foo
+foo
+thread: &amp;lt;Thread(bar, started 123145482194944)&amp;gt;
+e800cefdc2ce4a00bb716b8342c75a96
+thread: &amp;lt;_MainThread(MainThread, started 140736955184064)&amp;gt;
+86b0cb00d5884cb49ba033d83e21040f
+foo
+foo
+&lt;/pre&gt;
+&lt;p&gt;sentry 上的信息:&lt;/p&gt;
+&lt;p&gt;&lt;img alt="sentry" src="/static/images/python/sentry-traceback-233.jpg" /&gt;&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class="section" id="id1"&gt;
+&lt;h2 id="hidid1"&gt;参考资料&lt;a class="headerlink" href="#hidid1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;ul class="simple"&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://docs.python.org/3/library/threading.html#threading.enumerate"&gt;17.1. threading — Thread-based parallelism — Python 3.6.4rc1 documentation&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://docs.python.org/3/library/sys.html#sys._current_frames"&gt;29.1. sys — System-specific parameters and functions — Python 3.6.4rc1 documentation&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://docs.python.org/3/library/traceback.html#module-traceback"&gt;29.9. traceback — Print or retrieve a stack traceback — Python 3.6.4rc1 documentation&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://greenlet.readthedocs.io/en/latest/#methods-and-attributes-of-greenlets"&gt;greenlet: Lightweight concurrent programming — greenlet 0.4.0 documentation&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://docs.python.org/3/library/gc.html#gc.get_objects"&gt;29.11. gc — Garbage Collector interface — Python 3.6.4rc1 documentation&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://docs.python.org/3/library/asyncio-task.html#task"&gt;18.5.3. Tasks and coroutines — Python 3.6.4rc1 documentation&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://github.com/getsentry/raven-python"&gt;getsentry/raven-python: Raven is a Python client for Sentry (getsentry.com)&lt;/a&gt;&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/div&gt;
+</summary><category term="debug"></category></entry><entry><title>Python: 使用 faulthandler 模块获取运行中进程的 traceback 信息</title><link href="https://mozillazg.github.io/2017/12/python-use-faulthandler-to-debug-running-process-with-dumping-traceback.html" rel="alternate"></link><updated>2017-12-09T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.github.io,2017-12-09:2017/12/python-use-faulthandler-to-debug-running-process-with-dumping-traceback.html</id><summary type="html">&lt;p&gt;Python 3.3 新增了一个 &lt;a class="reference external" href="https://docs.python.org/3/library/faulthandler.html"&gt;faulthandler&lt;/a&gt; 模块，可以输出运行中进程的 traceback 信息，可以用来作为调试运行中的 Python 进程的一种手段。&lt;/p&gt;
+&lt;div class="section" id="id1"&gt;
+&lt;h2 id="hidid1"&gt;特点及限制&lt;a class="headerlink" href="#hidid1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;模块本身是使用 C 实现的，所以有如下特点和限制：&lt;/p&gt;
+&lt;div class="section" id="id2"&gt;
+&lt;h3 id="hidid2"&gt;特点&lt;a class="headerlink" href="#hidid2" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
+&lt;ul class="simple"&gt;
+&lt;li&gt;在 Segmentation fault 或者 Python 死锁时仍然可以输出 traceback 信息&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/div&gt;
+&lt;div class="section" id="id3"&gt;
+&lt;h3 id="hidid3"&gt;限制&lt;a class="headerlink" href="#hidid3" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
+&lt;ul class="simple"&gt;
+&lt;li&gt;只能用于信号安全的函数&lt;/li&gt;
+&lt;li&gt;只支持 ASCII 字符。程序使用 &lt;tt class="docutils literal"&gt;backslashreplace&lt;/tt&gt; 作为编码时的 error handler&lt;/li&gt;
+&lt;li&gt;每个字符串最长只能包含 500 个字符&lt;/li&gt;
+&lt;li&gt;只显示文件名，函数名和行号（不显示源码）&lt;/li&gt;
+&lt;li&gt;最大支持 100 个 frame 和 100 个线程&lt;/li&gt;
+&lt;li&gt;显示顺序是翻转的：最近的调用显示在前面&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;div class="section" id="id4"&gt;
+&lt;h2 id="hidid4"&gt;安装&lt;a class="headerlink" href="#hidid4" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;Python 3.3 自带了这个模块，Python 2.x 可以通过一下方式安装:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+pip install faulthandler
+&lt;/pre&gt;
+&lt;/div&gt;
+&lt;div class="section" id="id5"&gt;
+&lt;h2 id="hidid5"&gt;使用示例&lt;a class="headerlink" href="#hidid5" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;div class="section" id="traceback"&gt;
+&lt;h3 id="hidtraceback"&gt;手动输出 traceback 信息&lt;a class="headerlink" href="#hidtraceback" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
+&lt;p&gt;测试函数:&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="kn"&gt;from&lt;/span&gt; &lt;span class="nn"&gt;threading&lt;/span&gt; &lt;span class="kn"&gt;import&lt;/span&gt; &lt;span class="n"&gt;Thread&lt;/span&gt;
+&lt;span class="kn"&gt;import&lt;/span&gt; &lt;span class="nn"&gt;time&lt;/span&gt;
+
+
+&lt;span class="k"&gt;def&lt;/span&gt; &lt;span class="nf"&gt;do&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;x&lt;/span&gt;&lt;span class="p"&gt;):&lt;/span&gt;
+    &lt;span class="n"&gt;x&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;x&lt;/span&gt; &lt;span class="o"&gt;*&lt;/span&gt; &lt;span class="mi"&gt;3&lt;/span&gt;
+    &lt;span class="n"&gt;time&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;sleep&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;x&lt;/span&gt; &lt;span class="o"&gt;*&lt;/span&gt; &lt;span class="mi"&gt;60&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+
+
+&lt;span class="k"&gt;def&lt;/span&gt; &lt;span class="nf"&gt;main&lt;/span&gt;&lt;span class="p"&gt;():&lt;/span&gt;
+    &lt;span class="n"&gt;threads&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="p"&gt;[]&lt;/span&gt;
+    &lt;span class="k"&gt;for&lt;/span&gt; &lt;span class="n"&gt;x&lt;/span&gt; &lt;span class="ow"&gt;in&lt;/span&gt; &lt;span class="nb"&gt;range&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="mi"&gt;1&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="mi"&gt;3&lt;/span&gt;&lt;span class="p"&gt;):&lt;/span&gt;
+        &lt;span class="n"&gt;t&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;Thread&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;target&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="n"&gt;do&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;args&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;x&lt;/span&gt;&lt;span class="p"&gt;,))&lt;/span&gt;
+        &lt;span class="n"&gt;t&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;start&lt;/span&gt;&lt;span class="p"&gt;()&lt;/span&gt;
+    &lt;span class="k"&gt;for&lt;/span&gt; &lt;span class="n"&gt;x&lt;/span&gt; &lt;span class="ow"&gt;in&lt;/span&gt; &lt;span class="n"&gt;threads&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;
+        &lt;span class="n"&gt;x&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;join&lt;/span&gt;&lt;span class="p"&gt;()&lt;/span&gt;
+&lt;/pre&gt;&lt;/div&gt;
+&lt;p&gt;使用 faulthandler 输出所有线程的 traceback 信息:&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="n"&gt;In&lt;/span&gt; &lt;span class="p"&gt;[&lt;/span&gt;&lt;span class="mi"&gt;1&lt;/span&gt;&lt;span class="p"&gt;]:&lt;/span&gt; &lt;span class="kn"&gt;import&lt;/span&gt; &lt;span class="nn"&gt;test&lt;/span&gt;
+
+&lt;span class="n"&gt;In&lt;/span&gt; &lt;span class="p"&gt;[&lt;/span&gt;&lt;span class="mi"&gt;2&lt;/span&gt;&lt;span class="p"&gt;]:&lt;/span&gt; &lt;span class="n"&gt;test&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;main&lt;/span&gt;&lt;span class="p"&gt;()&lt;/span&gt;
+
+&lt;span class="n"&gt;In&lt;/span&gt; &lt;span class="p"&gt;[&lt;/span&gt;&lt;span class="mi"&gt;3&lt;/span&gt;&lt;span class="p"&gt;]:&lt;/span&gt; &lt;span class="kn"&gt;import&lt;/span&gt; &lt;span class="nn"&gt;faulthandler&lt;/span&gt;
+
+&lt;span class="n"&gt;In&lt;/span&gt; &lt;span class="p"&gt;[&lt;/span&gt;&lt;span class="mi"&gt;4&lt;/span&gt;&lt;span class="p"&gt;]:&lt;/span&gt; &lt;span class="n"&gt;faulthandler&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;dump_traceback&lt;/span&gt;&lt;span class="p"&gt;()&lt;/span&gt;
+&lt;span class="n"&gt;Thread&lt;/span&gt; &lt;span class="mh"&gt;0x0000700009d66000&lt;/span&gt; &lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;most&lt;/span&gt; &lt;span class="n"&gt;recent&lt;/span&gt; &lt;span class="n"&gt;call&lt;/span&gt; &lt;span class="n"&gt;first&lt;/span&gt;&lt;span class="p"&gt;):&lt;/span&gt;
+  &lt;span class="n"&gt;File&lt;/span&gt; &lt;span class="s2"&gt;&amp;quot;/Users/xxx/tmp/test_faulthandler/test.py&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;line&lt;/span&gt; &lt;span class="mi"&gt;7&lt;/span&gt; &lt;span class="ow"&gt;in&lt;/span&gt; &lt;span class="n"&gt;do&lt;/span&gt;
+  &lt;span class="n"&gt;File&lt;/span&gt; &lt;span class="s2"&gt;&amp;quot;/xxx/lib/python3.6/threading.py&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;line&lt;/span&gt; &lt;span class="mi"&gt;864&lt;/span&gt; &lt;span class="ow"&gt;in&lt;/span&gt; &lt;span class="n"&gt;run&lt;/span&gt;
+  &lt;span class="n"&gt;File&lt;/span&gt; &lt;span class="s2"&gt;&amp;quot;/xxx/lib/python3.6/threading.py&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;line&lt;/span&gt; &lt;span class="mi"&gt;916&lt;/span&gt; &lt;span class="ow"&gt;in&lt;/span&gt; &lt;span class="n"&gt;_bootstrap_inner&lt;/span&gt;
+  &lt;span class="n"&gt;File&lt;/span&gt; &lt;span class="s2"&gt;&amp;quot;/xxx/lib/python3.6/threading.py&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;line&lt;/span&gt; &lt;span class="mi"&gt;884&lt;/span&gt; &lt;span class="ow"&gt;in&lt;/span&gt; &lt;span class="n"&gt;_bootstrap&lt;/span&gt;
+
+&lt;span class="n"&gt;Thread&lt;/span&gt; &lt;span class="mh"&gt;0x0000700009863000&lt;/span&gt; &lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;most&lt;/span&gt; &lt;span class="n"&gt;recent&lt;/span&gt; &lt;span class="n"&gt;call&lt;/span&gt; &lt;span class="n"&gt;first&lt;/span&gt;&lt;span class="p"&gt;):&lt;/span&gt;
+  &lt;span class="n"&gt;File&lt;/span&gt; &lt;span class="s2"&gt;&amp;quot;/Users/xxx/tmp/test_faulthandler/test.py&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;line&lt;/span&gt; &lt;span class="mi"&gt;7&lt;/span&gt; &lt;span class="ow"&gt;in&lt;/span&gt; &lt;span class="n"&gt;do&lt;/span&gt;
+  &lt;span class="n"&gt;File&lt;/span&gt; &lt;span class="s2"&gt;&amp;quot;/xxx/lib/python3.6/threading.py&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;line&lt;/span&gt; &lt;span class="mi"&gt;864&lt;/span&gt; &lt;span class="ow"&gt;in&lt;/span&gt; &lt;span class="n"&gt;run&lt;/span&gt;
+  &lt;span class="n"&gt;File&lt;/span&gt; &lt;span class="s2"&gt;&amp;quot;/xxx/lib/python3.6/threading.py&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;line&lt;/span&gt; &lt;span class="mi"&gt;916&lt;/span&gt; &lt;span class="ow"&gt;in&lt;/span&gt; &lt;span class="n"&gt;_bootstrap_inner&lt;/span&gt;
+  &lt;span class="n"&gt;File&lt;/span&gt; &lt;span class="s2"&gt;&amp;quot;/xxx/lib/python3.6/threading.py&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;line&lt;/span&gt; &lt;span class="mi"&gt;884&lt;/span&gt; &lt;span class="ow"&gt;in&lt;/span&gt; &lt;span class="n"&gt;_bootstrap&lt;/span&gt;
+
+&lt;span class="n"&gt;Thread&lt;/span&gt; &lt;span class="mh"&gt;0x0000700009360000&lt;/span&gt; &lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;most&lt;/span&gt; &lt;span class="n"&gt;recent&lt;/span&gt; &lt;span class="n"&gt;call&lt;/span&gt; &lt;span class="n"&gt;first&lt;/span&gt;&lt;span class="p"&gt;):&lt;/span&gt;
+  &lt;span class="n"&gt;File&lt;/span&gt; &lt;span class="s2"&gt;&amp;quot;/xxx/lib/python3.6/threading.py&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;line&lt;/span&gt; &lt;span class="mi"&gt;295&lt;/span&gt; &lt;span class="ow"&gt;in&lt;/span&gt; &lt;span class="n"&gt;wait&lt;/span&gt;
+  &lt;span class="n"&gt;File&lt;/span&gt; &lt;span class="s2"&gt;&amp;quot;/xxx/lib/python3.6/threading.py&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;line&lt;/span&gt; &lt;span class="mi"&gt;551&lt;/span&gt; &lt;span class="ow"&gt;in&lt;/span&gt; &lt;span class="n"&gt;wait&lt;/span&gt;
+  &lt;span class="n"&gt;File&lt;/span&gt; &lt;span class="s2"&gt;&amp;quot;/xxx/lib/python3.6/site-packages/IPython/core/history.py&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;line&lt;/span&gt; &lt;span class="mi"&gt;834&lt;/span&gt; &lt;span class="ow"&gt;in&lt;/span&gt; &lt;span class="n"&gt;run&lt;/span&gt;
+  &lt;span class="n"&gt;File&lt;/span&gt; &lt;span class="s2"&gt;&amp;quot;/xxx/lib/python3.6/site-packages/IPython/core/history.py&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;line&lt;/span&gt; &lt;span class="mi"&gt;60&lt;/span&gt; &lt;span class="ow"&gt;in&lt;/span&gt; &lt;span class="n"&gt;needs_sqlite&lt;/span&gt;
+  &lt;span class="n"&gt;File&lt;/span&gt; &lt;span class="s2"&gt;&amp;quot;&amp;lt;decorator-gen-23&amp;gt;&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;line&lt;/span&gt; &lt;span class="mi"&gt;2&lt;/span&gt; &lt;span class="ow"&gt;in&lt;/span&gt; &lt;span class="n"&gt;run&lt;/span&gt;
+  &lt;span class="n"&gt;File&lt;/span&gt; &lt;span class="s2"&gt;&amp;quot;/xxx/lib/python3.6/threading.py&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;line&lt;/span&gt; &lt;span class="mi"&gt;916&lt;/span&gt; &lt;span class="ow"&gt;in&lt;/span&gt; &lt;span class="n"&gt;_bootstrap_inner&lt;/span&gt;
+  &lt;span class="n"&gt;File&lt;/span&gt; &lt;span class="s2"&gt;&amp;quot;/xxx/lib/python3.6/threading.py&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;line&lt;/span&gt; &lt;span class="mi"&gt;884&lt;/span&gt; &lt;span class="ow"&gt;in&lt;/span&gt; &lt;span class="n"&gt;_bootstrap&lt;/span&gt;
+
+&lt;span class="n"&gt;Current&lt;/span&gt; &lt;span class="n"&gt;thread&lt;/span&gt; &lt;span class="mh"&gt;0x00007fffe03873c0&lt;/span&gt; &lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;most&lt;/span&gt; &lt;span class="n"&gt;recent&lt;/span&gt; &lt;span class="n"&gt;call&lt;/span&gt; &lt;span class="n"&gt;first&lt;/span&gt;&lt;span class="p"&gt;):&lt;/span&gt;
+  &lt;span class="n"&gt;File&lt;/span&gt; &lt;span class="s2"&gt;&amp;quot;&amp;lt;ipython-input-4-6b8299023d33&amp;gt;&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;line&lt;/span&gt; &lt;span class="mi"&gt;1&lt;/span&gt; &lt;span class="ow"&gt;in&lt;/span&gt; &lt;span class="o"&gt;&amp;lt;&lt;/span&gt;&lt;span class="n"&gt;module&lt;/span&gt;&lt;span class="o"&gt;&amp;gt;&lt;/span&gt;
+  &lt;span class="n"&gt;File&lt;/span&gt; &lt;span class="s2"&gt;&amp;quot;/xxx/lib/python3.6/site-packages/IPython/core/interactiveshell.py&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;line&lt;/span&gt; &lt;span class="mi"&gt;2881&lt;/span&gt; &lt;span class="ow"&gt;in&lt;/span&gt; &lt;span class="n"&gt;run_code&lt;/span&gt;
+  &lt;span class="n"&gt;File&lt;/span&gt; &lt;span class="s2"&gt;&amp;quot;/xxx/lib/python3.6/site-packages/IPython/core/interactiveshell.py&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;line&lt;/span&gt; &lt;span class="mi"&gt;2827&lt;/span&gt; &lt;span class="ow"&gt;in&lt;/span&gt; &lt;span class="n"&gt;run_ast_nodes&lt;/span&gt;
+  &lt;span class="n"&gt;File&lt;/span&gt; &lt;span class="s2"&gt;&amp;quot;/xxx/lib/python3.6/site-packages/IPython/core/interactiveshell.py&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;line&lt;/span&gt; &lt;span class="mi"&gt;2717&lt;/span&gt; &lt;span class="ow"&gt;in&lt;/span&gt; &lt;span class="n"&gt;run_cell&lt;/span&gt;
+  &lt;span class="n"&gt;File&lt;/span&gt; &lt;span class="s2"&gt;&amp;quot;/xxx/lib/python3.6/site-packages/IPython/terminal/interactiveshell.py&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;line&lt;/span&gt; &lt;span class="mi"&gt;446&lt;/span&gt; &lt;span class="ow"&gt;in&lt;/span&gt; &lt;span class="n"&gt;interact&lt;/span&gt;
+  &lt;span class="n"&gt;File&lt;/span&gt; &lt;span class="s2"&gt;&amp;quot;/xxx/lib/python3.6/site-packages/IPython/terminal/interactiveshell.py&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;line&lt;/span&gt; &lt;span class="mi"&gt;455&lt;/span&gt; &lt;span class="ow"&gt;in&lt;/span&gt; &lt;span class="n"&gt;mainloop&lt;/span&gt;
+  &lt;span class="n"&gt;File&lt;/span&gt; &lt;span class="s2"&gt;&amp;quot;/xxx/lib/python3.6/site-packages/IPython/terminal/ipapp.py&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;line&lt;/span&gt; &lt;span class="mi"&gt;348&lt;/span&gt; &lt;span class="ow"&gt;in&lt;/span&gt; &lt;span class="n"&gt;start&lt;/span&gt;
+  &lt;span class="n"&gt;File&lt;/span&gt; &lt;span class="s2"&gt;&amp;quot;/xxx/lib/python3.6/site-packages/traitlets/config/application.py&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;line&lt;/span&gt; &lt;span class="mi"&gt;658&lt;/span&gt; &lt;span class="ow"&gt;in&lt;/span&gt; &lt;span class="n"&gt;launch_instance&lt;/span&gt;
+  &lt;span class="n"&gt;File&lt;/span&gt; &lt;span class="s2"&gt;&amp;quot;/xxx/lib/python3.6/site-packages/IPython/__init__.py&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;line&lt;/span&gt; &lt;span class="mi"&gt;119&lt;/span&gt; &lt;span class="ow"&gt;in&lt;/span&gt; &lt;span class="n"&gt;start_ipython&lt;/span&gt;
+  &lt;span class="n"&gt;File&lt;/span&gt; &lt;span class="s2"&gt;&amp;quot;/xxx/bin/ipython&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;line&lt;/span&gt; &lt;span class="mi"&gt;11&lt;/span&gt; &lt;span class="ow"&gt;in&lt;/span&gt; &lt;span class="o"&gt;&amp;lt;&lt;/span&gt;&lt;span class="n"&gt;module&lt;/span&gt;&lt;span class="o"&gt;&amp;gt;&lt;/span&gt;
+
+&lt;span class="n"&gt;In&lt;/span&gt; &lt;span class="p"&gt;[&lt;/span&gt;&lt;span class="mi"&gt;5&lt;/span&gt;&lt;span class="p"&gt;]:&lt;/span&gt;
+&lt;/pre&gt;&lt;/div&gt;
+&lt;p&gt;可以通过 &lt;tt class="docutils literal"&gt;all_threads=False&lt;/tt&gt; 参数指定只输出当前线程，
+&lt;tt class="docutils literal"&gt;file=sys.stderr&lt;/tt&gt; 参数指定输出到哪里（默认是标准错误），
+详见 &lt;a class="reference external" href="https://docs.python.org/3/library/faulthandler.html"&gt;faulthandler&lt;/a&gt; 官方文档。&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class="section" id="id6"&gt;
+&lt;h3 id="hidid6"&gt;通过信号自动输出 traceback 信息&lt;a class="headerlink" href="#hidid6" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
+&lt;p&gt;给前面的测试函数增加信号处理，增加通过 &lt;tt class="docutils literal"&gt;USR1&lt;/tt&gt; 信号输出 traceback 信息的功能：&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="kn"&gt;import&lt;/span&gt; &lt;span class="nn"&gt;faulthandler&lt;/span&gt;
+&lt;span class="kn"&gt;import&lt;/span&gt; &lt;span class="nn"&gt;signal&lt;/span&gt;
+&lt;span class="kn"&gt;from&lt;/span&gt; &lt;span class="nn"&gt;threading&lt;/span&gt; &lt;span class="kn"&gt;import&lt;/span&gt; &lt;span class="n"&gt;Thread&lt;/span&gt;
+&lt;span class="kn"&gt;import&lt;/span&gt; &lt;span class="nn"&gt;time&lt;/span&gt;
+
+
+&lt;span class="k"&gt;def&lt;/span&gt; &lt;span class="nf"&gt;do&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;x&lt;/span&gt;&lt;span class="p"&gt;):&lt;/span&gt;
+    &lt;span class="n"&gt;x&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;x&lt;/span&gt; &lt;span class="o"&gt;*&lt;/span&gt; &lt;span class="mi"&gt;3&lt;/span&gt;
+    &lt;span class="n"&gt;time&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;sleep&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;x&lt;/span&gt; &lt;span class="o"&gt;*&lt;/span&gt; &lt;span class="mi"&gt;60&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+
+
+&lt;span class="k"&gt;def&lt;/span&gt; &lt;span class="nf"&gt;main&lt;/span&gt;&lt;span class="p"&gt;():&lt;/span&gt;
+    &lt;span class="n"&gt;threads&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="p"&gt;[]&lt;/span&gt;
+    &lt;span class="k"&gt;for&lt;/span&gt; &lt;span class="n"&gt;x&lt;/span&gt; &lt;span class="ow"&gt;in&lt;/span&gt; &lt;span class="nb"&gt;range&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="mi"&gt;1&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="mi"&gt;3&lt;/span&gt;&lt;span class="p"&gt;):&lt;/span&gt;
+        &lt;span class="n"&gt;t&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;Thread&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;target&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="n"&gt;do&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;args&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;x&lt;/span&gt;&lt;span class="p"&gt;,))&lt;/span&gt;
+        &lt;span class="n"&gt;t&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;start&lt;/span&gt;&lt;span class="p"&gt;()&lt;/span&gt;
+    &lt;span class="k"&gt;for&lt;/span&gt; &lt;span class="n"&gt;x&lt;/span&gt; &lt;span class="ow"&gt;in&lt;/span&gt; &lt;span class="n"&gt;threads&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;
+        &lt;span class="n"&gt;x&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;join&lt;/span&gt;&lt;span class="p"&gt;()&lt;/span&gt;
+
+
+&lt;span class="k"&gt;if&lt;/span&gt; &lt;span class="n"&gt;__name__&lt;/span&gt; &lt;span class="o"&gt;==&lt;/span&gt; &lt;span class="s1"&gt;&amp;#39;__main__&amp;#39;&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;
+    &lt;span class="n"&gt;faulthandler&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;register&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;signal&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;SIGUSR1&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+    &lt;span class="n"&gt;main&lt;/span&gt;&lt;span class="p"&gt;()&lt;/span&gt;
+&lt;/pre&gt;&lt;/div&gt;
+&lt;p&gt;运行程序，然后就可以通过向进程发送 &lt;tt class="docutils literal"&gt;USR1&lt;/tt&gt; 信号来获取运行中进程的 traceback 信息了:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+$ python test.py &amp;amp;
+[1] 21924
+$ kill -s USR1 21924
+Thread 0x0000700001c03000 (most recent call first):
+  File &amp;quot;test.py&amp;quot;, line 9 in do
+  File &amp;quot;/xxx/lib/python3.6/threading.py&amp;quot;, line 864 in run
+  File &amp;quot;/xxx/lib/python3.6/threading.py&amp;quot;, line 916 in _bootstrap_inner
+  File &amp;quot;/xxx/lib/python3.6/threading.py&amp;quot;, line 884 in _bootstrap
+
+Thread 0x0000700001700000 (most recent call first):
+  File &amp;quot;test.py&amp;quot;, line 9 in do
+  File &amp;quot;/xxx/lib/python3.6/threading.py&amp;quot;, line 864 in run
+  File &amp;quot;/xxx/lib/python3.6/threading.py&amp;quot;, line 916 in _bootstrap_inner
+  File &amp;quot;/xxx/lib/python3.6/threading.py&amp;quot;, line 884 in _bootstrap
+
+Current thread 0x00007fffe03873c0 (most recent call first):
+  File &amp;quot;/xxx/lib/python3.6/threading.py&amp;quot;, line 1072 in _wait_for_tstate_lock
+  File &amp;quot;/xxx/lib/python3.6/threading.py&amp;quot;, line 1056 in join
+  File &amp;quot;/xxx/lib/python3.6/threading.py&amp;quot;, line 1290 in _shutdown
+&lt;/pre&gt;
+&lt;p&gt;更多用法以及其他的信息请阅读 &lt;a class="reference external" href="https://docs.python.org/3/library/faulthandler.html"&gt;官方文档&lt;/a&gt; 。&lt;/p&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;div class="section" id="id8"&gt;
+&lt;h2 id="hidid8"&gt;参考资料&lt;a class="headerlink" href="#hidid8" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;ul class="simple"&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://docs.python.org/3/library/faulthandler.html"&gt;27.2. faulthandler — Dump the Python traceback — Python 3.6.4rc1 documentation&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://github.com/vstinner/faulthandler"&gt;vstinner/faulthandler: Fault handler for Python: display the Python backtrace on SIGSEGV, SIGFPE, SIGABRT, SIGBUS and SIGILL signals&lt;/a&gt;&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/div&gt;
+</summary><category term="debug"></category><category term="faulthandler"></category></entry><entry><title>Python: linux 环境下如何修改 PIPE buffer size</title><link href="https://mozillazg.github.io/2017/11/python-how-to-set-pipe-buffer-size-on-linux.html" rel="alternate"></link><updated>2017-11-01T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.github.io,2017-11-01:2017/11/python-how-to-set-pipe-buffer-size-on-linux.html</id><summary type="html">&lt;p&gt;当 PIPE 的写入方写的太快，但是读取方来不及读取的时候，就会把 buffer 给写满从而出现 &lt;tt class="docutils literal"&gt;resource temporarily unavailable&lt;/tt&gt; 错误。在 linux 下可以通过
+&lt;tt class="docutils literal"&gt;fcntl.fcntl(fd, fcntl.F_SETPIPE_SZ, size)&lt;/tt&gt; 来设置 PIPE 的 buffer 大小。&lt;/p&gt;
+&lt;p&gt;相关 Python 代码如下:&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="kn"&gt;import&lt;/span&gt; &lt;span class="nn"&gt;fcntl&lt;/span&gt;
+&lt;span class="kn"&gt;import&lt;/span&gt; &lt;span class="nn"&gt;platform&lt;/span&gt;
+
+&lt;span class="k"&gt;try&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;
+    &lt;span class="k"&gt;if&lt;/span&gt; &lt;span class="n"&gt;platform&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;system&lt;/span&gt;&lt;span class="p"&gt;()&lt;/span&gt; &lt;span class="o"&gt;==&lt;/span&gt; &lt;span class="s1"&gt;&amp;#39;Linux&amp;#39;&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;
+        &lt;span class="n"&gt;fcntl&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;F_SETPIPE_SZ&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="mi"&gt;1031&lt;/span&gt;
+        &lt;span class="n"&gt;fcntl&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;fcntl&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;fd&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;fcntl&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;F_SETPIPE_SZ&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;size&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+&lt;span class="k"&gt;except&lt;/span&gt; &lt;span class="ne"&gt;IOError&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;
+    &lt;span class="k"&gt;print&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;can not change PIPE buffer size&amp;#39;&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+&lt;/pre&gt;&lt;/div&gt;
+&lt;p&gt;一般可以通过 &lt;tt class="docutils literal"&gt;read_fd, write_fd = os.pipe()&lt;/tt&gt; 来生成 pipe，
+此时上面的 &lt;tt class="docutils literal"&gt;fd&lt;/tt&gt; 对应 &lt;tt class="docutils literal"&gt;read_fd&lt;/tt&gt; 和 &lt;tt class="docutils literal"&gt;write_fd&lt;/tt&gt; 。&lt;/p&gt;
+&lt;ul class="simple"&gt;
+&lt;li&gt;捕获 &lt;tt class="docutils literal"&gt;IOError&lt;/tt&gt; 异常是因为有的 linux 内核版本不支持修改 PIPE buffer 大小。&lt;/li&gt;
+&lt;li&gt;python 的 fcntl 没有 &lt;tt class="docutils literal"&gt;F_SETPIPE_SZ&lt;/tt&gt; 属性，所以我们定义了这个属性，它的值来自 &lt;a class="reference external" href="https://github.com/torvalds/linux/blob/ead751507de86d90fa250431e9990a8b881f713c/include/uapi/linux/fcntl.h#L28"&gt;fcntl.h&lt;/a&gt; 。&lt;/li&gt;
+&lt;/ul&gt;
+&lt;div class="section" id="id1"&gt;
+&lt;h2 id="hidid1"&gt;参考资料&lt;a class="headerlink" href="#hidid1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;ul class="simple"&gt;
+&lt;li&gt;&lt;a class="reference external" href="http://developerweb.net/viewtopic.php?id=5792"&gt;FIFO: Resource temporarily unavailable (Page 1) / Processes / UNIX Socket FAQ&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="http://man7.org/linux/man-pages/man2/fcntl.2.html"&gt;fcntl(2) - Linux manual page&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="http://man7.org/linux/man-pages/man7/pipe.7.html"&gt;pipe(7) - Linux manual page&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://github.com/torvalds/linux/blob/ead751507de86d90fa250431e9990a8b881f713c/include/uapi/linux/fcntl.h#L28"&gt;linux/fcntl.h at ead751507de86d90fa250431e9990a8b881f713c · torvalds/linux&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://github.com/torvalds/linux/blob/ead751507de86d90fa250431e9990a8b881f713c/include/uapi/asm-generic/fcntl.h#L189"&gt;asm-generic/fcntl.h at ead751507de86d90fa250431e9990a8b881f713c · torvalds/linux&lt;/a&gt;&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/div&gt;
+</summary><category term="pipe"></category><category term="linux"></category></entry><entry><title>asyncio 学习笔记：使用抽象类 Protocol 实现异步 I/O</title><link href="https://mozillazg.github.io/2017/08/python-asyncio-note-io-protocol.html" rel="alternate"></link><updated>2017-08-26T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.github.io,2017-08-26:2017/08/python-asyncio-note-io-protocol.html</id><summary type="html">&lt;p&gt;本文是 &lt;a class="reference external" href="https://pymotw.com/3/asyncio/io_protocol.html"&gt;https://pymotw.com/3/asyncio/io_protocol.html&lt;/a&gt;
 的学习笔记，强烈推荐直接阅读原文。&lt;/p&gt;
 &lt;p&gt;这次将用两个程序介绍使用 asyncio 实现一个简单的 echo 服务端和客户端程序&lt;/p&gt;
 &lt;div class="section" id="echo"&gt;
@@ -2538,8 +3073,7 @@ $ sudo apt-get install gdb python2.7-dbg
 &lt;/pre&gt;
 &lt;p&gt;设置 /proc/sys/kernel/yama/ptrace_scope:&lt;/p&gt;
 &lt;pre class="code shell literal-block"&gt;
-$ sudo su
-&lt;span class="c1"&gt;# echo 0 &amp;gt; /proc/sys/kernel/yama/ptrace_scope&lt;/span&gt;
+$ &lt;span class="nb"&gt;echo&lt;/span&gt; &lt;span class="m"&gt;0&lt;/span&gt; &lt;span class="p"&gt;|&lt;/span&gt;sudo tee /proc/sys/kernel/yama/ptrace_scope
 &lt;/pre&gt;
 &lt;p&gt;运行 test.py:&lt;/p&gt;
 &lt;pre class="code shell literal-block"&gt;
@@ -3399,6 +3933,7 @@ self is &amp;lt;__main__.D object at 0x10ce10e48&amp;gt; &amp;#64;A.add
 &lt;li&gt;&lt;a class="reference external" href="http://sixty-north.com/blog/series/pythons-super-explained"&gt;Python's super() Explained&lt;/a&gt;&lt;/li&gt;
 &lt;li&gt;&lt;a class="reference external" href="https://docs.python.org/3/library/functions.html#super"&gt;2. Built-in Functions — Python 3.5.2 documentation&lt;/a&gt;&lt;/li&gt;
 &lt;li&gt;&lt;a class="reference external" href="https://fuhm.net/super-harmful/"&gt;Python's Super Considered Harmful&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://mozillazg.github.io/2016/11/python-mro-compute.html"&gt;Python: 多继承模式下 MRO(Method Resolution Order) 的计算方式 - Huang Huang 的博客&lt;/a&gt;&lt;/li&gt;
 &lt;/ul&gt;
 &lt;/div&gt;
 </summary></entry><entry><title>Python: 多继承模式下 MRO(Method Resolution Order) 的计算方式</title><link href="https://mozillazg.github.io/2016/11/python-mro-compute.html" rel="alternate"></link><updated>2016-11-06T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.github.io,2016-11-06:2016/11/python-mro-compute.html</id><summary type="html">&lt;p&gt;大家可能已经知道了，在 Python 3(Python 2 的新式类)中多继承模式是使用 C3 算法来确定 MRO(Method Resolution Order) 的。&lt;/p&gt;
