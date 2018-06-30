@@ -1,0 +1,500 @@
+<!DOCTYPE html>
+<html lang="zh-hans" prefix="og: http://ogp.me/ns# fb: https://www.facebook.com/2008/fbml" class="han-init">
+<head>
+    <title>让我们一起来阅读源代码之 Howdoi （一） - Huang Huang 的博客</title>
+    <!-- Using the latest rendering mode for IE -->
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <!-- share.css -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/social-share.js/1.0.16/css/share.min.css">
+    <!-- share.js -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/social-share.js/1.0.16/js/social-share.min.js"></script>
+
+
+    <link href="http://127.0.0.1:8000/favicon.ico" rel="icon">
+
+<link rel="canonical" href="http://127.0.0.1:8000/2018/04/let-us-read-source-code-howdoi-1.html">
+
+        <meta name="author" content="mozillazg" />
+        <meta name="keywords" content="let-us,let-us-read-source-code,Howdoi" />
+    <meta name="description" content="前言¶ 正式开始填坑了。让我们先从 Howdoi 这个项目开始。有一点要说明一下：我使用的 Python 版本是 Python 3.6 ，我的源码阅读的所有文章中所有的 Python 相关的操作如果没有特别说明都是用的 Python 3.6 。 熟悉基本功能¶ 既然要看它的源代码至少先得了解程序的基本功能，这样看代码的时候才会有“哦，原来那个功能是这样实现的呀”的感觉。熟悉项目的基本功能有哪些是首先要做的事情。 我们先通过阅读项目的 README 来了解这个项目的功能。通过 README 我们可以知道 Howdoi 这个项目的主要功能如下： 用来在命令行中搜索编程问题，输出答案代码 默认使用 google 搜索 StackOverflow 上的问题，可以通过环境变量 HOWDOI_SEARCH_ENGINE 修改搜索引擎改为使用 bing 搜索。 可以通过环境变量 HOWDOI_URL 指定搜索不同的问答网站（默认是 stackoverflow.com ，可以是其他 stackoverflow 家族的网站，比如：serverfault.com, pt.stackoverflow.com）。 下面我们来实际使用一下这个程序，看看实际的效果。 安装¶ git clone 源代码（为了保持一致，使用我 fork 的代码）: $ git clone https://github.com/let-us-read-source-code/howdoi.git $ cd howdoi 安装程序： 我们先使用 virtualenv 创建虚拟环境，防止污染系统 python 环境 $ python -m venv venv $ . venv/bin/activate 使用 develop 模式安装，方便调试（修改代码后不需要重新安装，修改会直接生效）: $ pip install -e . $ howdoi usage: howdoi [-h] [-p POS] [-a] [-l] [-c] [-n NUM_ANSWERS] [-C] [-v] [QUERY [QUERY ...]] instant coding answers via the command line positional arguments: QUERY the question to answer optional arguments: -h, --help show this help message and exit -p POS, --pos POS select answer in specified position (default: 1) -a, --all display the full text of the answer -l, --link display only the answer link -c, --color enable colorized output -n NUM_ANSWERS, --num-answers NUM_ANSWERS number of answers to return -C, --clear-cache clear the cache -v, --version displays the current version of howdoi 使用¶ 为了方便，我们通过环境变量 HOWDOI_SEARCH_ENGINE 指定使用 bing 搜索引擎: $ export HOWDOI_SEARCH_ENGINE=bing 先来看看最基本的搜索问题的功能: $ howdoi python convert int to str &gt;&gt;&gt; str(10) &#39;10&#39; &gt;&gt;&gt; int(&#39;10&#39;) 10 效果还是可以的。 再来看一下几个主要参数的功能: -p POS, --pos POS     选择指定位置的答案 (default: 1): $ howdoi -p 1 python convert int to str &gt;&gt;&gt; str(10) &#39;10&#39; &gt;&gt;&gt; int(&#39;10&#39;) 10 $ howdoi -p 2 python convert int to str &gt;&gt;&gt; a = &#34;545.2222&#34; &gt;&gt;&gt; float(a) 545.22220000000004 &gt;&gt;&gt; int(float(a)) 545 -a, --all             显示答案全文: $ howdoi -a python convert int to str ★ Answer from https://stackoverflow.com/questions/961632/converting-integer-to-string-in-python ★ &gt;&gt;&gt; str(10) &#39;10&#39; &gt;&gt;&gt; int(&#39;10&#39;) 10 Links to the documentation: int() str() The problem seems to come from this line: d.str(). Conversion to a string is done with the builtin str() function, which basically calls the __str__() method of its parameter. Also, it shouldn&#39;t be necessary to call pow(). Try using the ** operator. -l, --link            只显示答案链接: $ howdoi -l python convert int to str https://stackoverflow.com/questions/961632/converting-integer-to-string-in-python -n NUM_ANSWERS, --num-answers NUM_ANSWERS 返回的答案数目: $ howdoi -n 2 python convert int to str ★ Answer from https://stackoverflow.com/questions/961632/converting-integer-to-string-in-python ★ &gt;&gt;&gt; str(10) &#39;10&#39; &gt;&gt;&gt; int(&#39;10&#39;) 10 ================================================================================ ★ Answer from https://stackoverflow.com/questions/15197774/python-convert-str-to-integer ★ list[0][2] = int(list[0][2]) 熟悉了基本功能后，我们即将进入阅读源代码的环节，不过鉴于这篇文章已经有点长了，这次就先到这里。 总结¶ 本文我们主要熟悉了一下 howdoi 这个项目的基本功能，为后面的阅读源码工作做一点准备， 后面我们将进入涉及源代码的环节。在下篇文章出炉前大家不妨思考一下：如果让你来实现 howdoi 的这几个基本功能，你会如何实现？ 参考资料¶ gleitz/howdoi: instant coding answers via the command line Stack Overflow - Where Developers Learn, Share, &amp; Build Careers" />
+
+    <style>
+      .js-toc {
+        margin-bottom: 20px;
+      }
+      .donate-modal {
+        text-align: center;
+      }
+      #donate-modal-container .donate-image {
+        max-height: 300px !important;
+        min-height: inherit !important;
+      }
+    </style>
+
+        <meta property="og:site_name" content="Huang Huang 的博客" />
+        <meta property="og:type" content="article"/>
+        <meta property="og:title" content="让我们一起来阅读源代码之 Howdoi （一）"/>
+        <meta property="og:url" content="http://127.0.0.1:8000/2018/04/let-us-read-source-code-howdoi-1.html"/>
+        <meta property="og:description" content="前言¶ 正式开始填坑了。让我们先从 Howdoi 这个项目开始。有一点要说明一下：我使用的 Python 版本是 Python 3.6 ，我的源码阅读的所有文章中所有的 Python 相关的操作如果没有特别说明都是用的 Python 3.6 。 熟悉基本功能¶ 既然要看它的源代码至少先得了解程序的基本功能，这样看代码的时候才会有“哦，原来那个功能是这样实现的呀”的感觉。熟悉项目的基本功能有哪些是首先要做的事情。 我们先通过阅读项目的 README 来了解这个项目的功能。通过 README 我们可以知道 Howdoi 这个项目的主要功能如下： 用来在命令行中搜索编程问题，输出答案代码 默认使用 google 搜索 StackOverflow 上的问题，可以通过环境变量 HOWDOI_SEARCH_ENGINE 修改搜索引擎改为使用 bing 搜索。 可以通过环境变量 HOWDOI_URL 指定搜索不同的问答网站（默认是 stackoverflow.com ，可以是其他 stackoverflow 家族的网站，比如：serverfault.com, pt.stackoverflow.com）。 下面我们来实际使用一下这个程序，看看实际的效果。 安装¶ git clone 源代码（为了保持一致，使用我 fork 的代码）: $ git clone https://github.com/let-us-read-source-code/howdoi.git $ cd howdoi 安装程序： 我们先使用 virtualenv 创建虚拟环境，防止污染系统 python 环境 $ python -m venv venv $ . venv/bin/activate 使用 develop 模式安装，方便调试（修改代码后不需要重新安装，修改会直接生效）: $ pip install -e . $ howdoi usage: howdoi [-h] [-p POS] [-a] [-l] [-c] [-n NUM_ANSWERS] [-C] [-v] [QUERY [QUERY ...]] instant coding answers via the command line positional arguments: QUERY the question to answer optional arguments: -h, --help show this help message and exit -p POS, --pos POS select answer in specified position (default: 1) -a, --all display the full text of the answer -l, --link display only the answer link -c, --color enable colorized output -n NUM_ANSWERS, --num-answers NUM_ANSWERS number of answers to return -C, --clear-cache clear the cache -v, --version displays the current version of howdoi 使用¶ 为了方便，我们通过环境变量 HOWDOI_SEARCH_ENGINE 指定使用 bing 搜索引擎: $ export HOWDOI_SEARCH_ENGINE=bing 先来看看最基本的搜索问题的功能: $ howdoi python convert int to str &gt;&gt;&gt; str(10) &#39;10&#39; &gt;&gt;&gt; int(&#39;10&#39;) 10 效果还是可以的。 再来看一下几个主要参数的功能: -p POS, --pos POS     选择指定位置的答案 (default: 1): $ howdoi -p 1 python convert int to str &gt;&gt;&gt; str(10) &#39;10&#39; &gt;&gt;&gt; int(&#39;10&#39;) 10 $ howdoi -p 2 python convert int to str &gt;&gt;&gt; a = &#34;545.2222&#34; &gt;&gt;&gt; float(a) 545.22220000000004 &gt;&gt;&gt; int(float(a)) 545 -a, --all             显示答案全文: $ howdoi -a python convert int to str ★ Answer from https://stackoverflow.com/questions/961632/converting-integer-to-string-in-python ★ &gt;&gt;&gt; str(10) &#39;10&#39; &gt;&gt;&gt; int(&#39;10&#39;) 10 Links to the documentation: int() str() The problem seems to come from this line: d.str(). Conversion to a string is done with the builtin str() function, which basically calls the __str__() method of its parameter. Also, it shouldn&#39;t be necessary to call pow(). Try using the ** operator. -l, --link            只显示答案链接: $ howdoi -l python convert int to str https://stackoverflow.com/questions/961632/converting-integer-to-string-in-python -n NUM_ANSWERS, --num-answers NUM_ANSWERS 返回的答案数目: $ howdoi -n 2 python convert int to str ★ Answer from https://stackoverflow.com/questions/961632/converting-integer-to-string-in-python ★ &gt;&gt;&gt; str(10) &#39;10&#39; &gt;&gt;&gt; int(&#39;10&#39;) 10 ================================================================================ ★ Answer from https://stackoverflow.com/questions/15197774/python-convert-str-to-integer ★ list[0][2] = int(list[0][2]) 熟悉了基本功能后，我们即将进入阅读源代码的环节，不过鉴于这篇文章已经有点长了，这次就先到这里。 总结¶ 本文我们主要熟悉了一下 howdoi 这个项目的基本功能，为后面的阅读源码工作做一点准备， 后面我们将进入涉及源代码的环节。在下篇文章出炉前大家不妨思考一下：如果让你来实现 howdoi 的这几个基本功能，你会如何实现？ 参考资料¶ gleitz/howdoi: instant coding answers via the command line Stack Overflow - Where Developers Learn, Share, &amp; Build Careers"/>
+        <meta property="article:published_time" content="2018-04-07" />
+            <meta property="article:section" content="python" />
+            <meta property="article:tag" content="let-us" />
+            <meta property="article:tag" content="let-us-read-source-code" />
+            <meta property="article:tag" content="Howdoi" />
+            <meta property="article:author" content="mozillazg" />
+            <meta property="og:image"
+                  content="http://127.0.0.1:8000/static/avatar.jpeg"/>
+
+
+    <meta name="twitter:card" content="summary">
+        <meta name="twitter:site" content="@mozillazg">
+        <meta name="twitter:creator" content="@mozillazg">
+    <meta name="twitter:domain" content="http://127.0.0.1:8000">
+            <meta property="twitter:image"
+                  content="http://127.0.0.1:8000/static/avatar.jpeg"/>
+
+    <!-- Bootstrap -->
+        <link rel="stylesheet" href="http://127.0.0.1:8000/theme/css/bootstrap.min.css" type="text/css"/>
+    <link href="http://127.0.0.1:8000/theme/css/font-awesome.min.css" rel="stylesheet">
+
+    <link href="http://127.0.0.1:8000/theme/css/pygments/github.css" rel="stylesheet">
+    <link rel="stylesheet" href="http://127.0.0.1:8000/theme/css/style.css" type="text/css"/>
+            <link href="http://127.0.0.1:8000/static/custom.css" rel="stylesheet">
+
+        <link href="http://127.0.0.1:8000/feeds/all.atom.xml" type="application/atom+xml" rel="alternate"
+              title="Huang Huang 的博客 ATOM Feed"/>
+
+        <link href="http://127.0.0.1:8000/feeds/all.rss.xml" type="application/rss+xml" rel="alternate"
+              title="Huang Huang 的博客 RSS Feed"/>
+
+
+        <link href="http://127.0.0.1:8000/feeds/python.atom.xml" type="application/atom+xml" rel="alternate"
+              title="Huang Huang 的博客 python ATOM Feed"/>
+
+
+    <script type="application/ld+json">
+    {
+        "@context": "https://schema.org",
+        "@type": "Website",
+        "publisher": {
+            "@type": "Person",
+            "name": "mozillazg",
+            "logo": "http://127.0.0.1:8000/static/avatar.jpeg"
+        },
+        "author": {
+            "@type": "Person",
+            "name": "mozillazg",
+            "image": "http://127.0.0.1:8000/static/avatar.jpeg",
+            "url": "http://127.0.0.1:8000",
+            "sameAs": []
+        },
+        // "headline": "",
+        "url": "http://127.0.0.1:8000/2018/04/let-us-read-source-code-howdoi-1.html",
+        "datePublished": "2018-04-07",
+        // "dateModified": "",
+        "image": "http://127.0.0.1:8000/static/avatar.jpeg",
+        "keywords": "let-us, let-us-read-source-code, Howdoi",
+        "description": "前言¶ 正式开始填坑了。让我们先从 Howdoi 这个项目开始。有一点要说明一下：我使用的 Python 版本是 Python 3.6 ，我的源码阅读的所有文章中所有的 Python 相关的操作如果没有特别说明都是用的 Python 3.6 。 熟悉基本功能¶ 既然要看它的源代码至少先得了解程序的基本功能，这样看代码的时候才会有“哦，原来那个功能是这样实现的呀”的感觉。熟悉项目的基本功能有哪些是首先要做的事情。 我们先通过阅读项目的 README 来了解这个项目的功能。通过 README 我们可以知道 Howdoi 这个项目的主要功能如下： 用来在命令行中搜索编程问题，输出答案代码 默认使用 google 搜索 StackOverflow 上的问题，可以通过环境变量 HOWDOI_SEARCH_ENGINE 修改搜索引擎改为使用 bing 搜索。 可以通过环境变量 HOWDOI_URL 指定搜索不同的问答网站（默认是 stackoverflow.com ，可以是其他 stackoverflow 家族的网站，比如：serverfault.com, pt.stackoverflow.com）。 下面我们来实际使用一下这个程序，看看实际的效果。 安装¶ git clone 源代码（为了保持一致，使用我 fork 的代码）: $ git clone https://github.com/let-us-read-source-code/howdoi.git $ cd howdoi 安装程序： 我们先使用 virtualenv 创建虚拟环境，防止污染系统 python 环境 $ python -m venv venv $ . venv/bin/activate 使用 develop 模式安装，方便调试（修改代码后不需要重新安装，修改会直接生效）: $ pip install -e . $ howdoi usage: howdoi [-h] [-p POS] [-a] [-l] [-c] [-n NUM_ANSWERS] [-C] [-v] [QUERY [QUERY ...]] instant coding answers via the command line positional arguments: QUERY the question to answer optional arguments: -h, --help show this help message and exit -p POS, --pos POS select answer in specified position (default: 1) -a, --all display the full text of the answer -l, --link display only the answer link -c, --color enable colorized output -n NUM_ANSWERS, --num-answers NUM_ANSWERS number of answers to return -C, --clear-cache clear the cache -v, --version displays the current version of howdoi 使用¶ 为了方便，我们通过环境变量 HOWDOI_SEARCH_ENGINE 指定使用 bing 搜索引擎: $ export HOWDOI_SEARCH_ENGINE=bing 先来看看最基本的搜索问题的功能: $ howdoi python convert int to str &gt;&gt;&gt; str(10) &#39;10&#39; &gt;&gt;&gt; int(&#39;10&#39;) 10 效果还是可以的。 再来看一下几个主要参数的功能: -p POS, --pos POS     选择指定位置的答案 (default: 1): $ howdoi -p 1 python convert int to str &gt;&gt;&gt; str(10) &#39;10&#39; &gt;&gt;&gt; int(&#39;10&#39;) 10 $ howdoi -p 2 python convert int to str &gt;&gt;&gt; a = &#34;545.2222&#34; &gt;&gt;&gt; float(a) 545.22220000000004 &gt;&gt;&gt; int(float(a)) 545 -a, --all             显示答案全文: $ howdoi -a python convert int to str ★ Answer from https://stackoverflow.com/questions/961632/converting-integer-to-string-in-python ★ &gt;&gt;&gt; str(10) &#39;10&#39; &gt;&gt;&gt; int(&#39;10&#39;) 10 Links to the documentation: int() str() The problem seems to come from this line: d.str(). Conversion to a string is done with the builtin str() function, which basically calls the __str__() method of its parameter. Also, it shouldn&#39;t be necessary to call pow(). Try using the ** operator. -l, --link            只显示答案链接: $ howdoi -l python convert int to str https://stackoverflow.com/questions/961632/converting-integer-to-string-in-python -n NUM_ANSWERS, --num-answers NUM_ANSWERS 返回的答案数目: $ howdoi -n 2 python convert int to str ★ Answer from https://stackoverflow.com/questions/961632/converting-integer-to-string-in-python ★ &gt;&gt;&gt; str(10) &#39;10&#39; &gt;&gt;&gt; int(&#39;10&#39;) 10 ================================================================================ ★ Answer from https://stackoverflow.com/questions/15197774/python-convert-str-to-integer ★ list[0][2] = int(list[0][2]) 熟悉了基本功能后，我们即将进入阅读源代码的环节，不过鉴于这篇文章已经有点长了，这次就先到这里。 总结¶ 本文我们主要熟悉了一下 howdoi 这个项目的基本功能，为后面的阅读源码工作做一点准备， 后面我们将进入涉及源代码的环节。在下篇文章出炉前大家不妨思考一下：如果让你来实现 howdoi 的这几个基本功能，你会如何实现？ 参考资料¶ gleitz/howdoi: instant coding answers via the command line Stack Overflow - Where Developers Learn, Share, &amp; Build Careers",
+        "mainEntityOfPage": {
+            "@type": "WebPage",
+            "@id": "http://127.0.0.1:8000"
+        }
+    }
+    </script>
+
+</head>
+<body>
+
+<div class="navbar" role="navigation">
+	<div class="container">
+        <div class="navbar-header">
+            <button type="button" class="navbar-toggle" data-toggle="collapse" data-target=".navbar-ex1-collapse">
+                <span class="sr-only">Toggle navigation</span>
+                <span class="icon-bar"></span>
+                <span class="icon-bar"></span>
+                <span class="icon-bar"></span>
+            </button>
+            <a href="http://127.0.0.1:8000/" class="navbar-brand">
+Huang Huang 的博客            </a>
+        </div>
+        <div class="collapse navbar-collapse navbar-ex1-collapse">
+            <ul class="nav navbar-nav">
+                    <li><a href="http://127.0.0.1:8000/feeds/all.atom.xml">Feed</a></li>
+                    <li><a href="/2014/10/pages/about-me.html">About</a></li>
+            </ul>
+            <ul class="nav navbar-nav navbar-right">
+              <li><a href="http://127.0.0.1:8000/archives.html"><i class="fa fa-th-list"></i><span class="icon-label">Archives</span></a></li>
+            </ul>
+        </div>
+        <!-- /.navbar-collapse -->
+    </div>
+</div> <!-- /.navbar -->
+<!-- Banner -->
+<!-- End Banner -->
+<div class="container">
+    <div class="row">
+        <div class="col-lg-12">
+    <section id="content" class="yue">
+        <article>
+            <header class="text-center">
+                <h1>
+                    <a href="http://127.0.0.1:8000/2018/04/let-us-read-source-code-howdoi-1.html"
+                       rel="bookmark"
+                       title="Permalink to 让我们一起来阅读源代码之 Howdoi （一）">
+                        让我们一起来阅读源代码之 Howdoi （一）
+                    </a>
+                </h1>
+                <p class="published">
+                    <time datetime="2018-04-07T00:00:00+00:00">
+                    2018-04-07
+                    </time>
+                </p>
+            </header>
+            <div class="entry-content">
+                <div class="well-sm article-info">
+<footer class="post-info">
+        <a href="http://127.0.0.1:8000/category/python.html">python</a>
+
+
+<span class="label label-default hide">Tags</span>
+	<a href="http://127.0.0.1:8000/tag/let-us.html">let-us</a>
+        /
+	<a href="http://127.0.0.1:8000/tag/let-us-read-source-code.html">let-us-read-source-code</a>
+        /
+	<a href="http://127.0.0.1:8000/tag/howdoi.html">Howdoi</a>
+    
+</footer><!-- /.post-info -->                </div>
+                <div class="js-toc"></div>
+                <div>
+                <div class="section" id="id1">
+<h2 id="hidid1">前言<a class="headerlink" href="#hidid1" title="Permalink to this headline">¶</a></h2>
+<p>正式开始填坑了。让我们先从 <a class="reference external" href="https://github.com/gleitz/howdoi">Howdoi</a> 这个项目开始。有一点要说明一下：我使用的 Python 版本是 Python 3.6 ，我的源码阅读的所有文章中所有的 Python 相关的操作如果没有特别说明都是用的 Python 3.6 。</p>
+</div>
+<div class="section" id="id2">
+<h2 id="hidid2">熟悉基本功能<a class="headerlink" href="#hidid2" title="Permalink to this headline">¶</a></h2>
+<p>既然要看它的源代码至少先得了解程序的基本功能，这样看代码的时候才会有“哦，原来那个功能是这样实现的呀”的感觉。熟悉项目的基本功能有哪些是首先要做的事情。</p>
+<p>我们先通过阅读项目的 <a class="reference external" href="https://github.com/gleitz/howdoi">README</a> 来了解这个项目的功能。通过 README 我们可以知道 Howdoi 这个项目的主要功能如下：</p>
+<ul class="simple">
+<li>用来在命令行中搜索编程问题，输出答案代码</li>
+<li>默认使用 google 搜索 StackOverflow 上的问题，可以通过环境变量 <tt class="docutils literal">HOWDOI_SEARCH_ENGINE</tt> 修改搜索引擎改为使用 bing 搜索。</li>
+<li>可以通过环境变量 <tt class="docutils literal">HOWDOI_URL</tt> 指定搜索不同的问答网站（默认是 stackoverflow.com ，可以是其他 stackoverflow 家族的网站，比如：serverfault.com, pt.stackoverflow.com）。</li>
+</ul>
+<p>下面我们来实际使用一下这个程序，看看实际的效果。</p>
+<div class="section" id="id3">
+<h3 id="hidid3">安装<a class="headerlink" href="#hidid3" title="Permalink to this headline">¶</a></h3>
+<p>git clone 源代码（为了保持一致，使用我 fork 的代码）:</p>
+<pre class="literal-block">
+$ git clone https://github.com/let-us-read-source-code/howdoi.git
+$ cd howdoi
+</pre>
+<p>安装程序：</p>
+<ol class="arabic">
+<li><p class="first">我们先使用 <a class="reference external" href="https://virtualenv.pypa.io/en/stable/">virtualenv</a> 创建虚拟环境，防止污染系统 python 环境</p>
+<pre class="literal-block">
+$ python -m venv venv
+$ . venv/bin/activate
+</pre>
+</li>
+<li><p class="first">使用 develop 模式安装，方便调试（修改代码后不需要重新安装，修改会直接生效）:</p>
+<pre class="literal-block">
+$ pip install -e .
+$ howdoi
+ usage: howdoi [-h] [-p POS] [-a] [-l] [-c] [-n NUM_ANSWERS] [-C] [-v]
+               [QUERY [QUERY ...]]
+
+ instant coding answers via the command line
+
+ positional arguments:
+   QUERY                 the question to answer
+
+ optional arguments:
+   -h, --help            show this help message and exit
+   -p POS, --pos POS     select answer in specified position (default: 1)
+   -a, --all             display the full text of the answer
+   -l, --link            display only the answer link
+   -c, --color           enable colorized output
+   -n NUM_ANSWERS, --num-answers NUM_ANSWERS
+                         number of answers to return
+   -C, --clear-cache     clear the cache
+   -v, --version         displays the current version of howdoi
+</pre>
+</li>
+</ol>
+</div>
+<div class="section" id="id4">
+<h3 id="hidid4">使用<a class="headerlink" href="#hidid4" title="Permalink to this headline">¶</a></h3>
+<p>为了方便，我们通过环境变量 <tt class="docutils literal">HOWDOI_SEARCH_ENGINE</tt> 指定使用 bing 搜索引擎:</p>
+<pre class="literal-block">
+$ export HOWDOI_SEARCH_ENGINE=bing
+</pre>
+<p>先来看看最基本的搜索问题的功能:</p>
+<pre class="literal-block">
+$ howdoi python convert int to str
+&gt;&gt;&gt; str(10)
+'10'
+&gt;&gt;&gt; int('10')
+10
+</pre>
+<p>效果还是可以的。</p>
+<p>再来看一下几个主要参数的功能:</p>
+<p><tt class="docutils literal"><span class="pre">-p</span> POS, <span class="pre">--pos</span> POS&nbsp;&nbsp;&nbsp;&nbsp; 选择指定位置的答案 (default: 1)</tt>:</p>
+<pre class="literal-block">
+$ howdoi -p 1 python convert int to str
+&gt;&gt;&gt; str(10)
+'10'
+&gt;&gt;&gt; int('10')
+10
+
+$ howdoi -p 2 python convert int to str
+&gt;&gt;&gt; a = &quot;545.2222&quot;
+&gt;&gt;&gt; float(a)
+545.22220000000004
+&gt;&gt;&gt; int(float(a))
+545
+</pre>
+<p><tt class="docutils literal"><span class="pre">-a,</span> <span class="pre">--all</span>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; 显示答案全文</tt>:</p>
+<pre class="literal-block">
+$ howdoi -a python convert int to str
+★  Answer from https://stackoverflow.com/questions/961632/converting-integer-to-string-in-python ★
+&gt;&gt;&gt; str(10)
+'10'
+&gt;&gt;&gt; int('10')
+10
+
+Links to the documentation:
+
+
+int()
+
+
+str()
+
+
+The problem seems to come from this line: d.str().
+Conversion to a string is done with the builtin str() function, which basically calls the __str__() method of its parameter.
+Also, it shouldn't be necessary to call pow(). Try using the ** operator.
+</pre>
+<p><tt class="docutils literal"><span class="pre">-l,</span> <span class="pre">--link</span>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; 只显示答案链接</tt>:</p>
+<pre class="literal-block">
+$ howdoi -l python convert int to str
+https://stackoverflow.com/questions/961632/converting-integer-to-string-in-python
+</pre>
+<p><tt class="docutils literal"><span class="pre">-n</span> NUM_ANSWERS, <span class="pre">--num-answers</span> NUM_ANSWERS 返回的答案数目</tt>:</p>
+<pre class="literal-block">
+$ howdoi -n 2 python convert int to str
+★  Answer from https://stackoverflow.com/questions/961632/converting-integer-to-string-in-python ★
+&gt;&gt;&gt; str(10)
+'10'
+&gt;&gt;&gt; int('10')
+10
+
+================================================================================
+
+★  Answer from https://stackoverflow.com/questions/15197774/python-convert-str-to-integer ★
+list[0][2] = int(list[0][2])
+</pre>
+<p>熟悉了基本功能后，我们即将进入阅读源代码的环节，不过鉴于这篇文章已经有点长了，这次就先到这里。</p>
+</div>
+</div>
+<div class="section" id="id5">
+<h2 id="hidid5">总结<a class="headerlink" href="#hidid5" title="Permalink to this headline">¶</a></h2>
+<p>本文我们主要熟悉了一下 howdoi 这个项目的基本功能，为后面的阅读源码工作做一点准备，
+后面我们将进入涉及源代码的环节。在下篇文章出炉前大家不妨思考一下：如果让你来实现 howdoi 的这几个基本功能，你会如何实现？</p>
+</div>
+<div class="section" id="id6">
+<h2 id="hidid6">参考资料<a class="headerlink" href="#hidid6" title="Permalink to this headline">¶</a></h2>
+<ul class="simple">
+<li><a class="reference external" href="https://github.com/gleitz/howdoi">gleitz/howdoi: instant coding answers via the command line</a></li>
+<li><a class="reference external" href="https://stackoverflow.com/">Stack Overflow - Where Developers Learn, Share, &amp; Build Careers</a></li>
+</ul>
+</div>
+
+                </div>
+            </div>
+            <!-- /.entry-content -->
+<section class="text-center">
+  
+<div id="donate"></div>
+
+<div class="social-share"></div>
+<div>
+<p>有任何意见欢迎在下方留言或者加我微信交流</p>
+<img src="/static/wechat.png" height="200px" width="200px"/>
+</div>
+
+</section>
+<section class="well" id="related-posts">
+    <p>Related Posts:</p>
+    <ul>
+        <li><a href="http://127.0.0.1:8000/2018/04/let-us-read-source-code-howdoi-2.html">让我们一起来阅读源代码之 Howdoi （二）</a></li>
+        <li><a href="http://127.0.0.1:8000/2018/03/let-us-read-source-code-introduction.html">让我们一起来阅读源代码之序</a></li>
+    </ul>
+</section>
+    <hr/>
+    <section class="comments" id="comments">
+        <h2>Comments</h2>
+
+        <div id="disqus_thread"></div>
+        <script type="text/javascript">
+            /* * * CONFIGURATION VARIABLES: EDIT BEFORE PASTING INTO YOUR WEBPAGE * * */
+            var disqus_shortname = 'my-github-blog'; // required: replace example with your forum shortname
+
+                    var disqus_identifier = 'let-us-read-source-code-howdoi-1';
+                var disqus_url = 'http://127.0.0.1:8000/2018/04/let-us-read-source-code-howdoi-1.html';
+
+            var disqus_config = function () {
+                this.language = "zh-hans";
+            };
+
+            /* * * DON'T EDIT BELOW THIS LINE * * */
+            (function () {
+                var dsq = document.createElement('script');
+                dsq.type = 'text/javascript';
+                dsq.async = true;
+                dsq.src = '//' + disqus_shortname + '.disqus.com/embed.js';
+                (document.getElementsByTagName('head')[0] || document.getElementsByTagName('body')[0]).appendChild(dsq);
+            })();
+        </script>
+        <noscript>Please enable JavaScript to view the <a href="http://disqus.com/?ref_noscript">comments powered by
+            Disqus.</a></noscript>
+        <a href="http://disqus.com" class="dsq-brlink">comments powered by <span class="logo-disqus">Disqus</span></a>
+
+    </section>
+        </article>
+    </section>
+
+        </div>
+    </div>
+</div>
+<footer>
+   <div class="container">
+      <hr>
+      <div class="row">
+         <div class="col-xs-10">&copy; 2018 mozillazg
+            &middot; Powered by <a href="https://github.com/DandyDev/pelican-bootstrap3" target="_blank">pelican-bootstrap3</a>,
+            <a href="http://docs.getpelican.com/" target="_blank">Pelican</a>,
+            <a href="http://getbootstrap.com" target="_blank">Bootstrap</a>              <p><small>  <a rel="license" href="http://creativecommons.org/licenses/by-sa/4.0/"><img alt="Creative Commons License" style="border-width:0" src="/static/images/by-sa-80x15.png" /></a>
+    &quot;<span xmlns:dct="http://purl.org/dc/terms/" property="dct:title">Huang Huang 的博客</span>&quot; by <a xmlns:cc="http://creativecommons.org/ns#" href="http://127.0.0.1:8000" property="cc:attributionName" rel="cc:attributionURL">mozillazg</a> is
+  licensed under a <a rel="license" href="http://creativecommons.org/licenses/by-sa/4.0/">Creative Commons Attribution-ShareAlike 4.0 International License</a>, except where indicated otherwise.
+</small></p>
+         </div>
+         <div class="col-xs-2"><p class="pull-right"><i class="fa fa-arrow-up"></i> <a href="#">Back to top</a></p></div>
+      </div>
+   </div>
+</footer>
+<script src="http://127.0.0.1:8000/theme/js/jquery.min.js"></script>
+
+<!-- Include all compiled plugins (below), or include individual files as needed -->
+<script src="http://127.0.0.1:8000/theme/js/bootstrap.min.js"></script>
+
+<!-- Enable responsive features in IE8 with Respond.js (https://github.com/scottjehl/Respond) -->
+<script src="http://127.0.0.1:8000/theme/js/respond.min.js"></script>
+
+    <!-- Disqus -->
+    <script type="text/javascript">
+        /* * * CONFIGURATION VARIABLES: EDIT BEFORE PASTING INTO YOUR WEBPAGE * * */
+        var disqus_shortname = 'my-github-blog'; // required: replace example with your forum shortname
+
+        /* * * DON'T EDIT BELOW THIS LINE * * */
+        (function () {
+            var s = document.createElement('script');
+            s.async = true;
+            s.type = 'text/javascript';
+            s.src = '//' + disqus_shortname + '.disqus.com/count.js';
+            (document.getElementsByTagName('HEAD')[0] || document.getElementsByTagName('BODY')[0]).appendChild(s);
+        }());
+    </script>
+    <!-- End Disqus Code -->
+    <!-- Google Analytics Universal -->
+    <script type="text/javascript">
+        (function(i,s,o,g,r,a,m){i['GoogleAnalyticsObject']=r;i[r]=i[r]||function(){
+        (i[r].q=i[r].q||[]).push(arguments)},i[r].l=1*new Date();a=s.createElement(o),
+        m=s.getElementsByTagName(o)[0];a.async=1;a.src=g;m.parentNode.insertBefore(a,m)
+        })(window,document,'script','//www.google-analytics.com/analytics.js','ga');
+
+        ga('create', 'UA-77172981-1', 'auto');
+        ga('send', 'pageview');
+    </script>
+    <!-- End Google Analytics Universal Code -->
+
+
+<script src="http://127.0.0.1:8000/theme/js/vdonate.js"></script>
+<script>
+$(document).ready(function(){
+new vdonate({
+  title: '如果觉得我的文章对您有用，请随意打赏。您的支持将鼓励我继续创作!', // 可选参数，打赏标题
+  btnText: '打赏支持', // 可选参数，打赏按钮文字
+  el: document.getElementById('donate'), // 必选参数，打赏按钮的容器
+  wechatImage: 'http://127.0.0.1:8000/static/wechat_donate.png', // 必选参数，微信收款二维码
+  alipayImage: 'http://127.0.0.1:8000/static/alipay_donate.jpg' // 必选参数，支付宝收款二维码
+});
+});
+</script>
+
+<script src="http://127.0.0.1:8000/theme/js/tocbot.min.js"></script>
+<script>
+$(document).ready(function(){
+  tocbot.init({
+    // Where to render the table of contents.
+    tocSelector: '.js-toc',
+    // Where to grab the headings to build the table of contents.
+    contentSelector: '.entry-content',
+    // Which headings to grab inside of the contentSelector element.
+    headingSelector: 'h2, h3, h4,h5',
+    // Headings that match the ignoreSelector will be skipped.
+    ignoreSelector: '.js-toc-ignore',
+    // Main class to add to links.
+    linkClass: 'toc-link',
+    // Extra classes to add to links.
+    extraLinkClasses: '',
+    // Class to add to active links,
+    // the link corresponding to the top most heading on the page.
+    activeLinkClass: 'is-active-link',
+    // Main class to add to lists.
+    listClass: 'toc-list',
+    // Extra classes to add to lists.
+    extraListClasses: '',
+    // Class that gets added when a list should be collapsed.
+    isCollapsedClass: 'is-collapsed',
+    // Class that gets added when a list should be able
+    // to be collapsed but isn't necessarily collpased.
+    collapsibleClass: 'is-collapsible',
+    // Class to add to list items.
+    listItemClass: 'toc-list-item',
+    // How many heading levels should not be collpased.
+    // For example, number 6 will show everything since
+    // there are only 6 heading levels and number 0 will collpase them all.
+    // The sections that are hidden will open
+    // and close as you scroll to headings within them.
+    collapseDepth: 6,
+    // Smooth scrolling enabled.
+    smoothScroll: true,
+    // Smooth scroll duration.
+    smoothScrollDuration: 420,
+    // Callback for scroll end (requires: smoothScroll).
+    scrollEndCallback: function (e) {},
+    // Headings offset between the headings and the top of the document (this is meant for minor adjustments).
+    headingsOffset: 0,
+    // Timeout between events firing to make sure it's
+    // not too rapid (for performance reasons).
+    throttleTimeout: 50,
+    // Element to add the positionFixedClass to.
+    positionFixedSelector: null,
+    // Fixed position class to add to make sidebar fixed after scrolling
+    // down past the fixedSidebarOffset.
+    positionFixedClass: 'is-position-fixed',
+    // fixedSidebarOffset can be any number but by default is set
+    // to auto which sets the fixedSidebarOffset to the sidebar
+    // element's offsetTop from the top of the document on init.
+    fixedSidebarOffset: 'auto',
+    // includeHtml can be set to true to include the HTML markup from the
+    // heading node instead of just including the textContent.
+    includeHtml: false
+  });
+});
+</script>
+</body>
+</html>
