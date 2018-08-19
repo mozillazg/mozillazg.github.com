@@ -1,0 +1,438 @@
+<!DOCTYPE html>
+<html lang="zh-hans" prefix="og: http://ogp.me/ns# fb: https://www.facebook.com/2008/fbml" class="han-init">
+<head>
+    <title>Python: 调试运行中进程的几种方法（总结） - Huang Huang 的博客</title>
+    <!-- Using the latest rendering mode for IE -->
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <!-- share.css -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/social-share.js/1.0.16/css/share.min.css">
+    <!-- share.js -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/social-share.js/1.0.16/js/social-share.min.js"></script>
+
+
+    <link href="https://mozillazg.com/favicon.ico" rel="icon">
+
+<link rel="canonical" href="https://mozillazg.com/2018/07/python-some-ways-to-debug-running-process.html">
+
+        <meta name="author" content="mozillazg" />
+        <meta name="keywords" content="debug" />
+    <meta name="description" content="前言¶ 之前写了几篇关于调试运行中进程方法的文章，本文总结一下常用的几种调试方法。 需要修改代码的方法¶ print/logging¶ 最常用的方法是查看程序运行日志。这种方法适合可以通过日志分析出问题的常见，也是诊断问题的首选方法。 这种方法需要预先在合适位置记录有用的日志信息，如果出问题时没有相关的日志信息的话，这种方法就会比较难以诊断问题。 预置调试后门（接口）¶ 这种方法通过预先在程序里置入用于调试的后门（接口），方便在诊断问题时提供查看问题现场，甚至进入程序运行时环境的的手段。 常用的预置功能有： 提供一种方法可以获取当前程序的 stack traceback 信息 提供一种行可以获取当前程序运行时关键变量/状态 提供一种方法可以进入当前程序运行时，方便在程序运行时环境中执行调试代码 提供一种方法可以触发特定功能或者运行特定代码 无需修改代码的方法¶ ps/proc¶ 通过 ps 可以查看指定进程的各种信息，通过查看 /proc/&lt;pid&gt;/ 目录下的系统文件也可以查看指定进程的各种信息。 比如：通过 ps 可以查看进程是否是僵尸进程、是否是孤儿进程，查看进程的启动时间、了解进程是否发生过重启等。 通过查看 /proc/&lt;pid&gt;/ 目录下的各种系统文件可以获取进程的环境变量信息、 stack 信息、内存信息等。 strace¶ 通过 strace 程序可以查看程序正在调用的系统调用。可以用 strace 在系统调用层面查看程序正在进行的操作， 比如可以查看程序是否死锁、是否正在处理 socket 请求，正在处理文件等。 gdb-python¶ 使用 gdb-python 可以通过在 gdb 中执行几个命令就可以查看程序正在执行的代码等信息。 不过，使用 gdb-python 需要预先安装包含调试符号的 debug 版本的 python 解释器，并使用该 debug 版本的 python 执行程序，算是一个比较大的限制。 纯 gdb¶ 所谓的纯 gdb 方法就是只需要安装 gdb 就可以了，不需要安装带调试符号版本的 debug python 就可以调试 python 进程。 方法是使用 gdb 的 -eval-command [1] 参数对进程执行包含了调试代码的 gdb 命令，实现在进程运行时环境中执行调试代码的目的。 pystack [2] 和 pyrasite [3] 这两个调试工具就是利用的这种方法实现的无需修改代码即可调试进程的功能。 总结¶ 本文总结了几种调试运行中进程的方法，每种方法都有一定的局限性，实际诊断问题的时候往往要综合几种方法最终才有可能发现真正的问题所在。 参考资料¶ 16.6. logging — Logging facility for Python — Python 3.7.0 documentation Python: 通过预置后门（调试接口）的方式调试运行中的进程 - Huang Huang 的博客 ps(1) - Linux manual page proc(5) - Linux manual page strace 使用 gdb 调试运行中的 Python 进程 - Huang Huang 的博客 wooparadog/pystack: Tool to dump python thread and greenlet stacks. lmacken/pyrasite: Inject code into running Python processes Debugging with GDB: File Options [1]https://sourceware.org/gdb/onlinedocs/gdb/File-Options.html [2]https://github.com/wooparadog/pystack/blob/a2f0a45419df581e0d800aa0a98b9471779de0cb/pystack.py#L42 [3]https://github.com/lmacken/pyrasite/blob/d0c90ab38a8986527c9c1f24e222323494ab17a2/pyrasite/injector.py#L36" />
+
+    <style>
+      .js-toc {
+        margin-bottom: 20px;
+      }
+      .donate-modal {
+        text-align: center;
+      }
+      #donate-modal-container .donate-image {
+        max-height: 300px !important;
+        min-height: inherit !important;
+      }
+    </style>
+
+        <meta property="og:site_name" content="Huang Huang 的博客" />
+        <meta property="og:type" content="article"/>
+        <meta property="og:title" content="Python: 调试运行中进程的几种方法（总结）"/>
+        <meta property="og:url" content="https://mozillazg.com/2018/07/python-some-ways-to-debug-running-process.html"/>
+        <meta property="og:description" content="前言¶ 之前写了几篇关于调试运行中进程方法的文章，本文总结一下常用的几种调试方法。 需要修改代码的方法¶ print/logging¶ 最常用的方法是查看程序运行日志。这种方法适合可以通过日志分析出问题的常见，也是诊断问题的首选方法。 这种方法需要预先在合适位置记录有用的日志信息，如果出问题时没有相关的日志信息的话，这种方法就会比较难以诊断问题。 预置调试后门（接口）¶ 这种方法通过预先在程序里置入用于调试的后门（接口），方便在诊断问题时提供查看问题现场，甚至进入程序运行时环境的的手段。 常用的预置功能有： 提供一种方法可以获取当前程序的 stack traceback 信息 提供一种行可以获取当前程序运行时关键变量/状态 提供一种方法可以进入当前程序运行时，方便在程序运行时环境中执行调试代码 提供一种方法可以触发特定功能或者运行特定代码 无需修改代码的方法¶ ps/proc¶ 通过 ps 可以查看指定进程的各种信息，通过查看 /proc/&lt;pid&gt;/ 目录下的系统文件也可以查看指定进程的各种信息。 比如：通过 ps 可以查看进程是否是僵尸进程、是否是孤儿进程，查看进程的启动时间、了解进程是否发生过重启等。 通过查看 /proc/&lt;pid&gt;/ 目录下的各种系统文件可以获取进程的环境变量信息、 stack 信息、内存信息等。 strace¶ 通过 strace 程序可以查看程序正在调用的系统调用。可以用 strace 在系统调用层面查看程序正在进行的操作， 比如可以查看程序是否死锁、是否正在处理 socket 请求，正在处理文件等。 gdb-python¶ 使用 gdb-python 可以通过在 gdb 中执行几个命令就可以查看程序正在执行的代码等信息。 不过，使用 gdb-python 需要预先安装包含调试符号的 debug 版本的 python 解释器，并使用该 debug 版本的 python 执行程序，算是一个比较大的限制。 纯 gdb¶ 所谓的纯 gdb 方法就是只需要安装 gdb 就可以了，不需要安装带调试符号版本的 debug python 就可以调试 python 进程。 方法是使用 gdb 的 -eval-command [1] 参数对进程执行包含了调试代码的 gdb 命令，实现在进程运行时环境中执行调试代码的目的。 pystack [2] 和 pyrasite [3] 这两个调试工具就是利用的这种方法实现的无需修改代码即可调试进程的功能。 总结¶ 本文总结了几种调试运行中进程的方法，每种方法都有一定的局限性，实际诊断问题的时候往往要综合几种方法最终才有可能发现真正的问题所在。 参考资料¶ 16.6. logging — Logging facility for Python — Python 3.7.0 documentation Python: 通过预置后门（调试接口）的方式调试运行中的进程 - Huang Huang 的博客 ps(1) - Linux manual page proc(5) - Linux manual page strace 使用 gdb 调试运行中的 Python 进程 - Huang Huang 的博客 wooparadog/pystack: Tool to dump python thread and greenlet stacks. lmacken/pyrasite: Inject code into running Python processes Debugging with GDB: File Options [1]https://sourceware.org/gdb/onlinedocs/gdb/File-Options.html [2]https://github.com/wooparadog/pystack/blob/a2f0a45419df581e0d800aa0a98b9471779de0cb/pystack.py#L42 [3]https://github.com/lmacken/pyrasite/blob/d0c90ab38a8986527c9c1f24e222323494ab17a2/pyrasite/injector.py#L36"/>
+        <meta property="article:published_time" content="2018-07-15" />
+            <meta property="article:section" content="python" />
+            <meta property="article:tag" content="debug" />
+            <meta property="article:author" content="mozillazg" />
+            <meta property="og:image"
+                  content="https://mozillazg.com/static/avatar.jpeg"/>
+
+
+    <meta name="twitter:card" content="summary">
+        <meta name="twitter:site" content="@mozillazg">
+        <meta name="twitter:creator" content="@mozillazg">
+    <meta name="twitter:domain" content="https://mozillazg.com">
+            <meta property="twitter:image"
+                  content="https://mozillazg.com/static/avatar.jpeg"/>
+
+    <!-- Bootstrap -->
+        <link rel="stylesheet" href="https://mozillazg.com/theme/css/bootstrap.min.css" type="text/css"/>
+    <link href="https://mozillazg.com/theme/css/font-awesome.min.css" rel="stylesheet">
+
+    <link href="https://mozillazg.com/theme/css/pygments/github.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://mozillazg.com/theme/css/style.css" type="text/css"/>
+            <link href="https://mozillazg.com/static/custom.css" rel="stylesheet">
+
+        <link href="https://mozillazg.com/feeds/all.atom.xml" type="application/atom+xml" rel="alternate"
+              title="Huang Huang 的博客 ATOM Feed"/>
+
+        <link href="https://mozillazg.com/feeds/all.rss.xml" type="application/rss+xml" rel="alternate"
+              title="Huang Huang 的博客 RSS Feed"/>
+
+
+        <link href="https://mozillazg.com/feeds/python.atom.xml" type="application/atom+xml" rel="alternate"
+              title="Huang Huang 的博客 python ATOM Feed"/>
+
+
+    <script type="application/ld+json">
+    {
+        "@context": "https://schema.org",
+        "@type": "Website",
+        "publisher": {
+            "@type": "Person",
+            "name": "mozillazg",
+            "logo": "https://mozillazg.com/static/avatar.jpeg"
+        },
+        "author": {
+            "@type": "Person",
+            "name": "mozillazg",
+            "image": "https://mozillazg.com/static/avatar.jpeg",
+            "url": "https://mozillazg.com",
+            "sameAs": []
+        },
+        // "headline": "",
+        "url": "https://mozillazg.com/2018/07/python-some-ways-to-debug-running-process.html",
+        "datePublished": "2018-07-15",
+        // "dateModified": "",
+        "image": "https://mozillazg.com/static/avatar.jpeg",
+        "keywords": "debug",
+        "description": "前言¶ 之前写了几篇关于调试运行中进程方法的文章，本文总结一下常用的几种调试方法。 需要修改代码的方法¶ print/logging¶ 最常用的方法是查看程序运行日志。这种方法适合可以通过日志分析出问题的常见，也是诊断问题的首选方法。 这种方法需要预先在合适位置记录有用的日志信息，如果出问题时没有相关的日志信息的话，这种方法就会比较难以诊断问题。 预置调试后门（接口）¶ 这种方法通过预先在程序里置入用于调试的后门（接口），方便在诊断问题时提供查看问题现场，甚至进入程序运行时环境的的手段。 常用的预置功能有： 提供一种方法可以获取当前程序的 stack traceback 信息 提供一种行可以获取当前程序运行时关键变量/状态 提供一种方法可以进入当前程序运行时，方便在程序运行时环境中执行调试代码 提供一种方法可以触发特定功能或者运行特定代码 无需修改代码的方法¶ ps/proc¶ 通过 ps 可以查看指定进程的各种信息，通过查看 /proc/&lt;pid&gt;/ 目录下的系统文件也可以查看指定进程的各种信息。 比如：通过 ps 可以查看进程是否是僵尸进程、是否是孤儿进程，查看进程的启动时间、了解进程是否发生过重启等。 通过查看 /proc/&lt;pid&gt;/ 目录下的各种系统文件可以获取进程的环境变量信息、 stack 信息、内存信息等。 strace¶ 通过 strace 程序可以查看程序正在调用的系统调用。可以用 strace 在系统调用层面查看程序正在进行的操作， 比如可以查看程序是否死锁、是否正在处理 socket 请求，正在处理文件等。 gdb-python¶ 使用 gdb-python 可以通过在 gdb 中执行几个命令就可以查看程序正在执行的代码等信息。 不过，使用 gdb-python 需要预先安装包含调试符号的 debug 版本的 python 解释器，并使用该 debug 版本的 python 执行程序，算是一个比较大的限制。 纯 gdb¶ 所谓的纯 gdb 方法就是只需要安装 gdb 就可以了，不需要安装带调试符号版本的 debug python 就可以调试 python 进程。 方法是使用 gdb 的 -eval-command [1] 参数对进程执行包含了调试代码的 gdb 命令，实现在进程运行时环境中执行调试代码的目的。 pystack [2] 和 pyrasite [3] 这两个调试工具就是利用的这种方法实现的无需修改代码即可调试进程的功能。 总结¶ 本文总结了几种调试运行中进程的方法，每种方法都有一定的局限性，实际诊断问题的时候往往要综合几种方法最终才有可能发现真正的问题所在。 参考资料¶ 16.6. logging — Logging facility for Python — Python 3.7.0 documentation Python: 通过预置后门（调试接口）的方式调试运行中的进程 - Huang Huang 的博客 ps(1) - Linux manual page proc(5) - Linux manual page strace 使用 gdb 调试运行中的 Python 进程 - Huang Huang 的博客 wooparadog/pystack: Tool to dump python thread and greenlet stacks. lmacken/pyrasite: Inject code into running Python processes Debugging with GDB: File Options [1]https://sourceware.org/gdb/onlinedocs/gdb/File-Options.html [2]https://github.com/wooparadog/pystack/blob/a2f0a45419df581e0d800aa0a98b9471779de0cb/pystack.py#L42 [3]https://github.com/lmacken/pyrasite/blob/d0c90ab38a8986527c9c1f24e222323494ab17a2/pyrasite/injector.py#L36",
+        "mainEntityOfPage": {
+            "@type": "WebPage",
+            "@id": "https://mozillazg.com"
+        }
+    }
+    </script>
+
+</head>
+<body>
+
+<div class="navbar" role="navigation">
+	<div class="container">
+        <div class="navbar-header">
+            <button type="button" class="navbar-toggle" data-toggle="collapse" data-target=".navbar-ex1-collapse">
+                <span class="sr-only">Toggle navigation</span>
+                <span class="icon-bar"></span>
+                <span class="icon-bar"></span>
+                <span class="icon-bar"></span>
+            </button>
+            <a href="https://mozillazg.com/" class="navbar-brand">
+Huang Huang 的博客            </a>
+        </div>
+        <div class="collapse navbar-collapse navbar-ex1-collapse">
+            <ul class="nav navbar-nav">
+                    <li><a href="https://mozillazg.com/feeds/all.atom.xml">Feed</a></li>
+                    <li><a href="/2014/10/pages/about-me.html">About</a></li>
+            </ul>
+            <ul class="nav navbar-nav navbar-right">
+              <li><a href="https://mozillazg.com/archives.html"><i class="fa fa-th-list"></i><span class="icon-label">Archives</span></a></li>
+            </ul>
+        </div>
+        <!-- /.navbar-collapse -->
+    </div>
+</div> <!-- /.navbar -->
+<!-- Banner -->
+<!-- End Banner -->
+<div class="container">
+    <div class="row">
+        <div class="col-lg-12">
+    <section id="content" class="yue">
+        <article>
+            <header class="text-center">
+                <h1>
+                    <a href="https://mozillazg.com/2018/07/python-some-ways-to-debug-running-process.html"
+                       rel="bookmark"
+                       title="Permalink to Python: 调试运行中进程的几种方法（总结）">
+                        Python: 调试运行中进程的几种方法（总结）
+                    </a>
+                </h1>
+                <p class="published">
+                    <time datetime="2018-07-15T00:00:00+00:00">
+                    2018-07-15
+                    </time>
+                </p>
+            </header>
+            <div class="entry-content">
+                <div class="well-sm article-info">
+<footer class="post-info">
+        <a href="https://mozillazg.com/category/python.html">python</a>
+
+
+<span class="label label-default hide">Tags</span>
+	<a href="https://mozillazg.com/tag/debug.html">debug</a>
+    
+</footer><!-- /.post-info -->                </div>
+                <div class="js-toc"></div>
+                <div>
+                <div class="section" id="id1">
+<h2 id="hidid1">前言<a class="headerlink" href="#hidid1" title="Permalink to this headline">¶</a></h2>
+<p>之前写了几篇关于调试运行中进程方法的文章，本文总结一下常用的几种调试方法。</p>
+</div>
+<div class="section" id="id2">
+<h2 id="hidid2">需要修改代码的方法<a class="headerlink" href="#hidid2" title="Permalink to this headline">¶</a></h2>
+<div class="section" id="print-logging">
+<h3 id="hidprint-logging">print/logging<a class="headerlink" href="#hidprint-logging" title="Permalink to this headline">¶</a></h3>
+<p>最常用的方法是查看程序运行日志。这种方法适合可以通过日志分析出问题的常见，也是诊断问题的首选方法。</p>
+<p>这种方法需要预先在合适位置记录有用的日志信息，如果出问题时没有相关的日志信息的话，这种方法就会比较难以诊断问题。</p>
+</div>
+<div class="section" id="id3">
+<h3 id="hidid3">预置调试后门（接口）<a class="headerlink" href="#hidid3" title="Permalink to this headline">¶</a></h3>
+<p>这种方法通过预先在程序里置入用于调试的后门（接口），方便在诊断问题时提供查看问题现场，甚至进入程序运行时环境的的手段。</p>
+<p>常用的预置功能有：</p>
+<ul class="simple">
+<li>提供一种方法可以获取当前程序的 stack traceback 信息</li>
+<li>提供一种行可以获取当前程序运行时关键变量/状态</li>
+<li>提供一种方法可以进入当前程序运行时，方便在程序运行时环境中执行调试代码</li>
+<li>提供一种方法可以触发特定功能或者运行特定代码</li>
+</ul>
+</div>
+</div>
+<div class="section" id="id4">
+<h2 id="hidid4">无需修改代码的方法<a class="headerlink" href="#hidid4" title="Permalink to this headline">¶</a></h2>
+<div class="section" id="ps-proc">
+<h3 id="hidps-proc">ps/proc<a class="headerlink" href="#hidps-proc" title="Permalink to this headline">¶</a></h3>
+<p>通过 ps 可以查看指定进程的各种信息，通过查看 /proc/&lt;pid&gt;/ 目录下的系统文件也可以查看指定进程的各种信息。</p>
+<p>比如：通过 ps 可以查看进程是否是僵尸进程、是否是孤儿进程，查看进程的启动时间、了解进程是否发生过重启等。
+通过查看 /proc/&lt;pid&gt;/ 目录下的各种系统文件可以获取进程的环境变量信息、 stack 信息、内存信息等。</p>
+</div>
+<div class="section" id="strace">
+<h3 id="hidstrace">strace<a class="headerlink" href="#hidstrace" title="Permalink to this headline">¶</a></h3>
+<p>通过 strace 程序可以查看程序正在调用的系统调用。可以用 strace 在系统调用层面查看程序正在进行的操作，
+比如可以查看程序是否死锁、是否正在处理 socket 请求，正在处理文件等。</p>
+</div>
+<div class="section" id="gdb-python">
+<h3 id="hidgdb-python">gdb-python<a class="headerlink" href="#hidgdb-python" title="Permalink to this headline">¶</a></h3>
+<p>使用 gdb-python 可以通过在 gdb 中执行几个命令就可以查看程序正在执行的代码等信息。</p>
+<p>不过，使用 gdb-python 需要预先安装包含调试符号的 debug 版本的 python 解释器，并使用该 debug 版本的 python 执行程序，算是一个比较大的限制。</p>
+</div>
+<div class="section" id="gdb">
+<h3 id="hidgdb">纯 gdb<a class="headerlink" href="#hidgdb" title="Permalink to this headline">¶</a></h3>
+<p>所谓的纯 gdb 方法就是只需要安装 gdb 就可以了，不需要安装带调试符号版本的 debug python 就可以调试 python 进程。</p>
+<p>方法是使用 gdb 的 <tt class="docutils literal"><span class="pre">-eval-command</span></tt> <a class="footnote-reference" href="#id10" id="id5">[1]</a> 参数对进程执行包含了调试代码的 gdb 命令，实现在进程运行时环境中执行调试代码的目的。</p>
+<p>pystack <a class="footnote-reference" href="#id11" id="id6">[2]</a> 和 pyrasite <a class="footnote-reference" href="#id12" id="id7">[3]</a> 这两个调试工具就是利用的这种方法实现的无需修改代码即可调试进程的功能。</p>
+</div>
+</div>
+<div class="section" id="id8">
+<h2 id="hidid8">总结<a class="headerlink" href="#hidid8" title="Permalink to this headline">¶</a></h2>
+<p>本文总结了几种调试运行中进程的方法，每种方法都有一定的局限性，实际诊断问题的时候往往要综合几种方法最终才有可能发现真正的问题所在。</p>
+</div>
+<div class="section" id="id9">
+<h2 id="hidid9">参考资料<a class="headerlink" href="#hidid9" title="Permalink to this headline">¶</a></h2>
+<ul class="simple">
+<li><a class="reference external" href="https://docs.python.org/3/library/logging.html#module-logging">16.6. logging — Logging facility for Python — Python 3.7.0 documentation</a></li>
+<li><a class="reference external" href="https://mozillazg.com/2017/12/python-debug-running-process-threading-gevent-eventlet-asyncio-via-preset-backdoor.html">Python: 通过预置后门（调试接口）的方式调试运行中的进程 - Huang Huang 的博客</a></li>
+<li><a class="reference external" href="http://man7.org/linux/man-pages/man1/ps.1.html">ps(1) - Linux manual page</a></li>
+<li><a class="reference external" href="http://man7.org/linux/man-pages/man5/proc.5.html">proc(5) - Linux manual page</a></li>
+<li><a class="reference external" href="https://strace.io/">strace</a></li>
+<li><a class="reference external" href="https://mozillazg.com/2017/07/debug-running-python-process-with-gdb.html">使用 gdb 调试运行中的 Python 进程 - Huang Huang 的博客</a></li>
+<li><a class="reference external" href="https://github.com/wooparadog/pystack">wooparadog/pystack: Tool to dump python thread and greenlet stacks.</a></li>
+<li><a class="reference external" href="https://github.com/lmacken/pyrasite">lmacken/pyrasite: Inject code into running Python processes</a></li>
+<li><a class="reference external" href="https://sourceware.org/gdb/onlinedocs/gdb/File-Options.html">Debugging with GDB: File Options</a></li>
+</ul>
+<table class="docutils footnote" frame="void" id="id10" rules="none">
+<colgroup><col class="label" /><col /></colgroup>
+<tbody valign="top">
+<tr><td class="label"><a class="fn-backref" href="#id5">[1]</a></td><td><a class="reference external" href="https://sourceware.org/gdb/onlinedocs/gdb/File-Options.html">https://sourceware.org/gdb/onlinedocs/gdb/File-Options.html</a></td></tr>
+</tbody>
+</table>
+<table class="docutils footnote" frame="void" id="id11" rules="none">
+<colgroup><col class="label" /><col /></colgroup>
+<tbody valign="top">
+<tr><td class="label"><a class="fn-backref" href="#id6">[2]</a></td><td><a class="reference external" href="https://github.com/wooparadog/pystack/blob/a2f0a45419df581e0d800aa0a98b9471779de0cb/pystack.py#L42">https://github.com/wooparadog/pystack/blob/a2f0a45419df581e0d800aa0a98b9471779de0cb/pystack.py#L42</a></td></tr>
+</tbody>
+</table>
+<table class="docutils footnote" frame="void" id="id12" rules="none">
+<colgroup><col class="label" /><col /></colgroup>
+<tbody valign="top">
+<tr><td class="label"><a class="fn-backref" href="#id7">[3]</a></td><td><a class="reference external" href="https://github.com/lmacken/pyrasite/blob/d0c90ab38a8986527c9c1f24e222323494ab17a2/pyrasite/injector.py#L36">https://github.com/lmacken/pyrasite/blob/d0c90ab38a8986527c9c1f24e222323494ab17a2/pyrasite/injector.py#L36</a></td></tr>
+</tbody>
+</table>
+</div>
+
+                </div>
+            </div>
+            <!-- /.entry-content -->
+<section class="text-center">
+  
+<div id="donate"></div>
+
+<div class="social-share"></div>
+<div>
+<p>有任何意见欢迎在下方留言或者加我微信交流</p>
+<img src="/static/wechat.png" height="200px" width="200px"/>
+</div>
+
+</section>
+<section class="well" id="related-posts">
+    <p>Related Posts:</p>
+    <ul>
+        <li><a href="https://mozillazg.com/2017/12/python-use-faulthandler-to-debug-running-process-with-dumping-traceback.html">Python: 使用 faulthandler 模块获取运行中进程的 traceback 信息</a></li>
+        <li><a href="https://mozillazg.com/2017/12/python-get-concurrency-programm-all-tracebacks-threading-gevent-asyncio-etc.html">Python: 获取并发程序的 traceback 信息（threading/gevent/asyncio）</a></li>
+        <li><a href="https://mozillazg.com/2017/07/debug-running-python-process-with-gdb.html">使用 gdb 调试运行中的 Python 进程</a></li>
+        <li><a href="https://mozillazg.com/2017/12/python-debug-running-process-threading-gevent-eventlet-asyncio-via-preset-backdoor.html">Python: 通过预置后门（调试接口）的方式调试运行中的进程</a></li>
+    </ul>
+</section>
+    <hr/>
+    <section class="comments" id="comments">
+        <h2>Comments</h2>
+
+        <div id="disqus_thread"></div>
+        <script type="text/javascript">
+            /* * * CONFIGURATION VARIABLES: EDIT BEFORE PASTING INTO YOUR WEBPAGE * * */
+            var disqus_shortname = 'my-github-blog'; // required: replace example with your forum shortname
+
+                    var disqus_identifier = 'python-some-ways-to-debug-running-process';
+                var disqus_url = 'https://mozillazg.com/2018/07/python-some-ways-to-debug-running-process.html';
+
+            var disqus_config = function () {
+                this.language = "zh-hans";
+            };
+
+            /* * * DON'T EDIT BELOW THIS LINE * * */
+            (function () {
+                var dsq = document.createElement('script');
+                dsq.type = 'text/javascript';
+                dsq.async = true;
+                dsq.src = '//' + disqus_shortname + '.disqus.com/embed.js';
+                (document.getElementsByTagName('head')[0] || document.getElementsByTagName('body')[0]).appendChild(dsq);
+            })();
+        </script>
+        <noscript>Please enable JavaScript to view the <a href="http://disqus.com/?ref_noscript">comments powered by
+            Disqus.</a></noscript>
+        <a href="http://disqus.com" class="dsq-brlink">comments powered by <span class="logo-disqus">Disqus</span></a>
+
+    </section>
+        </article>
+    </section>
+
+        </div>
+    </div>
+</div>
+<footer>
+   <div class="container">
+      <hr>
+      <div class="row">
+         <div class="col-xs-10">&copy; 2018 mozillazg
+            &middot; Powered by <a href="https://github.com/DandyDev/pelican-bootstrap3" target="_blank">pelican-bootstrap3</a>,
+            <a href="http://docs.getpelican.com/" target="_blank">Pelican</a>,
+            <a href="http://getbootstrap.com" target="_blank">Bootstrap</a>              <p><small>  <a rel="license" href="http://creativecommons.org/licenses/by-sa/4.0/"><img alt="Creative Commons License" style="border-width:0" src="/static/images/by-sa-80x15.png" /></a>
+    &quot;<span xmlns:dct="http://purl.org/dc/terms/" property="dct:title">Huang Huang 的博客</span>&quot; by <a xmlns:cc="http://creativecommons.org/ns#" href="https://mozillazg.com" property="cc:attributionName" rel="cc:attributionURL">mozillazg</a> is
+  licensed under a <a rel="license" href="http://creativecommons.org/licenses/by-sa/4.0/">Creative Commons Attribution-ShareAlike 4.0 International License</a>, except where indicated otherwise.
+</small></p>
+         </div>
+         <div class="col-xs-2"><p class="pull-right"><i class="fa fa-arrow-up"></i> <a href="#">Back to top</a></p></div>
+      </div>
+   </div>
+</footer>
+<script src="https://mozillazg.com/theme/js/jquery.min.js"></script>
+
+<!-- Include all compiled plugins (below), or include individual files as needed -->
+<script src="https://mozillazg.com/theme/js/bootstrap.min.js"></script>
+
+<!-- Enable responsive features in IE8 with Respond.js (https://github.com/scottjehl/Respond) -->
+<script src="https://mozillazg.com/theme/js/respond.min.js"></script>
+
+    <!-- Disqus -->
+    <script type="text/javascript">
+        /* * * CONFIGURATION VARIABLES: EDIT BEFORE PASTING INTO YOUR WEBPAGE * * */
+        var disqus_shortname = 'my-github-blog'; // required: replace example with your forum shortname
+
+        /* * * DON'T EDIT BELOW THIS LINE * * */
+        (function () {
+            var s = document.createElement('script');
+            s.async = true;
+            s.type = 'text/javascript';
+            s.src = '//' + disqus_shortname + '.disqus.com/count.js';
+            (document.getElementsByTagName('HEAD')[0] || document.getElementsByTagName('BODY')[0]).appendChild(s);
+        }());
+    </script>
+    <!-- End Disqus Code -->
+    <!-- Google Analytics Universal -->
+    <script type="text/javascript">
+        (function(i,s,o,g,r,a,m){i['GoogleAnalyticsObject']=r;i[r]=i[r]||function(){
+        (i[r].q=i[r].q||[]).push(arguments)},i[r].l=1*new Date();a=s.createElement(o),
+        m=s.getElementsByTagName(o)[0];a.async=1;a.src=g;m.parentNode.insertBefore(a,m)
+        })(window,document,'script','//www.google-analytics.com/analytics.js','ga');
+
+        ga('create', 'UA-77172981-1', 'auto');
+        ga('send', 'pageview');
+    </script>
+    <!-- End Google Analytics Universal Code -->
+
+
+<script src="https://mozillazg.com/theme/js/vdonate.js"></script>
+<script>
+$(document).ready(function(){
+new vdonate({
+  title: '如果觉得我的文章对您有用，请随意打赏。您的支持将鼓励我继续创作!', // 可选参数，打赏标题
+  btnText: '打赏支持', // 可选参数，打赏按钮文字
+  el: document.getElementById('donate'), // 必选参数，打赏按钮的容器
+  wechatImage: 'https://mozillazg.com/static/wechat_donate.png', // 必选参数，微信收款二维码
+  alipayImage: 'https://mozillazg.com/static/alipay_donate.jpg' // 必选参数，支付宝收款二维码
+});
+});
+</script>
+
+<script src="https://mozillazg.com/theme/js/tocbot.min.js"></script>
+<script>
+$(document).ready(function(){
+  tocbot.init({
+    // Where to render the table of contents.
+    tocSelector: '.js-toc',
+    // Where to grab the headings to build the table of contents.
+    contentSelector: '.entry-content',
+    // Which headings to grab inside of the contentSelector element.
+    headingSelector: 'h2, h3, h4,h5',
+    // Headings that match the ignoreSelector will be skipped.
+    ignoreSelector: '.js-toc-ignore',
+    // Main class to add to links.
+    linkClass: 'toc-link',
+    // Extra classes to add to links.
+    extraLinkClasses: '',
+    // Class to add to active links,
+    // the link corresponding to the top most heading on the page.
+    activeLinkClass: 'is-active-link',
+    // Main class to add to lists.
+    listClass: 'toc-list',
+    // Extra classes to add to lists.
+    extraListClasses: '',
+    // Class that gets added when a list should be collapsed.
+    isCollapsedClass: 'is-collapsed',
+    // Class that gets added when a list should be able
+    // to be collapsed but isn't necessarily collpased.
+    collapsibleClass: 'is-collapsible',
+    // Class to add to list items.
+    listItemClass: 'toc-list-item',
+    // How many heading levels should not be collpased.
+    // For example, number 6 will show everything since
+    // there are only 6 heading levels and number 0 will collpase them all.
+    // The sections that are hidden will open
+    // and close as you scroll to headings within them.
+    collapseDepth: 6,
+    // Smooth scrolling enabled.
+    smoothScroll: true,
+    // Smooth scroll duration.
+    smoothScrollDuration: 420,
+    // Callback for scroll end (requires: smoothScroll).
+    scrollEndCallback: function (e) {},
+    // Headings offset between the headings and the top of the document (this is meant for minor adjustments).
+    headingsOffset: 0,
+    // Timeout between events firing to make sure it's
+    // not too rapid (for performance reasons).
+    throttleTimeout: 50,
+    // Element to add the positionFixedClass to.
+    positionFixedSelector: null,
+    // Fixed position class to add to make sidebar fixed after scrolling
+    // down past the fixedSidebarOffset.
+    positionFixedClass: 'is-position-fixed',
+    // fixedSidebarOffset can be any number but by default is set
+    // to auto which sets the fixedSidebarOffset to the sidebar
+    // element's offsetTop from the top of the document on init.
+    fixedSidebarOffset: 'auto',
+    // includeHtml can be set to true to include the HTML markup from the
+    // heading node instead of just including the textContent.
+    includeHtml: false
+  });
+});
+</script>
+</body>
+</html>

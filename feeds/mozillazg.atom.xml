@@ -1,5 +1,204 @@
 <?xml version="1.0" encoding="utf-8"?>
-<feed xmlns="http://www.w3.org/2005/Atom"><title>Huang Huang 的博客</title><link href="https://mozillazg.com/" rel="alternate"></link><link href="https://mozillazg.com/feeds/mozillazg.atom.xml" rel="self"></link><id>https://mozillazg.com/</id><updated>2018-05-06T00:00:00+00:00</updated><entry><title>通过临时文件实现安全的/原子性的更新文件</title><link href="https://mozillazg.com/2018/05/a-way-to-atomic-write-or-safe-update-a-file.html" rel="alternate"></link><updated>2018-05-06T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2018-05-06:2018/05/a-way-to-atomic-write-or-safe-update-a-file.html</id><summary type="html">&lt;div class="section" id="id2"&gt;
+<feed xmlns="http://www.w3.org/2005/Atom"><title>Huang Huang 的博客</title><link href="https://mozillazg.com/" rel="alternate"></link><link href="https://mozillazg.com/feeds/mozillazg.atom.xml" rel="self"></link><id>https://mozillazg.com/</id><updated>2018-08-16T00:00:00+00:00</updated><entry><title>调用远程服务的一些备忘录</title><link href="https://mozillazg.com/2018/08/call-remote-service-checklist.html" rel="alternate"></link><updated>2018-08-16T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2018-08-16:2018/08/call-remote-service-checklist.html</id><summary type="html">&lt;div class="section" id="id2"&gt;
+&lt;h2 id="hidid2"&gt;前言&lt;a class="headerlink" href="#hidid2" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;大部分程序或多或少都会调用其他远程服务，比如访问 HTTP API、操作数据等各种远程操作。
+因为是调用其他服务所以会有很多不可控的因素，在编写相关代码的时候需要有一些注意事项或者说是备忘录。&lt;/p&gt;
+&lt;p&gt;本文就列一些常见的备忘录（主要针对调用网络服务）。&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class="section" id="id3"&gt;
+&lt;h2 id="hidid3"&gt;超时&lt;a class="headerlink" href="#hidid3" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;为了防止对方服务响应时间太长或者因为网络等各种因素导致响应时间变长，导致拖慢我们自己的程序，
+在调用远程服务的时候记得配置或实现合适的超时机制。&lt;/p&gt;
+&lt;p&gt;如果设置的超时时间不合理或者没有实现超时功能的话，
+就会出现对方服务故障或与对方服务通信故障拖垮我们自己服务的尴尬情况。&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class="section" id="id4"&gt;
+&lt;h2 id="hidid4"&gt;重试&lt;a class="headerlink" href="#hidid4" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;当调用远程服务失败的时候，就涉及到是否需要重试的问题。是否需要重试设计到各种情况：&lt;/p&gt;
+&lt;ul class="simple"&gt;
+&lt;li&gt;连接未到达对方服务，可以安全重试&lt;/li&gt;
+&lt;li&gt;连接到达对方服务，对方服务故障，无法处理请求，可以安全重试&lt;/li&gt;
+&lt;li&gt;连接到达对方服务，对方处理了请求，看情况重试:&lt;ul&gt;
+&lt;li&gt;虽然处理了请求，但是响应信息提示请求的参数有问题，无需重试，因为是我们自己代码的问题，重试也是一样的结果&lt;/li&gt;
+&lt;li&gt;对方处理请求时间过长导致超时，根据实际情况，酌情重试&lt;/li&gt;
+&lt;li&gt;操作是幂等的，可以安全重试&lt;/li&gt;
+&lt;li&gt;其他场景，主要是要考虑重试是否会产生非预期的副作用&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/li&gt;
+&lt;/ul&gt;
+&lt;p&gt;重试的时候所使用的重试策略也需要精心考虑，不能无脑重试、无限重试：&lt;/p&gt;
+&lt;ul class="simple"&gt;
+&lt;li&gt;限制重试次数，增加重试间隔&lt;/li&gt;
+&lt;li&gt;重试间隔一般不要是固定间隔，间隔时间可以是指数递增，也可以加上在一定区间内波动的随机数，
+防止出现雪崩效应，打垮对方服务&lt;/li&gt;
+&lt;/ul&gt;
+&lt;p&gt;关于重试及重试策略可以参考：&lt;/p&gt;
+&lt;ul class="simple"&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://docs.microsoft.com/en-us/azure/architecture/best-practices/transient-faults"&gt;Retry general guidance | Microsoft Docs&lt;/a&gt;&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/div&gt;
+&lt;div class="section" id="id5"&gt;
+&lt;h2 id="hidid5"&gt;日志&lt;a class="headerlink" href="#hidid5" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;当程序正常运行或出现故障时我们可能都需要借助日志来提供有用的信息。&lt;/p&gt;
+&lt;p&gt;比如当调用远程服务故障时，可能需要记录一些有用的信息:&lt;/p&gt;
+&lt;ul class="simple"&gt;
+&lt;li&gt;调用的服务信息，比如请求的 url、ip、端口之类的&lt;/li&gt;
+&lt;li&gt;请求参数，可以用于复现或 debug 的相关请求参数&lt;/li&gt;
+&lt;li&gt;失败原因，比如异常信息，根据需要区分不同的异常&lt;/li&gt;
+&lt;li&gt;如果有响应返回的话，响应中包含的有用信息，比如 http 响应码、http response 中的有用信息等&lt;/li&gt;
+&lt;/ul&gt;
+&lt;p&gt;当时在记日志的时候也需要注意一些问题：&lt;/p&gt;
+&lt;ul class="simple"&gt;
+&lt;li&gt;日志数量问题，有些场景下日志量太大会影响程序性能，不要随意记无用的日志&lt;/li&gt;
+&lt;li&gt;不要记录敏感数据，记得对日志内容脱密，比如：不要记密码、token 等敏感信息&lt;/li&gt;
+&lt;li&gt;单条日志大小问题，需要考虑控制单条日志大小，比如上面说的 http response 之类的无法预料到大小的信息
+需要考虑对大的信息进行截断处理或者干脆不记录（比如调用上传文件接口之类的不记录文件内容）&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/div&gt;
+&lt;div class="section" id="circuit-breaker"&gt;
+&lt;h2 id="hidcircuit-breaker"&gt;熔断/断路器（Circuit Breaker）&lt;a class="headerlink" href="#hidcircuit-breaker" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;为了处理调用远程服务短时间内失败率很高或者总是失败的场景，程序可以考虑实现自动熔断/断路器的功能。
+即：如果发现失败率比较高的时候，自动在后续一段时间内逐步减少对对方服务的调用
+（限制请求，对部分操作直接报错不访问远程服务），
+当发现成功率上去后逐步放开限制直至恢复正常访问。&lt;/p&gt;
+&lt;p&gt;关于熔断/断路器可以参考：&lt;/p&gt;
+&lt;ul class="simple"&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://docs.microsoft.com/en-us/azure/architecture/patterns/circuit-breaker"&gt;Circuit Breaker | Microsoft Docs&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://www.ibm.com/cloud/garage/content/manage/practice_circuit_breaker_pattern/"&gt;Preventing system failure with the Circuit Breaker pattern - IBM Cloud Garage Method&lt;/a&gt;&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/div&gt;
+&lt;div class="section" id="id6"&gt;
+&lt;h2 id="hidid6"&gt;降级&lt;a class="headerlink" href="#hidid6" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;上面的熔断是调用方程序实现在失败率很高时减少请求数，降级的话就是可以外部介入程序的功能。
+比如当通过监控发现调用远程服务故障率特别高，或者收到通知对方服务在某个时间不可用，
+可以直接降级到这个功能，彻底不发送任何请求。&lt;/p&gt;
+&lt;p&gt;比如，我们有个服务同时支持微信支付收款和支付宝支付收款，当发现微信支付大面积故障的时候，
+可以人工/第三方程序自动降级掉程序里的微信支付功能，此时用户付款的时候就只会看到一个支付宝支付的功能，
+微信支付的功能会被临时下掉。&lt;/p&gt;
+&lt;p&gt;关于降级的另一种应用是: fallback，即：调用主服务失败时，改为调用备用服务。
+比如上传图片，平时都把图片上传到阿里云 oss，这次调用是发现 oss 故障，然后程序就尝试改为
+调用腾讯云 cos，把图片上传到 cos。&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class="section" id="id7"&gt;
+&lt;h2 id="hidid7"&gt;监控&lt;a class="headerlink" href="#hidid7" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;通过监控我们可以掌握程序的各种运行指标/状况，这样就可以及时/提前发现问题。&lt;/p&gt;
+&lt;p&gt;常见的针对远程调用的监控指标如下：&lt;/p&gt;
+&lt;ul class="simple"&gt;
+&lt;li&gt;响应时间&lt;/li&gt;
+&lt;li&gt;调用失败计数&lt;/li&gt;
+&lt;li&gt;特定错误计数&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/div&gt;
+&lt;div class="section" id="id8"&gt;
+&lt;h2 id="hidid8"&gt;告警&lt;a class="headerlink" href="#hidid8" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;虽然有了监控数据，但是我们不可能 24 小时不眠不休的盯着监控数据，此时就需要有告警程序来帮助我们
+自动发现可能的异常和已经出现的问题。&lt;/p&gt;
+&lt;p&gt;这样即可以及时发现问题也可以解放生产力， 在没有异常的时候让员工去做更有创造力的事情。&lt;/p&gt;
+&lt;p&gt;根据告警数据的不同有一些常见的针对远程调用的告警：&lt;/p&gt;
+&lt;ul class="simple"&gt;
+&lt;li&gt;响应时间阈值告警&lt;/li&gt;
+&lt;li&gt;一段时间内特定错误/失败数告警&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/div&gt;
+&lt;div class="section" id="id9"&gt;
+&lt;h2 id="hidid9"&gt;总结&lt;a class="headerlink" href="#hidid9" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;本文罗列了一些编写调用远程服务相关代码时需要注意的一下注意事项。
+欢迎大家在评论里一起讨论/补充其他的注意事项。&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class="section" id="id10"&gt;
+&lt;h2 id="hidid10"&gt;参考资料&lt;a class="headerlink" href="#hidid10" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;ul class="simple"&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://docs.microsoft.com/en-us/azure/architecture/best-practices/transient-faults"&gt;Retry general guidance | Microsoft Docs&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://docs.microsoft.com/en-us/azure/architecture/patterns/circuit-breaker"&gt;Circuit Breaker | Microsoft Docs&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://www.ibm.com/cloud/garage/content/manage/practice_circuit_breaker_pattern/"&gt;Preventing system failure with the Circuit Breaker pattern - IBM Cloud Garage Method&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://pragprog.com/book/mnee2/release-it-second-edition"&gt;Release It! Second Edition: Design and Deploy Production-Ready Software by Michael Nygard | The Pragmatic Bookshelf&lt;/a&gt;&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/div&gt;
+</summary><category term="checklist"></category></entry><entry><title>Python: 调试运行中进程的几种方法（总结）</title><link href="https://mozillazg.com/2018/07/python-some-ways-to-debug-running-process.html" rel="alternate"></link><updated>2018-07-15T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2018-07-15:2018/07/python-some-ways-to-debug-running-process.html</id><summary type="html">&lt;div class="section" id="id1"&gt;
+&lt;h2 id="hidid1"&gt;前言&lt;a class="headerlink" href="#hidid1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;之前写了几篇关于调试运行中进程方法的文章，本文总结一下常用的几种调试方法。&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class="section" id="id2"&gt;
+&lt;h2 id="hidid2"&gt;需要修改代码的方法&lt;a class="headerlink" href="#hidid2" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;div class="section" id="print-logging"&gt;
+&lt;h3 id="hidprint-logging"&gt;print/logging&lt;a class="headerlink" href="#hidprint-logging" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
+&lt;p&gt;最常用的方法是查看程序运行日志。这种方法适合可以通过日志分析出问题的常见，也是诊断问题的首选方法。&lt;/p&gt;
+&lt;p&gt;这种方法需要预先在合适位置记录有用的日志信息，如果出问题时没有相关的日志信息的话，这种方法就会比较难以诊断问题。&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class="section" id="id3"&gt;
+&lt;h3 id="hidid3"&gt;预置调试后门（接口）&lt;a class="headerlink" href="#hidid3" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
+&lt;p&gt;这种方法通过预先在程序里置入用于调试的后门（接口），方便在诊断问题时提供查看问题现场，甚至进入程序运行时环境的的手段。&lt;/p&gt;
+&lt;p&gt;常用的预置功能有：&lt;/p&gt;
+&lt;ul class="simple"&gt;
+&lt;li&gt;提供一种方法可以获取当前程序的 stack traceback 信息&lt;/li&gt;
+&lt;li&gt;提供一种行可以获取当前程序运行时关键变量/状态&lt;/li&gt;
+&lt;li&gt;提供一种方法可以进入当前程序运行时，方便在程序运行时环境中执行调试代码&lt;/li&gt;
+&lt;li&gt;提供一种方法可以触发特定功能或者运行特定代码&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;div class="section" id="id4"&gt;
+&lt;h2 id="hidid4"&gt;无需修改代码的方法&lt;a class="headerlink" href="#hidid4" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;div class="section" id="ps-proc"&gt;
+&lt;h3 id="hidps-proc"&gt;ps/proc&lt;a class="headerlink" href="#hidps-proc" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
+&lt;p&gt;通过 ps 可以查看指定进程的各种信息，通过查看 /proc/&amp;lt;pid&amp;gt;/ 目录下的系统文件也可以查看指定进程的各种信息。&lt;/p&gt;
+&lt;p&gt;比如：通过 ps 可以查看进程是否是僵尸进程、是否是孤儿进程，查看进程的启动时间、了解进程是否发生过重启等。
+通过查看 /proc/&amp;lt;pid&amp;gt;/ 目录下的各种系统文件可以获取进程的环境变量信息、 stack 信息、内存信息等。&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class="section" id="strace"&gt;
+&lt;h3 id="hidstrace"&gt;strace&lt;a class="headerlink" href="#hidstrace" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
+&lt;p&gt;通过 strace 程序可以查看程序正在调用的系统调用。可以用 strace 在系统调用层面查看程序正在进行的操作，
+比如可以查看程序是否死锁、是否正在处理 socket 请求，正在处理文件等。&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class="section" id="gdb-python"&gt;
+&lt;h3 id="hidgdb-python"&gt;gdb-python&lt;a class="headerlink" href="#hidgdb-python" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
+&lt;p&gt;使用 gdb-python 可以通过在 gdb 中执行几个命令就可以查看程序正在执行的代码等信息。&lt;/p&gt;
+&lt;p&gt;不过，使用 gdb-python 需要预先安装包含调试符号的 debug 版本的 python 解释器，并使用该 debug 版本的 python 执行程序，算是一个比较大的限制。&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class="section" id="gdb"&gt;
+&lt;h3 id="hidgdb"&gt;纯 gdb&lt;a class="headerlink" href="#hidgdb" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
+&lt;p&gt;所谓的纯 gdb 方法就是只需要安装 gdb 就可以了，不需要安装带调试符号版本的 debug python 就可以调试 python 进程。&lt;/p&gt;
+&lt;p&gt;方法是使用 gdb 的 &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;-eval-command&lt;/span&gt;&lt;/tt&gt; &lt;a class="footnote-reference" href="#id10" id="id5"&gt;[1]&lt;/a&gt; 参数对进程执行包含了调试代码的 gdb 命令，实现在进程运行时环境中执行调试代码的目的。&lt;/p&gt;
+&lt;p&gt;pystack &lt;a class="footnote-reference" href="#id11" id="id6"&gt;[2]&lt;/a&gt; 和 pyrasite &lt;a class="footnote-reference" href="#id12" id="id7"&gt;[3]&lt;/a&gt; 这两个调试工具就是利用的这种方法实现的无需修改代码即可调试进程的功能。&lt;/p&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;div class="section" id="id8"&gt;
+&lt;h2 id="hidid8"&gt;总结&lt;a class="headerlink" href="#hidid8" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;本文总结了几种调试运行中进程的方法，每种方法都有一定的局限性，实际诊断问题的时候往往要综合几种方法最终才有可能发现真正的问题所在。&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class="section" id="id9"&gt;
+&lt;h2 id="hidid9"&gt;参考资料&lt;a class="headerlink" href="#hidid9" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;ul class="simple"&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://docs.python.org/3/library/logging.html#module-logging"&gt;16.6. logging — Logging facility for Python — Python 3.7.0 documentation&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://mozillazg.com/2017/12/python-debug-running-process-threading-gevent-eventlet-asyncio-via-preset-backdoor.html"&gt;Python: 通过预置后门（调试接口）的方式调试运行中的进程 - Huang Huang 的博客&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="http://man7.org/linux/man-pages/man1/ps.1.html"&gt;ps(1) - Linux manual page&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="http://man7.org/linux/man-pages/man5/proc.5.html"&gt;proc(5) - Linux manual page&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://strace.io/"&gt;strace&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://mozillazg.com/2017/07/debug-running-python-process-with-gdb.html"&gt;使用 gdb 调试运行中的 Python 进程 - Huang Huang 的博客&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://github.com/wooparadog/pystack"&gt;wooparadog/pystack: Tool to dump python thread and greenlet stacks.&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://github.com/lmacken/pyrasite"&gt;lmacken/pyrasite: Inject code into running Python processes&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://sourceware.org/gdb/onlinedocs/gdb/File-Options.html"&gt;Debugging with GDB: File Options&lt;/a&gt;&lt;/li&gt;
+&lt;/ul&gt;
+&lt;table class="docutils footnote" frame="void" id="id10" rules="none"&gt;
+&lt;colgroup&gt;&lt;col class="label" /&gt;&lt;col /&gt;&lt;/colgroup&gt;
+&lt;tbody valign="top"&gt;
+&lt;tr&gt;&lt;td class="label"&gt;&lt;a class="fn-backref" href="#id5"&gt;[1]&lt;/a&gt;&lt;/td&gt;&lt;td&gt;&lt;a class="reference external" href="https://sourceware.org/gdb/onlinedocs/gdb/File-Options.html"&gt;https://sourceware.org/gdb/onlinedocs/gdb/File-Options.html&lt;/a&gt;&lt;/td&gt;&lt;/tr&gt;
+&lt;/tbody&gt;
+&lt;/table&gt;
+&lt;table class="docutils footnote" frame="void" id="id11" rules="none"&gt;
+&lt;colgroup&gt;&lt;col class="label" /&gt;&lt;col /&gt;&lt;/colgroup&gt;
+&lt;tbody valign="top"&gt;
+&lt;tr&gt;&lt;td class="label"&gt;&lt;a class="fn-backref" href="#id6"&gt;[2]&lt;/a&gt;&lt;/td&gt;&lt;td&gt;&lt;a class="reference external" href="https://github.com/wooparadog/pystack/blob/a2f0a45419df581e0d800aa0a98b9471779de0cb/pystack.py#L42"&gt;https://github.com/wooparadog/pystack/blob/a2f0a45419df581e0d800aa0a98b9471779de0cb/pystack.py#L42&lt;/a&gt;&lt;/td&gt;&lt;/tr&gt;
+&lt;/tbody&gt;
+&lt;/table&gt;
+&lt;table class="docutils footnote" frame="void" id="id12" rules="none"&gt;
+&lt;colgroup&gt;&lt;col class="label" /&gt;&lt;col /&gt;&lt;/colgroup&gt;
+&lt;tbody valign="top"&gt;
+&lt;tr&gt;&lt;td class="label"&gt;&lt;a class="fn-backref" href="#id7"&gt;[3]&lt;/a&gt;&lt;/td&gt;&lt;td&gt;&lt;a class="reference external" href="https://github.com/lmacken/pyrasite/blob/d0c90ab38a8986527c9c1f24e222323494ab17a2/pyrasite/injector.py#L36"&gt;https://github.com/lmacken/pyrasite/blob/d0c90ab38a8986527c9c1f24e222323494ab17a2/pyrasite/injector.py#L36&lt;/a&gt;&lt;/td&gt;&lt;/tr&gt;
+&lt;/tbody&gt;
+&lt;/table&gt;
+&lt;/div&gt;
+</summary><category term="debug"></category></entry><entry><title>通过临时文件实现安全的/原子性的更新文件</title><link href="https://mozillazg.com/2018/05/a-way-to-atomic-write-or-safe-update-a-file.html" rel="alternate"></link><updated>2018-05-06T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2018-05-06:2018/05/a-way-to-atomic-write-or-safe-update-a-file.html</id><summary type="html">&lt;div class="section" id="id2"&gt;
 &lt;h2 id="hidid2"&gt;前言&lt;a class="headerlink" href="#hidid2" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;p&gt;所谓的原子性更新文件指的是要么更新成功，要么更新失败，不能有中间状态，不能出现更新到一半失败了的情况。&lt;/p&gt;
 &lt;p&gt;想像一下，当更新文件的时候程序中途崩溃了或者被终止了出现文件更新不完整的情况或在更新的时候有另一个程序正好在读取该文件，此时就会出现非预期的情况：读取程序读取到了脏数据，同时原来的旧数据也丢失了。所以我们在更新一些比较重要的文件时要考虑实现原子性的更新。下面就来讲一下一种实现原子性更新文件的方法。&lt;/p&gt;
@@ -32,7 +231,7 @@
 &lt;span class="o"&gt;...&lt;/span&gt;     &lt;span class="n"&gt;fp&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;write&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;Hello world.&amp;#39;&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
 &lt;span class="o"&gt;...&lt;/span&gt;
 &lt;/pre&gt;&lt;/div&gt;
-&lt;p&gt;其他的模块可以在 &lt;a class="reference external" href="https://github.com"&gt;https://github.com&lt;/a&gt; 或 &lt;a class="reference external" href="https://pypi.org"&gt;https://pypi.org&lt;/a&gt; 上搜索 &lt;tt class="docutils literal"&gt;automic file&lt;/tt&gt; 。然后看一下搜索出来的项目的代码，看看有没有实现上面的流程，以及一些细节的功能是否满足你的实际需求，以此来判断是使用该模块。&lt;/p&gt;
+&lt;p&gt;其他的模块可以在 &lt;a class="reference external" href="https://github.com"&gt;https://github.com&lt;/a&gt; 或 &lt;a class="reference external" href="https://pypi.org"&gt;https://pypi.org&lt;/a&gt; 上搜索 &lt;tt class="docutils literal"&gt;atomic file&lt;/tt&gt; 。然后看一下搜索出来的项目的代码，看看有没有实现上面的流程，以及一些细节的功能是否满足你的实际需求，以此来判断是使用该模块。&lt;/p&gt;
 &lt;/div&gt;
 &lt;/div&gt;
 &lt;div class="section" id="id5"&gt;
@@ -83,7 +282,7 @@
 &lt;/tbody&gt;
 &lt;/table&gt;
 &lt;/div&gt;
-</summary><category term="automic"></category><category term="fsync"></category><category term="file"></category></entry><entry><title>Python: Mock 常用功能</title><link href="https://mozillazg.com/2018/03/python-introduction-mock-unit-test-examples-cookbook.html" rel="alternate"></link><updated>2018-03-04T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2018-03-04:2018/03/python-introduction-mock-unit-test-examples-cookbook.html</id><summary type="html">&lt;div class="section" id="id1"&gt;
+</summary><category term="atomic"></category><category term="fsync"></category><category term="file"></category></entry><entry><title>Python: Mock 常用功能</title><link href="https://mozillazg.com/2018/03/python-introduction-mock-unit-test-examples-cookbook.html" rel="alternate"></link><updated>2018-03-04T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2018-03-04:2018/03/python-introduction-mock-unit-test-examples-cookbook.html</id><summary type="html">&lt;div class="section" id="id1"&gt;
 &lt;h2 id="hidid1"&gt;前言&lt;a class="headerlink" href="#hidid1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;blockquote&gt;
 unittest.mock is a library for testing in Python. It allows you to replace parts of your system under test with mock objects and make assertions about how they have been used.&lt;/blockquote&gt;
@@ -19651,6 +19850,8 @@ Query Error: AUTOINCREMENT is only allowed on an INTEGER PRIMARY KEY Unable to e
 &lt;p&gt;后来的解决办法是：
  &lt;strong&gt;重启 explorer.exe 进程&lt;/strong&gt; 。&lt;/p&gt;</summary></entry><entry><title>[go]等待 goroutine 结束</title><link href="https://mozillazg.com/2014/10/go-wait-all-goroutines-end.html" rel="alternate"></link><updated>2014-10-27T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2014-10-27:2014/10/go-wait-all-goroutines-end.html</id><summary type="html">&lt;p&gt;默认情况下，程序不会等待 goroutine 结束就退出了。
 下面将讲解一种等待所有 goroutine 结束的方法：使用 &lt;tt class="docutils literal"&gt;sync.WaitGroup&lt;/tt&gt; 。&lt;/p&gt;
+&lt;div class="section" id="sync-waitgroup"&gt;
+&lt;h2 id="hidsync-waitgroup"&gt;使用 sync.WaitGroup&lt;a class="headerlink" href="#hidsync-waitgroup" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="kn"&gt;package&lt;/span&gt; &lt;span class="nx"&gt;main&lt;/span&gt;
 
 &lt;span class="kn"&gt;import&lt;/span&gt; &lt;span class="p"&gt;(&lt;/span&gt;
@@ -19676,11 +19877,68 @@ Query Error: AUTOINCREMENT is only allowed on an INTEGER PRIMARY KEY Unable to e
 &lt;span class="p"&gt;}&lt;/span&gt;
 &lt;/pre&gt;&lt;/div&gt;
 &lt;p&gt;在线演示地址：&lt;a class="reference external" href="http://play.golang.org/p/fECMMK8Rja"&gt;http://play.golang.org/p/fECMMK8Rja&lt;/a&gt;&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class="section" id="chan"&gt;
+&lt;h2 id="hidchan"&gt;使用 chan&lt;a class="headerlink" href="#hidchan" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;评论区 remones 大佬提到了另一种方法，那就是使用 &lt;tt class="docutils literal"&gt;chan&lt;/tt&gt; 来实现。&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="kn"&gt;package&lt;/span&gt; &lt;span class="nx"&gt;main&lt;/span&gt;
+
+&lt;span class="kn"&gt;import&lt;/span&gt; &lt;span class="s"&gt;&amp;quot;fmt&amp;quot;&lt;/span&gt;
+
+&lt;span class="kd"&gt;func&lt;/span&gt; &lt;span class="nx"&gt;main&lt;/span&gt;&lt;span class="p"&gt;()&lt;/span&gt; &lt;span class="p"&gt;{&lt;/span&gt;
+    &lt;span class="nx"&gt;arr&lt;/span&gt; &lt;span class="o"&gt;:=&lt;/span&gt; &lt;span class="p"&gt;[&lt;/span&gt;&lt;span class="mi"&gt;3&lt;/span&gt;&lt;span class="p"&gt;]&lt;/span&gt;&lt;span class="kt"&gt;string&lt;/span&gt;&lt;span class="p"&gt;{&lt;/span&gt;&lt;span class="s"&gt;&amp;quot;a&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="s"&gt;&amp;quot;b&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="s"&gt;&amp;quot;c&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;}&lt;/span&gt;
+    &lt;span class="nx"&gt;ch&lt;/span&gt; &lt;span class="o"&gt;:=&lt;/span&gt; &lt;span class="nb"&gt;make&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="kd"&gt;chan&lt;/span&gt; &lt;span class="kd"&gt;struct&lt;/span&gt;&lt;span class="p"&gt;{},&lt;/span&gt; &lt;span class="nb"&gt;len&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="nx"&gt;arr&lt;/span&gt;&lt;span class="p"&gt;))&lt;/span&gt;
+
+    &lt;span class="k"&gt;for&lt;/span&gt; &lt;span class="nx"&gt;_&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="nx"&gt;v&lt;/span&gt; &lt;span class="o"&gt;:=&lt;/span&gt; &lt;span class="k"&gt;range&lt;/span&gt; &lt;span class="nx"&gt;arr&lt;/span&gt; &lt;span class="p"&gt;{&lt;/span&gt;
+        &lt;span class="k"&gt;go&lt;/span&gt; &lt;span class="kd"&gt;func&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="nx"&gt;s&lt;/span&gt; &lt;span class="kt"&gt;string&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt; &lt;span class="p"&gt;{&lt;/span&gt;
+            &lt;span class="nx"&gt;fmt&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Println&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="nx"&gt;s&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+            &lt;span class="nx"&gt;ch&lt;/span&gt; &lt;span class="o"&gt;&amp;lt;-&lt;/span&gt; &lt;span class="kd"&gt;struct&lt;/span&gt;&lt;span class="p"&gt;{}{}&lt;/span&gt;
+        &lt;span class="p"&gt;}(&lt;/span&gt;&lt;span class="nx"&gt;v&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+    &lt;span class="p"&gt;}&lt;/span&gt;
+
+    &lt;span class="k"&gt;for&lt;/span&gt; &lt;span class="nx"&gt;i&lt;/span&gt; &lt;span class="o"&gt;:=&lt;/span&gt; &lt;span class="mi"&gt;0&lt;/span&gt;&lt;span class="p"&gt;;&lt;/span&gt; &lt;span class="nx"&gt;i&lt;/span&gt; &lt;span class="p"&gt;&amp;lt;&lt;/span&gt; &lt;span class="nb"&gt;len&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="nx"&gt;arr&lt;/span&gt;&lt;span class="p"&gt;);&lt;/span&gt; &lt;span class="nx"&gt;i&lt;/span&gt;&lt;span class="o"&gt;++&lt;/span&gt; &lt;span class="p"&gt;{&lt;/span&gt;
+        &lt;span class="o"&gt;&amp;lt;-&lt;/span&gt;&lt;span class="nx"&gt;ch&lt;/span&gt;
+    &lt;span class="p"&gt;}&lt;/span&gt;
+
+&lt;span class="p"&gt;}&lt;/span&gt;
+&lt;/pre&gt;&lt;/div&gt;
+&lt;p&gt;或者 remones 大佬的版本：&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="kn"&gt;package&lt;/span&gt; &lt;span class="nx"&gt;main&lt;/span&gt;
+
+&lt;span class="kn"&gt;import&lt;/span&gt; &lt;span class="p"&gt;(&lt;/span&gt;
+    &lt;span class="s"&gt;&amp;quot;fmt&amp;quot;&lt;/span&gt;
+    &lt;span class="s"&gt;&amp;quot;time&amp;quot;&lt;/span&gt;
+&lt;span class="p"&gt;)&lt;/span&gt;
+
+&lt;span class="kd"&gt;func&lt;/span&gt; &lt;span class="nx"&gt;main&lt;/span&gt;&lt;span class="p"&gt;()&lt;/span&gt; &lt;span class="p"&gt;{&lt;/span&gt;
+    &lt;span class="nx"&gt;workFn&lt;/span&gt; &lt;span class="o"&gt;:=&lt;/span&gt; &lt;span class="kd"&gt;func&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="nx"&gt;n&lt;/span&gt; &lt;span class="kt"&gt;int&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt; &lt;span class="o"&gt;&amp;lt;-&lt;/span&gt;&lt;span class="kd"&gt;chan&lt;/span&gt; &lt;span class="kd"&gt;struct&lt;/span&gt;&lt;span class="p"&gt;{}&lt;/span&gt; &lt;span class="p"&gt;{&lt;/span&gt;
+        &lt;span class="nx"&gt;doneC&lt;/span&gt; &lt;span class="o"&gt;:=&lt;/span&gt; &lt;span class="nb"&gt;make&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="kd"&gt;chan&lt;/span&gt; &lt;span class="kd"&gt;struct&lt;/span&gt;&lt;span class="p"&gt;{})&lt;/span&gt;
+        &lt;span class="k"&gt;go&lt;/span&gt; &lt;span class="kd"&gt;func&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="nx"&gt;n&lt;/span&gt; &lt;span class="kt"&gt;int&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt; &lt;span class="p"&gt;{&lt;/span&gt;
+            &lt;span class="nx"&gt;time&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Sleep&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="mi"&gt;100&lt;/span&gt; &lt;span class="o"&gt;*&lt;/span&gt; &lt;span class="nx"&gt;time&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Millisecond&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+            &lt;span class="nx"&gt;fmt&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Printf&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="s"&gt;&amp;quot;routine %d was finished.\n&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="nx"&gt;n&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+            &lt;span class="nx"&gt;doneC&lt;/span&gt; &lt;span class="o"&gt;&amp;lt;-&lt;/span&gt; &lt;span class="kd"&gt;struct&lt;/span&gt;&lt;span class="p"&gt;{}{}&lt;/span&gt;
+        &lt;span class="p"&gt;}(&lt;/span&gt;&lt;span class="nx"&gt;n&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+        &lt;span class="k"&gt;return&lt;/span&gt; &lt;span class="nx"&gt;doneC&lt;/span&gt;
+    &lt;span class="p"&gt;}&lt;/span&gt;
+
+    &lt;span class="nx"&gt;chs&lt;/span&gt; &lt;span class="o"&gt;:=&lt;/span&gt; &lt;span class="nb"&gt;make&lt;/span&gt;&lt;span class="p"&gt;([]&lt;/span&gt;&lt;span class="o"&gt;&amp;lt;-&lt;/span&gt;&lt;span class="kd"&gt;chan&lt;/span&gt; &lt;span class="kd"&gt;struct&lt;/span&gt;&lt;span class="p"&gt;{},&lt;/span&gt; &lt;span class="mi"&gt;0&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="mi"&gt;5&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+    &lt;span class="k"&gt;for&lt;/span&gt; &lt;span class="nx"&gt;i&lt;/span&gt; &lt;span class="o"&gt;:=&lt;/span&gt; &lt;span class="mi"&gt;0&lt;/span&gt;&lt;span class="p"&gt;;&lt;/span&gt; &lt;span class="nx"&gt;i&lt;/span&gt; &lt;span class="p"&gt;&amp;lt;&lt;/span&gt; &lt;span class="mi"&gt;5&lt;/span&gt;&lt;span class="p"&gt;;&lt;/span&gt; &lt;span class="nx"&gt;i&lt;/span&gt;&lt;span class="o"&gt;++&lt;/span&gt; &lt;span class="p"&gt;{&lt;/span&gt;
+        &lt;span class="nx"&gt;ch&lt;/span&gt; &lt;span class="o"&gt;:=&lt;/span&gt; &lt;span class="nx"&gt;workFn&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="nx"&gt;i&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+        &lt;span class="nx"&gt;chs&lt;/span&gt; &lt;span class="p"&gt;=&lt;/span&gt; &lt;span class="nb"&gt;append&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="nx"&gt;chs&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="nx"&gt;ch&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+    &lt;span class="p"&gt;}&lt;/span&gt;
+    &lt;span class="k"&gt;for&lt;/span&gt; &lt;span class="nx"&gt;_&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="nx"&gt;ch&lt;/span&gt; &lt;span class="o"&gt;:=&lt;/span&gt; &lt;span class="k"&gt;range&lt;/span&gt; &lt;span class="nx"&gt;chs&lt;/span&gt; &lt;span class="p"&gt;{&lt;/span&gt;
+        &lt;span class="o"&gt;&amp;lt;-&lt;/span&gt;&lt;span class="nx"&gt;ch&lt;/span&gt;
+    &lt;span class="p"&gt;}&lt;/span&gt;
+&lt;span class="p"&gt;}&lt;/span&gt;
+&lt;/pre&gt;&lt;/div&gt;
+&lt;/div&gt;
 &lt;div class="section" id="id1"&gt;
 &lt;h2 id="hidid1"&gt;参考资料&lt;a class="headerlink" href="#hidid1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;ul class="simple"&gt;
 &lt;li&gt;&lt;a class="reference external" href="http://stackoverflow.com/questions/18207772/how-to-wait-for-all-goroutines-to-finish-without-using-time-sleep"&gt;http://stackoverflow.com/questions/18207772/how-to-wait-for-all-goroutines-to-finish-without-using-time-sleep&lt;/a&gt;&lt;/li&gt;
 &lt;li&gt;&lt;a class="reference external" href="http://nathanleclaire.com/blog/2014/02/15/how-to-wait-for-all-goroutines-to-finish-executing-before-continuing/"&gt;http://nathanleclaire.com/blog/2014/02/15/how-to-wait-for-all-goroutines-to-finish-executing-before-continuing/&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://blog.golang.org/share-memory-by-communicating"&gt;Share Memory By Communicating - The Go Blog&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://dave.cheney.net/2014/03/25/the-empty-struct"&gt;The empty struct | Dave Cheney&lt;/a&gt;&lt;/li&gt;
 &lt;/ul&gt;
 &lt;/div&gt;
 </summary><category term="goroutine"></category></entry><entry><title>[mongodb]复制文档（document）</title><link href="https://mozillazg.com/2014/10/mongodb-copy-document.html" rel="alternate"></link><updated>2014-10-27T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2014-10-27:2014/10/mongodb-copy-document.html</id><summary type="html">&lt;p&gt;可以通过下列命令复制文档&lt;/p&gt;
