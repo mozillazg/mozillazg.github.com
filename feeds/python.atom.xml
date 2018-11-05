@@ -4839,19 +4839,19 @@ self is &amp;lt;__main__.D object at 0x10ce10e48&amp;gt; &amp;#64;A.add
 &lt;span class="o"&gt;&amp;lt;&lt;/span&gt;&lt;span class="k"&gt;class&lt;/span&gt; &lt;span class="err"&gt;&amp;#39;&lt;/span&gt;&lt;span class="nc"&gt;super&lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;&amp;gt;&lt;/span&gt;
 &lt;span class="o"&gt;&amp;gt;&amp;gt;&amp;gt;&lt;/span&gt;
 &lt;/pre&gt;&lt;/div&gt;
-&lt;p&gt;在大多数情况下， &lt;tt class="docutils literal"&gt;super&lt;/tt&gt; 包含了两个非常重要的信息: 一个 MRO 以及 MRO 中的一个类。当以如下方式调用 &lt;tt class="docutils literal"&gt;super&lt;/tt&gt; 时:&lt;/p&gt;
+&lt;p&gt;在大多数情况下， &lt;tt class="docutils literal"&gt;super&lt;/tt&gt; 包含了两个非常重要的信息: 一个 MRO(Method Resolution Order) 列表以及 MRO 中的一个类。当以如下方式调用 &lt;tt class="docutils literal"&gt;super&lt;/tt&gt; 时:&lt;/p&gt;
 &lt;pre class="literal-block"&gt;
 super(a_type, obj)
 &lt;/pre&gt;
-&lt;p&gt;MRO 指的是 &lt;tt class="docutils literal"&gt;type(obj)&lt;/tt&gt; 的 MRO, MRO 中的那个类就是 &lt;tt class="docutils literal"&gt;a_type&lt;/tt&gt; , 同时 &lt;tt class="docutils literal"&gt;isinstance(obj, a_type) == True&lt;/tt&gt; 。&lt;/p&gt;
+&lt;p&gt;MRO 列表指的是 &lt;tt class="docutils literal"&gt;type(obj)&lt;/tt&gt; 的 MRO 列表, MRO 中的那个类就是 &lt;tt class="docutils literal"&gt;a_type&lt;/tt&gt; , 同时 &lt;tt class="docutils literal"&gt;isinstance(obj, a_type) == True&lt;/tt&gt; 。&lt;/p&gt;
 &lt;p&gt;当这样调用时:&lt;/p&gt;
 &lt;pre class="literal-block"&gt;
 super(type1, type2)
 &lt;/pre&gt;
-&lt;p&gt;MRO 指的是 &lt;tt class="docutils literal"&gt;type2&lt;/tt&gt; 的 MRO, MRO 中的那个类就是 &lt;tt class="docutils literal"&gt;type1&lt;/tt&gt; ，同时 &lt;tt class="docutils literal"&gt;issubclass(type2, type1) == True&lt;/tt&gt; 。&lt;/p&gt;
-&lt;p&gt;那么， &lt;tt class="docutils literal"&gt;super()&lt;/tt&gt; 实际上做了啥呢？简单来说就是：提供一个 MRO 以及一个 MRO 中的类 &lt;tt class="docutils literal"&gt;C&lt;/tt&gt; ， &lt;tt class="docutils literal"&gt;super()&lt;/tt&gt; 将返回一个从 MRO 中 &lt;tt class="docutils literal"&gt;C&lt;/tt&gt; 之后的类中查找方法的对象。&lt;/p&gt;
-&lt;p&gt;也就是说，查找方式时不是像常规方法一样从所有的 MRO 类中查找，而是从 MRO 的 tail 中查找。&lt;/p&gt;
-&lt;p&gt;举个栗子, 有个 MRO:&lt;/p&gt;
+&lt;p&gt;MRO 指的是 &lt;tt class="docutils literal"&gt;type2&lt;/tt&gt; 的 MRO 列表, MRO 中的那个类就是 &lt;tt class="docutils literal"&gt;type1&lt;/tt&gt; ，同时 &lt;tt class="docutils literal"&gt;issubclass(type2, type1) == True&lt;/tt&gt; 。&lt;/p&gt;
+&lt;p&gt;那么， &lt;tt class="docutils literal"&gt;super()&lt;/tt&gt; 实际上做了啥呢？简单来说就是：提供一个 MRO 列表以及一个 MRO 中的类 &lt;tt class="docutils literal"&gt;C&lt;/tt&gt; ， &lt;tt class="docutils literal"&gt;super()&lt;/tt&gt; 将返回一个从 MRO 列表中 &lt;tt class="docutils literal"&gt;C&lt;/tt&gt; 之后的类中查找方法的对象。&lt;/p&gt;
+&lt;p&gt;也就是说，查找方式时不是像常规方法一样从所有的 MRO 类中查找，而是从 MRO 列表的 tail 中查找。&lt;/p&gt;
+&lt;p&gt;举个栗子, 有个 MRO 列表:&lt;/p&gt;
 &lt;pre class="literal-block"&gt;
 [A, B, C, D, E, object]
 &lt;/pre&gt;
@@ -5010,158 +5010,162 @@ class C(B1, B2, ..., BN): pass
 &lt;pre class="literal-block"&gt;
 L[C(B1 ... BN)] = C + merge(L[B1] ... L[BN], B1 ... BN)
 &lt;/pre&gt;
-&lt;p&gt;merge 的计算规则如下：&lt;/p&gt;
+&lt;p&gt;merge 的计算规则如下 &lt;a class="footnote-reference" href="#id3" id="id1"&gt;[1]&lt;/a&gt; ：&lt;/p&gt;
 &lt;blockquote&gt;
 &lt;ol class="arabic simple"&gt;
-&lt;li&gt;take the head of the first list, i.e L[B1][0];&lt;/li&gt;
-&lt;li&gt;if this head is not in the tail of any of the other lists, then add it to the linearization of C and remove it from the lists in the merge, otherwise look at the head of the next list and take it, if it is a good head.&lt;/li&gt;
-&lt;li&gt;Then repeat the operation until all the class are removed or it is impossible to find good heads. In this case, it is impossible to construct the merge, Python 2.3 will refuse to create the class C and will raise an exception.&lt;/li&gt;
+&lt;li&gt;take the head of the first list, i.e L[B1][0];
+(取第一个列表的第一个元素)&lt;/li&gt;
+&lt;li&gt;if this head is not in the tail of any of the other lists, then add it to the linearization of C and remove it from the lists in the merge, otherwise look at the head of the next list and take it, if it is a good head.
+(如果这个元素是其他包含这个元素的列表的第一个元素或者其他列表都不包含这个元素，把它加到 C
+的线性化值列表中，并从待计算的 merge 列表中删除这个元素，否则就从下个列表中取第一个元素进行比较，
+如果这个元素满足条件的话就用它)&lt;/li&gt;
+&lt;li&gt;Then repeat the operation until all the class are removed or it is impossible to find good heads. In this case, it is impossible to construct the merge, Python 2.3 will refuse to create the class C and will raise an exception.
+(一直重复这个步骤，直到所有的类都被从 merge 列表中删除或者当出现无法找到符合规则的元素时。
+当出现无法计算 merge 规则的情况时，Python 2.3 将拒绝创建类 C 同时抛出一个异常）&lt;/li&gt;
 &lt;/ol&gt;
 &lt;/blockquote&gt;
 &lt;div class="section" id="mro"&gt;
 &lt;h2 id="hidmro"&gt;计算 MRO&lt;a class="headerlink" href="#hidmro" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;p&gt;先从简单的类说起：&lt;/p&gt;
-&lt;pre class="literal-block"&gt;
-class B(object): pass
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="k"&gt;class&lt;/span&gt; &lt;span class="nc"&gt;B&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="nb"&gt;object&lt;/span&gt;&lt;span class="p"&gt;):&lt;/span&gt; &lt;span class="k"&gt;pass&lt;/span&gt;
 
-L[B] = L[B(object)]
-     = B + merge(L[object])
-     = B + L[object]
-     = B object
+&lt;span class="n"&gt;L&lt;/span&gt;&lt;span class="p"&gt;[&lt;/span&gt;&lt;span class="n"&gt;B&lt;/span&gt;&lt;span class="p"&gt;]&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;L&lt;/span&gt;&lt;span class="p"&gt;[&lt;/span&gt;&lt;span class="n"&gt;B&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="nb"&gt;object&lt;/span&gt;&lt;span class="p"&gt;)]&lt;/span&gt;
+     &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;B&lt;/span&gt; &lt;span class="o"&gt;+&lt;/span&gt; &lt;span class="n"&gt;merge&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;L&lt;/span&gt;&lt;span class="p"&gt;[&lt;/span&gt;&lt;span class="nb"&gt;object&lt;/span&gt;&lt;span class="p"&gt;])&lt;/span&gt;
+     &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;B&lt;/span&gt; &lt;span class="o"&gt;+&lt;/span&gt; &lt;span class="n"&gt;L&lt;/span&gt;&lt;span class="p"&gt;[&lt;/span&gt;&lt;span class="nb"&gt;object&lt;/span&gt;&lt;span class="p"&gt;]&lt;/span&gt;
+     &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;B&lt;/span&gt; &lt;span class="nb"&gt;object&lt;/span&gt;
 
-&amp;gt;&amp;gt;&amp;gt; B.mro()
-[&amp;lt;class '__main__.B'&amp;gt;, &amp;lt;type 'object'&amp;gt;]
-&lt;/pre&gt;
+&lt;span class="o"&gt;&amp;gt;&amp;gt;&amp;gt;&lt;/span&gt; &lt;span class="n"&gt;B&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;mro&lt;/span&gt;&lt;span class="p"&gt;()&lt;/span&gt;
+&lt;span class="p"&gt;[&lt;/span&gt;&lt;span class="o"&gt;&amp;lt;&lt;/span&gt;&lt;span class="k"&gt;class&lt;/span&gt; &lt;span class="err"&gt;&amp;#39;&lt;/span&gt;&lt;span class="nc"&gt;__main__&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;B&lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;&amp;gt;, &amp;lt;type &amp;#39;&lt;/span&gt;&lt;span class="nb"&gt;object&lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;&amp;gt;]&lt;/span&gt;
+&lt;/pre&gt;&lt;/div&gt;
 &lt;p&gt;简单的子类:&lt;/p&gt;
-&lt;pre class="literal-block"&gt;
-class C(B): pass
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="k"&gt;class&lt;/span&gt; &lt;span class="nc"&gt;C&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;B&lt;/span&gt;&lt;span class="p"&gt;):&lt;/span&gt; &lt;span class="k"&gt;pass&lt;/span&gt;
 
-L[C] = L[C(B)]
-     = C + merge(L[B])
-     = C + L[B]
-     = C B object     # 从上面已经知道了 L[B] = B object
+&lt;span class="n"&gt;L&lt;/span&gt;&lt;span class="p"&gt;[&lt;/span&gt;&lt;span class="n"&gt;C&lt;/span&gt;&lt;span class="p"&gt;]&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;L&lt;/span&gt;&lt;span class="p"&gt;[&lt;/span&gt;&lt;span class="n"&gt;C&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;B&lt;/span&gt;&lt;span class="p"&gt;)]&lt;/span&gt;
+     &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;C&lt;/span&gt; &lt;span class="o"&gt;+&lt;/span&gt; &lt;span class="n"&gt;merge&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;L&lt;/span&gt;&lt;span class="p"&gt;[&lt;/span&gt;&lt;span class="n"&gt;B&lt;/span&gt;&lt;span class="p"&gt;])&lt;/span&gt;
+     &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;C&lt;/span&gt; &lt;span class="o"&gt;+&lt;/span&gt; &lt;span class="n"&gt;L&lt;/span&gt;&lt;span class="p"&gt;[&lt;/span&gt;&lt;span class="n"&gt;B&lt;/span&gt;&lt;span class="p"&gt;]&lt;/span&gt;
+     &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;C&lt;/span&gt; &lt;span class="n"&gt;B&lt;/span&gt; &lt;span class="nb"&gt;object&lt;/span&gt;     &lt;span class="c1"&gt;# 从上面已经知道了 L[B] = B object&lt;/span&gt;
 
-&amp;gt;&amp;gt;&amp;gt; C.mro()
-[&amp;lt;class '__main__.C'&amp;gt;, &amp;lt;class '__main__.B'&amp;gt;, &amp;lt;type 'object'&amp;gt;]
-&lt;/pre&gt;
+&lt;span class="o"&gt;&amp;gt;&amp;gt;&amp;gt;&lt;/span&gt; &lt;span class="n"&gt;C&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;mro&lt;/span&gt;&lt;span class="p"&gt;()&lt;/span&gt;
+&lt;span class="p"&gt;[&lt;/span&gt;&lt;span class="o"&gt;&amp;lt;&lt;/span&gt;&lt;span class="k"&gt;class&lt;/span&gt; &lt;span class="err"&gt;&amp;#39;&lt;/span&gt;&lt;span class="nc"&gt;__main__&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;C&lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;&amp;gt;, &amp;lt;class &amp;#39;&lt;/span&gt;&lt;span class="n"&gt;__main__&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;B&lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;&amp;gt;, &amp;lt;type &amp;#39;&lt;/span&gt;&lt;span class="nb"&gt;object&lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;&amp;gt;]&lt;/span&gt;
+&lt;/pre&gt;&lt;/div&gt;
 &lt;p&gt;下面来看一个复杂的例子:&lt;/p&gt;
-&lt;pre class="literal-block"&gt;
-&amp;gt;&amp;gt;&amp;gt; O = object
-&amp;gt;&amp;gt;&amp;gt; class F(O): pass
-&amp;gt;&amp;gt;&amp;gt; class E(O): pass
-&amp;gt;&amp;gt;&amp;gt; class D(O): pass
-&amp;gt;&amp;gt;&amp;gt; class C(D,F): pass
-&amp;gt;&amp;gt;&amp;gt; class B(D,E): pass
-&amp;gt;&amp;gt;&amp;gt; class A(B,C): pass
-&lt;/pre&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="o"&gt;&amp;gt;&amp;gt;&amp;gt;&lt;/span&gt; &lt;span class="n"&gt;O&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="nb"&gt;object&lt;/span&gt;
+&lt;span class="o"&gt;&amp;gt;&amp;gt;&amp;gt;&lt;/span&gt; &lt;span class="k"&gt;class&lt;/span&gt; &lt;span class="nc"&gt;F&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;O&lt;/span&gt;&lt;span class="p"&gt;):&lt;/span&gt; &lt;span class="k"&gt;pass&lt;/span&gt;
+&lt;span class="o"&gt;&amp;gt;&amp;gt;&amp;gt;&lt;/span&gt; &lt;span class="k"&gt;class&lt;/span&gt; &lt;span class="nc"&gt;E&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;O&lt;/span&gt;&lt;span class="p"&gt;):&lt;/span&gt; &lt;span class="k"&gt;pass&lt;/span&gt;
+&lt;span class="o"&gt;&amp;gt;&amp;gt;&amp;gt;&lt;/span&gt; &lt;span class="k"&gt;class&lt;/span&gt; &lt;span class="nc"&gt;D&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;O&lt;/span&gt;&lt;span class="p"&gt;):&lt;/span&gt; &lt;span class="k"&gt;pass&lt;/span&gt;
+&lt;span class="o"&gt;&amp;gt;&amp;gt;&amp;gt;&lt;/span&gt; &lt;span class="k"&gt;class&lt;/span&gt; &lt;span class="nc"&gt;C&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;D&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;&lt;span class="n"&gt;F&lt;/span&gt;&lt;span class="p"&gt;):&lt;/span&gt; &lt;span class="k"&gt;pass&lt;/span&gt;
+&lt;span class="o"&gt;&amp;gt;&amp;gt;&amp;gt;&lt;/span&gt; &lt;span class="k"&gt;class&lt;/span&gt; &lt;span class="nc"&gt;B&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;D&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;&lt;span class="n"&gt;E&lt;/span&gt;&lt;span class="p"&gt;):&lt;/span&gt; &lt;span class="k"&gt;pass&lt;/span&gt;
+&lt;span class="o"&gt;&amp;gt;&amp;gt;&amp;gt;&lt;/span&gt; &lt;span class="k"&gt;class&lt;/span&gt; &lt;span class="nc"&gt;A&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;B&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;&lt;span class="n"&gt;C&lt;/span&gt;&lt;span class="p"&gt;):&lt;/span&gt; &lt;span class="k"&gt;pass&lt;/span&gt;
+&lt;/pre&gt;&lt;/div&gt;
 &lt;p&gt;很容易就可以想到:&lt;/p&gt;
-&lt;pre class="literal-block"&gt;
-L[O] = O = object
-L[F] = L[F(O)] = F  O
-L[E] = L[E(O)] = E  O
-L[D] = L[D(O)] = D  O
-&lt;/pre&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="n"&gt;L&lt;/span&gt;&lt;span class="p"&gt;[&lt;/span&gt;&lt;span class="n"&gt;O&lt;/span&gt;&lt;span class="p"&gt;]&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;O&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="nb"&gt;object&lt;/span&gt;
+&lt;span class="n"&gt;L&lt;/span&gt;&lt;span class="p"&gt;[&lt;/span&gt;&lt;span class="n"&gt;F&lt;/span&gt;&lt;span class="p"&gt;]&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;L&lt;/span&gt;&lt;span class="p"&gt;[&lt;/span&gt;&lt;span class="n"&gt;F&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;O&lt;/span&gt;&lt;span class="p"&gt;)]&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;F&lt;/span&gt;  &lt;span class="n"&gt;O&lt;/span&gt;
+&lt;span class="n"&gt;L&lt;/span&gt;&lt;span class="p"&gt;[&lt;/span&gt;&lt;span class="n"&gt;E&lt;/span&gt;&lt;span class="p"&gt;]&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;L&lt;/span&gt;&lt;span class="p"&gt;[&lt;/span&gt;&lt;span class="n"&gt;E&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;O&lt;/span&gt;&lt;span class="p"&gt;)]&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;E&lt;/span&gt;  &lt;span class="n"&gt;O&lt;/span&gt;
+&lt;span class="n"&gt;L&lt;/span&gt;&lt;span class="p"&gt;[&lt;/span&gt;&lt;span class="n"&gt;D&lt;/span&gt;&lt;span class="p"&gt;]&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;L&lt;/span&gt;&lt;span class="p"&gt;[&lt;/span&gt;&lt;span class="n"&gt;D&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;O&lt;/span&gt;&lt;span class="p"&gt;)]&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;D&lt;/span&gt;  &lt;span class="n"&gt;O&lt;/span&gt;
+&lt;/pre&gt;&lt;/div&gt;
 &lt;p&gt;下面来计算 C, B, A:&lt;/p&gt;
 &lt;p&gt;&lt;tt class="docutils literal"&gt;L[C]&lt;/tt&gt;:&lt;/p&gt;
-&lt;pre class="literal-block"&gt;
-L[C] = L[C(D, F)]
-     = C + merge(L[D], L[F], DF)
-     # 从前面可知 L[D] 和 L[F] 的结果
-     = C +  merge(DO, FO, DF)
-     # 因为 D 是顺序第一个并且在几个包含 D 的 list 中是 head，
-     # 所以这一次取 D 同时从列表中删除 D
-     = C + D + merge(O, FO, F)
-     # 因为 O 虽然是顺序第一个但在其他 list (FO)中不是 head, 跳过,
-     # 改为检查第二个list FO # F 是第二个 list 和其他 list 的 head,
-     # 取 F同时从列表中删除 F
-     = C + D + F + merge(O)
-     = C D F O
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="n"&gt;L&lt;/span&gt;&lt;span class="p"&gt;[&lt;/span&gt;&lt;span class="n"&gt;C&lt;/span&gt;&lt;span class="p"&gt;]&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;L&lt;/span&gt;&lt;span class="p"&gt;[&lt;/span&gt;&lt;span class="n"&gt;C&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;D&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;F&lt;/span&gt;&lt;span class="p"&gt;)]&lt;/span&gt;
+     &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;C&lt;/span&gt; &lt;span class="o"&gt;+&lt;/span&gt; &lt;span class="n"&gt;merge&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;L&lt;/span&gt;&lt;span class="p"&gt;[&lt;/span&gt;&lt;span class="n"&gt;D&lt;/span&gt;&lt;span class="p"&gt;],&lt;/span&gt; &lt;span class="n"&gt;L&lt;/span&gt;&lt;span class="p"&gt;[&lt;/span&gt;&lt;span class="n"&gt;F&lt;/span&gt;&lt;span class="p"&gt;],&lt;/span&gt; &lt;span class="n"&gt;DF&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+     &lt;span class="c1"&gt;# 从前面可知 L[D] 和 L[F] 的结果&lt;/span&gt;
+     &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;C&lt;/span&gt; &lt;span class="o"&gt;+&lt;/span&gt;  &lt;span class="n"&gt;merge&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;DO&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;FO&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;DF&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+     &lt;span class="c1"&gt;# 因为 D 是顺序第一个并且在几个包含 D 的 list 中是 head，&lt;/span&gt;
+     &lt;span class="c1"&gt;# 所以这一次取 D 同时从列表中删除 D&lt;/span&gt;
+     &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;C&lt;/span&gt; &lt;span class="o"&gt;+&lt;/span&gt; &lt;span class="n"&gt;D&lt;/span&gt; &lt;span class="o"&gt;+&lt;/span&gt; &lt;span class="n"&gt;merge&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;O&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;FO&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;F&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+     &lt;span class="c1"&gt;# 因为 O 虽然是顺序第一个但在其他 list (FO)中不是 head, 跳过,&lt;/span&gt;
+     &lt;span class="c1"&gt;# 改为检查第二个list FO&lt;/span&gt;
+     &lt;span class="c1"&gt;# F 是第二个 list 和其他 list 的 head,&lt;/span&gt;
+     &lt;span class="c1"&gt;# 取 F同时从列表中删除 F&lt;/span&gt;
+     &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;C&lt;/span&gt; &lt;span class="o"&gt;+&lt;/span&gt; &lt;span class="n"&gt;D&lt;/span&gt; &lt;span class="o"&gt;+&lt;/span&gt; &lt;span class="n"&gt;F&lt;/span&gt; &lt;span class="o"&gt;+&lt;/span&gt; &lt;span class="n"&gt;merge&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;O&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+     &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;C&lt;/span&gt; &lt;span class="n"&gt;D&lt;/span&gt; &lt;span class="n"&gt;F&lt;/span&gt; &lt;span class="n"&gt;O&lt;/span&gt;
 
-&amp;gt;&amp;gt;&amp;gt; C.mro()
-[&amp;lt;class '__main__.C'&amp;gt;, &amp;lt;class '__main__.D'&amp;gt;, &amp;lt;class '__main__.F'&amp;gt;, &amp;lt;type 'object'&amp;gt;]
-&lt;/pre&gt;
+&lt;span class="o"&gt;&amp;gt;&amp;gt;&amp;gt;&lt;/span&gt; &lt;span class="n"&gt;C&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;mro&lt;/span&gt;&lt;span class="p"&gt;()&lt;/span&gt;
+&lt;span class="p"&gt;[&lt;/span&gt;&lt;span class="o"&gt;&amp;lt;&lt;/span&gt;&lt;span class="k"&gt;class&lt;/span&gt; &lt;span class="err"&gt;&amp;#39;&lt;/span&gt;&lt;span class="nc"&gt;__main__&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;C&lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;&amp;gt;, &amp;lt;class &amp;#39;&lt;/span&gt;&lt;span class="n"&gt;__main__&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;D&lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;&amp;gt;, &amp;lt;class &amp;#39;&lt;/span&gt;&lt;span class="n"&gt;__main__&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;F&lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;&amp;gt;, &amp;lt;type &amp;#39;&lt;/span&gt;&lt;span class="nb"&gt;object&lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;&amp;gt;]&lt;/span&gt;
+&lt;/pre&gt;&lt;/div&gt;
 &lt;p&gt;&lt;tt class="docutils literal"&gt;L[B]&lt;/tt&gt;:&lt;/p&gt;
-&lt;pre class="literal-block"&gt;
-L[B] = L[B(D, E)]
-     = B + merge(L[D], L[E], DE)
-     = B + merge(DO, EO, DE)
-     = B + D + merge(O, EO, E)
-     = B + D + E + merge(O)
-     = B D E O
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="n"&gt;L&lt;/span&gt;&lt;span class="p"&gt;[&lt;/span&gt;&lt;span class="n"&gt;B&lt;/span&gt;&lt;span class="p"&gt;]&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;L&lt;/span&gt;&lt;span class="p"&gt;[&lt;/span&gt;&lt;span class="n"&gt;B&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;D&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;E&lt;/span&gt;&lt;span class="p"&gt;)]&lt;/span&gt;
+     &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;B&lt;/span&gt; &lt;span class="o"&gt;+&lt;/span&gt; &lt;span class="n"&gt;merge&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;L&lt;/span&gt;&lt;span class="p"&gt;[&lt;/span&gt;&lt;span class="n"&gt;D&lt;/span&gt;&lt;span class="p"&gt;],&lt;/span&gt; &lt;span class="n"&gt;L&lt;/span&gt;&lt;span class="p"&gt;[&lt;/span&gt;&lt;span class="n"&gt;E&lt;/span&gt;&lt;span class="p"&gt;],&lt;/span&gt; &lt;span class="n"&gt;DE&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+     &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;B&lt;/span&gt; &lt;span class="o"&gt;+&lt;/span&gt; &lt;span class="n"&gt;merge&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;DO&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;EO&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;DE&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+     &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;B&lt;/span&gt; &lt;span class="o"&gt;+&lt;/span&gt; &lt;span class="n"&gt;D&lt;/span&gt; &lt;span class="o"&gt;+&lt;/span&gt; &lt;span class="n"&gt;merge&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;O&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;EO&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;E&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+     &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;B&lt;/span&gt; &lt;span class="o"&gt;+&lt;/span&gt; &lt;span class="n"&gt;D&lt;/span&gt; &lt;span class="o"&gt;+&lt;/span&gt; &lt;span class="n"&gt;E&lt;/span&gt; &lt;span class="o"&gt;+&lt;/span&gt; &lt;span class="n"&gt;merge&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;O&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+     &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;B&lt;/span&gt; &lt;span class="n"&gt;D&lt;/span&gt; &lt;span class="n"&gt;E&lt;/span&gt; &lt;span class="n"&gt;O&lt;/span&gt;
 
-&amp;gt;&amp;gt;&amp;gt; B.mro()
-[&amp;lt;class '__main__.B'&amp;gt;, &amp;lt;class '__main__.D'&amp;gt;, &amp;lt;class '__main__.E'&amp;gt;, &amp;lt;type 'object'&amp;gt;]
-&lt;/pre&gt;
+&lt;span class="o"&gt;&amp;gt;&amp;gt;&amp;gt;&lt;/span&gt; &lt;span class="n"&gt;B&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;mro&lt;/span&gt;&lt;span class="p"&gt;()&lt;/span&gt;
+&lt;span class="p"&gt;[&lt;/span&gt;&lt;span class="o"&gt;&amp;lt;&lt;/span&gt;&lt;span class="k"&gt;class&lt;/span&gt; &lt;span class="err"&gt;&amp;#39;&lt;/span&gt;&lt;span class="nc"&gt;__main__&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;B&lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;&amp;gt;, &amp;lt;class &amp;#39;&lt;/span&gt;&lt;span class="n"&gt;__main__&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;D&lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;&amp;gt;, &amp;lt;class &amp;#39;&lt;/span&gt;&lt;span class="n"&gt;__main__&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;E&lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;&amp;gt;, &amp;lt;type &amp;#39;&lt;/span&gt;&lt;span class="nb"&gt;object&lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;&amp;gt;]&lt;/span&gt;
+&lt;/pre&gt;&lt;/div&gt;
 &lt;p&gt;&lt;tt class="docutils literal"&gt;L[A]&lt;/tt&gt;:&lt;/p&gt;
-&lt;pre class="literal-block"&gt;
-L[A] = L[A(B, C)]
-     = A + merge(L(B), L(C), BC)
-     = A + merge(BDEO, CDFO, BC)
-     = A + B + merge(DEO, CDFO, C)
-     # 注意这里是 C , 因为第一个list 的 head D 不是其他list 的 head
-     # 所以改为从下一个 list CDFO 开始
-     = A + B + C + merge(DEO, DFO)
-     = A + B + C + D + merge(EO, FO)
-     = A + B + C  + D + E + merge(O, FO)
-     = A + B + C + D + E + F + merge(O)
-     = A B C D E F O
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="n"&gt;L&lt;/span&gt;&lt;span class="p"&gt;[&lt;/span&gt;&lt;span class="n"&gt;A&lt;/span&gt;&lt;span class="p"&gt;]&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;L&lt;/span&gt;&lt;span class="p"&gt;[&lt;/span&gt;&lt;span class="n"&gt;A&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;B&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;C&lt;/span&gt;&lt;span class="p"&gt;)]&lt;/span&gt;
+     &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;A&lt;/span&gt; &lt;span class="o"&gt;+&lt;/span&gt; &lt;span class="n"&gt;merge&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;L&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;B&lt;/span&gt;&lt;span class="p"&gt;),&lt;/span&gt; &lt;span class="n"&gt;L&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;C&lt;/span&gt;&lt;span class="p"&gt;),&lt;/span&gt; &lt;span class="n"&gt;BC&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+     &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;A&lt;/span&gt; &lt;span class="o"&gt;+&lt;/span&gt; &lt;span class="n"&gt;merge&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;BDEO&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;CDFO&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;BC&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+     &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;A&lt;/span&gt; &lt;span class="o"&gt;+&lt;/span&gt; &lt;span class="n"&gt;B&lt;/span&gt; &lt;span class="o"&gt;+&lt;/span&gt; &lt;span class="n"&gt;merge&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;DEO&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;CDFO&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;C&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+     &lt;span class="c1"&gt;# 注意这里是 C , 因为第一个list 的 head D 不是其他list 的 head&lt;/span&gt;
+     &lt;span class="c1"&gt;# 所以改为从下一个 list CDFO 开始&lt;/span&gt;
+     &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;A&lt;/span&gt; &lt;span class="o"&gt;+&lt;/span&gt; &lt;span class="n"&gt;B&lt;/span&gt; &lt;span class="o"&gt;+&lt;/span&gt; &lt;span class="n"&gt;C&lt;/span&gt; &lt;span class="o"&gt;+&lt;/span&gt; &lt;span class="n"&gt;merge&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;DEO&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;DFO&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+     &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;A&lt;/span&gt; &lt;span class="o"&gt;+&lt;/span&gt; &lt;span class="n"&gt;B&lt;/span&gt; &lt;span class="o"&gt;+&lt;/span&gt; &lt;span class="n"&gt;C&lt;/span&gt; &lt;span class="o"&gt;+&lt;/span&gt; &lt;span class="n"&gt;D&lt;/span&gt; &lt;span class="o"&gt;+&lt;/span&gt; &lt;span class="n"&gt;merge&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;EO&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;FO&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+     &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;A&lt;/span&gt; &lt;span class="o"&gt;+&lt;/span&gt; &lt;span class="n"&gt;B&lt;/span&gt; &lt;span class="o"&gt;+&lt;/span&gt; &lt;span class="n"&gt;C&lt;/span&gt;  &lt;span class="o"&gt;+&lt;/span&gt; &lt;span class="n"&gt;D&lt;/span&gt; &lt;span class="o"&gt;+&lt;/span&gt; &lt;span class="n"&gt;E&lt;/span&gt; &lt;span class="o"&gt;+&lt;/span&gt; &lt;span class="n"&gt;merge&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;O&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;FO&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+     &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;A&lt;/span&gt; &lt;span class="o"&gt;+&lt;/span&gt; &lt;span class="n"&gt;B&lt;/span&gt; &lt;span class="o"&gt;+&lt;/span&gt; &lt;span class="n"&gt;C&lt;/span&gt; &lt;span class="o"&gt;+&lt;/span&gt; &lt;span class="n"&gt;D&lt;/span&gt; &lt;span class="o"&gt;+&lt;/span&gt; &lt;span class="n"&gt;E&lt;/span&gt; &lt;span class="o"&gt;+&lt;/span&gt; &lt;span class="n"&gt;F&lt;/span&gt; &lt;span class="o"&gt;+&lt;/span&gt; &lt;span class="n"&gt;merge&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;O&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+     &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;A&lt;/span&gt; &lt;span class="n"&gt;B&lt;/span&gt; &lt;span class="n"&gt;C&lt;/span&gt; &lt;span class="n"&gt;D&lt;/span&gt; &lt;span class="n"&gt;E&lt;/span&gt; &lt;span class="n"&gt;F&lt;/span&gt; &lt;span class="n"&gt;O&lt;/span&gt;
 
-&amp;gt;&amp;gt;&amp;gt; A.mro()
-[&amp;lt;class '__main__.A'&amp;gt;, &amp;lt;class '__main__.B'&amp;gt;, &amp;lt;class '__main__.C'&amp;gt;,
- &amp;lt;class '__main__.D'&amp;gt;, &amp;lt;class '__main__.E'&amp;gt;, &amp;lt;class '__main__.F'&amp;gt;, &amp;lt;type 'object'&amp;gt;]
-&lt;/pre&gt;
+&lt;span class="o"&gt;&amp;gt;&amp;gt;&amp;gt;&lt;/span&gt; &lt;span class="n"&gt;A&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;mro&lt;/span&gt;&lt;span class="p"&gt;()&lt;/span&gt;
+&lt;span class="p"&gt;[&lt;/span&gt;&lt;span class="o"&gt;&amp;lt;&lt;/span&gt;&lt;span class="k"&gt;class&lt;/span&gt; &lt;span class="err"&gt;&amp;#39;&lt;/span&gt;&lt;span class="nc"&gt;__main__&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;A&lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;&amp;gt;, &amp;lt;class &amp;#39;&lt;/span&gt;&lt;span class="n"&gt;__main__&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;B&lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;&amp;gt;, &amp;lt;class &amp;#39;&lt;/span&gt;&lt;span class="n"&gt;__main__&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;C&lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;&amp;gt;,&lt;/span&gt;
+ &lt;span class="o"&gt;&amp;lt;&lt;/span&gt;&lt;span class="k"&gt;class&lt;/span&gt; &lt;span class="err"&gt;&amp;#39;&lt;/span&gt;&lt;span class="nc"&gt;__main__&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;D&lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;&amp;gt;, &amp;lt;class &amp;#39;&lt;/span&gt;&lt;span class="n"&gt;__main__&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;E&lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;&amp;gt;, &amp;lt;class &amp;#39;&lt;/span&gt;&lt;span class="n"&gt;__main__&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;F&lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;&amp;gt;, &amp;lt;type &amp;#39;&lt;/span&gt;&lt;span class="nb"&gt;object&lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;&amp;gt;]&lt;/span&gt;
+&lt;/pre&gt;&lt;/div&gt;
 &lt;p&gt;到这里应该已经有一点眉目了。下面再来个上面那些类的变种，可以先自己算算看，后面有详细的计算过程。&lt;/p&gt;
-&lt;pre class="literal-block"&gt;
-&amp;gt;&amp;gt;&amp;gt; O = object
-&amp;gt;&amp;gt;&amp;gt; class F(O): pass
-&amp;gt;&amp;gt;&amp;gt; class E(O): pass
-&amp;gt;&amp;gt;&amp;gt; class D(O): pass
-&amp;gt;&amp;gt;&amp;gt; class C(D,F): pass
-&amp;gt;&amp;gt;&amp;gt; class B(E,D): pass
-&amp;gt;&amp;gt;&amp;gt; class A(B,C): pass
-&lt;/pre&gt;
-&lt;p&gt;跟之前唯一的区别是 &lt;tt class="docutils literal"&gt;B(D, E)&lt;/tt&gt; 变成了 &lt;tt class="docutils literal"&gt;B(E, D)&lt;/tt&gt;&lt;/p&gt;
-&lt;pre class="literal-block"&gt;
-L[O] = O = object
-L[F(O)] = F  O
-L[E(O)] = E  O
-L[D(O)] = D  O
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="o"&gt;&amp;gt;&amp;gt;&amp;gt;&lt;/span&gt; &lt;span class="n"&gt;O&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="nb"&gt;object&lt;/span&gt;
+&lt;span class="o"&gt;&amp;gt;&amp;gt;&amp;gt;&lt;/span&gt; &lt;span class="k"&gt;class&lt;/span&gt; &lt;span class="nc"&gt;F&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;O&lt;/span&gt;&lt;span class="p"&gt;):&lt;/span&gt; &lt;span class="k"&gt;pass&lt;/span&gt;
+&lt;span class="o"&gt;&amp;gt;&amp;gt;&amp;gt;&lt;/span&gt; &lt;span class="k"&gt;class&lt;/span&gt; &lt;span class="nc"&gt;E&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;O&lt;/span&gt;&lt;span class="p"&gt;):&lt;/span&gt; &lt;span class="k"&gt;pass&lt;/span&gt;
+&lt;span class="o"&gt;&amp;gt;&amp;gt;&amp;gt;&lt;/span&gt; &lt;span class="k"&gt;class&lt;/span&gt; &lt;span class="nc"&gt;D&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;O&lt;/span&gt;&lt;span class="p"&gt;):&lt;/span&gt; &lt;span class="k"&gt;pass&lt;/span&gt;
+&lt;span class="o"&gt;&amp;gt;&amp;gt;&amp;gt;&lt;/span&gt; &lt;span class="k"&gt;class&lt;/span&gt; &lt;span class="nc"&gt;C&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;D&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;&lt;span class="n"&gt;F&lt;/span&gt;&lt;span class="p"&gt;):&lt;/span&gt; &lt;span class="k"&gt;pass&lt;/span&gt;
+&lt;span class="o"&gt;&amp;gt;&amp;gt;&amp;gt;&lt;/span&gt; &lt;span class="k"&gt;class&lt;/span&gt; &lt;span class="nc"&gt;B&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;E&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;&lt;span class="n"&gt;D&lt;/span&gt;&lt;span class="p"&gt;):&lt;/span&gt; &lt;span class="k"&gt;pass&lt;/span&gt;
+&lt;span class="o"&gt;&amp;gt;&amp;gt;&amp;gt;&lt;/span&gt; &lt;span class="k"&gt;class&lt;/span&gt; &lt;span class="nc"&gt;A&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;B&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;&lt;span class="n"&gt;C&lt;/span&gt;&lt;span class="p"&gt;):&lt;/span&gt; &lt;span class="k"&gt;pass&lt;/span&gt;
+&lt;/pre&gt;&lt;/div&gt;
+&lt;p&gt;跟之前唯一的区别是 &lt;tt class="docutils literal"&gt;B(D, E)&lt;/tt&gt; 变成了 &lt;tt class="docutils literal"&gt;B(E, D)&lt;/tt&gt; :&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="n"&gt;L&lt;/span&gt;&lt;span class="p"&gt;[&lt;/span&gt;&lt;span class="n"&gt;O&lt;/span&gt;&lt;span class="p"&gt;]&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;O&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="nb"&gt;object&lt;/span&gt;
+&lt;span class="n"&gt;L&lt;/span&gt;&lt;span class="p"&gt;[&lt;/span&gt;&lt;span class="n"&gt;F&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;O&lt;/span&gt;&lt;span class="p"&gt;)]&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;F&lt;/span&gt;  &lt;span class="n"&gt;O&lt;/span&gt;
+&lt;span class="n"&gt;L&lt;/span&gt;&lt;span class="p"&gt;[&lt;/span&gt;&lt;span class="n"&gt;E&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;O&lt;/span&gt;&lt;span class="p"&gt;)]&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;E&lt;/span&gt;  &lt;span class="n"&gt;O&lt;/span&gt;
+&lt;span class="n"&gt;L&lt;/span&gt;&lt;span class="p"&gt;[&lt;/span&gt;&lt;span class="n"&gt;D&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;O&lt;/span&gt;&lt;span class="p"&gt;)]&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;D&lt;/span&gt;  &lt;span class="n"&gt;O&lt;/span&gt;
 
-L[C] = L[C(D, F)]
-     = C + merge(L[D], L[F], DF)
-     = C D F O
+&lt;span class="n"&gt;L&lt;/span&gt;&lt;span class="p"&gt;[&lt;/span&gt;&lt;span class="n"&gt;C&lt;/span&gt;&lt;span class="p"&gt;]&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;L&lt;/span&gt;&lt;span class="p"&gt;[&lt;/span&gt;&lt;span class="n"&gt;C&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;D&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;F&lt;/span&gt;&lt;span class="p"&gt;)]&lt;/span&gt;
+     &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;C&lt;/span&gt; &lt;span class="o"&gt;+&lt;/span&gt; &lt;span class="n"&gt;merge&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;L&lt;/span&gt;&lt;span class="p"&gt;[&lt;/span&gt;&lt;span class="n"&gt;D&lt;/span&gt;&lt;span class="p"&gt;],&lt;/span&gt; &lt;span class="n"&gt;L&lt;/span&gt;&lt;span class="p"&gt;[&lt;/span&gt;&lt;span class="n"&gt;F&lt;/span&gt;&lt;span class="p"&gt;],&lt;/span&gt; &lt;span class="n"&gt;DF&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+     &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;C&lt;/span&gt; &lt;span class="n"&gt;D&lt;/span&gt; &lt;span class="n"&gt;F&lt;/span&gt; &lt;span class="n"&gt;O&lt;/span&gt;
 
-L[B] = L[B(E, D)]
-     = B + merge(L[E], L[D], ED)
-     = B + merge(EO, DO, ED)
-     = B + E + merge(O, DO, D)
-     = B + E + D + merge(O)
-     = B E D O
-&amp;gt;&amp;gt;&amp;gt; B.mro()
-[&amp;lt;class '__main__.B'&amp;gt;, &amp;lt;class '__main__.E'&amp;gt;, &amp;lt;class '__main__.D'&amp;gt;, &amp;lt;type 'object'&amp;gt;]
+&lt;span class="n"&gt;L&lt;/span&gt;&lt;span class="p"&gt;[&lt;/span&gt;&lt;span class="n"&gt;B&lt;/span&gt;&lt;span class="p"&gt;]&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;L&lt;/span&gt;&lt;span class="p"&gt;[&lt;/span&gt;&lt;span class="n"&gt;B&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;E&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;D&lt;/span&gt;&lt;span class="p"&gt;)]&lt;/span&gt;
+     &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;B&lt;/span&gt; &lt;span class="o"&gt;+&lt;/span&gt; &lt;span class="n"&gt;merge&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;L&lt;/span&gt;&lt;span class="p"&gt;[&lt;/span&gt;&lt;span class="n"&gt;E&lt;/span&gt;&lt;span class="p"&gt;],&lt;/span&gt; &lt;span class="n"&gt;L&lt;/span&gt;&lt;span class="p"&gt;[&lt;/span&gt;&lt;span class="n"&gt;D&lt;/span&gt;&lt;span class="p"&gt;],&lt;/span&gt; &lt;span class="n"&gt;ED&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+     &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;B&lt;/span&gt; &lt;span class="o"&gt;+&lt;/span&gt; &lt;span class="n"&gt;merge&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;EO&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;DO&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;ED&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+     &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;B&lt;/span&gt; &lt;span class="o"&gt;+&lt;/span&gt; &lt;span class="n"&gt;E&lt;/span&gt; &lt;span class="o"&gt;+&lt;/span&gt; &lt;span class="n"&gt;merge&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;O&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;DO&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;D&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+     &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;B&lt;/span&gt; &lt;span class="o"&gt;+&lt;/span&gt; &lt;span class="n"&gt;E&lt;/span&gt; &lt;span class="o"&gt;+&lt;/span&gt; &lt;span class="n"&gt;D&lt;/span&gt; &lt;span class="o"&gt;+&lt;/span&gt; &lt;span class="n"&gt;merge&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;O&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+     &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;B&lt;/span&gt; &lt;span class="n"&gt;E&lt;/span&gt; &lt;span class="n"&gt;D&lt;/span&gt; &lt;span class="n"&gt;O&lt;/span&gt;
+&lt;span class="o"&gt;&amp;gt;&amp;gt;&amp;gt;&lt;/span&gt; &lt;span class="n"&gt;B&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;mro&lt;/span&gt;&lt;span class="p"&gt;()&lt;/span&gt;
+&lt;span class="p"&gt;[&lt;/span&gt;&lt;span class="o"&gt;&amp;lt;&lt;/span&gt;&lt;span class="k"&gt;class&lt;/span&gt; &lt;span class="err"&gt;&amp;#39;&lt;/span&gt;&lt;span class="nc"&gt;__main__&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;B&lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;&amp;gt;, &amp;lt;class &amp;#39;&lt;/span&gt;&lt;span class="n"&gt;__main__&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;E&lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;&amp;gt;, &amp;lt;class &amp;#39;&lt;/span&gt;&lt;span class="n"&gt;__main__&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;D&lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;&amp;gt;, &amp;lt;type &amp;#39;&lt;/span&gt;&lt;span class="nb"&gt;object&lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;&amp;gt;]&lt;/span&gt;
 
-L[A] = L[A(B, C)]
-     = A + merge(L[B], L[C], BC)
-     = A + merge(BEDO, CDFO, BC)
-     = A + B + merge(EDO, CDFO, C)
-     = A + B + E + merge(DO, CDFO, C)
-     = A + B + E + C + merge(DO, DFO)
-     = A + B + E + C + D + merge(O, FO)
-     = A + B + E + C + D + F + merge(O)
-     = A B E C D F O
-&amp;gt;&amp;gt;&amp;gt; A.mro()
-[&amp;lt;class '__main__.A'&amp;gt;, &amp;lt;class '__main__.B'&amp;gt;, &amp;lt;class '__main__.E'&amp;gt;,
- &amp;lt;class '__main__.C'&amp;gt;, &amp;lt;class '__main__.D'&amp;gt;, &amp;lt;class '__main__.F'&amp;gt;, &amp;lt;type 'object'&amp;gt;]
-&lt;/pre&gt;
+&lt;span class="n"&gt;L&lt;/span&gt;&lt;span class="p"&gt;[&lt;/span&gt;&lt;span class="n"&gt;A&lt;/span&gt;&lt;span class="p"&gt;]&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;L&lt;/span&gt;&lt;span class="p"&gt;[&lt;/span&gt;&lt;span class="n"&gt;A&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;B&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;C&lt;/span&gt;&lt;span class="p"&gt;)]&lt;/span&gt;
+     &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;A&lt;/span&gt; &lt;span class="o"&gt;+&lt;/span&gt; &lt;span class="n"&gt;merge&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;L&lt;/span&gt;&lt;span class="p"&gt;[&lt;/span&gt;&lt;span class="n"&gt;B&lt;/span&gt;&lt;span class="p"&gt;],&lt;/span&gt; &lt;span class="n"&gt;L&lt;/span&gt;&lt;span class="p"&gt;[&lt;/span&gt;&lt;span class="n"&gt;C&lt;/span&gt;&lt;span class="p"&gt;],&lt;/span&gt; &lt;span class="n"&gt;BC&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+     &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;A&lt;/span&gt; &lt;span class="o"&gt;+&lt;/span&gt; &lt;span class="n"&gt;merge&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;BEDO&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;CDFO&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;BC&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+     &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;A&lt;/span&gt; &lt;span class="o"&gt;+&lt;/span&gt; &lt;span class="n"&gt;B&lt;/span&gt; &lt;span class="o"&gt;+&lt;/span&gt; &lt;span class="n"&gt;merge&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;EDO&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;CDFO&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;C&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+     &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;A&lt;/span&gt; &lt;span class="o"&gt;+&lt;/span&gt; &lt;span class="n"&gt;B&lt;/span&gt; &lt;span class="o"&gt;+&lt;/span&gt; &lt;span class="n"&gt;E&lt;/span&gt; &lt;span class="o"&gt;+&lt;/span&gt; &lt;span class="n"&gt;merge&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;DO&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;CDFO&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;C&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+     &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;A&lt;/span&gt; &lt;span class="o"&gt;+&lt;/span&gt; &lt;span class="n"&gt;B&lt;/span&gt; &lt;span class="o"&gt;+&lt;/span&gt; &lt;span class="n"&gt;E&lt;/span&gt; &lt;span class="o"&gt;+&lt;/span&gt; &lt;span class="n"&gt;C&lt;/span&gt; &lt;span class="o"&gt;+&lt;/span&gt; &lt;span class="n"&gt;merge&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;DO&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;DFO&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+     &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;A&lt;/span&gt; &lt;span class="o"&gt;+&lt;/span&gt; &lt;span class="n"&gt;B&lt;/span&gt; &lt;span class="o"&gt;+&lt;/span&gt; &lt;span class="n"&gt;E&lt;/span&gt; &lt;span class="o"&gt;+&lt;/span&gt; &lt;span class="n"&gt;C&lt;/span&gt; &lt;span class="o"&gt;+&lt;/span&gt; &lt;span class="n"&gt;D&lt;/span&gt; &lt;span class="o"&gt;+&lt;/span&gt; &lt;span class="n"&gt;merge&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;O&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;FO&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+     &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;A&lt;/span&gt; &lt;span class="o"&gt;+&lt;/span&gt; &lt;span class="n"&gt;B&lt;/span&gt; &lt;span class="o"&gt;+&lt;/span&gt; &lt;span class="n"&gt;E&lt;/span&gt; &lt;span class="o"&gt;+&lt;/span&gt; &lt;span class="n"&gt;C&lt;/span&gt; &lt;span class="o"&gt;+&lt;/span&gt; &lt;span class="n"&gt;D&lt;/span&gt; &lt;span class="o"&gt;+&lt;/span&gt; &lt;span class="n"&gt;F&lt;/span&gt; &lt;span class="o"&gt;+&lt;/span&gt; &lt;span class="n"&gt;merge&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;O&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+     &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;A&lt;/span&gt; &lt;span class="n"&gt;B&lt;/span&gt; &lt;span class="n"&gt;E&lt;/span&gt; &lt;span class="n"&gt;C&lt;/span&gt; &lt;span class="n"&gt;D&lt;/span&gt; &lt;span class="n"&gt;F&lt;/span&gt; &lt;span class="n"&gt;O&lt;/span&gt;
+&lt;span class="o"&gt;&amp;gt;&amp;gt;&amp;gt;&lt;/span&gt; &lt;span class="n"&gt;A&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;mro&lt;/span&gt;&lt;span class="p"&gt;()&lt;/span&gt;
+&lt;span class="p"&gt;[&lt;/span&gt;&lt;span class="o"&gt;&amp;lt;&lt;/span&gt;&lt;span class="k"&gt;class&lt;/span&gt; &lt;span class="err"&gt;&amp;#39;&lt;/span&gt;&lt;span class="nc"&gt;__main__&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;A&lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;&amp;gt;, &amp;lt;class &amp;#39;&lt;/span&gt;&lt;span class="n"&gt;__main__&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;B&lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;&amp;gt;, &amp;lt;class &amp;#39;&lt;/span&gt;&lt;span class="n"&gt;__main__&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;E&lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;&amp;gt;,&lt;/span&gt;
+ &lt;span class="o"&gt;&amp;lt;&lt;/span&gt;&lt;span class="k"&gt;class&lt;/span&gt; &lt;span class="err"&gt;&amp;#39;&lt;/span&gt;&lt;span class="nc"&gt;__main__&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;C&lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;&amp;gt;, &amp;lt;class &amp;#39;&lt;/span&gt;&lt;span class="n"&gt;__main__&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;D&lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;&amp;gt;, &amp;lt;class &amp;#39;&lt;/span&gt;&lt;span class="n"&gt;__main__&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;F&lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;&amp;gt;, &amp;lt;type &amp;#39;&lt;/span&gt;&lt;span class="nb"&gt;object&lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;&amp;gt;]&lt;/span&gt;
+&lt;/pre&gt;&lt;/div&gt;
 &lt;p&gt;通过这几个例子应该对如何计算 MRO 已经有所了解了，更详细的信息可以阅读 &lt;a class="reference external" href="https://www.python.org/download/releases/2.3/mro/"&gt;python MRO 文档&lt;/a&gt;
 以及 wikipedia 中的 &lt;a class="reference external" href="https://en.wikipedia.org/wiki/C3_linearization"&gt;C3 算法&lt;/a&gt;.&lt;/p&gt;
 &lt;/div&gt;
-&lt;div class="section" id="id1"&gt;
-&lt;h2 id="hidid1"&gt;参考资料&lt;a class="headerlink" href="#hidid1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;div class="section" id="id2"&gt;
+&lt;h2 id="hidid2"&gt;参考资料&lt;a class="headerlink" href="#hidid2" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;ul class="simple"&gt;
 &lt;li&gt;&lt;a class="reference external" href="https://www.python.org/download/releases/2.3/mro/"&gt;The Python 2.3 Method Resolution Order | Python.org&lt;/a&gt;&lt;/li&gt;
 &lt;li&gt;&lt;a class="reference external" href="https://en.wikipedia.org/wiki/C3_linearization"&gt;C3 linearization - Wikipedia&lt;/a&gt;&lt;/li&gt;
 &lt;/ul&gt;
+&lt;table class="docutils footnote" frame="void" id="id3" rules="none"&gt;
+&lt;colgroup&gt;&lt;col class="label" /&gt;&lt;col /&gt;&lt;/colgroup&gt;
+&lt;tbody valign="top"&gt;
+&lt;tr&gt;&lt;td class="label"&gt;&lt;a class="fn-backref" href="#id1"&gt;[1]&lt;/a&gt;&lt;/td&gt;&lt;td&gt;: &lt;a class="reference external" href="https://www.python.org/download/releases/2.3/mro/"&gt;The Python 2.3 Method Resolution Order | Python.org&lt;/a&gt;&lt;/td&gt;&lt;/tr&gt;
+&lt;/tbody&gt;
+&lt;/table&gt;
 &lt;/div&gt;
 </summary></entry><entry><title>Python: threading + multiprocessing + logging = 死锁 ?</title><link href="https://mozillazg.com/2016/09/python-threading-multiprocessing-logging-equal-deadlock.html" rel="alternate"></link><updated>2016-09-18T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2016-09-18:2016/09/python-threading-multiprocessing-logging-equal-deadlock.html</id><summary type="html">&lt;p&gt;前段时间有个程序突然出现了子进程不工作的情况。&lt;/p&gt;
 &lt;p&gt;后来通过调查发现是因为程序中同时使用了多线程，多进程以及 logging
