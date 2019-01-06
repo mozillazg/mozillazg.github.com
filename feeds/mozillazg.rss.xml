@@ -1,5 +1,70 @@
 <?xml version="1.0" encoding="utf-8"?>
-<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom"><channel><title>Huang Huang 的博客</title><link>https://mozillazg.com/</link><description></description><atom:link href="https://mozillazg.com/feeds/mozillazg.rss.xml" rel="self"></atom:link><lastBuildDate>Thu, 16 Aug 2018 00:00:00 +0000</lastBuildDate><item><title>调用远程服务的一些备忘录</title><link>https://mozillazg.com/2018/08/call-remote-service-checklist.html</link><description>&lt;div class="section" id="id2"&gt;
+<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom"><channel><title>Huang Huang 的博客</title><link>https://mozillazg.com/</link><description></description><atom:link href="https://mozillazg.com/feeds/mozillazg.rss.xml" rel="self"></atom:link><lastBuildDate>Thu, 03 Jan 2019 00:00:00 +0000</lastBuildDate><item><title>rate limiting 之 token bucket</title><link>https://mozillazg.com/2019/01/rate-limiting-intro-token-bucket.html</link><description>&lt;div class="section" id="id1"&gt;
+&lt;h2 id="hidid1"&gt;前言&lt;a class="headerlink" href="#hidid1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;在实现限速功能的时候，其中一种常用的方法是使用 token bucket 算法来实现。&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class="section" id="token-bucket"&gt;
+&lt;h2 id="hidtoken-bucket"&gt;token bucket&lt;a class="headerlink" href="#hidtoken-bucket" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;&lt;img alt="token bucket" src="/static/images/other/token_bucket.jpg" /&gt;&lt;/p&gt;
+&lt;p&gt;(图片来自 &lt;a class="reference external" href="https://gateoverflow.in/39720/gate2016-1-54"&gt;https://gateoverflow.in/39720/gate2016-1-54&lt;/a&gt; ）&lt;/p&gt;
+&lt;p&gt;token bucket 常见的中文解释是：令牌桶算法的原理是系统会以一个恒定的速度往桶里放入令牌，而如果请求需要被处理，则需要先从桶里获取一个令牌，当桶里没有令牌可取时，则拒绝服务 &lt;a class="footnote-reference" href="#id7" id="id2"&gt;[1]&lt;/a&gt; 。&lt;/p&gt;
+&lt;p&gt;维基百科 &lt;a class="footnote-reference" href="#id8" id="id3"&gt;[2]&lt;/a&gt; 上 token bucket 算法的简单描述如下：&lt;/p&gt;
+&lt;ul class="simple"&gt;
+&lt;li&gt;A token is added to the bucket every 1/r seconds.
+每隔 1/r 秒向 bucket 中增加一个 token。&lt;/li&gt;
+&lt;li&gt;The bucket can hold at the most b tokens. If a token arrives when the bucket is full, it is discarded.
+这个 bucket 最多只能存放 b 个 token。如果放置 token 时 bucket 已经满了，丢弃这个 token。&lt;/li&gt;
+&lt;li&gt;When a packet (network layer PDU) of n bytes arrives,
+当一个包含 n 个字节的数据包进来的时候，&lt;ul&gt;
+&lt;li&gt;if at least n tokens are in the bucket, n tokens are removed from the bucket, and the packet is sent to the network.
+如果 bucket 中有 &amp;gt;= n 个 token，将从 bucket 中移除 n 个 token，然后把这个数据包发送出去。&lt;/li&gt;
+&lt;li&gt;if fewer than n tokens are available, no tokens are removed from the bucket, and the packet is considered to be non-conformant.
+如果可用的 token &amp;lt; n，此时不会从 bucket 中移除任何的 token，但是这个数据包会被认为是被限制的数据包。&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/div&gt;
+&lt;div class="section" id="id4"&gt;
+&lt;h2 id="hidid4"&gt;常见实现方法&lt;a class="headerlink" href="#hidid4" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;一般有两种实现方法。&lt;/p&gt;
+&lt;p&gt;一种是按照 token bucket 的说明，真的做放 token 的操作：&lt;/p&gt;
+&lt;ul class="simple"&gt;
+&lt;li&gt;后台有个线程每 1/n 秒将 bucket 中的 token 数量加一，直至达到 bucket 容量。&lt;/li&gt;
+&lt;li&gt;主线程检查限速时，比较 bucket 中 token 的数量，如果少于需要的数量，表示当前被限制。
+（比如，一个请求进来，检查 bucket 中的 token 数量是否 &amp;gt; 1，如果 &amp;gt; 1请求放行同时把 token 数量减 1，
+如果 &amp;lt; 1 说明当前请求已超出速率限制，请求被拒绝。）&lt;/li&gt;
+&lt;/ul&gt;
+&lt;p&gt;这种方法有一个很大的缺点，那就是因为每个 token bucket 都会有一个繁忙的后台线程在更新 token 数量，会
+导致严重占用系统 CPU 出现严重的性能问题。假设我们的限速是限制为 1000/s，此时后台每隔 1ms 就会更新一次 token 数量，可以想像每个后台线程都会频繁占用 CPU，用这种方法实现的 rate limiting 处理不了几个请求就会出现 CPU 接近 100% 的情况。所以实践中一般用另一种方法来实现 token bucket。&lt;/p&gt;
+&lt;p&gt;另一种是在取 token 时计算上次取跟这次取之间按照速率会产生多少个 token 加上上次剩余的 token ，然后比较剩余 token 数是否满足需要。&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class="section" id="id5"&gt;
+&lt;h2 id="hidid5"&gt;总结&lt;a class="headerlink" href="#hidid5" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;本文简单介绍了一下 token bucket 算法以及两种常见的实现方法。&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class="section" id="id6"&gt;
+&lt;h2 id="hidid6"&gt;参考资料&lt;a class="headerlink" href="#hidid6" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;ul class="simple"&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://en.wikipedia.org/wiki/Token_bucket"&gt;Token bucket - Wikipedia&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://github.com/juju/ratelimit"&gt;juju/ratelimit: Efficient token-bucket-based rate limiter package.&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://github.com/falconry/token-bucket"&gt;falconry/token-bucket&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://gateoverflow.in/39720/gate2016-1-54"&gt;GATE2016-1-54 - GATE Overflow&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://colobu.com/2014/11/13/rate-limiting/"&gt;流量调整和限流技术 | 鸟窝&lt;/a&gt;&lt;/li&gt;
+&lt;/ul&gt;
+&lt;table class="docutils footnote" frame="void" id="id7" rules="none"&gt;
+&lt;colgroup&gt;&lt;col class="label" /&gt;&lt;col /&gt;&lt;/colgroup&gt;
+&lt;tbody valign="top"&gt;
+&lt;tr&gt;&lt;td class="label"&gt;&lt;a class="fn-backref" href="#id2"&gt;[1]&lt;/a&gt;&lt;/td&gt;&lt;td&gt;&lt;a class="reference external" href="https://colobu.com/2014/11/13/rate-limiting/"&gt;流量调整和限流技术 | 鸟窝&lt;/a&gt;&lt;/td&gt;&lt;/tr&gt;
+&lt;/tbody&gt;
+&lt;/table&gt;
+&lt;table class="docutils footnote" frame="void" id="id8" rules="none"&gt;
+&lt;colgroup&gt;&lt;col class="label" /&gt;&lt;col /&gt;&lt;/colgroup&gt;
+&lt;tbody valign="top"&gt;
+&lt;tr&gt;&lt;td class="label"&gt;&lt;a class="fn-backref" href="#id3"&gt;[2]&lt;/a&gt;&lt;/td&gt;&lt;td&gt;&lt;a class="reference external" href="https://en.wikipedia.org/wiki/Token_bucket"&gt;Token bucket - Wikipedia&lt;/a&gt;&lt;/td&gt;&lt;/tr&gt;
+&lt;/tbody&gt;
+&lt;/table&gt;
+&lt;/div&gt;
+</description><dc:creator xmlns:dc="http://purl.org/dc/elements/1.1/">mozillazg</dc:creator><pubDate>Thu, 03 Jan 2019 00:00:00 +0000</pubDate><guid>tag:mozillazg.com,2019-01-03:2019/01/rate-limiting-intro-token-bucket.html</guid><category>rate-limiting</category><category>token-bucket</category></item><item><title>调用远程服务的一些备忘录</title><link>https://mozillazg.com/2018/08/call-remote-service-checklist.html</link><description>&lt;div class="section" id="id2"&gt;
 &lt;h2 id="hidid2"&gt;前言&lt;a class="headerlink" href="#hidid2" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;p&gt;大部分程序或多或少都会调用其他远程服务，比如访问 HTTP API、操作数据等各种远程操作。
 因为是调用其他服务所以会有很多不可控的因素，在编写相关代码的时候需要有一些注意事项或者说是备忘录。&lt;/p&gt;
@@ -106,7 +171,7 @@
 &lt;h2 id="hidid9"&gt;告警&lt;a class="headerlink" href="#hidid9" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;p&gt;虽然有了监控数据，但是我们不可能 24 小时不眠不休的盯着监控数据，此时就需要有告警程序来帮助我们
 自动发现可能的异常和已经出现的问题。&lt;/p&gt;
-&lt;p&gt;这样即可以及时发现问题也可以解放生产力， 在没有异常的时候让员工去做更有创造力的事情。&lt;/p&gt;
+&lt;p&gt;这样即可以及时发现问题也可以解放生产力， 在没有异常的时候去做更有创造力的事情。&lt;/p&gt;
 &lt;p&gt;根据告警数据的不同有一些常见的针对远程调用的告警：&lt;/p&gt;
 &lt;ul class="simple"&gt;
 &lt;li&gt;响应时间阈值告警&lt;/li&gt;
@@ -127,7 +192,7 @@
 &lt;/ul&gt;
 &lt;p&gt;至于是否实现 熔断/降级/监控/告警 需要看实际情况：&lt;/p&gt;
 &lt;ul class="simple"&gt;
-&lt;li&gt;临时的/一次性的脚本之类的就没必要实现了&lt;/li&gt;
+&lt;li&gt;临时的/一次性的运维脚本之类的可能就没必要实现了&lt;/li&gt;
 &lt;li&gt;基础设施不完善或者没有对应的基础设施的话，实现这些功能可能就不适合了。&lt;/li&gt;
 &lt;/ul&gt;
 &lt;p&gt;欢迎大家在评论里一起讨论/补充其他的注意事项。&lt;/p&gt;
@@ -141,7 +206,551 @@
 &lt;li&gt;&lt;a class="reference external" href="https://pragprog.com/book/mnee2/release-it-second-edition"&gt;Release It! Second Edition: Design and Deploy Production-Ready Software by Michael Nygard | The Pragmatic Bookshelf&lt;/a&gt;&lt;/li&gt;
 &lt;/ul&gt;
 &lt;/div&gt;
-</description><dc:creator xmlns:dc="http://purl.org/dc/elements/1.1/">mozillazg</dc:creator><pubDate>Thu, 16 Aug 2018 00:00:00 +0000</pubDate><guid>tag:mozillazg.com,2018-08-16:2018/08/call-remote-service-checklist.html</guid><category>checklist</category></item><item><title>Python: 调试运行中进程的几种方法（总结）</title><link>https://mozillazg.com/2018/07/python-some-ways-to-debug-running-process.html</link><description>&lt;div class="section" id="id1"&gt;
+</description><dc:creator xmlns:dc="http://purl.org/dc/elements/1.1/">mozillazg</dc:creator><pubDate>Thu, 16 Aug 2018 00:00:00 +0000</pubDate><guid>tag:mozillazg.com,2018-08-16:2018/08/call-remote-service-checklist.html</guid><category>checklist</category></item><item><title>Bash Shell 常用语法和操作</title><link>https://mozillazg.com/2018/08/linux-bash-shell-script-cookbook.html</link><description>&lt;div class="section" id="id1"&gt;
+&lt;h2 id="hidid1"&gt;变量&lt;a class="headerlink" href="#hidid1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;&lt;tt class="docutils literal"&gt;变量名=值&lt;/tt&gt; :&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="nv"&gt;a&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="s2"&gt;&amp;quot;abc&amp;quot;&lt;/span&gt;
+&lt;span class="nb"&gt;echo&lt;/span&gt; &lt;span class="s2"&gt;&amp;quot;&lt;/span&gt;&lt;span class="nv"&gt;$a&lt;/span&gt;&lt;span class="s2"&gt;&amp;quot;&lt;/span&gt;
+&lt;/pre&gt;&lt;/div&gt;
+&lt;/div&gt;
+&lt;div class="section" id="id2"&gt;
+&lt;h2 id="hidid2"&gt;数组&lt;a class="headerlink" href="#hidid2" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;div class="section" id="range"&gt;
+&lt;h3 id="hidrange"&gt;range&lt;a class="headerlink" href="#hidrange" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
+&lt;p&gt;语法:&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="o"&gt;{&lt;/span&gt;start..end..step&lt;span class="o"&gt;}&lt;/span&gt;
+&lt;/pre&gt;&lt;/div&gt;
+&lt;p&gt;示例：&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="c1"&gt;# 输出 1 2 3&lt;/span&gt;
+&lt;span class="k"&gt;for&lt;/span&gt; value in &lt;span class="o"&gt;{&lt;/span&gt;1..3&lt;span class="o"&gt;}&lt;/span&gt;
+&lt;span class="k"&gt;do&lt;/span&gt;
+    &lt;span class="nb"&gt;echo&lt;/span&gt; &lt;span class="nv"&gt;$value&lt;/span&gt;
+&lt;span class="k"&gt;done&lt;/span&gt;
+
+&lt;span class="c1"&gt;# 输出 1 3 5&lt;/span&gt;
+&lt;span class="k"&gt;for&lt;/span&gt; value in &lt;span class="o"&gt;{&lt;/span&gt;1..6..2&lt;span class="o"&gt;}&lt;/span&gt;
+&lt;span class="k"&gt;do&lt;/span&gt;
+    &lt;span class="nb"&gt;echo&lt;/span&gt; &lt;span class="nv"&gt;$value&lt;/span&gt;
+&lt;span class="k"&gt;done&lt;/span&gt;
+&lt;/pre&gt;&lt;/div&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;div class="section" id="if"&gt;
+&lt;h2 id="hidif"&gt;if&lt;a class="headerlink" href="#hidif" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;if 语句的语法如下：&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="k"&gt;if&lt;/span&gt; &lt;span class="o"&gt;[&lt;/span&gt; &amp;lt;some test&amp;gt; &lt;span class="o"&gt;]&lt;/span&gt;
+&lt;span class="k"&gt;then&lt;/span&gt;
+    &amp;lt;commands&amp;gt;
+&lt;span class="k"&gt;elif&lt;/span&gt; &lt;span class="o"&gt;[&lt;/span&gt; &amp;lt;some test&amp;gt; &lt;span class="o"&gt;]&lt;/span&gt;
+&lt;span class="k"&gt;then&lt;/span&gt;
+    &amp;lt;different commands&amp;gt;
+&lt;span class="k"&gt;else&lt;/span&gt;
+    &amp;lt;other commands&amp;gt;
+&lt;span class="k"&gt;fi&lt;/span&gt;
+&lt;/pre&gt;&lt;/div&gt;
+&lt;p&gt;比如:&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="k"&gt;if&lt;/span&gt; &lt;span class="o"&gt;[&lt;/span&gt; &lt;span class="s2"&gt;&amp;quot;&lt;/span&gt;&lt;span class="nv"&gt;$age&lt;/span&gt;&lt;span class="s2"&gt;&amp;quot;&lt;/span&gt; -gt &lt;span class="m"&gt;18&lt;/span&gt; &lt;span class="o"&gt;]&lt;/span&gt;
+&lt;span class="k"&gt;then&lt;/span&gt;
+    &lt;span class="nb"&gt;echo&lt;/span&gt; &lt;span class="s2"&gt;&amp;quot;you are &lt;/span&gt;&lt;span class="nv"&gt;$age&lt;/span&gt;&lt;span class="s2"&gt; &amp;gt; 18&amp;quot;&lt;/span&gt;
+&lt;span class="k"&gt;elif&lt;/span&gt; &lt;span class="o"&gt;[&lt;/span&gt; &lt;span class="s2"&gt;&amp;quot;&lt;/span&gt;&lt;span class="nv"&gt;$age&lt;/span&gt;&lt;span class="s2"&gt;&amp;quot;&lt;/span&gt; -eq &lt;span class="m"&gt;18&lt;/span&gt; &lt;span class="o"&gt;]&lt;/span&gt;
+&lt;span class="k"&gt;then&lt;/span&gt;
+    &lt;span class="nb"&gt;echo&lt;/span&gt; &lt;span class="s2"&gt;&amp;quot;you are &lt;/span&gt;&lt;span class="nv"&gt;$age&lt;/span&gt;&lt;span class="s2"&gt; == 18&amp;quot;&lt;/span&gt;
+&lt;span class="k"&gt;else&lt;/span&gt;
+    &lt;span class="nb"&gt;echo&lt;/span&gt; &lt;span class="s2"&gt;&amp;quot;you are &lt;/span&gt;&lt;span class="nv"&gt;$age&lt;/span&gt;&lt;span class="s2"&gt; &amp;lt; 18&amp;quot;&lt;/span&gt;
+&lt;span class="k"&gt;fi&lt;/span&gt;
+&lt;/pre&gt;&lt;/div&gt;
+&lt;div class="section" id="id3"&gt;
+&lt;h3 id="hidid3"&gt;常用的条件判断&lt;a class="headerlink" href="#hidid3" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
+&lt;table border="1" class="docutils"&gt;
+&lt;colgroup&gt;
+&lt;col width="38%" /&gt;
+&lt;col width="63%" /&gt;
+&lt;/colgroup&gt;
+&lt;thead valign="bottom"&gt;
+&lt;tr&gt;&lt;th class="head"&gt;条件表达式&lt;/th&gt;
+&lt;th class="head"&gt;含义&lt;/th&gt;
+&lt;/tr&gt;
+&lt;/thead&gt;
+&lt;tbody valign="top"&gt;
+&lt;tr&gt;&lt;td&gt;! 表达式&lt;/td&gt;
+&lt;td&gt;false&lt;/td&gt;
+&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;-n 字符串&lt;/td&gt;
+&lt;td&gt;字符串长度大于 0&lt;/td&gt;
+&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;-z 字符串&lt;/td&gt;
+&lt;td&gt;字符串长度等于 0&lt;/td&gt;
+&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;A = B&lt;/td&gt;
+&lt;td&gt;字符串 A B 相等&lt;/td&gt;
+&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;A != B&lt;/td&gt;
+&lt;td&gt;字符串 A B 不相等&lt;/td&gt;
+&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;m -eq n&lt;/td&gt;
+&lt;td&gt;数字 m n 相等&lt;/td&gt;
+&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;m -gt n&lt;/td&gt;
+&lt;td&gt;数字 m 大于 n&lt;/td&gt;
+&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;m -lt n&lt;/td&gt;
+&lt;td&gt;数字 m 小于 n&lt;/td&gt;
+&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;-d 路径&lt;/td&gt;
+&lt;td&gt;文件路径存在，并且是个目录&lt;/td&gt;
+&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;-e 路径&lt;/td&gt;
+&lt;td&gt;文件存在&lt;/td&gt;
+&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;-s 路径&lt;/td&gt;
+&lt;td&gt;文件存在，并且大小大于 0&lt;/td&gt;
+&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;-r 路径&lt;/td&gt;
+&lt;td&gt;文件存在，并且拥有读权限&lt;/td&gt;
+&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;-w 路径&lt;/td&gt;
+&lt;td&gt;文件存在，并且拥有写权限&lt;/td&gt;
+&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;-x 路径&lt;/td&gt;
+&lt;td&gt;文件存在，并且拥有执行权限&lt;/td&gt;
+&lt;/tr&gt;
+&lt;/tbody&gt;
+&lt;/table&gt;
+&lt;p&gt;&lt;tt class="docutils literal"&gt;[]&lt;/tt&gt; 实际调用的是 &lt;tt class="docutils literal"&gt;test&lt;/tt&gt; 命令，我们可以用 &lt;tt class="docutils literal"&gt;test&lt;/tt&gt; 命令来测试条件表达式：&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;$ &lt;span class="nb"&gt;test&lt;/span&gt; &lt;span class="s2"&gt;&amp;quot;abc&amp;quot;&lt;/span&gt; &lt;span class="o"&gt;==&lt;/span&gt; 18
+$ &lt;span class="nb"&gt;echo&lt;/span&gt; &lt;span class="nv"&gt;$?&lt;/span&gt;
+1
+$ &lt;span class="nb"&gt;test&lt;/span&gt; &lt;span class="m"&gt;1&lt;/span&gt; -eq 1
+$ &lt;span class="nb"&gt;echo&lt;/span&gt; &lt;span class="nv"&gt;$?&lt;/span&gt;
+0
+&lt;/pre&gt;&lt;/div&gt;
+&lt;p&gt;以及可以用 &lt;tt class="docutils literal"&gt;&amp;amp;&amp;amp;&lt;/tt&gt; 和 &lt;tt class="docutils literal"&gt;||&lt;/tt&gt; 组合判断多个条件表达式，实现 and 和 or 的功能&lt;/p&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;div class="section" id="case-switch-case"&gt;
+&lt;h2 id="hidcase-switch-case"&gt;case(switch case)&lt;a class="headerlink" href="#hidcase-switch-case" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;语法:&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="k"&gt;case&lt;/span&gt; &amp;lt;variable&amp;gt; in
+&amp;lt;pattern 1&amp;gt;&lt;span class="o"&gt;)&lt;/span&gt;
+    &amp;lt;commands&amp;gt;
+    &lt;span class="p"&gt;;;&lt;/span&gt;
+&amp;lt;pattern 2&amp;gt;&lt;span class="o"&gt;)&lt;/span&gt;
+    &amp;lt;other commands&amp;gt;
+    &lt;span class="p"&gt;;;&lt;/span&gt;
+&lt;span class="k"&gt;esac&lt;/span&gt;
+&lt;/pre&gt;&lt;/div&gt;
+&lt;p&gt;例子：&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="k"&gt;case&lt;/span&gt; &lt;span class="nv"&gt;$1&lt;/span&gt; in
+start&lt;span class="o"&gt;)&lt;/span&gt;
+    &lt;span class="nb"&gt;echo&lt;/span&gt; starting
+    &lt;span class="p"&gt;;;&lt;/span&gt;
+stop&lt;span class="o"&gt;)&lt;/span&gt;
+    &lt;span class="nb"&gt;echo&lt;/span&gt; stoping
+    &lt;span class="p"&gt;;;&lt;/span&gt;
+restart&lt;span class="o"&gt;)&lt;/span&gt;
+    &lt;span class="nb"&gt;echo&lt;/span&gt; restarting
+    &lt;span class="p"&gt;;;&lt;/span&gt;
+*&lt;span class="o"&gt;)&lt;/span&gt;
+    &lt;span class="nb"&gt;echo&lt;/span&gt; don&lt;span class="se"&gt;\&amp;#39;&lt;/span&gt;t know
+    &lt;span class="p"&gt;;;&lt;/span&gt;
+&lt;span class="k"&gt;esac&lt;/span&gt;
+&lt;/pre&gt;&lt;/div&gt;
+&lt;/div&gt;
+&lt;div class="section" id="for"&gt;
+&lt;h2 id="hidfor"&gt;for&lt;a class="headerlink" href="#hidfor" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;语法：&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="k"&gt;for&lt;/span&gt; var in &amp;lt;list&amp;gt;
+&lt;span class="k"&gt;do&lt;/span&gt;
+    &amp;lt;commands&amp;gt;
+&lt;span class="k"&gt;done&lt;/span&gt;
+&lt;/pre&gt;&lt;/div&gt;
+&lt;p&gt;同时 &lt;tt class="docutils literal"&gt;for&lt;/tt&gt; 也支持 &lt;tt class="docutils literal"&gt;break&lt;/tt&gt; 和 &lt;tt class="docutils literal"&gt;continue&lt;/tt&gt;&lt;/p&gt;
+&lt;p&gt;例子：&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="nv"&gt;names&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;tom jim jake&amp;#39;&lt;/span&gt;
+&lt;span class="k"&gt;for&lt;/span&gt; name in &lt;span class="nv"&gt;$names&lt;/span&gt;
+&lt;span class="k"&gt;do&lt;/span&gt;
+    &lt;span class="nb"&gt;echo&lt;/span&gt; &lt;span class="nv"&gt;$name&lt;/span&gt;
+&lt;span class="k"&gt;done&lt;/span&gt;
+&lt;/pre&gt;&lt;/div&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="k"&gt;for&lt;/span&gt; age in &lt;span class="o"&gt;{&lt;/span&gt;1..10&lt;span class="o"&gt;}&lt;/span&gt;
+&lt;span class="k"&gt;do&lt;/span&gt;
+    &lt;span class="k"&gt;if&lt;/span&gt; &lt;span class="o"&gt;[&lt;/span&gt; &lt;span class="nv"&gt;$age&lt;/span&gt; -eq &lt;span class="m"&gt;3&lt;/span&gt; &lt;span class="o"&gt;]&lt;/span&gt;
+    &lt;span class="k"&gt;then&lt;/span&gt;
+        &lt;span class="k"&gt;continue&lt;/span&gt;
+    &lt;span class="k"&gt;fi&lt;/span&gt;
+
+    &lt;span class="nb"&gt;echo&lt;/span&gt; &lt;span class="nv"&gt;$age&lt;/span&gt;
+
+    &lt;span class="k"&gt;if&lt;/span&gt; &lt;span class="o"&gt;[&lt;/span&gt; &lt;span class="nv"&gt;$age&lt;/span&gt; -gt &lt;span class="m"&gt;5&lt;/span&gt; &lt;span class="o"&gt;]&lt;/span&gt;
+    &lt;span class="k"&gt;then&lt;/span&gt;
+        &lt;span class="nb"&gt;break&lt;/span&gt;
+    &lt;span class="k"&gt;fi&lt;/span&gt;
+&lt;span class="k"&gt;done&lt;/span&gt;
+&lt;/pre&gt;&lt;/div&gt;
+&lt;/div&gt;
+&lt;div class="section" id="while"&gt;
+&lt;h2 id="hidwhile"&gt;while&lt;a class="headerlink" href="#hidwhile" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;语法：&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="k"&gt;while&lt;/span&gt; &lt;span class="o"&gt;[&lt;/span&gt; &amp;lt;some test&amp;gt; &lt;span class="o"&gt;]&lt;/span&gt;
+&lt;span class="k"&gt;do&lt;/span&gt;
+    &amp;lt;commands&amp;gt;
+&lt;span class="k"&gt;done&lt;/span&gt;
+&lt;/pre&gt;&lt;/div&gt;
+&lt;p&gt;例子：&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="nv"&gt;total&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;1
+&lt;span class="k"&gt;while&lt;/span&gt; &lt;span class="o"&gt;[&lt;/span&gt; &lt;span class="nv"&gt;$total&lt;/span&gt; -le &lt;span class="m"&gt;3&lt;/span&gt; &lt;span class="o"&gt;]&lt;/span&gt;
+&lt;span class="k"&gt;do&lt;/span&gt;
+    &lt;span class="nb"&gt;echo&lt;/span&gt; &lt;span class="nv"&gt;$total&lt;/span&gt;
+    &lt;span class="o"&gt;((&lt;/span&gt;total++&lt;span class="o"&gt;))&lt;/span&gt;
+&lt;span class="k"&gt;done&lt;/span&gt;
+&lt;/pre&gt;&lt;/div&gt;
+&lt;/div&gt;
+&lt;div class="section" id="until"&gt;
+&lt;h2 id="hiduntil"&gt;until&lt;a class="headerlink" href="#hiduntil" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;语法：&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="k"&gt;until&lt;/span&gt; &lt;span class="o"&gt;[&lt;/span&gt; &amp;lt;some test&amp;gt; &lt;span class="o"&gt;]&lt;/span&gt;
+&lt;span class="k"&gt;do&lt;/span&gt;
+    &amp;lt;commands&amp;gt;
+&lt;span class="k"&gt;done&lt;/span&gt;
+&lt;/pre&gt;&lt;/div&gt;
+&lt;p&gt;例子：&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="nv"&gt;total&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;1
+&lt;span class="k"&gt;until&lt;/span&gt; &lt;span class="o"&gt;[&lt;/span&gt; &lt;span class="nv"&gt;$total&lt;/span&gt; -gt &lt;span class="m"&gt;3&lt;/span&gt; &lt;span class="o"&gt;]&lt;/span&gt;
+&lt;span class="k"&gt;do&lt;/span&gt;
+    &lt;span class="nb"&gt;echo&lt;/span&gt; &lt;span class="nv"&gt;$total&lt;/span&gt;
+    &lt;span class="o"&gt;((&lt;/span&gt;total++&lt;span class="o"&gt;))&lt;/span&gt;
+&lt;span class="k"&gt;done&lt;/span&gt;
+&lt;/pre&gt;&lt;/div&gt;
+&lt;/div&gt;
+&lt;div class="section" id="select"&gt;
+&lt;h2 id="hidselect"&gt;select 单项选择&lt;a class="headerlink" href="#hidselect" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;选择功能一般用 case 语法用的多，不过 select 也可以实现，
+select 的功能类似 while + case，比较适合反复询问用户选择项直到用户选择了输入了合法的选择项。&lt;/p&gt;
+&lt;p&gt;语法：&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="k"&gt;select&lt;/span&gt; var in &amp;lt;list&amp;gt;
+&lt;span class="k"&gt;do&lt;/span&gt;
+    &amp;lt;commands&amp;gt;
+    &lt;span class="o"&gt;[&lt;/span&gt;break&lt;span class="o"&gt;]&lt;/span&gt;
+&lt;span class="k"&gt;done&lt;/span&gt;
+&lt;/pre&gt;&lt;/div&gt;
+&lt;p&gt;可以用 break 跳出 select 以及可以通过修改 PS3 变量的值修改提示内容。&lt;/p&gt;
+&lt;p&gt;示例：&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="nv"&gt;PS3&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;please choice: &amp;#39;&lt;/span&gt;
+
+&lt;span class="k"&gt;select&lt;/span&gt; value in &lt;span class="o"&gt;{&lt;/span&gt;1..5&lt;span class="o"&gt;}&lt;/span&gt;
+&lt;span class="k"&gt;do&lt;/span&gt;
+    &lt;span class="nb"&gt;echo&lt;/span&gt; &lt;span class="nv"&gt;$value&lt;/span&gt;
+
+    &lt;span class="k"&gt;if&lt;/span&gt; &lt;span class="o"&gt;[&lt;/span&gt; &lt;span class="nv"&gt;$value&lt;/span&gt; -gt &lt;span class="m"&gt;3&lt;/span&gt; &lt;span class="o"&gt;]&lt;/span&gt;
+    &lt;span class="k"&gt;then&lt;/span&gt;
+        &lt;span class="nb"&gt;break&lt;/span&gt;
+    &lt;span class="k"&gt;fi&lt;/span&gt;
+
+&lt;span class="k"&gt;done&lt;/span&gt;
+&lt;/pre&gt;&lt;/div&gt;
+&lt;/div&gt;
+&lt;div class="section" id="id4"&gt;
+&lt;h2 id="hidid4"&gt;函数&lt;a class="headerlink" href="#hidid4" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;语法:&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;function_name &lt;span class="o"&gt;()&lt;/span&gt; &lt;span class="o"&gt;{&lt;/span&gt;
+    &amp;lt;commands&amp;gt;
+&lt;span class="o"&gt;}&lt;/span&gt;
+
+&lt;span class="c1"&gt;# or&lt;/span&gt;
+
+&lt;span class="k"&gt;function&lt;/span&gt; function_name &lt;span class="o"&gt;{&lt;/span&gt;
+    &amp;lt;commands&amp;gt;
+&lt;span class="o"&gt;}&lt;/span&gt;
+&lt;/pre&gt;&lt;/div&gt;
+&lt;div class="section" id="id5"&gt;
+&lt;h3 id="hidid5"&gt;参数&lt;a class="headerlink" href="#hidid5" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
+&lt;p&gt;在函数体内可以通过 $1, $2, $3, ... 获取调用时传入的位置参数&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class="section" id="id6"&gt;
+&lt;h3 id="hidid6"&gt;返回值&lt;a class="headerlink" href="#hidid6" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
+&lt;p&gt;不支持返回值功能，不过可以用 return x 指定一个状态吗:&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="k"&gt;function&lt;/span&gt; &lt;span class="nb"&gt;test&lt;/span&gt; &lt;span class="o"&gt;{&lt;/span&gt;
+    &lt;span class="nb"&gt;echo&lt;/span&gt; &lt;span class="s2"&gt;&amp;quot;test&amp;quot;&lt;/span&gt;
+    &lt;span class="k"&gt;return&lt;/span&gt; 3
+&lt;span class="o"&gt;}&lt;/span&gt;
+
+&lt;span class="nb"&gt;test&lt;/span&gt;
+&lt;span class="nb"&gt;echo&lt;/span&gt; &lt;span class="nv"&gt;$?&lt;/span&gt;   &lt;span class="c1"&gt;# 3&lt;/span&gt;
+&lt;/pre&gt;&lt;/div&gt;
+&lt;/div&gt;
+&lt;div class="section" id="id7"&gt;
+&lt;h3 id="hidid7"&gt;变量作用域&lt;a class="headerlink" href="#hidid7" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
+&lt;p&gt;默认函数类的变量是全局变量，可以通过 local 定义局部变量：&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="k"&gt;function&lt;/span&gt; &lt;span class="nb"&gt;test&lt;/span&gt; &lt;span class="o"&gt;{&lt;/span&gt;
+    &lt;span class="nb"&gt;local&lt;/span&gt; &lt;span class="nv"&gt;a&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;local&amp;#39;&lt;/span&gt;
+
+    &lt;span class="nv"&gt;a&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;233&amp;#39;&lt;/span&gt;
+    &lt;span class="nv"&gt;b&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;666&amp;#39;&lt;/span&gt;
+    &lt;span class="nb"&gt;echo&lt;/span&gt; &lt;span class="nv"&gt;$a&lt;/span&gt;, &lt;span class="nv"&gt;$b&lt;/span&gt;
+&lt;span class="o"&gt;}&lt;/span&gt;
+
+&lt;span class="nv"&gt;b&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;global&amp;#39;&lt;/span&gt;
+
+&lt;span class="nb"&gt;test&lt;/span&gt;
+
+&lt;span class="nb"&gt;echo&lt;/span&gt; &lt;span class="nv"&gt;$b&lt;/span&gt;
+&lt;span class="nb"&gt;echo&lt;/span&gt; &lt;span class="nv"&gt;$a&lt;/span&gt;
+&lt;/pre&gt;&lt;/div&gt;
+&lt;/div&gt;
+&lt;div class="section" id="id8"&gt;
+&lt;h3 id="hidid8"&gt;创建跟外部命令同名的函数&lt;a class="headerlink" href="#hidid8" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
+&lt;p&gt;例子：&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="k"&gt;function&lt;/span&gt; ls &lt;span class="o"&gt;{&lt;/span&gt;
+    &lt;span class="nb"&gt;command&lt;/span&gt; ls -lh
+&lt;span class="o"&gt;}&lt;/span&gt;
+
+ls
+&lt;/pre&gt;&lt;/div&gt;
+&lt;p&gt;主要是不要忘了加 command，不加的话，上面的 ls 会无限递归不会按预期的调用 ls 命令。&lt;/p&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;div class="section" id="id9"&gt;
+&lt;h2 id="hidid9"&gt;字符串操作&lt;a class="headerlink" href="#hidid9" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;div class="section" id="id10"&gt;
+&lt;h3 id="hidid10"&gt;字符串替换&lt;a class="headerlink" href="#hidid10" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
+&lt;div class="section" id="id11"&gt;
+&lt;h4 id="hidid11"&gt;替换子串&lt;a class="headerlink" href="#hidid11" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h4&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;$ &lt;span class="nv"&gt;test&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="s2"&gt;&amp;quot;hello_world&amp;quot;&lt;/span&gt;
+$ &lt;span class="nb"&gt;echo&lt;/span&gt; &lt;span class="s2"&gt;&amp;quot;&lt;/span&gt;&lt;span class="si"&gt;${&lt;/span&gt;&lt;span class="nv"&gt;test&lt;/span&gt;&lt;span class="p"&gt;/_/-&lt;/span&gt;&lt;span class="si"&gt;}&lt;/span&gt;&lt;span class="s2"&gt;&amp;quot;&lt;/span&gt;
+hello-world
+$ &lt;span class="nb"&gt;echo&lt;/span&gt; &lt;span class="s2"&gt;&amp;quot;&lt;/span&gt;&lt;span class="si"&gt;${&lt;/span&gt;&lt;span class="nv"&gt;test&lt;/span&gt;&lt;span class="p"&gt;/world/bar&lt;/span&gt;&lt;span class="si"&gt;}&lt;/span&gt;&lt;span class="s2"&gt;&amp;quot;&lt;/span&gt;
+hello_bar
+&lt;/pre&gt;&lt;/div&gt;
+&lt;/div&gt;
+&lt;div class="section" id="id12"&gt;
+&lt;h4 id="hidid12"&gt;删除前缀&lt;a class="headerlink" href="#hidid12" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h4&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;$ &lt;span class="nv"&gt;test&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="s2"&gt;&amp;quot;foofoo_bar_foofoo&amp;quot;&lt;/span&gt;
+$ &lt;span class="nb"&gt;echo&lt;/span&gt; &lt;span class="s2"&gt;&amp;quot;&lt;/span&gt;&lt;span class="si"&gt;${&lt;/span&gt;&lt;span class="nv"&gt;test&lt;/span&gt;&lt;span class="p"&gt;#foo&lt;/span&gt;&lt;span class="si"&gt;}&lt;/span&gt;&lt;span class="s2"&gt;&amp;quot;&lt;/span&gt;
+foo_bar_foofoo
+$ &lt;span class="nv"&gt;prefix&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="s2"&gt;&amp;quot;foo&amp;quot;&lt;/span&gt;
+$ &lt;span class="nb"&gt;echo&lt;/span&gt; &lt;span class="s2"&gt;&amp;quot;&lt;/span&gt;&lt;span class="si"&gt;${&lt;/span&gt;&lt;span class="nv"&gt;test&lt;/span&gt;&lt;span class="p"&gt;#&lt;/span&gt;&lt;span class="nv"&gt;$prefix&lt;/span&gt;&lt;span class="si"&gt;}&lt;/span&gt;&lt;span class="s2"&gt;&amp;quot;&lt;/span&gt;
+foo_bar_foofoo
+&lt;/pre&gt;&lt;/div&gt;
+&lt;/div&gt;
+&lt;div class="section" id="id13"&gt;
+&lt;h4 id="hidid13"&gt;删除后缀&lt;a class="headerlink" href="#hidid13" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h4&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;$ &lt;span class="nv"&gt;test&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="s2"&gt;&amp;quot;foofoo_bar_foofoo&amp;quot;&lt;/span&gt;
+$ &lt;span class="nb"&gt;echo&lt;/span&gt; &lt;span class="s2"&gt;&amp;quot;&lt;/span&gt;&lt;span class="si"&gt;${&lt;/span&gt;&lt;span class="nv"&gt;test&lt;/span&gt;&lt;span class="p"&gt;%foo&lt;/span&gt;&lt;span class="si"&gt;}&lt;/span&gt;&lt;span class="s2"&gt;&amp;quot;&lt;/span&gt;
+foofoo_bar_foo
+$ &lt;span class="nv"&gt;suffix&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="s2"&gt;&amp;quot;foo&amp;quot;&lt;/span&gt;
+$ &lt;span class="nb"&gt;echo&lt;/span&gt; &lt;span class="s2"&gt;&amp;quot;&lt;/span&gt;&lt;span class="si"&gt;${&lt;/span&gt;&lt;span class="nv"&gt;test&lt;/span&gt;&lt;span class="p"&gt;%&lt;/span&gt;&lt;span class="nv"&gt;$suffix&lt;/span&gt;&lt;span class="si"&gt;}&lt;/span&gt;&lt;span class="s2"&gt;&amp;quot;&lt;/span&gt;
+foofoo_bar_foo
+&lt;/pre&gt;&lt;/div&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;div class="section" id="id14"&gt;
+&lt;h3 id="hidid14"&gt;打印字符串&lt;a class="headerlink" href="#hidid14" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
+&lt;p&gt;推荐使用 &lt;tt class="docutils literal"&gt;printf&lt;/tt&gt;:&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="nb"&gt;printf&lt;/span&gt; &lt;span class="s2"&gt;&amp;quot;hello world\\n&amp;quot;&lt;/span&gt;
+&lt;span class="nb"&gt;printf&lt;/span&gt; &lt;span class="s2"&gt;&amp;quot;hello %s\\n&amp;quot;&lt;/span&gt; &lt;span class="s2"&gt;&amp;quot;world&amp;quot;&lt;/span&gt;
+&lt;/pre&gt;&lt;/div&gt;
+&lt;p&gt;&lt;tt class="docutils literal"&gt;echo&lt;/tt&gt; 也可以：&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="nb"&gt;echo&lt;/span&gt; hello
+&lt;/pre&gt;&lt;/div&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;div class="section" id="id15"&gt;
+&lt;h2 id="hidid15"&gt;文件操作&lt;a class="headerlink" href="#hidid15" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;div class="section" id="id16"&gt;
+&lt;h3 id="hidid16"&gt;保存大段文本&lt;a class="headerlink" href="#hidid16" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
+&lt;p&gt;可以使用 &lt;tt class="docutils literal"&gt;tee&lt;/tt&gt; 和 &lt;tt class="docutils literal"&gt;EOF&lt;/tt&gt;:&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;tee test.text &lt;span class="s"&gt;&amp;lt;&amp;lt;EOF&lt;/span&gt;
+&lt;span class="s"&gt;hello&lt;/span&gt;
+&lt;span class="s"&gt;    world&lt;/span&gt;
+
+&lt;span class="s"&gt;!&lt;/span&gt;
+
+&lt;span class="s"&gt;EOF&lt;/span&gt;
+&lt;/pre&gt;&lt;/div&gt;
+&lt;p&gt;保存包含 EOF 命令的文本可以用多个 EOF 的变种:&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;tee a.sh &lt;span class="s"&gt;&amp;lt;&amp;lt; EOF&lt;/span&gt;
+&lt;span class="s"&gt;tee b.text &amp;lt;&amp;lt; EOF&lt;/span&gt;2
+ &lt;span class="nb"&gt;echo&lt;/span&gt; hello
+EOF2
+EOF
+
+
+$ tee a.sh &lt;span class="s"&gt;&amp;lt;&amp;lt; EOF&lt;/span&gt;
+&lt;span class="s"&gt;&amp;gt; tee b.text &amp;lt;&amp;lt; EOF&lt;/span&gt;2
+&amp;gt; &lt;span class="nb"&gt;echo&lt;/span&gt; hello
+&amp;gt; EOF2
+&amp;gt; EOF
+tee b.text &lt;span class="s"&gt;&amp;lt;&amp;lt; EOF2&lt;/span&gt;
+&lt;span class="s"&gt;echo hello&lt;/span&gt;
+&lt;span class="s"&gt;EOF2&lt;/span&gt;
+
+$ cat a.sh
+tee b.text &lt;span class="s"&gt;&amp;lt;&amp;lt; EOF2&lt;/span&gt;
+&lt;span class="s"&gt;echo hello&lt;/span&gt;
+&lt;span class="s"&gt;EOF2&lt;/span&gt;
+
+$ bash a.sh
+&lt;span class="nb"&gt;echo&lt;/span&gt; hello
+
+$ cat b.text
+&lt;span class="nb"&gt;echo&lt;/span&gt; hello
+&lt;/pre&gt;&lt;/div&gt;
+&lt;p&gt;append 更新可以使用 &lt;tt class="docutils literal"&gt;tee &lt;span class="pre"&gt;-a&lt;/span&gt;&lt;/tt&gt;&lt;/p&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;div class="section" id="id17"&gt;
+&lt;h2 id="hidid17"&gt;其他实用功能&lt;a class="headerlink" href="#hidid17" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;div class="section" id="cd"&gt;
+&lt;h3&gt;隔离 &lt;tt class="docutils literal"&gt;cd&lt;/tt&gt; 命令的干扰&lt;/h3&gt;
+&lt;p&gt;可以用括号来隔离:&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="c1"&gt;# pwd=/tmp&lt;/span&gt;
+&lt;span class="o"&gt;(&lt;/span&gt;
+    &lt;span class="nb"&gt;cd&lt;/span&gt; test/
+    ls   &lt;span class="c1"&gt;# pwd = /tmp/test/&lt;/span&gt;
+&lt;span class="o"&gt;)&lt;/span&gt;
+&lt;span class="c1"&gt;# pwd=/tmp&lt;/span&gt;
+&lt;/pre&gt;&lt;/div&gt;
+&lt;/div&gt;
+&lt;div class="section" id="id18"&gt;
+&lt;h3 id="hidid18"&gt;设置功能标志&lt;a class="headerlink" href="#hidid18" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
+&lt;p&gt;一般会在脚本中设置如下标志：&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="nb"&gt;set&lt;/span&gt; -euo pipefail
+&lt;span class="nv"&gt;IFS&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="s1"&gt;$&amp;#39;\n\t&amp;#39;&lt;/span&gt;
+&lt;/pre&gt;&lt;/div&gt;
+&lt;p&gt;常用的功能标志如下：&lt;/p&gt;
+&lt;ul class="simple"&gt;
+&lt;li&gt;运行的时候显示执行到那一条语句了: &lt;tt class="docutils literal"&gt;set &lt;span class="pre"&gt;-x&lt;/span&gt;&lt;/tt&gt;&lt;/li&gt;
+&lt;/ul&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;$ cat a.sh
+&lt;span class="nb"&gt;set&lt;/span&gt; -x
+
+&lt;span class="nb"&gt;echo&lt;/span&gt; &lt;span class="s1"&gt;&amp;#39;hello&amp;#39;&lt;/span&gt;
+
+$ bash a.sh
++ &lt;span class="nb"&gt;echo&lt;/span&gt; hello
+hello
+&lt;/pre&gt;&lt;/div&gt;
+&lt;p&gt;&lt;tt class="docutils literal"&gt;bash &lt;span class="pre"&gt;-x&lt;/span&gt; xx.sh&lt;/tt&gt; 也可以实现同样的效果:&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;$ cat a.sh
+&lt;span class="nb"&gt;echo&lt;/span&gt; &lt;span class="s1"&gt;&amp;#39;hello&amp;#39;&lt;/span&gt;
+
+$ bash -x a.sh
++ &lt;span class="nb"&gt;echo&lt;/span&gt; hello
+hello
+&lt;/pre&gt;&lt;/div&gt;
+&lt;ul class="simple"&gt;
+&lt;li&gt;有任何命令的退出码不是 0 就退出: &lt;tt class="docutils literal"&gt;set &lt;span class="pre"&gt;-e&lt;/span&gt;&lt;/tt&gt;&lt;/li&gt;
+&lt;/ul&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;$ cat a.sh
+abc
+&lt;span class="nb"&gt;echo&lt;/span&gt; &lt;span class="s1"&gt;&amp;#39;hello&amp;#39;&lt;/span&gt;
+
+$ bash a.sh
+a.sh: line 1: abc: &lt;span class="nb"&gt;command&lt;/span&gt; not found
+hello
+
+$ cat a.sh
+&lt;span class="nb"&gt;set&lt;/span&gt; -e
+abc
+&lt;span class="nb"&gt;echo&lt;/span&gt; &lt;span class="s1"&gt;&amp;#39;hello&amp;#39;&lt;/span&gt;
+
+$ bash a.sh
+a.sh: line 2: abc: &lt;span class="nb"&gt;command&lt;/span&gt; not found
+&lt;/pre&gt;&lt;/div&gt;
+&lt;p&gt;&lt;tt class="docutils literal"&gt;bash &lt;span class="pre"&gt;-e&lt;/span&gt; xx.sh&lt;/tt&gt; 也可以实现同样的效果。&lt;/p&gt;
+&lt;ul class="simple"&gt;
+&lt;li&gt;引用未定义的变量时出错并退出: &lt;tt class="docutils literal"&gt;set &lt;span class="pre"&gt;-u&lt;/span&gt;&lt;/tt&gt;&lt;/li&gt;
+&lt;/ul&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;$ cat a.sh
+&lt;span class="nb"&gt;echo&lt;/span&gt; &lt;span class="s2"&gt;&amp;quot;&lt;/span&gt;&lt;span class="nv"&gt;$abc&lt;/span&gt;&lt;span class="s2"&gt;&amp;quot;&lt;/span&gt;
+&lt;span class="nb"&gt;echo&lt;/span&gt; hello
+
+$ bash a.sh
+
+hello
+
+$ cat a.sh
+&lt;span class="nb"&gt;set&lt;/span&gt; -u
+&lt;span class="nb"&gt;echo&lt;/span&gt; &lt;span class="s2"&gt;&amp;quot;&lt;/span&gt;&lt;span class="nv"&gt;$abc&lt;/span&gt;&lt;span class="s2"&gt;&amp;quot;&lt;/span&gt;
+&lt;span class="nb"&gt;echo&lt;/span&gt; hello
+
+$ bash a.sh
+a.sh: line 2: abc: unbound variable
+&lt;/pre&gt;&lt;/div&gt;
+&lt;p&gt;&lt;tt class="docutils literal"&gt;bash &lt;span class="pre"&gt;-u&lt;/span&gt; xx.sh&lt;/tt&gt; 也可以实现同样的效果。&lt;/p&gt;
+&lt;ul class="simple"&gt;
+&lt;li&gt;管道命令中有一个命令失败整个管道操作的退出码将是失败的那个命令的退出码,
+未设置这个标志时是最后一个操作的退出码: &lt;tt class="docutils literal"&gt;set &lt;span class="pre"&gt;-o&lt;/span&gt; pipefail&lt;/tt&gt;&lt;/li&gt;
+&lt;/ul&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;$ cat a.sh
+la la la &lt;span class="p"&gt;|&lt;/span&gt; &lt;span class="nb"&gt;echo&lt;/span&gt; &lt;span class="s1"&gt;&amp;#39;aa&amp;#39;&lt;/span&gt;
+
+$ bash a.sh
+a.sh: line 1: la: &lt;span class="nb"&gt;command&lt;/span&gt; not found
+aa
+
+$ &lt;span class="nb"&gt;echo&lt;/span&gt; &lt;span class="nv"&gt;$?&lt;/span&gt;
+0
+
+$ cat a.sh
+&lt;span class="nb"&gt;set&lt;/span&gt; -o pipefail
+la la la &lt;span class="p"&gt;|&lt;/span&gt; &lt;span class="nb"&gt;echo&lt;/span&gt; &lt;span class="s1"&gt;&amp;#39;aa&amp;#39;&lt;/span&gt;
+
+$ bash a.sh
+a.sh: line 2: la: &lt;span class="nb"&gt;command&lt;/span&gt; not found
+aa
+
+$ &lt;span class="nb"&gt;echo&lt;/span&gt; &lt;span class="nv"&gt;$?&lt;/span&gt;
+127
+&lt;/pre&gt;&lt;/div&gt;
+&lt;ul class="simple"&gt;
+&lt;li&gt;设置单词切分使用的分隔符，默认是 &lt;tt class="docutils literal"&gt;$' \n\t'&lt;/tt&gt; （空格、换行、制表符），
+可以通过 &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;IFS=$'\n\t'&lt;/span&gt;&lt;/tt&gt; 设置为换行和制表符:&lt;/li&gt;
+&lt;/ul&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;$ cat a.sh
+&lt;span class="nv"&gt;names&lt;/span&gt;&lt;span class="o"&gt;=(&lt;/span&gt;
+    &lt;span class="s2"&gt;&amp;quot;foo bar&amp;quot;&lt;/span&gt;
+    &lt;span class="s2"&gt;&amp;quot;foobar tom&amp;quot;&lt;/span&gt;
+&lt;span class="o"&gt;)&lt;/span&gt;
+
+&lt;span class="k"&gt;for&lt;/span&gt; i in &lt;span class="si"&gt;${&lt;/span&gt;&lt;span class="nv"&gt;names&lt;/span&gt;&lt;span class="p"&gt;[@]&lt;/span&gt;&lt;span class="si"&gt;}&lt;/span&gt;&lt;span class="p"&gt;;&lt;/span&gt; &lt;span class="k"&gt;do&lt;/span&gt;
+    &lt;span class="nb"&gt;echo&lt;/span&gt; &lt;span class="s2"&gt;&amp;quot;&lt;/span&gt;&lt;span class="nv"&gt;$i&lt;/span&gt;&lt;span class="s2"&gt;&amp;quot;&lt;/span&gt;
+&lt;span class="k"&gt;done&lt;/span&gt;
+
+$ bash a.sh
+foo
+bar
+foobar
+tom
+
+$ cat a.sh
+&lt;span class="nv"&gt;names&lt;/span&gt;&lt;span class="o"&gt;=(&lt;/span&gt;
+    &lt;span class="s2"&gt;&amp;quot;foo bar&amp;quot;&lt;/span&gt;
+    &lt;span class="s2"&gt;&amp;quot;foobar tom&amp;quot;&lt;/span&gt;
+&lt;span class="o"&gt;)&lt;/span&gt;
+
+&lt;span class="nv"&gt;IFS&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="s1"&gt;$&amp;#39;\n\t&amp;#39;&lt;/span&gt;
+&lt;span class="k"&gt;for&lt;/span&gt; i in &lt;span class="si"&gt;${&lt;/span&gt;&lt;span class="nv"&gt;names&lt;/span&gt;&lt;span class="p"&gt;[@]&lt;/span&gt;&lt;span class="si"&gt;}&lt;/span&gt;&lt;span class="p"&gt;;&lt;/span&gt; &lt;span class="k"&gt;do&lt;/span&gt;
+    &lt;span class="nb"&gt;echo&lt;/span&gt; &lt;span class="s2"&gt;&amp;quot;&lt;/span&gt;&lt;span class="nv"&gt;$i&lt;/span&gt;&lt;span class="s2"&gt;&amp;quot;&lt;/span&gt;
+&lt;span class="k"&gt;done&lt;/span&gt;
+
+$ bash a.sh
+foo bar
+foobar tom
+&lt;/pre&gt;&lt;/div&gt;
+&lt;p&gt;更多的 set 支持的标志可以查看 &lt;a class="reference external" href="https://www.gnu.org/software/bash/manual/bashref.html#The-Set-Builtin"&gt;Bash Reference Manual&lt;/a&gt;&lt;/p&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;div class="section" id="id19"&gt;
+&lt;h2 id="hidid19"&gt;参考资料&lt;a class="headerlink" href="#hidid19" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;ul class="simple"&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://ryanstutorials.net/bash-scripting-tutorial/bash-if-statements.php"&gt;If Statements - Bash Scripting Tutorial&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://ryanstutorials.net/bash-scripting-tutorial/bash-loops.php"&gt;Loops - Bash Scripting Tutorial&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://www.gnu.org/software/bash/manual/bashref.html#The-Set-Builtin"&gt;Bash Reference Manual&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="http://redsymbol.net/articles/unofficial-bash-strict-mode/"&gt;Use the Unofficial Bash Strict Mode (Unless You Looove Debugging)&lt;/a&gt;&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/div&gt;
+</description><dc:creator xmlns:dc="http://purl.org/dc/elements/1.1/">mozillazg</dc:creator><pubDate>Sun, 12 Aug 2018 00:00:00 +0000</pubDate><guid>tag:mozillazg.com,2018-08-12:2018/08/linux-bash-shell-script-cookbook.html</guid><category>bash</category><category>shell</category></item><item><title>Python: 调试运行中进程的几种方法（总结）</title><link>https://mozillazg.com/2018/07/python-some-ways-to-debug-running-process.html</link><description>&lt;div class="section" id="id1"&gt;
 &lt;h2 id="hidid1"&gt;前言&lt;a class="headerlink" href="#hidid1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;p&gt;之前写了几篇关于调试运行中进程方法的文章，本文总结一下常用的几种调试方法。&lt;/p&gt;
 &lt;/div&gt;
@@ -4396,17 +5005,18 @@ $ ps aux |grep 10106
 mozillazg              10126   0.0  0.0  2434836    740 s006  R+    0:00.00 grep 10106
 mozillazg              10106   0.0  0.0        0      0 s006  Z     0:00.00 (Python)
 &lt;/pre&gt;
-&lt;p&gt;可以看到，子进程 &lt;tt class="docutils literal"&gt;10106&lt;/tt&gt; 变成了僵尸进程。&lt;/p&gt;
+&lt;p&gt;可以看到，子进程 &lt;tt class="docutils literal"&gt;10106&lt;/tt&gt; 变成了僵尸进程（状态是 &lt;tt class="docutils literal"&gt;Z&lt;/tt&gt; ）。&lt;/p&gt;
 &lt;p&gt;既然已经可以控制僵尸进程的产生了，那我们就可以进入下一步如何清除僵尸进程了。&lt;/p&gt;
 &lt;/div&gt;
 &lt;div class="section" id="id3"&gt;
 &lt;h2 id="hidid3"&gt;清除僵尸进程&lt;a class="headerlink" href="#hidid3" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
-&lt;p&gt;清除僵尸进程有两种方法：&lt;/p&gt;
+&lt;p&gt;清除僵尸进程至少有三种方法：&lt;/p&gt;
 &lt;ul class="simple"&gt;
-&lt;li&gt;第一种方法就是结束父进程（一般是主进程）。当父进程退出的时候僵尸进程随后也会被清除。&lt;/li&gt;
+&lt;li&gt;第一种方法就是结束父进程（一般是主进程）。当父进程退出的时候僵尸进程随后也会被清除。
+当然这个是个暴力的手段，因为我们一般肯定是希望父进程继续运行的。&lt;/li&gt;
 &lt;li&gt;第二种方法就是通过 &lt;tt class="docutils literal"&gt;wait&lt;/tt&gt;
-调用来读取子进程退出状态。我们可以通过处理 &lt;tt class="docutils literal"&gt;SIGCHLD&lt;/tt&gt;
-信号，在处理程序中调用 &lt;tt class="docutils literal"&gt;wait&lt;/tt&gt; 系统调用来清除僵尸进程。&lt;/li&gt;
+调用来读取子进程退出状态。比如通过 &lt;tt class="docutils literal"&gt;multiprocessing.Process&lt;/tt&gt; 产出的进程可以通过子进程的 &lt;tt class="docutils literal"&gt;join()&lt;/tt&gt; 方法来 wait，也可以在父进程中处理 &lt;tt class="docutils literal"&gt;SIGCHLD&lt;/tt&gt;
+信号，在处理程序中调用 &lt;tt class="docutils literal"&gt;wait&lt;/tt&gt; 系统调用或者直接设置为 &lt;tt class="docutils literal"&gt;SIG_IGN&lt;/tt&gt; 来清除僵尸进程。&lt;/li&gt;
 &lt;li&gt;第三种办法就说把进程变成孤儿进程，这样进程就会自动交由 init 进程（pid 为 1 的进程）来处理，一般 init 进程都包含对僵尸进程进行处理的逻辑。（这里有个坑，那就是 docker 容器中一般 pid 为 1 进程就是主程序的进程，而不是我们预期的 init 进程。如果要使用这种方法的话，需要注意一下类似的场景）&lt;/li&gt;
 &lt;/ul&gt;
 &lt;div class="section" id="sigchld"&gt;
@@ -4479,6 +5089,7 @@ mozillazg              10194   0.0  0.0  2432788    556 s006  R+    0:00.00 grep
 信号，我们在 &lt;tt class="docutils literal"&gt;SIGCHLD&lt;/tt&gt; 信号的处理程序中通过 &lt;tt class="docutils literal"&gt;os.waitpid&lt;/tt&gt; 调用
 &lt;tt class="docutils literal"&gt;wait&lt;/tt&gt;
 系统调用后阻止了子进程一直处于僵尸进程状态，从而实现了清除僵尸进程的效果。&lt;/p&gt;
+&lt;p&gt;也可以把 &lt;tt class="docutils literal"&gt;SIGCHLD&lt;/tt&gt; 设置为 &lt;tt class="docutils literal"&gt;SIG_IGN&lt;/tt&gt;&lt;/p&gt;
 &lt;/div&gt;
 &lt;div class="section" id="id4"&gt;
 &lt;h3 id="hidid4"&gt;把进程变成孤儿进程&lt;a class="headerlink" href="#hidid4" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
@@ -5959,13 +6570,113 @@ self is &amp;lt;__main__.D object at 0x10ce10e48&amp;gt; &amp;#64;A.add
 &lt;/pre&gt;&lt;/div&gt;
 &lt;p&gt;&lt;img alt="super" src="/static/images/python/super.png" /&gt;&lt;/p&gt;
 &lt;p&gt;现在你知道为什么 &lt;tt class="docutils literal"&gt;d.add(2)&lt;/tt&gt; 后 &lt;tt class="docutils literal"&gt;d.n&lt;/tt&gt; 的值是 19 了吧 ;)&lt;/p&gt;
-&lt;p&gt;That's all! 希望这篇文章能对你有所帮助 ;)&lt;/p&gt;
+&lt;p&gt;如果感觉上面的解释还不是很清楚的话，下面我们一起来根据 super 的功能实现一个我们自己的 Super 类，相信这样会更直观一点。&lt;/p&gt;
 &lt;/div&gt;
 &lt;div class="section" id="id5"&gt;
-&lt;h2 id="hidid5"&gt;参考资料&lt;a class="headerlink" href="#hidid5" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;h2 id="hidid5"&gt;实现一个 Super 类&lt;a class="headerlink" href="#hidid5" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;在实现这个 Super 类之前，我们先来复习一下前面说的 super 的信息：&lt;/p&gt;
+&lt;blockquote&gt;
+super() 实际上做了啥呢？简单来说就是：提供一个 MRO 列表以及一个 MRO 中的类 C ， super() 将返回一个从 MRO 列表中 C 之后的类中查找方法的对象。&lt;/blockquote&gt;
+&lt;p&gt;根据这个信息我们可以写一个简陋版本的 &lt;tt class="docutils literal"&gt;Super&lt;/tt&gt; 类:&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="kn"&gt;from&lt;/span&gt; &lt;span class="nn"&gt;functools&lt;/span&gt; &lt;span class="kn"&gt;import&lt;/span&gt; &lt;span class="n"&gt;partial&lt;/span&gt;
+
+
+&lt;span class="k"&gt;class&lt;/span&gt; &lt;span class="nc"&gt;Super&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;
+    &lt;span class="k"&gt;def&lt;/span&gt; &lt;span class="nf"&gt;__init__&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="bp"&gt;self&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;sub_cls&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;instance&lt;/span&gt;&lt;span class="p"&gt;):&lt;/span&gt;
+        &lt;span class="c1"&gt;# 假设 sub_cls = B, instance = D()&lt;/span&gt;
+        &lt;span class="c1"&gt;# Super(B, self).add(233)&lt;/span&gt;
+        &lt;span class="n"&gt;mro&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;instance&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;__class__&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;mro&lt;/span&gt;&lt;span class="p"&gt;()&lt;/span&gt;
+        &lt;span class="c1"&gt;# mro == [D, B, C, A, object]&lt;/span&gt;
+        &lt;span class="c1"&gt;# sub_cls is B&lt;/span&gt;
+        &lt;span class="c1"&gt;# 从 mro 中 sub_cls 后面的类中进行查找&lt;/span&gt;
+        &lt;span class="c1"&gt;# __mro_tail == [C, A, object]&lt;/span&gt;
+        &lt;span class="bp"&gt;self&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;__mro_tail&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;mro&lt;/span&gt;&lt;span class="p"&gt;[&lt;/span&gt;&lt;span class="n"&gt;mro&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;index&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;sub_cls&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;&lt;span class="o"&gt;+&lt;/span&gt;&lt;span class="mi"&gt;1&lt;/span&gt;&lt;span class="p"&gt;:]&lt;/span&gt;
+        &lt;span class="bp"&gt;self&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;__sub_cls&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;sub_cls&lt;/span&gt;
+        &lt;span class="bp"&gt;self&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;__instance&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;instance&lt;/span&gt;
+
+    &lt;span class="k"&gt;def&lt;/span&gt; &lt;span class="nf"&gt;__getattr__&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="bp"&gt;self&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;name&lt;/span&gt;&lt;span class="p"&gt;):&lt;/span&gt;
+        &lt;span class="c1"&gt;# 从 mro tail 列表的各个类中查找方法&lt;/span&gt;
+        &lt;span class="k"&gt;for&lt;/span&gt; &lt;span class="n"&gt;cls&lt;/span&gt; &lt;span class="ow"&gt;in&lt;/span&gt; &lt;span class="bp"&gt;self&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;__mro_tail&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;
+            &lt;span class="k"&gt;if&lt;/span&gt; &lt;span class="ow"&gt;not&lt;/span&gt; &lt;span class="nb"&gt;hasattr&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;cls&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;name&lt;/span&gt;&lt;span class="p"&gt;):&lt;/span&gt;
+                &lt;span class="k"&gt;continue&lt;/span&gt;
+
+            &lt;span class="k"&gt;print&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;call {}.{}&amp;#39;&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;format&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;cls&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;name&lt;/span&gt;&lt;span class="p"&gt;))&lt;/span&gt;
+            &lt;span class="c1"&gt;# 获取类中定义的方法&lt;/span&gt;
+            &lt;span class="n"&gt;attr&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="nb"&gt;getattr&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;cls&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;name&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+            &lt;span class="c1"&gt;# 因为 d = D(); d.add(233)  等价于 D.add(d, 233)&lt;/span&gt;
+            &lt;span class="c1"&gt;# 所以返回的函数需要自动填充第一个 self 参数&lt;/span&gt;
+            &lt;span class="k"&gt;return&lt;/span&gt; &lt;span class="n"&gt;partial&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;attr&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="bp"&gt;self&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;__instance&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+
+        &lt;span class="k"&gt;raise&lt;/span&gt; &lt;span class="ne"&gt;AttributeError&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;name&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+&lt;/pre&gt;&lt;/div&gt;
+&lt;p&gt;然后我们把上面的那个例子中的 &lt;tt class="docutils literal"&gt;super&lt;/tt&gt; 替换为这个简陋版本的 &lt;tt class="docutils literal"&gt;Super&lt;/tt&gt; 类，看看效果:&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="k"&gt;class&lt;/span&gt; &lt;span class="nc"&gt;A&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;
+    &lt;span class="k"&gt;def&lt;/span&gt; &lt;span class="nf"&gt;__init__&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="bp"&gt;self&lt;/span&gt;&lt;span class="p"&gt;):&lt;/span&gt;
+        &lt;span class="bp"&gt;self&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;n&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="mi"&gt;2&lt;/span&gt;
+
+    &lt;span class="k"&gt;def&lt;/span&gt; &lt;span class="nf"&gt;add&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="bp"&gt;self&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;m&lt;/span&gt;&lt;span class="p"&gt;):&lt;/span&gt;
+        &lt;span class="k"&gt;print&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;self is {0} @A.add&amp;#39;&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;format&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="bp"&gt;self&lt;/span&gt;&lt;span class="p"&gt;))&lt;/span&gt;
+        &lt;span class="bp"&gt;self&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;n&lt;/span&gt; &lt;span class="o"&gt;+=&lt;/span&gt; &lt;span class="n"&gt;m&lt;/span&gt;
+
+
+&lt;span class="k"&gt;class&lt;/span&gt; &lt;span class="nc"&gt;B&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;A&lt;/span&gt;&lt;span class="p"&gt;):&lt;/span&gt;
+    &lt;span class="k"&gt;def&lt;/span&gt; &lt;span class="nf"&gt;__init__&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="bp"&gt;self&lt;/span&gt;&lt;span class="p"&gt;):&lt;/span&gt;
+        &lt;span class="bp"&gt;self&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;n&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="mi"&gt;3&lt;/span&gt;
+
+    &lt;span class="k"&gt;def&lt;/span&gt; &lt;span class="nf"&gt;add&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="bp"&gt;self&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;m&lt;/span&gt;&lt;span class="p"&gt;):&lt;/span&gt;
+        &lt;span class="k"&gt;print&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;self is {0} @B.add&amp;#39;&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;format&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="bp"&gt;self&lt;/span&gt;&lt;span class="p"&gt;))&lt;/span&gt;
+        &lt;span class="n"&gt;Super&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;B&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="bp"&gt;self&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;add&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;m&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+        &lt;span class="bp"&gt;self&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;n&lt;/span&gt; &lt;span class="o"&gt;+=&lt;/span&gt; &lt;span class="mi"&gt;3&lt;/span&gt;
+
+
+&lt;span class="k"&gt;class&lt;/span&gt; &lt;span class="nc"&gt;C&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;A&lt;/span&gt;&lt;span class="p"&gt;):&lt;/span&gt;
+    &lt;span class="k"&gt;def&lt;/span&gt; &lt;span class="nf"&gt;__init__&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="bp"&gt;self&lt;/span&gt;&lt;span class="p"&gt;):&lt;/span&gt;
+        &lt;span class="bp"&gt;self&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;n&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="mi"&gt;4&lt;/span&gt;
+
+    &lt;span class="k"&gt;def&lt;/span&gt; &lt;span class="nf"&gt;add&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="bp"&gt;self&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;m&lt;/span&gt;&lt;span class="p"&gt;):&lt;/span&gt;
+        &lt;span class="k"&gt;print&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;self is {0} @C.add&amp;#39;&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;format&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="bp"&gt;self&lt;/span&gt;&lt;span class="p"&gt;))&lt;/span&gt;
+        &lt;span class="n"&gt;Super&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;C&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="bp"&gt;self&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;add&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;m&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+        &lt;span class="bp"&gt;self&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;n&lt;/span&gt; &lt;span class="o"&gt;+=&lt;/span&gt; &lt;span class="mi"&gt;4&lt;/span&gt;
+
+
+&lt;span class="k"&gt;class&lt;/span&gt; &lt;span class="nc"&gt;D&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;B&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;C&lt;/span&gt;&lt;span class="p"&gt;):&lt;/span&gt;
+    &lt;span class="k"&gt;def&lt;/span&gt; &lt;span class="nf"&gt;__init__&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="bp"&gt;self&lt;/span&gt;&lt;span class="p"&gt;):&lt;/span&gt;
+        &lt;span class="bp"&gt;self&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;n&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="mi"&gt;5&lt;/span&gt;
+
+    &lt;span class="k"&gt;def&lt;/span&gt; &lt;span class="nf"&gt;add&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="bp"&gt;self&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;m&lt;/span&gt;&lt;span class="p"&gt;):&lt;/span&gt;
+        &lt;span class="k"&gt;print&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;self is {0} @D.add&amp;#39;&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;format&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="bp"&gt;self&lt;/span&gt;&lt;span class="p"&gt;))&lt;/span&gt;
+        &lt;span class="n"&gt;Super&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;D&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="bp"&gt;self&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;add&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;m&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+        &lt;span class="bp"&gt;self&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;n&lt;/span&gt; &lt;span class="o"&gt;+=&lt;/span&gt; &lt;span class="mi"&gt;5&lt;/span&gt;
+
+
+&lt;span class="n"&gt;d&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;D&lt;/span&gt;&lt;span class="p"&gt;()&lt;/span&gt;
+&lt;span class="n"&gt;d&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;add&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="mi"&gt;2&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+&lt;span class="k"&gt;print&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;d&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;n&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+&lt;/pre&gt;&lt;/div&gt;
+&lt;p&gt;修改后的例子运行结果如下:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+self is &amp;lt;__main__.D object at 0x10d02cf98&amp;gt; &amp;#64;D.add
+call &amp;lt;class '__main__.B'&amp;gt;.add
+self is &amp;lt;__main__.D object at 0x10d02cf98&amp;gt; &amp;#64;B.add
+call &amp;lt;class '__main__.C'&amp;gt;.add
+self is &amp;lt;__main__.D object at 0x10d02cf98&amp;gt; &amp;#64;C.add
+call &amp;lt;class '__main__.A'&amp;gt;.add
+self is &amp;lt;__main__.D object at 0x10d02cf98&amp;gt; &amp;#64;A.add
+19
+&lt;/pre&gt;
+&lt;p&gt;可以看到使用简陋版 &lt;tt class="docutils literal"&gt;Super&lt;/tt&gt; 和内置的 &lt;tt class="docutils literal"&gt;super&lt;/tt&gt; 的效果是一样的。希望这个简陋的 &lt;tt class="docutils literal"&gt;Super&lt;/tt&gt; 类可以帮助大家初步理解 &lt;tt class="docutils literal"&gt;super&lt;/tt&gt; 的工作方式。&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class="section" id="id6"&gt;
+&lt;h2 id="hidid6"&gt;总结&lt;a class="headerlink" href="#hidid6" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;希望这篇文章能让你对 &lt;tt class="docutils literal"&gt;super&lt;/tt&gt; 多一点了解，如果文中有啥没讲清楚或讲的不对的地方欢迎指正。&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class="section" id="id7"&gt;
+&lt;h2 id="hidid7"&gt;参考资料&lt;a class="headerlink" href="#hidid7" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;ul class="simple"&gt;
 &lt;li&gt;&lt;a class="reference external" href="http://sixty-north.com/blog/series/pythons-super-explained"&gt;Python's super() Explained&lt;/a&gt;&lt;/li&gt;
 &lt;li&gt;&lt;a class="reference external" href="https://docs.python.org/3/library/functions.html#super"&gt;2. Built-in Functions — Python 3.5.2 documentation&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://docs.python.org/3/reference/datamodel.html#object.__getattr__"&gt;3. Data model — Python 3.7.1 documentation&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://docs.python.org/3/library/functools.html#functools.partial"&gt;functools — Higher-order functions and operations on callable objects — Python 3.7.1 documentation&lt;/a&gt;&lt;/li&gt;
 &lt;li&gt;&lt;a class="reference external" href="https://fuhm.net/super-harmful/"&gt;Python's Super Considered Harmful&lt;/a&gt;&lt;/li&gt;
 &lt;li&gt;&lt;a class="reference external" href="https://mozillazg.github.io/2016/11/python-mro-compute.html"&gt;Python: 多继承模式下 MRO(Method Resolution Order) 的计算方式 - Huang Huang 的博客&lt;/a&gt;&lt;/li&gt;
 &lt;/ul&gt;

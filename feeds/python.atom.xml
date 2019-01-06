@@ -3528,17 +3528,18 @@ $ ps aux |grep 10106
 mozillazg              10126   0.0  0.0  2434836    740 s006  R+    0:00.00 grep 10106
 mozillazg              10106   0.0  0.0        0      0 s006  Z     0:00.00 (Python)
 &lt;/pre&gt;
-&lt;p&gt;可以看到，子进程 &lt;tt class="docutils literal"&gt;10106&lt;/tt&gt; 变成了僵尸进程。&lt;/p&gt;
+&lt;p&gt;可以看到，子进程 &lt;tt class="docutils literal"&gt;10106&lt;/tt&gt; 变成了僵尸进程（状态是 &lt;tt class="docutils literal"&gt;Z&lt;/tt&gt; ）。&lt;/p&gt;
 &lt;p&gt;既然已经可以控制僵尸进程的产生了，那我们就可以进入下一步如何清除僵尸进程了。&lt;/p&gt;
 &lt;/div&gt;
 &lt;div class="section" id="id3"&gt;
 &lt;h2 id="hidid3"&gt;清除僵尸进程&lt;a class="headerlink" href="#hidid3" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
-&lt;p&gt;清除僵尸进程有两种方法：&lt;/p&gt;
+&lt;p&gt;清除僵尸进程至少有三种方法：&lt;/p&gt;
 &lt;ul class="simple"&gt;
-&lt;li&gt;第一种方法就是结束父进程（一般是主进程）。当父进程退出的时候僵尸进程随后也会被清除。&lt;/li&gt;
+&lt;li&gt;第一种方法就是结束父进程（一般是主进程）。当父进程退出的时候僵尸进程随后也会被清除。
+当然这个是个暴力的手段，因为我们一般肯定是希望父进程继续运行的。&lt;/li&gt;
 &lt;li&gt;第二种方法就是通过 &lt;tt class="docutils literal"&gt;wait&lt;/tt&gt;
-调用来读取子进程退出状态。我们可以通过处理 &lt;tt class="docutils literal"&gt;SIGCHLD&lt;/tt&gt;
-信号，在处理程序中调用 &lt;tt class="docutils literal"&gt;wait&lt;/tt&gt; 系统调用来清除僵尸进程。&lt;/li&gt;
+调用来读取子进程退出状态。比如通过 &lt;tt class="docutils literal"&gt;multiprocessing.Process&lt;/tt&gt; 产出的进程可以通过子进程的 &lt;tt class="docutils literal"&gt;join()&lt;/tt&gt; 方法来 wait，也可以在父进程中处理 &lt;tt class="docutils literal"&gt;SIGCHLD&lt;/tt&gt;
+信号，在处理程序中调用 &lt;tt class="docutils literal"&gt;wait&lt;/tt&gt; 系统调用或者直接设置为 &lt;tt class="docutils literal"&gt;SIG_IGN&lt;/tt&gt; 来清除僵尸进程。&lt;/li&gt;
 &lt;li&gt;第三种办法就说把进程变成孤儿进程，这样进程就会自动交由 init 进程（pid 为 1 的进程）来处理，一般 init 进程都包含对僵尸进程进行处理的逻辑。（这里有个坑，那就是 docker 容器中一般 pid 为 1 进程就是主程序的进程，而不是我们预期的 init 进程。如果要使用这种方法的话，需要注意一下类似的场景）&lt;/li&gt;
 &lt;/ul&gt;
 &lt;div class="section" id="sigchld"&gt;
@@ -3611,6 +3612,7 @@ mozillazg              10194   0.0  0.0  2432788    556 s006  R+    0:00.00 grep
 信号，我们在 &lt;tt class="docutils literal"&gt;SIGCHLD&lt;/tt&gt; 信号的处理程序中通过 &lt;tt class="docutils literal"&gt;os.waitpid&lt;/tt&gt; 调用
 &lt;tt class="docutils literal"&gt;wait&lt;/tt&gt;
 系统调用后阻止了子进程一直处于僵尸进程状态，从而实现了清除僵尸进程的效果。&lt;/p&gt;
+&lt;p&gt;也可以把 &lt;tt class="docutils literal"&gt;SIGCHLD&lt;/tt&gt; 设置为 &lt;tt class="docutils literal"&gt;SIG_IGN&lt;/tt&gt;&lt;/p&gt;
 &lt;/div&gt;
 &lt;div class="section" id="id4"&gt;
 &lt;h3 id="hidid4"&gt;把进程变成孤儿进程&lt;a class="headerlink" href="#hidid4" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
@@ -4970,13 +4972,113 @@ self is &amp;lt;__main__.D object at 0x10ce10e48&amp;gt; &amp;#64;A.add
 &lt;/pre&gt;&lt;/div&gt;
 &lt;p&gt;&lt;img alt="super" src="/static/images/python/super.png" /&gt;&lt;/p&gt;
 &lt;p&gt;现在你知道为什么 &lt;tt class="docutils literal"&gt;d.add(2)&lt;/tt&gt; 后 &lt;tt class="docutils literal"&gt;d.n&lt;/tt&gt; 的值是 19 了吧 ;)&lt;/p&gt;
-&lt;p&gt;That's all! 希望这篇文章能对你有所帮助 ;)&lt;/p&gt;
+&lt;p&gt;如果感觉上面的解释还不是很清楚的话，下面我们一起来根据 super 的功能实现一个我们自己的 Super 类，相信这样会更直观一点。&lt;/p&gt;
 &lt;/div&gt;
 &lt;div class="section" id="id5"&gt;
-&lt;h2 id="hidid5"&gt;参考资料&lt;a class="headerlink" href="#hidid5" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;h2 id="hidid5"&gt;实现一个 Super 类&lt;a class="headerlink" href="#hidid5" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;在实现这个 Super 类之前，我们先来复习一下前面说的 super 的信息：&lt;/p&gt;
+&lt;blockquote&gt;
+super() 实际上做了啥呢？简单来说就是：提供一个 MRO 列表以及一个 MRO 中的类 C ， super() 将返回一个从 MRO 列表中 C 之后的类中查找方法的对象。&lt;/blockquote&gt;
+&lt;p&gt;根据这个信息我们可以写一个简陋版本的 &lt;tt class="docutils literal"&gt;Super&lt;/tt&gt; 类:&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="kn"&gt;from&lt;/span&gt; &lt;span class="nn"&gt;functools&lt;/span&gt; &lt;span class="kn"&gt;import&lt;/span&gt; &lt;span class="n"&gt;partial&lt;/span&gt;
+
+
+&lt;span class="k"&gt;class&lt;/span&gt; &lt;span class="nc"&gt;Super&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;
+    &lt;span class="k"&gt;def&lt;/span&gt; &lt;span class="nf"&gt;__init__&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="bp"&gt;self&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;sub_cls&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;instance&lt;/span&gt;&lt;span class="p"&gt;):&lt;/span&gt;
+        &lt;span class="c1"&gt;# 假设 sub_cls = B, instance = D()&lt;/span&gt;
+        &lt;span class="c1"&gt;# Super(B, self).add(233)&lt;/span&gt;
+        &lt;span class="n"&gt;mro&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;instance&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;__class__&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;mro&lt;/span&gt;&lt;span class="p"&gt;()&lt;/span&gt;
+        &lt;span class="c1"&gt;# mro == [D, B, C, A, object]&lt;/span&gt;
+        &lt;span class="c1"&gt;# sub_cls is B&lt;/span&gt;
+        &lt;span class="c1"&gt;# 从 mro 中 sub_cls 后面的类中进行查找&lt;/span&gt;
+        &lt;span class="c1"&gt;# __mro_tail == [C, A, object]&lt;/span&gt;
+        &lt;span class="bp"&gt;self&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;__mro_tail&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;mro&lt;/span&gt;&lt;span class="p"&gt;[&lt;/span&gt;&lt;span class="n"&gt;mro&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;index&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;sub_cls&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;&lt;span class="o"&gt;+&lt;/span&gt;&lt;span class="mi"&gt;1&lt;/span&gt;&lt;span class="p"&gt;:]&lt;/span&gt;
+        &lt;span class="bp"&gt;self&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;__sub_cls&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;sub_cls&lt;/span&gt;
+        &lt;span class="bp"&gt;self&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;__instance&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;instance&lt;/span&gt;
+
+    &lt;span class="k"&gt;def&lt;/span&gt; &lt;span class="nf"&gt;__getattr__&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="bp"&gt;self&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;name&lt;/span&gt;&lt;span class="p"&gt;):&lt;/span&gt;
+        &lt;span class="c1"&gt;# 从 mro tail 列表的各个类中查找方法&lt;/span&gt;
+        &lt;span class="k"&gt;for&lt;/span&gt; &lt;span class="n"&gt;cls&lt;/span&gt; &lt;span class="ow"&gt;in&lt;/span&gt; &lt;span class="bp"&gt;self&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;__mro_tail&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;
+            &lt;span class="k"&gt;if&lt;/span&gt; &lt;span class="ow"&gt;not&lt;/span&gt; &lt;span class="nb"&gt;hasattr&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;cls&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;name&lt;/span&gt;&lt;span class="p"&gt;):&lt;/span&gt;
+                &lt;span class="k"&gt;continue&lt;/span&gt;
+
+            &lt;span class="k"&gt;print&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;call {}.{}&amp;#39;&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;format&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;cls&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;name&lt;/span&gt;&lt;span class="p"&gt;))&lt;/span&gt;
+            &lt;span class="c1"&gt;# 获取类中定义的方法&lt;/span&gt;
+            &lt;span class="n"&gt;attr&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="nb"&gt;getattr&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;cls&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;name&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+            &lt;span class="c1"&gt;# 因为 d = D(); d.add(233)  等价于 D.add(d, 233)&lt;/span&gt;
+            &lt;span class="c1"&gt;# 所以返回的函数需要自动填充第一个 self 参数&lt;/span&gt;
+            &lt;span class="k"&gt;return&lt;/span&gt; &lt;span class="n"&gt;partial&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;attr&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="bp"&gt;self&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;__instance&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+
+        &lt;span class="k"&gt;raise&lt;/span&gt; &lt;span class="ne"&gt;AttributeError&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;name&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+&lt;/pre&gt;&lt;/div&gt;
+&lt;p&gt;然后我们把上面的那个例子中的 &lt;tt class="docutils literal"&gt;super&lt;/tt&gt; 替换为这个简陋版本的 &lt;tt class="docutils literal"&gt;Super&lt;/tt&gt; 类，看看效果:&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="k"&gt;class&lt;/span&gt; &lt;span class="nc"&gt;A&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;
+    &lt;span class="k"&gt;def&lt;/span&gt; &lt;span class="nf"&gt;__init__&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="bp"&gt;self&lt;/span&gt;&lt;span class="p"&gt;):&lt;/span&gt;
+        &lt;span class="bp"&gt;self&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;n&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="mi"&gt;2&lt;/span&gt;
+
+    &lt;span class="k"&gt;def&lt;/span&gt; &lt;span class="nf"&gt;add&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="bp"&gt;self&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;m&lt;/span&gt;&lt;span class="p"&gt;):&lt;/span&gt;
+        &lt;span class="k"&gt;print&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;self is {0} @A.add&amp;#39;&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;format&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="bp"&gt;self&lt;/span&gt;&lt;span class="p"&gt;))&lt;/span&gt;
+        &lt;span class="bp"&gt;self&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;n&lt;/span&gt; &lt;span class="o"&gt;+=&lt;/span&gt; &lt;span class="n"&gt;m&lt;/span&gt;
+
+
+&lt;span class="k"&gt;class&lt;/span&gt; &lt;span class="nc"&gt;B&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;A&lt;/span&gt;&lt;span class="p"&gt;):&lt;/span&gt;
+    &lt;span class="k"&gt;def&lt;/span&gt; &lt;span class="nf"&gt;__init__&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="bp"&gt;self&lt;/span&gt;&lt;span class="p"&gt;):&lt;/span&gt;
+        &lt;span class="bp"&gt;self&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;n&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="mi"&gt;3&lt;/span&gt;
+
+    &lt;span class="k"&gt;def&lt;/span&gt; &lt;span class="nf"&gt;add&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="bp"&gt;self&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;m&lt;/span&gt;&lt;span class="p"&gt;):&lt;/span&gt;
+        &lt;span class="k"&gt;print&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;self is {0} @B.add&amp;#39;&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;format&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="bp"&gt;self&lt;/span&gt;&lt;span class="p"&gt;))&lt;/span&gt;
+        &lt;span class="n"&gt;Super&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;B&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="bp"&gt;self&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;add&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;m&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+        &lt;span class="bp"&gt;self&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;n&lt;/span&gt; &lt;span class="o"&gt;+=&lt;/span&gt; &lt;span class="mi"&gt;3&lt;/span&gt;
+
+
+&lt;span class="k"&gt;class&lt;/span&gt; &lt;span class="nc"&gt;C&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;A&lt;/span&gt;&lt;span class="p"&gt;):&lt;/span&gt;
+    &lt;span class="k"&gt;def&lt;/span&gt; &lt;span class="nf"&gt;__init__&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="bp"&gt;self&lt;/span&gt;&lt;span class="p"&gt;):&lt;/span&gt;
+        &lt;span class="bp"&gt;self&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;n&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="mi"&gt;4&lt;/span&gt;
+
+    &lt;span class="k"&gt;def&lt;/span&gt; &lt;span class="nf"&gt;add&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="bp"&gt;self&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;m&lt;/span&gt;&lt;span class="p"&gt;):&lt;/span&gt;
+        &lt;span class="k"&gt;print&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;self is {0} @C.add&amp;#39;&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;format&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="bp"&gt;self&lt;/span&gt;&lt;span class="p"&gt;))&lt;/span&gt;
+        &lt;span class="n"&gt;Super&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;C&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="bp"&gt;self&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;add&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;m&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+        &lt;span class="bp"&gt;self&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;n&lt;/span&gt; &lt;span class="o"&gt;+=&lt;/span&gt; &lt;span class="mi"&gt;4&lt;/span&gt;
+
+
+&lt;span class="k"&gt;class&lt;/span&gt; &lt;span class="nc"&gt;D&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;B&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;C&lt;/span&gt;&lt;span class="p"&gt;):&lt;/span&gt;
+    &lt;span class="k"&gt;def&lt;/span&gt; &lt;span class="nf"&gt;__init__&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="bp"&gt;self&lt;/span&gt;&lt;span class="p"&gt;):&lt;/span&gt;
+        &lt;span class="bp"&gt;self&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;n&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="mi"&gt;5&lt;/span&gt;
+
+    &lt;span class="k"&gt;def&lt;/span&gt; &lt;span class="nf"&gt;add&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="bp"&gt;self&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;m&lt;/span&gt;&lt;span class="p"&gt;):&lt;/span&gt;
+        &lt;span class="k"&gt;print&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;self is {0} @D.add&amp;#39;&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;format&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="bp"&gt;self&lt;/span&gt;&lt;span class="p"&gt;))&lt;/span&gt;
+        &lt;span class="n"&gt;Super&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;D&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="bp"&gt;self&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;add&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;m&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+        &lt;span class="bp"&gt;self&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;n&lt;/span&gt; &lt;span class="o"&gt;+=&lt;/span&gt; &lt;span class="mi"&gt;5&lt;/span&gt;
+
+
+&lt;span class="n"&gt;d&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;D&lt;/span&gt;&lt;span class="p"&gt;()&lt;/span&gt;
+&lt;span class="n"&gt;d&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;add&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="mi"&gt;2&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+&lt;span class="k"&gt;print&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;d&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;n&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+&lt;/pre&gt;&lt;/div&gt;
+&lt;p&gt;修改后的例子运行结果如下:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+self is &amp;lt;__main__.D object at 0x10d02cf98&amp;gt; &amp;#64;D.add
+call &amp;lt;class '__main__.B'&amp;gt;.add
+self is &amp;lt;__main__.D object at 0x10d02cf98&amp;gt; &amp;#64;B.add
+call &amp;lt;class '__main__.C'&amp;gt;.add
+self is &amp;lt;__main__.D object at 0x10d02cf98&amp;gt; &amp;#64;C.add
+call &amp;lt;class '__main__.A'&amp;gt;.add
+self is &amp;lt;__main__.D object at 0x10d02cf98&amp;gt; &amp;#64;A.add
+19
+&lt;/pre&gt;
+&lt;p&gt;可以看到使用简陋版 &lt;tt class="docutils literal"&gt;Super&lt;/tt&gt; 和内置的 &lt;tt class="docutils literal"&gt;super&lt;/tt&gt; 的效果是一样的。希望这个简陋的 &lt;tt class="docutils literal"&gt;Super&lt;/tt&gt; 类可以帮助大家初步理解 &lt;tt class="docutils literal"&gt;super&lt;/tt&gt; 的工作方式。&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class="section" id="id6"&gt;
+&lt;h2 id="hidid6"&gt;总结&lt;a class="headerlink" href="#hidid6" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;希望这篇文章能让你对 &lt;tt class="docutils literal"&gt;super&lt;/tt&gt; 多一点了解，如果文中有啥没讲清楚或讲的不对的地方欢迎指正。&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class="section" id="id7"&gt;
+&lt;h2 id="hidid7"&gt;参考资料&lt;a class="headerlink" href="#hidid7" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;ul class="simple"&gt;
 &lt;li&gt;&lt;a class="reference external" href="http://sixty-north.com/blog/series/pythons-super-explained"&gt;Python's super() Explained&lt;/a&gt;&lt;/li&gt;
 &lt;li&gt;&lt;a class="reference external" href="https://docs.python.org/3/library/functions.html#super"&gt;2. Built-in Functions — Python 3.5.2 documentation&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://docs.python.org/3/reference/datamodel.html#object.__getattr__"&gt;3. Data model — Python 3.7.1 documentation&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://docs.python.org/3/library/functools.html#functools.partial"&gt;functools — Higher-order functions and operations on callable objects — Python 3.7.1 documentation&lt;/a&gt;&lt;/li&gt;
 &lt;li&gt;&lt;a class="reference external" href="https://fuhm.net/super-harmful/"&gt;Python's Super Considered Harmful&lt;/a&gt;&lt;/li&gt;
 &lt;li&gt;&lt;a class="reference external" href="https://mozillazg.github.io/2016/11/python-mro-compute.html"&gt;Python: 多继承模式下 MRO(Method Resolution Order) 的计算方式 - Huang Huang 的博客&lt;/a&gt;&lt;/li&gt;
 &lt;/ul&gt;

@@ -1,0 +1,898 @@
+<!DOCTYPE html>
+<html lang="zh-hans" prefix="og: http://ogp.me/ns# fb: https://www.facebook.com/2008/fbml" class="han-init">
+<head>
+    <title>Bash Shell 常用语法和操作 - Huang Huang 的博客</title>
+    <!-- Using the latest rendering mode for IE -->
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <!-- share.css -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/social-share.js/1.0.16/css/share.min.css">
+    <!-- share.js -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/social-share.js/1.0.16/js/social-share.min.js"></script>
+
+
+    <link href="https://mozillazg.com/favicon.ico" rel="icon">
+
+<link rel="canonical" href="https://mozillazg.com/2018/08/linux-bash-shell-script-cookbook.html">
+
+        <meta name="author" content="mozillazg" />
+        <meta name="keywords" content="bash,shell" />
+    <meta name="description" content="变量¶ 变量名=值 : a=&#34;abc&#34; echo &#34;$a&#34; 数组¶ range¶ 语法: {start..end..step} 示例： # 输出 1 2 3 for value in {1..3} do echo $value done # 输出 1 3 5 for value in {1..6..2} do echo $value done if¶ if 语句的语法如下： if [ &lt;some test&gt; ] then &lt;commands&gt; elif [ &lt;some test&gt; ] then &lt;different commands&gt; else &lt;other commands&gt; fi 比如: if [ &#34;$age&#34; -gt 18 ] then echo &#34;you are $age &gt; 18&#34; elif [ &#34;$age&#34; -eq 18 ] then echo &#34;you are $age == 18&#34; else echo &#34;you are $age &lt; 18&#34; fi 常用的条件判断¶ 条件表达式 含义 ! 表达式 false -n 字符串 字符串长度大于 0 -z 字符串 字符串长度等于 0 A = B 字符串 A B 相等 A != B 字符串 A B 不相等 m -eq n 数字 m n 相等 m -gt n 数字 m 大于 n m -lt n 数字 m 小于 n -d 路径 文件路径存在，并且是个目录 -e 路径 文件存在 -s 路径 文件存在，并且大小大于 0 -r 路径 文件存在，并且拥有读权限 -w 路径 文件存在，并且拥有写权限 -x 路径 文件存在，并且拥有执行权限 [] 实际调用的是 test 命令，我们可以用 test 命令来测试条件表达式： $ test &#34;abc&#34; == 18 $ echo $? 1 $ test 1 -eq 1 $ echo $? 0 以及可以用 &amp;&amp; 和 || 组合判断多个条件表达式，实现 and 和 or 的功能 case(switch case)¶ 语法: case &lt;variable&gt; in &lt;pattern 1&gt;) &lt;commands&gt; ;; &lt;pattern 2&gt;) &lt;other commands&gt; ;; esac 例子： case $1 in start) echo starting ;; stop) echo stoping ;; restart) echo restarting ;; *) echo don\&#39;t know ;; esac for¶ 语法： for var in &lt;list&gt; do &lt;commands&gt; done 同时 for 也支持 break 和 continue 例子： names=&#39;tom jim jake&#39; for name in $names do echo $name done for age in {1..10} do if [ $age -eq 3 ] then continue fi echo $age if [ $age -gt 5 ] then break fi done while¶ 语法： while [ &lt;some test&gt; ] do &lt;commands&gt; done 例子： total=1 while [ $total -le 3 ] do echo $total ((total++)) done until¶ 语法： until [ &lt;some test&gt; ] do &lt;commands&gt; done 例子： total=1 until [ $total -gt 3 ] do echo $total ((total++)) done select 单项选择¶ 选择功能一般用 case 语法用的多，不过 select 也可以实现， select 的功能类似 while + case，比较适合反复询问用户选择项直到用户选择了输入了合法的选择项。 语法： select var in &lt;list&gt; do &lt;commands&gt; [break] done 可以用 break 跳出 select 以及可以通过修改 PS3 变量的值修改提示内容。 示例： PS3=&#39;please choice: &#39; select value in {1..5} do echo $value if [ $value -gt 3 ] then break fi done 函数¶ 语法: function_name () { &lt;commands&gt; } # or function function_name { &lt;commands&gt; } 参数¶ 在函数体内可以通过 $1, $2, $3, ... 获取调用时传入的位置参数 返回值¶ 不支持返回值功能，不过可以用 return x 指定一个状态吗: function test { echo &#34;test&#34; return 3 } test echo $? # 3 变量作用域¶ 默认函数类的变量是全局变量，可以通过 local 定义局部变量： function test { local a=&#39;local&#39; a=&#39;233&#39; b=&#39;666&#39; echo $a, $b } b=&#39;global&#39; test echo $b echo $a 创建跟外部命令同名的函数¶ 例子： function ls { command ls -lh } ls 主要是不要忘了加 command，不加的话，上面的 ls 会无限递归不会按预期的调用 ls 命令。 字符串操作¶ 字符串替换¶ 替换子串¶ $ test=&#34;hello_world&#34; $ echo &#34;${test/_/-}&#34; hello-world $ echo &#34;${test/world/bar}&#34; hello_bar 删除前缀¶ $ test=&#34;foofoo_bar_foofoo&#34; $ echo &#34;${test#foo}&#34; foo_bar_foofoo $ prefix=&#34;foo&#34; $ echo &#34;${test#$prefix}&#34; foo_bar_foofoo 删除后缀¶ $ test=&#34;foofoo_bar_foofoo&#34; $ echo &#34;${test%foo}&#34; foofoo_bar_foo $ suffix=&#34;foo&#34; $ echo &#34;${test%$suffix}&#34; foofoo_bar_foo 打印字符串¶ 推荐使用 printf: printf &#34;hello world\\n&#34; printf &#34;hello %s\\n&#34; &#34;world&#34; echo 也可以： echo hello 文件操作¶ 保存大段文本¶ 可以使用 tee 和 EOF: tee test.text &lt;&lt;EOF hello world ! EOF 保存包含 EOF 命令的文本可以用多个 EOF 的变种: tee a.sh &lt;&lt; EOF tee b.text &lt;&lt; EOF2 echo hello EOF2 EOF $ tee a.sh &lt;&lt; EOF &gt; tee b.text &lt;&lt; EOF2 &gt; echo hello &gt; EOF2 &gt; EOF tee b.text &lt;&lt; EOF2 echo hello EOF2 $ cat a.sh tee b.text &lt;&lt; EOF2 echo hello EOF2 $ bash a.sh echo hello $ cat b.text echo hello append 更新可以使用 tee -a 其他实用功能¶ 隔离 cd 命令的干扰 可以用括号来隔离: # pwd=/tmp ( cd test/ ls # pwd = /tmp/test/ ) # pwd=/tmp 设置功能标志¶ 一般会在脚本中设置如下标志： set -euo pipefail IFS=$&#39;\n\t&#39; 常用的功能标志如下： 运行的时候显示执行到那一条语句了: set -x $ cat a.sh set -x echo &#39;hello&#39; $ bash a.sh + echo hello hello bash -x xx.sh 也可以实现同样的效果: $ cat a.sh echo &#39;hello&#39; $ bash -x a.sh + echo hello hello 有任何命令的退出码不是 0 就退出: set -e $ cat a.sh abc echo &#39;hello&#39; $ bash a.sh a.sh: line 1: abc: command not found hello $ cat a.sh set -e abc echo &#39;hello&#39; $ bash a.sh a.sh: line 2: abc: command not found bash -e xx.sh 也可以实现同样的效果。 引用未定义的变量时出错并退出: set -u $ cat a.sh echo &#34;$abc&#34; echo hello $ bash a.sh hello $ cat a.sh set -u echo &#34;$abc&#34; echo hello $ bash a.sh a.sh: line 2: abc: unbound variable bash -u xx.sh 也可以实现同样的效果。 管道命令中有一个命令失败整个管道操作的退出码将是失败的那个命令的退出码, 未设置这个标志时是最后一个操作的退出码: set -o pipefail $ cat a.sh la la la | echo &#39;aa&#39; $ bash a.sh a.sh: line 1: la: command not found aa $ echo $? 0 $ cat a.sh set -o pipefail la la la | echo &#39;aa&#39; $ bash a.sh a.sh: line 2: la: command not found aa $ echo $? 127 设置单词切分使用的分隔符，默认是 $&#39; \n\t&#39; （空格、换行、制表符）， 可以通过 IFS=$&#39;\n\t&#39; 设置为换行和制表符: $ cat a.sh names=( &#34;foo bar&#34; &#34;foobar tom&#34; ) for i in ${names[@]}; do echo &#34;$i&#34; done $ bash a.sh foo bar foobar tom $ cat a.sh names=( &#34;foo bar&#34; &#34;foobar tom&#34; ) IFS=$&#39;\n\t&#39; for i in ${names[@]}; do echo &#34;$i&#34; done $ bash a.sh foo bar foobar tom 更多的 set 支持的标志可以查看 Bash Reference Manual 参考资料¶ If Statements - Bash Scripting Tutorial Loops - Bash Scripting Tutorial Bash Reference Manual Use the Unofficial Bash Strict Mode (Unless You Looove Debugging)" />
+
+    <style>
+      .js-toc {
+        margin-bottom: 20px;
+      }
+      .donate-modal {
+        text-align: center;
+      }
+      #donate-modal-container .donate-image {
+        max-height: 300px !important;
+        min-height: inherit !important;
+      }
+    </style>
+
+        <meta property="og:site_name" content="Huang Huang 的博客" />
+        <meta property="og:type" content="article"/>
+        <meta property="og:title" content="Bash Shell 常用语法和操作"/>
+        <meta property="og:url" content="https://mozillazg.com/2018/08/linux-bash-shell-script-cookbook.html"/>
+        <meta property="og:description" content="变量¶ 变量名=值 : a=&#34;abc&#34; echo &#34;$a&#34; 数组¶ range¶ 语法: {start..end..step} 示例： # 输出 1 2 3 for value in {1..3} do echo $value done # 输出 1 3 5 for value in {1..6..2} do echo $value done if¶ if 语句的语法如下： if [ &lt;some test&gt; ] then &lt;commands&gt; elif [ &lt;some test&gt; ] then &lt;different commands&gt; else &lt;other commands&gt; fi 比如: if [ &#34;$age&#34; -gt 18 ] then echo &#34;you are $age &gt; 18&#34; elif [ &#34;$age&#34; -eq 18 ] then echo &#34;you are $age == 18&#34; else echo &#34;you are $age &lt; 18&#34; fi 常用的条件判断¶ 条件表达式 含义 ! 表达式 false -n 字符串 字符串长度大于 0 -z 字符串 字符串长度等于 0 A = B 字符串 A B 相等 A != B 字符串 A B 不相等 m -eq n 数字 m n 相等 m -gt n 数字 m 大于 n m -lt n 数字 m 小于 n -d 路径 文件路径存在，并且是个目录 -e 路径 文件存在 -s 路径 文件存在，并且大小大于 0 -r 路径 文件存在，并且拥有读权限 -w 路径 文件存在，并且拥有写权限 -x 路径 文件存在，并且拥有执行权限 [] 实际调用的是 test 命令，我们可以用 test 命令来测试条件表达式： $ test &#34;abc&#34; == 18 $ echo $? 1 $ test 1 -eq 1 $ echo $? 0 以及可以用 &amp;&amp; 和 || 组合判断多个条件表达式，实现 and 和 or 的功能 case(switch case)¶ 语法: case &lt;variable&gt; in &lt;pattern 1&gt;) &lt;commands&gt; ;; &lt;pattern 2&gt;) &lt;other commands&gt; ;; esac 例子： case $1 in start) echo starting ;; stop) echo stoping ;; restart) echo restarting ;; *) echo don\&#39;t know ;; esac for¶ 语法： for var in &lt;list&gt; do &lt;commands&gt; done 同时 for 也支持 break 和 continue 例子： names=&#39;tom jim jake&#39; for name in $names do echo $name done for age in {1..10} do if [ $age -eq 3 ] then continue fi echo $age if [ $age -gt 5 ] then break fi done while¶ 语法： while [ &lt;some test&gt; ] do &lt;commands&gt; done 例子： total=1 while [ $total -le 3 ] do echo $total ((total++)) done until¶ 语法： until [ &lt;some test&gt; ] do &lt;commands&gt; done 例子： total=1 until [ $total -gt 3 ] do echo $total ((total++)) done select 单项选择¶ 选择功能一般用 case 语法用的多，不过 select 也可以实现， select 的功能类似 while + case，比较适合反复询问用户选择项直到用户选择了输入了合法的选择项。 语法： select var in &lt;list&gt; do &lt;commands&gt; [break] done 可以用 break 跳出 select 以及可以通过修改 PS3 变量的值修改提示内容。 示例： PS3=&#39;please choice: &#39; select value in {1..5} do echo $value if [ $value -gt 3 ] then break fi done 函数¶ 语法: function_name () { &lt;commands&gt; } # or function function_name { &lt;commands&gt; } 参数¶ 在函数体内可以通过 $1, $2, $3, ... 获取调用时传入的位置参数 返回值¶ 不支持返回值功能，不过可以用 return x 指定一个状态吗: function test { echo &#34;test&#34; return 3 } test echo $? # 3 变量作用域¶ 默认函数类的变量是全局变量，可以通过 local 定义局部变量： function test { local a=&#39;local&#39; a=&#39;233&#39; b=&#39;666&#39; echo $a, $b } b=&#39;global&#39; test echo $b echo $a 创建跟外部命令同名的函数¶ 例子： function ls { command ls -lh } ls 主要是不要忘了加 command，不加的话，上面的 ls 会无限递归不会按预期的调用 ls 命令。 字符串操作¶ 字符串替换¶ 替换子串¶ $ test=&#34;hello_world&#34; $ echo &#34;${test/_/-}&#34; hello-world $ echo &#34;${test/world/bar}&#34; hello_bar 删除前缀¶ $ test=&#34;foofoo_bar_foofoo&#34; $ echo &#34;${test#foo}&#34; foo_bar_foofoo $ prefix=&#34;foo&#34; $ echo &#34;${test#$prefix}&#34; foo_bar_foofoo 删除后缀¶ $ test=&#34;foofoo_bar_foofoo&#34; $ echo &#34;${test%foo}&#34; foofoo_bar_foo $ suffix=&#34;foo&#34; $ echo &#34;${test%$suffix}&#34; foofoo_bar_foo 打印字符串¶ 推荐使用 printf: printf &#34;hello world\\n&#34; printf &#34;hello %s\\n&#34; &#34;world&#34; echo 也可以： echo hello 文件操作¶ 保存大段文本¶ 可以使用 tee 和 EOF: tee test.text &lt;&lt;EOF hello world ! EOF 保存包含 EOF 命令的文本可以用多个 EOF 的变种: tee a.sh &lt;&lt; EOF tee b.text &lt;&lt; EOF2 echo hello EOF2 EOF $ tee a.sh &lt;&lt; EOF &gt; tee b.text &lt;&lt; EOF2 &gt; echo hello &gt; EOF2 &gt; EOF tee b.text &lt;&lt; EOF2 echo hello EOF2 $ cat a.sh tee b.text &lt;&lt; EOF2 echo hello EOF2 $ bash a.sh echo hello $ cat b.text echo hello append 更新可以使用 tee -a 其他实用功能¶ 隔离 cd 命令的干扰 可以用括号来隔离: # pwd=/tmp ( cd test/ ls # pwd = /tmp/test/ ) # pwd=/tmp 设置功能标志¶ 一般会在脚本中设置如下标志： set -euo pipefail IFS=$&#39;\n\t&#39; 常用的功能标志如下： 运行的时候显示执行到那一条语句了: set -x $ cat a.sh set -x echo &#39;hello&#39; $ bash a.sh + echo hello hello bash -x xx.sh 也可以实现同样的效果: $ cat a.sh echo &#39;hello&#39; $ bash -x a.sh + echo hello hello 有任何命令的退出码不是 0 就退出: set -e $ cat a.sh abc echo &#39;hello&#39; $ bash a.sh a.sh: line 1: abc: command not found hello $ cat a.sh set -e abc echo &#39;hello&#39; $ bash a.sh a.sh: line 2: abc: command not found bash -e xx.sh 也可以实现同样的效果。 引用未定义的变量时出错并退出: set -u $ cat a.sh echo &#34;$abc&#34; echo hello $ bash a.sh hello $ cat a.sh set -u echo &#34;$abc&#34; echo hello $ bash a.sh a.sh: line 2: abc: unbound variable bash -u xx.sh 也可以实现同样的效果。 管道命令中有一个命令失败整个管道操作的退出码将是失败的那个命令的退出码, 未设置这个标志时是最后一个操作的退出码: set -o pipefail $ cat a.sh la la la | echo &#39;aa&#39; $ bash a.sh a.sh: line 1: la: command not found aa $ echo $? 0 $ cat a.sh set -o pipefail la la la | echo &#39;aa&#39; $ bash a.sh a.sh: line 2: la: command not found aa $ echo $? 127 设置单词切分使用的分隔符，默认是 $&#39; \n\t&#39; （空格、换行、制表符）， 可以通过 IFS=$&#39;\n\t&#39; 设置为换行和制表符: $ cat a.sh names=( &#34;foo bar&#34; &#34;foobar tom&#34; ) for i in ${names[@]}; do echo &#34;$i&#34; done $ bash a.sh foo bar foobar tom $ cat a.sh names=( &#34;foo bar&#34; &#34;foobar tom&#34; ) IFS=$&#39;\n\t&#39; for i in ${names[@]}; do echo &#34;$i&#34; done $ bash a.sh foo bar foobar tom 更多的 set 支持的标志可以查看 Bash Reference Manual 参考资料¶ If Statements - Bash Scripting Tutorial Loops - Bash Scripting Tutorial Bash Reference Manual Use the Unofficial Bash Strict Mode (Unless You Looove Debugging)"/>
+        <meta property="article:published_time" content="2018-08-12" />
+            <meta property="article:section" content="linux" />
+            <meta property="article:tag" content="bash" />
+            <meta property="article:tag" content="shell" />
+            <meta property="article:author" content="mozillazg" />
+            <meta property="og:image"
+                  content="https://mozillazg.com/static/avatar.jpeg"/>
+
+
+    <meta name="twitter:card" content="summary">
+        <meta name="twitter:site" content="@mozillazg">
+        <meta name="twitter:creator" content="@mozillazg">
+    <meta name="twitter:domain" content="https://mozillazg.com">
+            <meta property="twitter:image"
+                  content="https://mozillazg.com/static/avatar.jpeg"/>
+
+    <!-- Bootstrap -->
+        <link rel="stylesheet" href="https://mozillazg.com/theme/css/bootstrap.min.css" type="text/css"/>
+    <link href="https://mozillazg.com/theme/css/font-awesome.min.css" rel="stylesheet">
+
+    <link href="https://mozillazg.com/theme/css/pygments/github.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://mozillazg.com/theme/css/style.css" type="text/css"/>
+            <link href="https://mozillazg.com/static/custom.css" rel="stylesheet">
+
+        <link href="https://mozillazg.com/feeds/all.atom.xml" type="application/atom+xml" rel="alternate"
+              title="Huang Huang 的博客 ATOM Feed"/>
+
+        <link href="https://mozillazg.com/feeds/all.rss.xml" type="application/rss+xml" rel="alternate"
+              title="Huang Huang 的博客 RSS Feed"/>
+
+
+        <link href="https://mozillazg.com/feeds/linux.atom.xml" type="application/atom+xml" rel="alternate"
+              title="Huang Huang 的博客 linux ATOM Feed"/>
+
+
+    <script type="application/ld+json">
+    {
+        "@context": "https://schema.org",
+        "@type": "Website",
+        "publisher": {
+            "@type": "Person",
+            "name": "mozillazg",
+            "logo": "https://mozillazg.com/static/avatar.jpeg"
+        },
+        "author": {
+            "@type": "Person",
+            "name": "mozillazg",
+            "image": "https://mozillazg.com/static/avatar.jpeg",
+            "url": "https://mozillazg.com",
+            "sameAs": []
+        },
+        // "headline": "",
+        "url": "https://mozillazg.com/2018/08/linux-bash-shell-script-cookbook.html",
+        "datePublished": "2018-08-12",
+        // "dateModified": "",
+        "image": "https://mozillazg.com/static/avatar.jpeg",
+        "keywords": "bash, shell",
+        "description": "变量¶ 变量名=值 : a=&#34;abc&#34; echo &#34;$a&#34; 数组¶ range¶ 语法: {start..end..step} 示例： # 输出 1 2 3 for value in {1..3} do echo $value done # 输出 1 3 5 for value in {1..6..2} do echo $value done if¶ if 语句的语法如下： if [ &lt;some test&gt; ] then &lt;commands&gt; elif [ &lt;some test&gt; ] then &lt;different commands&gt; else &lt;other commands&gt; fi 比如: if [ &#34;$age&#34; -gt 18 ] then echo &#34;you are $age &gt; 18&#34; elif [ &#34;$age&#34; -eq 18 ] then echo &#34;you are $age == 18&#34; else echo &#34;you are $age &lt; 18&#34; fi 常用的条件判断¶ 条件表达式 含义 ! 表达式 false -n 字符串 字符串长度大于 0 -z 字符串 字符串长度等于 0 A = B 字符串 A B 相等 A != B 字符串 A B 不相等 m -eq n 数字 m n 相等 m -gt n 数字 m 大于 n m -lt n 数字 m 小于 n -d 路径 文件路径存在，并且是个目录 -e 路径 文件存在 -s 路径 文件存在，并且大小大于 0 -r 路径 文件存在，并且拥有读权限 -w 路径 文件存在，并且拥有写权限 -x 路径 文件存在，并且拥有执行权限 [] 实际调用的是 test 命令，我们可以用 test 命令来测试条件表达式： $ test &#34;abc&#34; == 18 $ echo $? 1 $ test 1 -eq 1 $ echo $? 0 以及可以用 &amp;&amp; 和 || 组合判断多个条件表达式，实现 and 和 or 的功能 case(switch case)¶ 语法: case &lt;variable&gt; in &lt;pattern 1&gt;) &lt;commands&gt; ;; &lt;pattern 2&gt;) &lt;other commands&gt; ;; esac 例子： case $1 in start) echo starting ;; stop) echo stoping ;; restart) echo restarting ;; *) echo don\&#39;t know ;; esac for¶ 语法： for var in &lt;list&gt; do &lt;commands&gt; done 同时 for 也支持 break 和 continue 例子： names=&#39;tom jim jake&#39; for name in $names do echo $name done for age in {1..10} do if [ $age -eq 3 ] then continue fi echo $age if [ $age -gt 5 ] then break fi done while¶ 语法： while [ &lt;some test&gt; ] do &lt;commands&gt; done 例子： total=1 while [ $total -le 3 ] do echo $total ((total++)) done until¶ 语法： until [ &lt;some test&gt; ] do &lt;commands&gt; done 例子： total=1 until [ $total -gt 3 ] do echo $total ((total++)) done select 单项选择¶ 选择功能一般用 case 语法用的多，不过 select 也可以实现， select 的功能类似 while + case，比较适合反复询问用户选择项直到用户选择了输入了合法的选择项。 语法： select var in &lt;list&gt; do &lt;commands&gt; [break] done 可以用 break 跳出 select 以及可以通过修改 PS3 变量的值修改提示内容。 示例： PS3=&#39;please choice: &#39; select value in {1..5} do echo $value if [ $value -gt 3 ] then break fi done 函数¶ 语法: function_name () { &lt;commands&gt; } # or function function_name { &lt;commands&gt; } 参数¶ 在函数体内可以通过 $1, $2, $3, ... 获取调用时传入的位置参数 返回值¶ 不支持返回值功能，不过可以用 return x 指定一个状态吗: function test { echo &#34;test&#34; return 3 } test echo $? # 3 变量作用域¶ 默认函数类的变量是全局变量，可以通过 local 定义局部变量： function test { local a=&#39;local&#39; a=&#39;233&#39; b=&#39;666&#39; echo $a, $b } b=&#39;global&#39; test echo $b echo $a 创建跟外部命令同名的函数¶ 例子： function ls { command ls -lh } ls 主要是不要忘了加 command，不加的话，上面的 ls 会无限递归不会按预期的调用 ls 命令。 字符串操作¶ 字符串替换¶ 替换子串¶ $ test=&#34;hello_world&#34; $ echo &#34;${test/_/-}&#34; hello-world $ echo &#34;${test/world/bar}&#34; hello_bar 删除前缀¶ $ test=&#34;foofoo_bar_foofoo&#34; $ echo &#34;${test#foo}&#34; foo_bar_foofoo $ prefix=&#34;foo&#34; $ echo &#34;${test#$prefix}&#34; foo_bar_foofoo 删除后缀¶ $ test=&#34;foofoo_bar_foofoo&#34; $ echo &#34;${test%foo}&#34; foofoo_bar_foo $ suffix=&#34;foo&#34; $ echo &#34;${test%$suffix}&#34; foofoo_bar_foo 打印字符串¶ 推荐使用 printf: printf &#34;hello world\\n&#34; printf &#34;hello %s\\n&#34; &#34;world&#34; echo 也可以： echo hello 文件操作¶ 保存大段文本¶ 可以使用 tee 和 EOF: tee test.text &lt;&lt;EOF hello world ! EOF 保存包含 EOF 命令的文本可以用多个 EOF 的变种: tee a.sh &lt;&lt; EOF tee b.text &lt;&lt; EOF2 echo hello EOF2 EOF $ tee a.sh &lt;&lt; EOF &gt; tee b.text &lt;&lt; EOF2 &gt; echo hello &gt; EOF2 &gt; EOF tee b.text &lt;&lt; EOF2 echo hello EOF2 $ cat a.sh tee b.text &lt;&lt; EOF2 echo hello EOF2 $ bash a.sh echo hello $ cat b.text echo hello append 更新可以使用 tee -a 其他实用功能¶ 隔离 cd 命令的干扰 可以用括号来隔离: # pwd=/tmp ( cd test/ ls # pwd = /tmp/test/ ) # pwd=/tmp 设置功能标志¶ 一般会在脚本中设置如下标志： set -euo pipefail IFS=$&#39;\n\t&#39; 常用的功能标志如下： 运行的时候显示执行到那一条语句了: set -x $ cat a.sh set -x echo &#39;hello&#39; $ bash a.sh + echo hello hello bash -x xx.sh 也可以实现同样的效果: $ cat a.sh echo &#39;hello&#39; $ bash -x a.sh + echo hello hello 有任何命令的退出码不是 0 就退出: set -e $ cat a.sh abc echo &#39;hello&#39; $ bash a.sh a.sh: line 1: abc: command not found hello $ cat a.sh set -e abc echo &#39;hello&#39; $ bash a.sh a.sh: line 2: abc: command not found bash -e xx.sh 也可以实现同样的效果。 引用未定义的变量时出错并退出: set -u $ cat a.sh echo &#34;$abc&#34; echo hello $ bash a.sh hello $ cat a.sh set -u echo &#34;$abc&#34; echo hello $ bash a.sh a.sh: line 2: abc: unbound variable bash -u xx.sh 也可以实现同样的效果。 管道命令中有一个命令失败整个管道操作的退出码将是失败的那个命令的退出码, 未设置这个标志时是最后一个操作的退出码: set -o pipefail $ cat a.sh la la la | echo &#39;aa&#39; $ bash a.sh a.sh: line 1: la: command not found aa $ echo $? 0 $ cat a.sh set -o pipefail la la la | echo &#39;aa&#39; $ bash a.sh a.sh: line 2: la: command not found aa $ echo $? 127 设置单词切分使用的分隔符，默认是 $&#39; \n\t&#39; （空格、换行、制表符）， 可以通过 IFS=$&#39;\n\t&#39; 设置为换行和制表符: $ cat a.sh names=( &#34;foo bar&#34; &#34;foobar tom&#34; ) for i in ${names[@]}; do echo &#34;$i&#34; done $ bash a.sh foo bar foobar tom $ cat a.sh names=( &#34;foo bar&#34; &#34;foobar tom&#34; ) IFS=$&#39;\n\t&#39; for i in ${names[@]}; do echo &#34;$i&#34; done $ bash a.sh foo bar foobar tom 更多的 set 支持的标志可以查看 Bash Reference Manual 参考资料¶ If Statements - Bash Scripting Tutorial Loops - Bash Scripting Tutorial Bash Reference Manual Use the Unofficial Bash Strict Mode (Unless You Looove Debugging)",
+        "mainEntityOfPage": {
+            "@type": "WebPage",
+            "@id": "https://mozillazg.com"
+        }
+    }
+    </script>
+
+</head>
+<body>
+
+<div class="navbar" role="navigation">
+	<div class="container">
+        <div class="navbar-header">
+            <button type="button" class="navbar-toggle" data-toggle="collapse" data-target=".navbar-ex1-collapse">
+                <span class="sr-only">Toggle navigation</span>
+                <span class="icon-bar"></span>
+                <span class="icon-bar"></span>
+                <span class="icon-bar"></span>
+            </button>
+            <a href="https://mozillazg.com/" class="navbar-brand">
+Huang Huang 的博客            </a>
+        </div>
+        <div class="collapse navbar-collapse navbar-ex1-collapse">
+            <ul class="nav navbar-nav">
+                    <li><a href="https://mozillazg.com/feeds/all.atom.xml">Feed</a></li>
+                    <li><a href="/2014/10/pages/about-me.html">About</a></li>
+            </ul>
+            <ul class="nav navbar-nav navbar-right">
+              <li><a href="https://mozillazg.com/archives.html"><i class="fa fa-th-list"></i><span class="icon-label">Archives</span></a></li>
+            </ul>
+        </div>
+        <!-- /.navbar-collapse -->
+    </div>
+</div> <!-- /.navbar -->
+<!-- Banner -->
+<!-- End Banner -->
+<div class="container">
+    <div class="row">
+        <div class="col-lg-12">
+    <section id="content" class="yue">
+        <article>
+            <header class="text-center">
+                <h1>
+                    <a href="https://mozillazg.com/2018/08/linux-bash-shell-script-cookbook.html"
+                       rel="bookmark"
+                       title="Permalink to Bash Shell 常用语法和操作">
+                        Bash Shell 常用语法和操作
+                    </a>
+                </h1>
+                <p class="published">
+                    <time datetime="2018-08-12T00:00:00+00:00">
+                    2018-08-12
+                    </time>
+                </p>
+            </header>
+            <div class="entry-content">
+                <div class="well-sm article-info">
+<footer class="post-info">
+        <a href="https://mozillazg.com/category/linux.html">linux</a>
+
+
+<span class="label label-default hide">Tags</span>
+	<a href="https://mozillazg.com/tag/bash.html">bash</a>
+        /
+	<a href="https://mozillazg.com/tag/shell.html">shell</a>
+    
+</footer><!-- /.post-info -->                </div>
+                <div class="js-toc"></div>
+                <div>
+                <div class="section" id="id1">
+<h2 id="hidid1">变量<a class="headerlink" href="#hidid1" title="Permalink to this headline">¶</a></h2>
+<p><tt class="docutils literal">变量名=值</tt> :</p>
+<div class="highlight"><pre><span></span><span class="nv">a</span><span class="o">=</span><span class="s2">&quot;abc&quot;</span>
+<span class="nb">echo</span> <span class="s2">&quot;</span><span class="nv">$a</span><span class="s2">&quot;</span>
+</pre></div>
+</div>
+<div class="section" id="id2">
+<h2 id="hidid2">数组<a class="headerlink" href="#hidid2" title="Permalink to this headline">¶</a></h2>
+<div class="section" id="range">
+<h3 id="hidrange">range<a class="headerlink" href="#hidrange" title="Permalink to this headline">¶</a></h3>
+<p>语法:</p>
+<div class="highlight"><pre><span></span><span class="o">{</span>start..end..step<span class="o">}</span>
+</pre></div>
+<p>示例：</p>
+<div class="highlight"><pre><span></span><span class="c1"># 输出 1 2 3</span>
+<span class="k">for</span> value in <span class="o">{</span>1..3<span class="o">}</span>
+<span class="k">do</span>
+    <span class="nb">echo</span> <span class="nv">$value</span>
+<span class="k">done</span>
+
+<span class="c1"># 输出 1 3 5</span>
+<span class="k">for</span> value in <span class="o">{</span>1..6..2<span class="o">}</span>
+<span class="k">do</span>
+    <span class="nb">echo</span> <span class="nv">$value</span>
+<span class="k">done</span>
+</pre></div>
+</div>
+</div>
+<div class="section" id="if">
+<h2 id="hidif">if<a class="headerlink" href="#hidif" title="Permalink to this headline">¶</a></h2>
+<p>if 语句的语法如下：</p>
+<div class="highlight"><pre><span></span><span class="k">if</span> <span class="o">[</span> &lt;some test&gt; <span class="o">]</span>
+<span class="k">then</span>
+    &lt;commands&gt;
+<span class="k">elif</span> <span class="o">[</span> &lt;some test&gt; <span class="o">]</span>
+<span class="k">then</span>
+    &lt;different commands&gt;
+<span class="k">else</span>
+    &lt;other commands&gt;
+<span class="k">fi</span>
+</pre></div>
+<p>比如:</p>
+<div class="highlight"><pre><span></span><span class="k">if</span> <span class="o">[</span> <span class="s2">&quot;</span><span class="nv">$age</span><span class="s2">&quot;</span> -gt <span class="m">18</span> <span class="o">]</span>
+<span class="k">then</span>
+    <span class="nb">echo</span> <span class="s2">&quot;you are </span><span class="nv">$age</span><span class="s2"> &gt; 18&quot;</span>
+<span class="k">elif</span> <span class="o">[</span> <span class="s2">&quot;</span><span class="nv">$age</span><span class="s2">&quot;</span> -eq <span class="m">18</span> <span class="o">]</span>
+<span class="k">then</span>
+    <span class="nb">echo</span> <span class="s2">&quot;you are </span><span class="nv">$age</span><span class="s2"> == 18&quot;</span>
+<span class="k">else</span>
+    <span class="nb">echo</span> <span class="s2">&quot;you are </span><span class="nv">$age</span><span class="s2"> &lt; 18&quot;</span>
+<span class="k">fi</span>
+</pre></div>
+<div class="section" id="id3">
+<h3 id="hidid3">常用的条件判断<a class="headerlink" href="#hidid3" title="Permalink to this headline">¶</a></h3>
+<table border="1" class="docutils">
+<colgroup>
+<col width="38%" />
+<col width="63%" />
+</colgroup>
+<thead valign="bottom">
+<tr><th class="head">条件表达式</th>
+<th class="head">含义</th>
+</tr>
+</thead>
+<tbody valign="top">
+<tr><td>! 表达式</td>
+<td>false</td>
+</tr>
+<tr><td>-n 字符串</td>
+<td>字符串长度大于 0</td>
+</tr>
+<tr><td>-z 字符串</td>
+<td>字符串长度等于 0</td>
+</tr>
+<tr><td>A = B</td>
+<td>字符串 A B 相等</td>
+</tr>
+<tr><td>A != B</td>
+<td>字符串 A B 不相等</td>
+</tr>
+<tr><td>m -eq n</td>
+<td>数字 m n 相等</td>
+</tr>
+<tr><td>m -gt n</td>
+<td>数字 m 大于 n</td>
+</tr>
+<tr><td>m -lt n</td>
+<td>数字 m 小于 n</td>
+</tr>
+<tr><td>-d 路径</td>
+<td>文件路径存在，并且是个目录</td>
+</tr>
+<tr><td>-e 路径</td>
+<td>文件存在</td>
+</tr>
+<tr><td>-s 路径</td>
+<td>文件存在，并且大小大于 0</td>
+</tr>
+<tr><td>-r 路径</td>
+<td>文件存在，并且拥有读权限</td>
+</tr>
+<tr><td>-w 路径</td>
+<td>文件存在，并且拥有写权限</td>
+</tr>
+<tr><td>-x 路径</td>
+<td>文件存在，并且拥有执行权限</td>
+</tr>
+</tbody>
+</table>
+<p><tt class="docutils literal">[]</tt> 实际调用的是 <tt class="docutils literal">test</tt> 命令，我们可以用 <tt class="docutils literal">test</tt> 命令来测试条件表达式：</p>
+<div class="highlight"><pre><span></span>$ <span class="nb">test</span> <span class="s2">&quot;abc&quot;</span> <span class="o">==</span> 18
+$ <span class="nb">echo</span> <span class="nv">$?</span>
+1
+$ <span class="nb">test</span> <span class="m">1</span> -eq 1
+$ <span class="nb">echo</span> <span class="nv">$?</span>
+0
+</pre></div>
+<p>以及可以用 <tt class="docutils literal">&amp;&amp;</tt> 和 <tt class="docutils literal">||</tt> 组合判断多个条件表达式，实现 and 和 or 的功能</p>
+</div>
+</div>
+<div class="section" id="case-switch-case">
+<h2 id="hidcase-switch-case">case(switch case)<a class="headerlink" href="#hidcase-switch-case" title="Permalink to this headline">¶</a></h2>
+<p>语法:</p>
+<div class="highlight"><pre><span></span><span class="k">case</span> &lt;variable&gt; in
+&lt;pattern 1&gt;<span class="o">)</span>
+    &lt;commands&gt;
+    <span class="p">;;</span>
+&lt;pattern 2&gt;<span class="o">)</span>
+    &lt;other commands&gt;
+    <span class="p">;;</span>
+<span class="k">esac</span>
+</pre></div>
+<p>例子：</p>
+<div class="highlight"><pre><span></span><span class="k">case</span> <span class="nv">$1</span> in
+start<span class="o">)</span>
+    <span class="nb">echo</span> starting
+    <span class="p">;;</span>
+stop<span class="o">)</span>
+    <span class="nb">echo</span> stoping
+    <span class="p">;;</span>
+restart<span class="o">)</span>
+    <span class="nb">echo</span> restarting
+    <span class="p">;;</span>
+*<span class="o">)</span>
+    <span class="nb">echo</span> don<span class="se">\&#39;</span>t know
+    <span class="p">;;</span>
+<span class="k">esac</span>
+</pre></div>
+</div>
+<div class="section" id="for">
+<h2 id="hidfor">for<a class="headerlink" href="#hidfor" title="Permalink to this headline">¶</a></h2>
+<p>语法：</p>
+<div class="highlight"><pre><span></span><span class="k">for</span> var in &lt;list&gt;
+<span class="k">do</span>
+    &lt;commands&gt;
+<span class="k">done</span>
+</pre></div>
+<p>同时 <tt class="docutils literal">for</tt> 也支持 <tt class="docutils literal">break</tt> 和 <tt class="docutils literal">continue</tt></p>
+<p>例子：</p>
+<div class="highlight"><pre><span></span><span class="nv">names</span><span class="o">=</span><span class="s1">&#39;tom jim jake&#39;</span>
+<span class="k">for</span> name in <span class="nv">$names</span>
+<span class="k">do</span>
+    <span class="nb">echo</span> <span class="nv">$name</span>
+<span class="k">done</span>
+</pre></div>
+<div class="highlight"><pre><span></span><span class="k">for</span> age in <span class="o">{</span>1..10<span class="o">}</span>
+<span class="k">do</span>
+    <span class="k">if</span> <span class="o">[</span> <span class="nv">$age</span> -eq <span class="m">3</span> <span class="o">]</span>
+    <span class="k">then</span>
+        <span class="k">continue</span>
+    <span class="k">fi</span>
+
+    <span class="nb">echo</span> <span class="nv">$age</span>
+
+    <span class="k">if</span> <span class="o">[</span> <span class="nv">$age</span> -gt <span class="m">5</span> <span class="o">]</span>
+    <span class="k">then</span>
+        <span class="nb">break</span>
+    <span class="k">fi</span>
+<span class="k">done</span>
+</pre></div>
+</div>
+<div class="section" id="while">
+<h2 id="hidwhile">while<a class="headerlink" href="#hidwhile" title="Permalink to this headline">¶</a></h2>
+<p>语法：</p>
+<div class="highlight"><pre><span></span><span class="k">while</span> <span class="o">[</span> &lt;some test&gt; <span class="o">]</span>
+<span class="k">do</span>
+    &lt;commands&gt;
+<span class="k">done</span>
+</pre></div>
+<p>例子：</p>
+<div class="highlight"><pre><span></span><span class="nv">total</span><span class="o">=</span>1
+<span class="k">while</span> <span class="o">[</span> <span class="nv">$total</span> -le <span class="m">3</span> <span class="o">]</span>
+<span class="k">do</span>
+    <span class="nb">echo</span> <span class="nv">$total</span>
+    <span class="o">((</span>total++<span class="o">))</span>
+<span class="k">done</span>
+</pre></div>
+</div>
+<div class="section" id="until">
+<h2 id="hiduntil">until<a class="headerlink" href="#hiduntil" title="Permalink to this headline">¶</a></h2>
+<p>语法：</p>
+<div class="highlight"><pre><span></span><span class="k">until</span> <span class="o">[</span> &lt;some test&gt; <span class="o">]</span>
+<span class="k">do</span>
+    &lt;commands&gt;
+<span class="k">done</span>
+</pre></div>
+<p>例子：</p>
+<div class="highlight"><pre><span></span><span class="nv">total</span><span class="o">=</span>1
+<span class="k">until</span> <span class="o">[</span> <span class="nv">$total</span> -gt <span class="m">3</span> <span class="o">]</span>
+<span class="k">do</span>
+    <span class="nb">echo</span> <span class="nv">$total</span>
+    <span class="o">((</span>total++<span class="o">))</span>
+<span class="k">done</span>
+</pre></div>
+</div>
+<div class="section" id="select">
+<h2 id="hidselect">select 单项选择<a class="headerlink" href="#hidselect" title="Permalink to this headline">¶</a></h2>
+<p>选择功能一般用 case 语法用的多，不过 select 也可以实现，
+select 的功能类似 while + case，比较适合反复询问用户选择项直到用户选择了输入了合法的选择项。</p>
+<p>语法：</p>
+<div class="highlight"><pre><span></span><span class="k">select</span> var in &lt;list&gt;
+<span class="k">do</span>
+    &lt;commands&gt;
+    <span class="o">[</span>break<span class="o">]</span>
+<span class="k">done</span>
+</pre></div>
+<p>可以用 break 跳出 select 以及可以通过修改 PS3 变量的值修改提示内容。</p>
+<p>示例：</p>
+<div class="highlight"><pre><span></span><span class="nv">PS3</span><span class="o">=</span><span class="s1">&#39;please choice: &#39;</span>
+
+<span class="k">select</span> value in <span class="o">{</span>1..5<span class="o">}</span>
+<span class="k">do</span>
+    <span class="nb">echo</span> <span class="nv">$value</span>
+
+    <span class="k">if</span> <span class="o">[</span> <span class="nv">$value</span> -gt <span class="m">3</span> <span class="o">]</span>
+    <span class="k">then</span>
+        <span class="nb">break</span>
+    <span class="k">fi</span>
+
+<span class="k">done</span>
+</pre></div>
+</div>
+<div class="section" id="id4">
+<h2 id="hidid4">函数<a class="headerlink" href="#hidid4" title="Permalink to this headline">¶</a></h2>
+<p>语法:</p>
+<div class="highlight"><pre><span></span>function_name <span class="o">()</span> <span class="o">{</span>
+    &lt;commands&gt;
+<span class="o">}</span>
+
+<span class="c1"># or</span>
+
+<span class="k">function</span> function_name <span class="o">{</span>
+    &lt;commands&gt;
+<span class="o">}</span>
+</pre></div>
+<div class="section" id="id5">
+<h3 id="hidid5">参数<a class="headerlink" href="#hidid5" title="Permalink to this headline">¶</a></h3>
+<p>在函数体内可以通过 $1, $2, $3, ... 获取调用时传入的位置参数</p>
+</div>
+<div class="section" id="id6">
+<h3 id="hidid6">返回值<a class="headerlink" href="#hidid6" title="Permalink to this headline">¶</a></h3>
+<p>不支持返回值功能，不过可以用 return x 指定一个状态吗:</p>
+<div class="highlight"><pre><span></span><span class="k">function</span> <span class="nb">test</span> <span class="o">{</span>
+    <span class="nb">echo</span> <span class="s2">&quot;test&quot;</span>
+    <span class="k">return</span> 3
+<span class="o">}</span>
+
+<span class="nb">test</span>
+<span class="nb">echo</span> <span class="nv">$?</span>   <span class="c1"># 3</span>
+</pre></div>
+</div>
+<div class="section" id="id7">
+<h3 id="hidid7">变量作用域<a class="headerlink" href="#hidid7" title="Permalink to this headline">¶</a></h3>
+<p>默认函数类的变量是全局变量，可以通过 local 定义局部变量：</p>
+<div class="highlight"><pre><span></span><span class="k">function</span> <span class="nb">test</span> <span class="o">{</span>
+    <span class="nb">local</span> <span class="nv">a</span><span class="o">=</span><span class="s1">&#39;local&#39;</span>
+
+    <span class="nv">a</span><span class="o">=</span><span class="s1">&#39;233&#39;</span>
+    <span class="nv">b</span><span class="o">=</span><span class="s1">&#39;666&#39;</span>
+    <span class="nb">echo</span> <span class="nv">$a</span>, <span class="nv">$b</span>
+<span class="o">}</span>
+
+<span class="nv">b</span><span class="o">=</span><span class="s1">&#39;global&#39;</span>
+
+<span class="nb">test</span>
+
+<span class="nb">echo</span> <span class="nv">$b</span>
+<span class="nb">echo</span> <span class="nv">$a</span>
+</pre></div>
+</div>
+<div class="section" id="id8">
+<h3 id="hidid8">创建跟外部命令同名的函数<a class="headerlink" href="#hidid8" title="Permalink to this headline">¶</a></h3>
+<p>例子：</p>
+<div class="highlight"><pre><span></span><span class="k">function</span> ls <span class="o">{</span>
+    <span class="nb">command</span> ls -lh
+<span class="o">}</span>
+
+ls
+</pre></div>
+<p>主要是不要忘了加 command，不加的话，上面的 ls 会无限递归不会按预期的调用 ls 命令。</p>
+</div>
+</div>
+<div class="section" id="id9">
+<h2 id="hidid9">字符串操作<a class="headerlink" href="#hidid9" title="Permalink to this headline">¶</a></h2>
+<div class="section" id="id10">
+<h3 id="hidid10">字符串替换<a class="headerlink" href="#hidid10" title="Permalink to this headline">¶</a></h3>
+<div class="section" id="id11">
+<h4 id="hidid11">替换子串<a class="headerlink" href="#hidid11" title="Permalink to this headline">¶</a></h4>
+<div class="highlight"><pre><span></span>$ <span class="nv">test</span><span class="o">=</span><span class="s2">&quot;hello_world&quot;</span>
+$ <span class="nb">echo</span> <span class="s2">&quot;</span><span class="si">${</span><span class="nv">test</span><span class="p">/_/-</span><span class="si">}</span><span class="s2">&quot;</span>
+hello-world
+$ <span class="nb">echo</span> <span class="s2">&quot;</span><span class="si">${</span><span class="nv">test</span><span class="p">/world/bar</span><span class="si">}</span><span class="s2">&quot;</span>
+hello_bar
+</pre></div>
+</div>
+<div class="section" id="id12">
+<h4 id="hidid12">删除前缀<a class="headerlink" href="#hidid12" title="Permalink to this headline">¶</a></h4>
+<div class="highlight"><pre><span></span>$ <span class="nv">test</span><span class="o">=</span><span class="s2">&quot;foofoo_bar_foofoo&quot;</span>
+$ <span class="nb">echo</span> <span class="s2">&quot;</span><span class="si">${</span><span class="nv">test</span><span class="p">#foo</span><span class="si">}</span><span class="s2">&quot;</span>
+foo_bar_foofoo
+$ <span class="nv">prefix</span><span class="o">=</span><span class="s2">&quot;foo&quot;</span>
+$ <span class="nb">echo</span> <span class="s2">&quot;</span><span class="si">${</span><span class="nv">test</span><span class="p">#</span><span class="nv">$prefix</span><span class="si">}</span><span class="s2">&quot;</span>
+foo_bar_foofoo
+</pre></div>
+</div>
+<div class="section" id="id13">
+<h4 id="hidid13">删除后缀<a class="headerlink" href="#hidid13" title="Permalink to this headline">¶</a></h4>
+<div class="highlight"><pre><span></span>$ <span class="nv">test</span><span class="o">=</span><span class="s2">&quot;foofoo_bar_foofoo&quot;</span>
+$ <span class="nb">echo</span> <span class="s2">&quot;</span><span class="si">${</span><span class="nv">test</span><span class="p">%foo</span><span class="si">}</span><span class="s2">&quot;</span>
+foofoo_bar_foo
+$ <span class="nv">suffix</span><span class="o">=</span><span class="s2">&quot;foo&quot;</span>
+$ <span class="nb">echo</span> <span class="s2">&quot;</span><span class="si">${</span><span class="nv">test</span><span class="p">%</span><span class="nv">$suffix</span><span class="si">}</span><span class="s2">&quot;</span>
+foofoo_bar_foo
+</pre></div>
+</div>
+</div>
+<div class="section" id="id14">
+<h3 id="hidid14">打印字符串<a class="headerlink" href="#hidid14" title="Permalink to this headline">¶</a></h3>
+<p>推荐使用 <tt class="docutils literal">printf</tt>:</p>
+<div class="highlight"><pre><span></span><span class="nb">printf</span> <span class="s2">&quot;hello world\\n&quot;</span>
+<span class="nb">printf</span> <span class="s2">&quot;hello %s\\n&quot;</span> <span class="s2">&quot;world&quot;</span>
+</pre></div>
+<p><tt class="docutils literal">echo</tt> 也可以：</p>
+<div class="highlight"><pre><span></span><span class="nb">echo</span> hello
+</pre></div>
+</div>
+</div>
+<div class="section" id="id15">
+<h2 id="hidid15">文件操作<a class="headerlink" href="#hidid15" title="Permalink to this headline">¶</a></h2>
+<div class="section" id="id16">
+<h3 id="hidid16">保存大段文本<a class="headerlink" href="#hidid16" title="Permalink to this headline">¶</a></h3>
+<p>可以使用 <tt class="docutils literal">tee</tt> 和 <tt class="docutils literal">EOF</tt>:</p>
+<div class="highlight"><pre><span></span>tee test.text <span class="s">&lt;&lt;EOF</span>
+<span class="s">hello</span>
+<span class="s">    world</span>
+
+<span class="s">!</span>
+
+<span class="s">EOF</span>
+</pre></div>
+<p>保存包含 EOF 命令的文本可以用多个 EOF 的变种:</p>
+<div class="highlight"><pre><span></span>tee a.sh <span class="s">&lt;&lt; EOF</span>
+<span class="s">tee b.text &lt;&lt; EOF</span>2
+ <span class="nb">echo</span> hello
+EOF2
+EOF
+
+
+$ tee a.sh <span class="s">&lt;&lt; EOF</span>
+<span class="s">&gt; tee b.text &lt;&lt; EOF</span>2
+&gt; <span class="nb">echo</span> hello
+&gt; EOF2
+&gt; EOF
+tee b.text <span class="s">&lt;&lt; EOF2</span>
+<span class="s">echo hello</span>
+<span class="s">EOF2</span>
+
+$ cat a.sh
+tee b.text <span class="s">&lt;&lt; EOF2</span>
+<span class="s">echo hello</span>
+<span class="s">EOF2</span>
+
+$ bash a.sh
+<span class="nb">echo</span> hello
+
+$ cat b.text
+<span class="nb">echo</span> hello
+</pre></div>
+<p>append 更新可以使用 <tt class="docutils literal">tee <span class="pre">-a</span></tt></p>
+</div>
+</div>
+<div class="section" id="id17">
+<h2 id="hidid17">其他实用功能<a class="headerlink" href="#hidid17" title="Permalink to this headline">¶</a></h2>
+<div class="section" id="cd">
+<h3>隔离 <tt class="docutils literal">cd</tt> 命令的干扰</h3>
+<p>可以用括号来隔离:</p>
+<div class="highlight"><pre><span></span><span class="c1"># pwd=/tmp</span>
+<span class="o">(</span>
+    <span class="nb">cd</span> test/
+    ls   <span class="c1"># pwd = /tmp/test/</span>
+<span class="o">)</span>
+<span class="c1"># pwd=/tmp</span>
+</pre></div>
+</div>
+<div class="section" id="id18">
+<h3 id="hidid18">设置功能标志<a class="headerlink" href="#hidid18" title="Permalink to this headline">¶</a></h3>
+<p>一般会在脚本中设置如下标志：</p>
+<div class="highlight"><pre><span></span><span class="nb">set</span> -euo pipefail
+<span class="nv">IFS</span><span class="o">=</span><span class="s1">$&#39;\n\t&#39;</span>
+</pre></div>
+<p>常用的功能标志如下：</p>
+<ul class="simple">
+<li>运行的时候显示执行到那一条语句了: <tt class="docutils literal">set <span class="pre">-x</span></tt></li>
+</ul>
+<div class="highlight"><pre><span></span>$ cat a.sh
+<span class="nb">set</span> -x
+
+<span class="nb">echo</span> <span class="s1">&#39;hello&#39;</span>
+
+$ bash a.sh
++ <span class="nb">echo</span> hello
+hello
+</pre></div>
+<p><tt class="docutils literal">bash <span class="pre">-x</span> xx.sh</tt> 也可以实现同样的效果:</p>
+<div class="highlight"><pre><span></span>$ cat a.sh
+<span class="nb">echo</span> <span class="s1">&#39;hello&#39;</span>
+
+$ bash -x a.sh
++ <span class="nb">echo</span> hello
+hello
+</pre></div>
+<ul class="simple">
+<li>有任何命令的退出码不是 0 就退出: <tt class="docutils literal">set <span class="pre">-e</span></tt></li>
+</ul>
+<div class="highlight"><pre><span></span>$ cat a.sh
+abc
+<span class="nb">echo</span> <span class="s1">&#39;hello&#39;</span>
+
+$ bash a.sh
+a.sh: line 1: abc: <span class="nb">command</span> not found
+hello
+
+$ cat a.sh
+<span class="nb">set</span> -e
+abc
+<span class="nb">echo</span> <span class="s1">&#39;hello&#39;</span>
+
+$ bash a.sh
+a.sh: line 2: abc: <span class="nb">command</span> not found
+</pre></div>
+<p><tt class="docutils literal">bash <span class="pre">-e</span> xx.sh</tt> 也可以实现同样的效果。</p>
+<ul class="simple">
+<li>引用未定义的变量时出错并退出: <tt class="docutils literal">set <span class="pre">-u</span></tt></li>
+</ul>
+<div class="highlight"><pre><span></span>$ cat a.sh
+<span class="nb">echo</span> <span class="s2">&quot;</span><span class="nv">$abc</span><span class="s2">&quot;</span>
+<span class="nb">echo</span> hello
+
+$ bash a.sh
+
+hello
+
+$ cat a.sh
+<span class="nb">set</span> -u
+<span class="nb">echo</span> <span class="s2">&quot;</span><span class="nv">$abc</span><span class="s2">&quot;</span>
+<span class="nb">echo</span> hello
+
+$ bash a.sh
+a.sh: line 2: abc: unbound variable
+</pre></div>
+<p><tt class="docutils literal">bash <span class="pre">-u</span> xx.sh</tt> 也可以实现同样的效果。</p>
+<ul class="simple">
+<li>管道命令中有一个命令失败整个管道操作的退出码将是失败的那个命令的退出码,
+未设置这个标志时是最后一个操作的退出码: <tt class="docutils literal">set <span class="pre">-o</span> pipefail</tt></li>
+</ul>
+<div class="highlight"><pre><span></span>$ cat a.sh
+la la la <span class="p">|</span> <span class="nb">echo</span> <span class="s1">&#39;aa&#39;</span>
+
+$ bash a.sh
+a.sh: line 1: la: <span class="nb">command</span> not found
+aa
+
+$ <span class="nb">echo</span> <span class="nv">$?</span>
+0
+
+$ cat a.sh
+<span class="nb">set</span> -o pipefail
+la la la <span class="p">|</span> <span class="nb">echo</span> <span class="s1">&#39;aa&#39;</span>
+
+$ bash a.sh
+a.sh: line 2: la: <span class="nb">command</span> not found
+aa
+
+$ <span class="nb">echo</span> <span class="nv">$?</span>
+127
+</pre></div>
+<ul class="simple">
+<li>设置单词切分使用的分隔符，默认是 <tt class="docutils literal">$' \n\t'</tt> （空格、换行、制表符），
+可以通过 <tt class="docutils literal"><span class="pre">IFS=$'\n\t'</span></tt> 设置为换行和制表符:</li>
+</ul>
+<div class="highlight"><pre><span></span>$ cat a.sh
+<span class="nv">names</span><span class="o">=(</span>
+    <span class="s2">&quot;foo bar&quot;</span>
+    <span class="s2">&quot;foobar tom&quot;</span>
+<span class="o">)</span>
+
+<span class="k">for</span> i in <span class="si">${</span><span class="nv">names</span><span class="p">[@]</span><span class="si">}</span><span class="p">;</span> <span class="k">do</span>
+    <span class="nb">echo</span> <span class="s2">&quot;</span><span class="nv">$i</span><span class="s2">&quot;</span>
+<span class="k">done</span>
+
+$ bash a.sh
+foo
+bar
+foobar
+tom
+
+$ cat a.sh
+<span class="nv">names</span><span class="o">=(</span>
+    <span class="s2">&quot;foo bar&quot;</span>
+    <span class="s2">&quot;foobar tom&quot;</span>
+<span class="o">)</span>
+
+<span class="nv">IFS</span><span class="o">=</span><span class="s1">$&#39;\n\t&#39;</span>
+<span class="k">for</span> i in <span class="si">${</span><span class="nv">names</span><span class="p">[@]</span><span class="si">}</span><span class="p">;</span> <span class="k">do</span>
+    <span class="nb">echo</span> <span class="s2">&quot;</span><span class="nv">$i</span><span class="s2">&quot;</span>
+<span class="k">done</span>
+
+$ bash a.sh
+foo bar
+foobar tom
+</pre></div>
+<p>更多的 set 支持的标志可以查看 <a class="reference external" href="https://www.gnu.org/software/bash/manual/bashref.html#The-Set-Builtin">Bash Reference Manual</a></p>
+</div>
+</div>
+<div class="section" id="id19">
+<h2 id="hidid19">参考资料<a class="headerlink" href="#hidid19" title="Permalink to this headline">¶</a></h2>
+<ul class="simple">
+<li><a class="reference external" href="https://ryanstutorials.net/bash-scripting-tutorial/bash-if-statements.php">If Statements - Bash Scripting Tutorial</a></li>
+<li><a class="reference external" href="https://ryanstutorials.net/bash-scripting-tutorial/bash-loops.php">Loops - Bash Scripting Tutorial</a></li>
+<li><a class="reference external" href="https://www.gnu.org/software/bash/manual/bashref.html#The-Set-Builtin">Bash Reference Manual</a></li>
+<li><a class="reference external" href="http://redsymbol.net/articles/unofficial-bash-strict-mode/">Use the Unofficial Bash Strict Mode (Unless You Looove Debugging)</a></li>
+</ul>
+</div>
+
+                </div>
+            </div>
+            <!-- /.entry-content -->
+<section class="text-center">
+  
+<div id="donate"></div>
+
+<div class="social-share"></div>
+<div>
+<p>有任何意见欢迎在下方留言或者加我微信交流</p>
+<img src="/static/wechat.png" height="200px" width="200px"/>
+</div>
+
+</section>
+<section class="well" id="related-posts">
+    <p>Related Posts:</p>
+    <ul>
+        <li><a href="https://mozillazg.com/2013/09/linux-bash-run-mutil-cmd.html">[linux]bash 下 ; &amp;&amp; || 的区别</a></li>
+    </ul>
+</section>
+    <hr/>
+    <section class="comments" id="comments">
+        <h2>Comments</h2>
+
+        <div id="disqus_thread"></div>
+        <script type="text/javascript">
+            /* * * CONFIGURATION VARIABLES: EDIT BEFORE PASTING INTO YOUR WEBPAGE * * */
+            var disqus_shortname = 'my-github-blog'; // required: replace example with your forum shortname
+
+                    var disqus_identifier = 'linux-bash-shell-script-cookbook';
+                var disqus_url = 'https://mozillazg.com/2018/08/linux-bash-shell-script-cookbook.html';
+
+            var disqus_config = function () {
+                this.language = "zh-hans";
+            };
+
+            /* * * DON'T EDIT BELOW THIS LINE * * */
+            (function () {
+                var dsq = document.createElement('script');
+                dsq.type = 'text/javascript';
+                dsq.async = true;
+                dsq.src = '//' + disqus_shortname + '.disqus.com/embed.js';
+                (document.getElementsByTagName('head')[0] || document.getElementsByTagName('body')[0]).appendChild(dsq);
+            })();
+        </script>
+        <noscript>Please enable JavaScript to view the <a href="http://disqus.com/?ref_noscript">comments powered by
+            Disqus.</a></noscript>
+        <a href="http://disqus.com" class="dsq-brlink">comments powered by <span class="logo-disqus">Disqus</span></a>
+
+    </section>
+        </article>
+    </section>
+
+        </div>
+    </div>
+</div>
+<footer>
+   <div class="container">
+      <hr>
+      <div class="row">
+         <div class="col-xs-10">&copy; 2019 mozillazg
+            &middot; Powered by <a href="https://github.com/DandyDev/pelican-bootstrap3" target="_blank">pelican-bootstrap3</a>,
+            <a href="http://docs.getpelican.com/" target="_blank">Pelican</a>,
+            <a href="http://getbootstrap.com" target="_blank">Bootstrap</a>              <p><small>  <a rel="license" href="http://creativecommons.org/licenses/by-sa/4.0/"><img alt="Creative Commons License" style="border-width:0" src="/static/images/by-sa-80x15.png" /></a>
+    &quot;<span xmlns:dct="http://purl.org/dc/terms/" property="dct:title">Huang Huang 的博客</span>&quot; by <a xmlns:cc="http://creativecommons.org/ns#" href="https://mozillazg.com" property="cc:attributionName" rel="cc:attributionURL">mozillazg</a> is
+  licensed under a <a rel="license" href="http://creativecommons.org/licenses/by-sa/4.0/">Creative Commons Attribution-ShareAlike 4.0 International License</a>, except where indicated otherwise.
+</small></p>
+         </div>
+         <div class="col-xs-2"><p class="pull-right"><i class="fa fa-arrow-up"></i> <a href="#">Back to top</a></p></div>
+      </div>
+   </div>
+</footer>
+<script src="https://mozillazg.com/theme/js/jquery.min.js"></script>
+
+<!-- Include all compiled plugins (below), or include individual files as needed -->
+<script src="https://mozillazg.com/theme/js/bootstrap.min.js"></script>
+
+<!-- Enable responsive features in IE8 with Respond.js (https://github.com/scottjehl/Respond) -->
+<script src="https://mozillazg.com/theme/js/respond.min.js"></script>
+
+    <!-- Disqus -->
+    <script type="text/javascript">
+        /* * * CONFIGURATION VARIABLES: EDIT BEFORE PASTING INTO YOUR WEBPAGE * * */
+        var disqus_shortname = 'my-github-blog'; // required: replace example with your forum shortname
+
+        /* * * DON'T EDIT BELOW THIS LINE * * */
+        (function () {
+            var s = document.createElement('script');
+            s.async = true;
+            s.type = 'text/javascript';
+            s.src = '//' + disqus_shortname + '.disqus.com/count.js';
+            (document.getElementsByTagName('HEAD')[0] || document.getElementsByTagName('BODY')[0]).appendChild(s);
+        }());
+    </script>
+    <!-- End Disqus Code -->
+    <!-- Google Analytics Universal -->
+    <script type="text/javascript">
+        (function(i,s,o,g,r,a,m){i['GoogleAnalyticsObject']=r;i[r]=i[r]||function(){
+        (i[r].q=i[r].q||[]).push(arguments)},i[r].l=1*new Date();a=s.createElement(o),
+        m=s.getElementsByTagName(o)[0];a.async=1;a.src=g;m.parentNode.insertBefore(a,m)
+        })(window,document,'script','//www.google-analytics.com/analytics.js','ga');
+
+        ga('create', 'UA-77172981-1', 'auto');
+        ga('send', 'pageview');
+    </script>
+    <!-- End Google Analytics Universal Code -->
+
+
+<script src="https://mozillazg.com/theme/js/vdonate.js"></script>
+<script>
+$(document).ready(function(){
+new vdonate({
+  title: '如果觉得我的文章对您有用，请随意打赏。您的支持将鼓励我继续创作!', // 可选参数，打赏标题
+  btnText: '打赏支持', // 可选参数，打赏按钮文字
+  el: document.getElementById('donate'), // 必选参数，打赏按钮的容器
+  wechatImage: 'https://mozillazg.com/static/wechat_donate.png', // 必选参数，微信收款二维码
+  alipayImage: 'https://mozillazg.com/static/alipay_donate.jpg' // 必选参数，支付宝收款二维码
+});
+});
+</script>
+
+<script src="https://mozillazg.com/theme/js/tocbot.min.js"></script>
+<script>
+$(document).ready(function(){
+  tocbot.init({
+    // Where to render the table of contents.
+    tocSelector: '.js-toc',
+    // Where to grab the headings to build the table of contents.
+    contentSelector: '.entry-content',
+    // Which headings to grab inside of the contentSelector element.
+    headingSelector: 'h2, h3, h4,h5',
+    // Headings that match the ignoreSelector will be skipped.
+    ignoreSelector: '.js-toc-ignore',
+    // Main class to add to links.
+    linkClass: 'toc-link',
+    // Extra classes to add to links.
+    extraLinkClasses: '',
+    // Class to add to active links,
+    // the link corresponding to the top most heading on the page.
+    activeLinkClass: 'is-active-link',
+    // Main class to add to lists.
+    listClass: 'toc-list',
+    // Extra classes to add to lists.
+    extraListClasses: '',
+    // Class that gets added when a list should be collapsed.
+    isCollapsedClass: 'is-collapsed',
+    // Class that gets added when a list should be able
+    // to be collapsed but isn't necessarily collpased.
+    collapsibleClass: 'is-collapsible',
+    // Class to add to list items.
+    listItemClass: 'toc-list-item',
+    // How many heading levels should not be collpased.
+    // For example, number 6 will show everything since
+    // there are only 6 heading levels and number 0 will collpase them all.
+    // The sections that are hidden will open
+    // and close as you scroll to headings within them.
+    collapseDepth: 6,
+    // Smooth scrolling enabled.
+    smoothScroll: true,
+    // Smooth scroll duration.
+    smoothScrollDuration: 420,
+    // Callback for scroll end (requires: smoothScroll).
+    scrollEndCallback: function (e) {},
+    // Headings offset between the headings and the top of the document (this is meant for minor adjustments).
+    headingsOffset: 0,
+    // Timeout between events firing to make sure it's
+    // not too rapid (for performance reasons).
+    throttleTimeout: 50,
+    // Element to add the positionFixedClass to.
+    positionFixedSelector: null,
+    // Fixed position class to add to make sidebar fixed after scrolling
+    // down past the fixedSidebarOffset.
+    positionFixedClass: 'is-position-fixed',
+    // fixedSidebarOffset can be any number but by default is set
+    // to auto which sets the fixedSidebarOffset to the sidebar
+    // element's offsetTop from the top of the document on init.
+    fixedSidebarOffset: 'auto',
+    // includeHtml can be set to true to include the HTML markup from the
+    // heading node instead of just including the textContent.
+    includeHtml: false
+  });
+});
+</script>
+</body>
+</html>
