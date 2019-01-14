@@ -1,0 +1,473 @@
+<!DOCTYPE html>
+<html lang="zh-hans" prefix="og: http://ogp.me/ns# fb: https://www.facebook.com/2008/fbml" class="han-init">
+<head>
+    <title>健康检查功能相关的一些备忘 - Huang Huang 的博客</title>
+    <!-- Using the latest rendering mode for IE -->
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <!-- share.css -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/social-share.js/1.0.16/css/share.min.css">
+    <!-- share.js -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/social-share.js/1.0.16/js/social-share.min.js"></script>
+
+
+    <link href="https://mozillazg.com/favicon.ico" rel="icon">
+
+<link rel="canonical" href="https://mozillazg.com/2019/01/notes-about-design-health-checking.html">
+
+        <meta name="author" content="mozillazg" />
+        <meta name="keywords" content="health-check,load-balancer" />
+    <meta name="description" content="前言¶ 本文记录一些健康检查功能相关的笔记/经验。 检查方法¶ 常见的健康检查一般分为主机层面的检查以及应用/服务层面的检查。 主机层面的检查¶ 主机层面的检查一般用下面的方法进行检查： 用是否能够 ping 通来检查 尝试用 tcp 连接一下目标 ip:port ，看看是否可以连通来检查 其中 tcp 连通性检查这里有时会用一个非常规的方法去做 tcp 健康检查 [1] ： 一般建立 tcp 连接都会经过 tcp 三次握手的过程: Client -&gt; Server: SYN Server -&gt; Client: SYN-ACK Client -&gt; Server: ACK 但是其实最后一次的 ACK 可以不用发，因为对于健康检查来说，收到服务端发送回来的 SYN-ACK 的时候， 我们就可以简单的认为客户端跟服务端是可联通的。所以 tcp 健康检查可以考虑省去最后一个 ACK: Client -&gt; Server: SYN Server -&gt; Client: SYN-ACK Client -&gt; Server: RST 这样做的好处是，因为没有完成三次握手而是直接 RST 掉了，所以就不会有后续关闭连接时的四次挥手了， 可以减少好几个包（客户端和服务端都省了一些包）。 应用/服务层面的检查¶ 应用/服务层面的检查，一般指的是按照应用/服务认可的普通客户端的方式去做健康检查， 比如发送合法的符合约定格式的 tcp/udp 包、http 请求、rpc 请求等。 一般这种检查都是服务端定义一个专门用来响应健康检查请求的 api ，针对客户端发送的健康检查请求发回约定的响应格式数据。 反应服务真正的健康情况¶ 服务层面的健康检查一个很重要的一点是要反应服务真正的健康状况，所以服务端在实现健康检查接口时要考虑自身情况， 检查各种强依赖项，然后反馈给客户端当前服务端是否足够健康可以接受新的请求： 检查强依赖的外部服务的连通性、响应时间等信息(db/redis/queue/...) 检查机器负载情况，当前机器负载是否在健康范围内 检查 CPU 利用率、内存使用率 检查程序后台任务的排队情况 检查磁盘剩余空间、IO 情况 检查机器带宽是否快跑满了 。。。 需要根据服务本身的实际情况选择合适的检查项（不是每个都需要检查,不同的服务的强依赖项不一样），以及有些检查项可能不适合在请求内完成（比如会导致响应时间太长客户端超时了），这种可能需要安装外部程序来协助检查，比如带宽/IO 信息可以从外部获取。 总之就是要真正反应服务真正的健康状况，一般不会啥都不做就回一个标志正常的响应。 如果这样的话跟普通的端口探活似乎没有太大的区别。 当然，如果场景就是只需要检查协议以及端口探活的话，直接响应一个表示成功的响应也没啥问题。:joy 响应或请求包含服务标识信息¶ 还有一个必须要提及的是，健康检查的请求或响应信息中最好标识相关的服务信息： 客户端在请求中包含要检查的服务的标识信息，比如服务名/appid 之类的，当服务端收到请求的时候发现不是请求本服务的，可以直接返回相应的错误信息。 客户端检查服务端返回的错误信息或响应中包含的服务标识信息时，就可以知道请求发错对象了。 为什么请求或响应中包含服务标识信息很重要呢，因为现在很多服务都在容器中运行，服务经常性的扩容/缩容/容器漂移 导致相同的 ip:port 可能会在不同时刻对应的是不同的服务，如果因为一些原因导致客户端没有感知到这个变化，然后健康检查请求了旧的 ip:port ，此时健康检查虽然通过了，但是实际上请求过去还是会失败了，因为远端已经不是原来客户端以为的那个服务了。 通过在请求和响应中包含服务标识信息就可以在客户端和服务端防御这种 case。 必要的配置项¶ 一般健康检查都会有一些必要的配置项用来控制健康检查功能： 最基本的肯定是要有待检查的目标服务信息，ip:port 之类的用于发送健康检查请求 健康检查所使用的协议（如果支持多协议的话）以及发送的数据（比如 http 协议的话检查所访问的 url path, http method, 认证信息等，tcp 的话可能是发送特定的数据表示请求做健康检查等） 判断服务健康的依据： 基本的连通性 响应的内容，比如表示服务健康的 http 响应状态码是哪些，响应的 body 内容需要包含什么内容等 检查不通过几次算服务不健康，从不健康到健康需要通过几次检查才算恢复健康 [2] [3] 以及健康检查的间隔，健康检查太频繁可能会影响被检查的服务，间隔太长可能会失去健康检查的意义无法及时探查到不健康的状态 超时，访问外部服务一定不能忘了超时相关的设置，健康检查也不例外 手动禁用/下线服务的能力¶ 所谓的手动禁用/下线服务的能力，指的是可以在检查端或被检查端把一个服务标记为不健康/下线的能力。 这个功能主要用于临时禁用一个服务，比如想对这个服务进行一些调试操作，但是又不希望这期间有请求进来进行干扰。 总结¶ 本文简单记录了一些健康检查功能相关的笔记/经验，如果以后还有新的知识会随时更新的。 参考资料¶ Health Checks and Graceful Degradation in Distributed Systems Health Endpoint Monitoring pattern - Cloud Design Patterns | Microsoft Docs NGINX Docs | TCP Health Checks Performing Health Checks | ALOHA 10.0 tevino/tcp-shaker: Performing TCP handshake without ACK in Go, useful for health checking, that is SYN, SYN-ACK, RST. [1]tevino/tcp-shaker: Performing TCP handshake without ACK in Go, useful for health checking, that is SYN, SYN-ACK, RST. [2]NGINX Docs | TCP Health Checks [3]Performing Health Checks | ALOHA 10.0" />
+
+    <style>
+      .js-toc {
+        margin-bottom: 20px;
+      }
+      .donate-modal {
+        text-align: center;
+      }
+      #donate-modal-container .donate-image {
+        max-height: 300px !important;
+        min-height: inherit !important;
+      }
+    </style>
+
+        <meta property="og:site_name" content="Huang Huang 的博客" />
+        <meta property="og:type" content="article"/>
+        <meta property="og:title" content="健康检查功能相关的一些备忘"/>
+        <meta property="og:url" content="https://mozillazg.com/2019/01/notes-about-design-health-checking.html"/>
+        <meta property="og:description" content="前言¶ 本文记录一些健康检查功能相关的笔记/经验。 检查方法¶ 常见的健康检查一般分为主机层面的检查以及应用/服务层面的检查。 主机层面的检查¶ 主机层面的检查一般用下面的方法进行检查： 用是否能够 ping 通来检查 尝试用 tcp 连接一下目标 ip:port ，看看是否可以连通来检查 其中 tcp 连通性检查这里有时会用一个非常规的方法去做 tcp 健康检查 [1] ： 一般建立 tcp 连接都会经过 tcp 三次握手的过程: Client -&gt; Server: SYN Server -&gt; Client: SYN-ACK Client -&gt; Server: ACK 但是其实最后一次的 ACK 可以不用发，因为对于健康检查来说，收到服务端发送回来的 SYN-ACK 的时候， 我们就可以简单的认为客户端跟服务端是可联通的。所以 tcp 健康检查可以考虑省去最后一个 ACK: Client -&gt; Server: SYN Server -&gt; Client: SYN-ACK Client -&gt; Server: RST 这样做的好处是，因为没有完成三次握手而是直接 RST 掉了，所以就不会有后续关闭连接时的四次挥手了， 可以减少好几个包（客户端和服务端都省了一些包）。 应用/服务层面的检查¶ 应用/服务层面的检查，一般指的是按照应用/服务认可的普通客户端的方式去做健康检查， 比如发送合法的符合约定格式的 tcp/udp 包、http 请求、rpc 请求等。 一般这种检查都是服务端定义一个专门用来响应健康检查请求的 api ，针对客户端发送的健康检查请求发回约定的响应格式数据。 反应服务真正的健康情况¶ 服务层面的健康检查一个很重要的一点是要反应服务真正的健康状况，所以服务端在实现健康检查接口时要考虑自身情况， 检查各种强依赖项，然后反馈给客户端当前服务端是否足够健康可以接受新的请求： 检查强依赖的外部服务的连通性、响应时间等信息(db/redis/queue/...) 检查机器负载情况，当前机器负载是否在健康范围内 检查 CPU 利用率、内存使用率 检查程序后台任务的排队情况 检查磁盘剩余空间、IO 情况 检查机器带宽是否快跑满了 。。。 需要根据服务本身的实际情况选择合适的检查项（不是每个都需要检查,不同的服务的强依赖项不一样），以及有些检查项可能不适合在请求内完成（比如会导致响应时间太长客户端超时了），这种可能需要安装外部程序来协助检查，比如带宽/IO 信息可以从外部获取。 总之就是要真正反应服务真正的健康状况，一般不会啥都不做就回一个标志正常的响应。 如果这样的话跟普通的端口探活似乎没有太大的区别。 当然，如果场景就是只需要检查协议以及端口探活的话，直接响应一个表示成功的响应也没啥问题。:joy 响应或请求包含服务标识信息¶ 还有一个必须要提及的是，健康检查的请求或响应信息中最好标识相关的服务信息： 客户端在请求中包含要检查的服务的标识信息，比如服务名/appid 之类的，当服务端收到请求的时候发现不是请求本服务的，可以直接返回相应的错误信息。 客户端检查服务端返回的错误信息或响应中包含的服务标识信息时，就可以知道请求发错对象了。 为什么请求或响应中包含服务标识信息很重要呢，因为现在很多服务都在容器中运行，服务经常性的扩容/缩容/容器漂移 导致相同的 ip:port 可能会在不同时刻对应的是不同的服务，如果因为一些原因导致客户端没有感知到这个变化，然后健康检查请求了旧的 ip:port ，此时健康检查虽然通过了，但是实际上请求过去还是会失败了，因为远端已经不是原来客户端以为的那个服务了。 通过在请求和响应中包含服务标识信息就可以在客户端和服务端防御这种 case。 必要的配置项¶ 一般健康检查都会有一些必要的配置项用来控制健康检查功能： 最基本的肯定是要有待检查的目标服务信息，ip:port 之类的用于发送健康检查请求 健康检查所使用的协议（如果支持多协议的话）以及发送的数据（比如 http 协议的话检查所访问的 url path, http method, 认证信息等，tcp 的话可能是发送特定的数据表示请求做健康检查等） 判断服务健康的依据： 基本的连通性 响应的内容，比如表示服务健康的 http 响应状态码是哪些，响应的 body 内容需要包含什么内容等 检查不通过几次算服务不健康，从不健康到健康需要通过几次检查才算恢复健康 [2] [3] 以及健康检查的间隔，健康检查太频繁可能会影响被检查的服务，间隔太长可能会失去健康检查的意义无法及时探查到不健康的状态 超时，访问外部服务一定不能忘了超时相关的设置，健康检查也不例外 手动禁用/下线服务的能力¶ 所谓的手动禁用/下线服务的能力，指的是可以在检查端或被检查端把一个服务标记为不健康/下线的能力。 这个功能主要用于临时禁用一个服务，比如想对这个服务进行一些调试操作，但是又不希望这期间有请求进来进行干扰。 总结¶ 本文简单记录了一些健康检查功能相关的笔记/经验，如果以后还有新的知识会随时更新的。 参考资料¶ Health Checks and Graceful Degradation in Distributed Systems Health Endpoint Monitoring pattern - Cloud Design Patterns | Microsoft Docs NGINX Docs | TCP Health Checks Performing Health Checks | ALOHA 10.0 tevino/tcp-shaker: Performing TCP handshake without ACK in Go, useful for health checking, that is SYN, SYN-ACK, RST. [1]tevino/tcp-shaker: Performing TCP handshake without ACK in Go, useful for health checking, that is SYN, SYN-ACK, RST. [2]NGINX Docs | TCP Health Checks [3]Performing Health Checks | ALOHA 10.0"/>
+        <meta property="article:published_time" content="2019-01-13" />
+            <meta property="article:section" content="others" />
+            <meta property="article:tag" content="health-check" />
+            <meta property="article:tag" content="load-balancer" />
+            <meta property="article:author" content="mozillazg" />
+            <meta property="og:image"
+                  content="https://mozillazg.com/static/avatar.jpeg"/>
+
+
+    <meta name="twitter:card" content="summary">
+        <meta name="twitter:site" content="@mozillazg">
+        <meta name="twitter:creator" content="@mozillazg">
+    <meta name="twitter:domain" content="https://mozillazg.com">
+            <meta property="twitter:image"
+                  content="https://mozillazg.com/static/avatar.jpeg"/>
+
+    <!-- Bootstrap -->
+        <link rel="stylesheet" href="https://mozillazg.com/theme/css/bootstrap.min.css" type="text/css"/>
+    <link href="https://mozillazg.com/theme/css/font-awesome.min.css" rel="stylesheet">
+
+    <link href="https://mozillazg.com/theme/css/pygments/github.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://mozillazg.com/theme/css/style.css" type="text/css"/>
+            <link href="https://mozillazg.com/static/custom.css" rel="stylesheet">
+
+        <link href="https://mozillazg.com/feeds/all.atom.xml" type="application/atom+xml" rel="alternate"
+              title="Huang Huang 的博客 ATOM Feed"/>
+
+        <link href="https://mozillazg.com/feeds/all.rss.xml" type="application/rss+xml" rel="alternate"
+              title="Huang Huang 的博客 RSS Feed"/>
+
+
+        <link href="https://mozillazg.com/feeds/others.atom.xml" type="application/atom+xml" rel="alternate"
+              title="Huang Huang 的博客 others ATOM Feed"/>
+
+
+    <script type="application/ld+json">
+    {
+        "@context": "https://schema.org",
+        "@type": "Website",
+        "publisher": {
+            "@type": "Person",
+            "name": "mozillazg",
+            "logo": "https://mozillazg.com/static/avatar.jpeg"
+        },
+        "author": {
+            "@type": "Person",
+            "name": "mozillazg",
+            "image": "https://mozillazg.com/static/avatar.jpeg",
+            "url": "https://mozillazg.com",
+            "sameAs": []
+        },
+        // "headline": "",
+        "url": "https://mozillazg.com/2019/01/notes-about-design-health-checking.html",
+        "datePublished": "2019-01-13",
+        // "dateModified": "",
+        "image": "https://mozillazg.com/static/avatar.jpeg",
+        "keywords": "health-check, load-balancer",
+        "description": "前言¶ 本文记录一些健康检查功能相关的笔记/经验。 检查方法¶ 常见的健康检查一般分为主机层面的检查以及应用/服务层面的检查。 主机层面的检查¶ 主机层面的检查一般用下面的方法进行检查： 用是否能够 ping 通来检查 尝试用 tcp 连接一下目标 ip:port ，看看是否可以连通来检查 其中 tcp 连通性检查这里有时会用一个非常规的方法去做 tcp 健康检查 [1] ： 一般建立 tcp 连接都会经过 tcp 三次握手的过程: Client -&gt; Server: SYN Server -&gt; Client: SYN-ACK Client -&gt; Server: ACK 但是其实最后一次的 ACK 可以不用发，因为对于健康检查来说，收到服务端发送回来的 SYN-ACK 的时候， 我们就可以简单的认为客户端跟服务端是可联通的。所以 tcp 健康检查可以考虑省去最后一个 ACK: Client -&gt; Server: SYN Server -&gt; Client: SYN-ACK Client -&gt; Server: RST 这样做的好处是，因为没有完成三次握手而是直接 RST 掉了，所以就不会有后续关闭连接时的四次挥手了， 可以减少好几个包（客户端和服务端都省了一些包）。 应用/服务层面的检查¶ 应用/服务层面的检查，一般指的是按照应用/服务认可的普通客户端的方式去做健康检查， 比如发送合法的符合约定格式的 tcp/udp 包、http 请求、rpc 请求等。 一般这种检查都是服务端定义一个专门用来响应健康检查请求的 api ，针对客户端发送的健康检查请求发回约定的响应格式数据。 反应服务真正的健康情况¶ 服务层面的健康检查一个很重要的一点是要反应服务真正的健康状况，所以服务端在实现健康检查接口时要考虑自身情况， 检查各种强依赖项，然后反馈给客户端当前服务端是否足够健康可以接受新的请求： 检查强依赖的外部服务的连通性、响应时间等信息(db/redis/queue/...) 检查机器负载情况，当前机器负载是否在健康范围内 检查 CPU 利用率、内存使用率 检查程序后台任务的排队情况 检查磁盘剩余空间、IO 情况 检查机器带宽是否快跑满了 。。。 需要根据服务本身的实际情况选择合适的检查项（不是每个都需要检查,不同的服务的强依赖项不一样），以及有些检查项可能不适合在请求内完成（比如会导致响应时间太长客户端超时了），这种可能需要安装外部程序来协助检查，比如带宽/IO 信息可以从外部获取。 总之就是要真正反应服务真正的健康状况，一般不会啥都不做就回一个标志正常的响应。 如果这样的话跟普通的端口探活似乎没有太大的区别。 当然，如果场景就是只需要检查协议以及端口探活的话，直接响应一个表示成功的响应也没啥问题。:joy 响应或请求包含服务标识信息¶ 还有一个必须要提及的是，健康检查的请求或响应信息中最好标识相关的服务信息： 客户端在请求中包含要检查的服务的标识信息，比如服务名/appid 之类的，当服务端收到请求的时候发现不是请求本服务的，可以直接返回相应的错误信息。 客户端检查服务端返回的错误信息或响应中包含的服务标识信息时，就可以知道请求发错对象了。 为什么请求或响应中包含服务标识信息很重要呢，因为现在很多服务都在容器中运行，服务经常性的扩容/缩容/容器漂移 导致相同的 ip:port 可能会在不同时刻对应的是不同的服务，如果因为一些原因导致客户端没有感知到这个变化，然后健康检查请求了旧的 ip:port ，此时健康检查虽然通过了，但是实际上请求过去还是会失败了，因为远端已经不是原来客户端以为的那个服务了。 通过在请求和响应中包含服务标识信息就可以在客户端和服务端防御这种 case。 必要的配置项¶ 一般健康检查都会有一些必要的配置项用来控制健康检查功能： 最基本的肯定是要有待检查的目标服务信息，ip:port 之类的用于发送健康检查请求 健康检查所使用的协议（如果支持多协议的话）以及发送的数据（比如 http 协议的话检查所访问的 url path, http method, 认证信息等，tcp 的话可能是发送特定的数据表示请求做健康检查等） 判断服务健康的依据： 基本的连通性 响应的内容，比如表示服务健康的 http 响应状态码是哪些，响应的 body 内容需要包含什么内容等 检查不通过几次算服务不健康，从不健康到健康需要通过几次检查才算恢复健康 [2] [3] 以及健康检查的间隔，健康检查太频繁可能会影响被检查的服务，间隔太长可能会失去健康检查的意义无法及时探查到不健康的状态 超时，访问外部服务一定不能忘了超时相关的设置，健康检查也不例外 手动禁用/下线服务的能力¶ 所谓的手动禁用/下线服务的能力，指的是可以在检查端或被检查端把一个服务标记为不健康/下线的能力。 这个功能主要用于临时禁用一个服务，比如想对这个服务进行一些调试操作，但是又不希望这期间有请求进来进行干扰。 总结¶ 本文简单记录了一些健康检查功能相关的笔记/经验，如果以后还有新的知识会随时更新的。 参考资料¶ Health Checks and Graceful Degradation in Distributed Systems Health Endpoint Monitoring pattern - Cloud Design Patterns | Microsoft Docs NGINX Docs | TCP Health Checks Performing Health Checks | ALOHA 10.0 tevino/tcp-shaker: Performing TCP handshake without ACK in Go, useful for health checking, that is SYN, SYN-ACK, RST. [1]tevino/tcp-shaker: Performing TCP handshake without ACK in Go, useful for health checking, that is SYN, SYN-ACK, RST. [2]NGINX Docs | TCP Health Checks [3]Performing Health Checks | ALOHA 10.0",
+        "mainEntityOfPage": {
+            "@type": "WebPage",
+            "@id": "https://mozillazg.com"
+        }
+    }
+    </script>
+
+</head>
+<body>
+
+<div class="navbar" role="navigation">
+	<div class="container">
+        <div class="navbar-header">
+            <button type="button" class="navbar-toggle" data-toggle="collapse" data-target=".navbar-ex1-collapse">
+                <span class="sr-only">Toggle navigation</span>
+                <span class="icon-bar"></span>
+                <span class="icon-bar"></span>
+                <span class="icon-bar"></span>
+            </button>
+            <a href="https://mozillazg.com/" class="navbar-brand">
+Huang Huang 的博客            </a>
+        </div>
+        <div class="collapse navbar-collapse navbar-ex1-collapse">
+            <ul class="nav navbar-nav">
+                    <li><a href="https://mozillazg.com/feeds/all.atom.xml">Feed</a></li>
+                    <li><a href="/2014/10/pages/about-me.html">About</a></li>
+            </ul>
+            <ul class="nav navbar-nav navbar-right">
+              <li><a href="https://mozillazg.com/archives.html"><i class="fa fa-th-list"></i><span class="icon-label">Archives</span></a></li>
+            </ul>
+        </div>
+        <!-- /.navbar-collapse -->
+    </div>
+</div> <!-- /.navbar -->
+<!-- Banner -->
+<!-- End Banner -->
+<div class="container">
+    <div class="row">
+        <div class="col-lg-12">
+    <section id="content" class="yue">
+        <article>
+            <header class="text-center">
+                <h1>
+                    <a href="https://mozillazg.com/2019/01/notes-about-design-health-checking.html"
+                       rel="bookmark"
+                       title="Permalink to 健康检查功能相关的一些备忘">
+                        健康检查功能相关的一些备忘
+                    </a>
+                </h1>
+                <p class="published">
+                    <time datetime="2019-01-13T00:00:00+00:00">
+                    2019-01-13
+                    </time>
+                </p>
+            </header>
+            <div class="entry-content">
+                <div class="well-sm article-info">
+<footer class="post-info">
+        <a href="https://mozillazg.com/category/others.html">others</a>
+
+
+<span class="label label-default hide">Tags</span>
+	<a href="https://mozillazg.com/tag/health-check.html">health-check</a>
+        /
+	<a href="https://mozillazg.com/tag/load-balancer.html">load-balancer</a>
+    
+</footer><!-- /.post-info -->                </div>
+                <div class="js-toc"></div>
+                <div>
+                <div class="section" id="id2">
+<h2 id="hidid2">前言<a class="headerlink" href="#hidid2" title="Permalink to this headline">¶</a></h2>
+<p>本文记录一些健康检查功能相关的笔记/经验。</p>
+</div>
+<div class="section" id="id3">
+<h2 id="hidid3">检查方法<a class="headerlink" href="#hidid3" title="Permalink to this headline">¶</a></h2>
+<p>常见的健康检查一般分为主机层面的检查以及应用/服务层面的检查。</p>
+</div>
+<div class="section" id="id4">
+<h2 id="hidid4">主机层面的检查<a class="headerlink" href="#hidid4" title="Permalink to this headline">¶</a></h2>
+<p>主机层面的检查一般用下面的方法进行检查：</p>
+<ul class="simple">
+<li>用是否能够 ping 通来检查</li>
+<li>尝试用 tcp 连接一下目标 ip:port ，看看是否可以连通来检查</li>
+</ul>
+<p>其中 tcp 连通性检查这里有时会用一个非常规的方法去做 tcp 健康检查 <a class="footnote-reference" href="#id15" id="id5">[1]</a> ：</p>
+<p>一般建立 tcp 连接都会经过 tcp 三次握手的过程:</p>
+<ul class="simple">
+<li>Client -&gt; Server: SYN</li>
+<li>Server -&gt; Client: SYN-ACK</li>
+<li>Client -&gt; Server: ACK</li>
+</ul>
+<p>但是其实最后一次的 ACK 可以不用发，因为对于健康检查来说，收到服务端发送回来的 SYN-ACK 的时候，
+我们就可以简单的认为客户端跟服务端是可联通的。所以 tcp 健康检查可以考虑省去最后一个 ACK:</p>
+<ul class="simple">
+<li>Client -&gt; Server: SYN</li>
+<li>Server -&gt; Client: SYN-ACK</li>
+<li>Client -&gt; Server: RST</li>
+</ul>
+<p>这样做的好处是，因为没有完成三次握手而是直接 RST 掉了，所以就不会有后续关闭连接时的四次挥手了，
+可以减少好几个包（客户端和服务端都省了一些包）。</p>
+</div>
+<div class="section" id="id6">
+<h2 id="hidid6">应用/服务层面的检查<a class="headerlink" href="#hidid6" title="Permalink to this headline">¶</a></h2>
+<p>应用/服务层面的检查，一般指的是按照应用/服务认可的普通客户端的方式去做健康检查，
+比如发送合法的符合约定格式的 tcp/udp 包、http 请求、rpc 请求等。</p>
+<p>一般这种检查都是服务端定义一个专门用来响应健康检查请求的 api ，针对客户端发送的健康检查请求发回约定的响应格式数据。</p>
+<div class="section" id="id7">
+<h3 id="hidid7">反应服务真正的健康情况<a class="headerlink" href="#hidid7" title="Permalink to this headline">¶</a></h3>
+<p>服务层面的健康检查一个很重要的一点是要反应服务真正的健康状况，所以服务端在实现健康检查接口时要考虑自身情况，
+检查各种强依赖项，然后反馈给客户端当前服务端是否足够健康可以接受新的请求：</p>
+<ul class="simple">
+<li>检查强依赖的外部服务的连通性、响应时间等信息(db/redis/queue/...)</li>
+<li>检查机器负载情况，当前机器负载是否在健康范围内</li>
+<li>检查 CPU 利用率、内存使用率</li>
+<li>检查程序后台任务的排队情况</li>
+<li>检查磁盘剩余空间、IO 情况</li>
+<li>检查机器带宽是否快跑满了</li>
+<li>。。。</li>
+</ul>
+<p>需要根据服务本身的实际情况选择合适的检查项（不是每个都需要检查,不同的服务的强依赖项不一样），以及有些检查项可能不适合在请求内完成（比如会导致响应时间太长客户端超时了），这种可能需要安装外部程序来协助检查，比如带宽/IO 信息可以从外部获取。</p>
+<p>总之就是要真正反应服务真正的健康状况，一般不会啥都不做就回一个标志正常的响应。
+如果这样的话跟普通的端口探活似乎没有太大的区别。</p>
+<p>当然，如果场景就是只需要检查协议以及端口探活的话，直接响应一个表示成功的响应也没啥问题。:joy</p>
+</div>
+<div class="section" id="id8">
+<h3 id="hidid8">响应或请求包含服务标识信息<a class="headerlink" href="#hidid8" title="Permalink to this headline">¶</a></h3>
+<p>还有一个必须要提及的是，健康检查的请求或响应信息中最好标识相关的服务信息：</p>
+<ul class="simple">
+<li>客户端在请求中包含要检查的服务的标识信息，比如服务名/appid 之类的，当服务端收到请求的时候发现不是请求本服务的，可以直接返回相应的错误信息。</li>
+<li>客户端检查服务端返回的错误信息或响应中包含的服务标识信息时，就可以知道请求发错对象了。</li>
+</ul>
+<p>为什么请求或响应中包含服务标识信息很重要呢，因为现在很多服务都在容器中运行，服务经常性的扩容/缩容/容器漂移 导致相同的 ip:port 可能会在不同时刻对应的是不同的服务，如果因为一些原因导致客户端没有感知到这个变化，然后健康检查请求了旧的 ip:port ，此时健康检查虽然通过了，但是实际上请求过去还是会失败了，因为远端已经不是原来客户端以为的那个服务了。
+通过在请求和响应中包含服务标识信息就可以在客户端和服务端防御这种 case。</p>
+</div>
+</div>
+<div class="section" id="id9">
+<h2 id="hidid9">必要的配置项<a class="headerlink" href="#hidid9" title="Permalink to this headline">¶</a></h2>
+<p>一般健康检查都会有一些必要的配置项用来控制健康检查功能：</p>
+<ul class="simple">
+<li>最基本的肯定是要有待检查的目标服务信息，ip:port 之类的用于发送健康检查请求</li>
+<li>健康检查所使用的协议（如果支持多协议的话）以及发送的数据（比如 http 协议的话检查所访问的 url path, http method, 认证信息等，tcp 的话可能是发送特定的数据表示请求做健康检查等）</li>
+<li>判断服务健康的依据：<ul>
+<li>基本的连通性</li>
+<li>响应的内容，比如表示服务健康的 http 响应状态码是哪些，响应的 body 内容需要包含什么内容等</li>
+<li>检查不通过几次算服务不健康，从不健康到健康需要通过几次检查才算恢复健康 <a class="footnote-reference" href="#id16" id="id10">[2]</a> <a class="footnote-reference" href="#id17" id="id11">[3]</a></li>
+</ul>
+</li>
+<li>以及健康检查的间隔，健康检查太频繁可能会影响被检查的服务，间隔太长可能会失去健康检查的意义无法及时探查到不健康的状态</li>
+<li>超时，访问外部服务一定不能忘了超时相关的设置，健康检查也不例外</li>
+</ul>
+</div>
+<div class="section" id="id12">
+<h2 id="hidid12">手动禁用/下线服务的能力<a class="headerlink" href="#hidid12" title="Permalink to this headline">¶</a></h2>
+<p>所谓的手动禁用/下线服务的能力，指的是可以在检查端或被检查端把一个服务标记为不健康/下线的能力。
+这个功能主要用于临时禁用一个服务，比如想对这个服务进行一些调试操作，但是又不希望这期间有请求进来进行干扰。</p>
+</div>
+<div class="section" id="id13">
+<h2 id="hidid13">总结<a class="headerlink" href="#hidid13" title="Permalink to this headline">¶</a></h2>
+<p>本文简单记录了一些健康检查功能相关的笔记/经验，如果以后还有新的知识会随时更新的。</p>
+</div>
+<div class="section" id="id14">
+<h2 id="hidid14">参考资料<a class="headerlink" href="#hidid14" title="Permalink to this headline">¶</a></h2>
+<ul class="simple">
+<li><a class="reference external" href="https://medium.com/&#64;copyconstruct/health-checks-in-distributed-systems-aa8a0e8c1672">Health Checks and Graceful Degradation in Distributed Systems</a></li>
+<li><a class="reference external" href="https://docs.microsoft.com/en-us/azure/architecture/patterns/health-endpoint-monitoring">Health Endpoint Monitoring pattern - Cloud Design Patterns | Microsoft Docs</a></li>
+<li><a class="reference external" href="https://docs.nginx.com/nginx/admin-guide/load-balancer/tcp-health-check/#fine-tuning-tcp-health-checks">NGINX Docs | TCP Health Checks</a></li>
+<li><a class="reference external" href="https://www.haproxy.com/documentation/aloha/10-0/traffic-management/lb-layer7/health-checks/#defining-health-check-parameters">Performing Health Checks | ALOHA 10.0</a></li>
+<li><a class="reference external" href="https://github.com/tevino/tcp-shaker">tevino/tcp-shaker: Performing TCP handshake without ACK in Go, useful for health checking, that is SYN, SYN-ACK, RST.</a></li>
+</ul>
+<table class="docutils footnote" frame="void" id="id15" rules="none">
+<colgroup><col class="label" /><col /></colgroup>
+<tbody valign="top">
+<tr><td class="label"><a class="fn-backref" href="#id5">[1]</a></td><td><a class="reference external" href="https://github.com/tevino/tcp-shaker">tevino/tcp-shaker: Performing TCP handshake without ACK in Go, useful for health checking, that is SYN, SYN-ACK, RST.</a></td></tr>
+</tbody>
+</table>
+<table class="docutils footnote" frame="void" id="id16" rules="none">
+<colgroup><col class="label" /><col /></colgroup>
+<tbody valign="top">
+<tr><td class="label"><a class="fn-backref" href="#id10">[2]</a></td><td><a class="reference external" href="https://docs.nginx.com/nginx/admin-guide/load-balancer/tcp-health-check/#fine-tuning-tcp-health-checks">NGINX Docs | TCP Health Checks</a></td></tr>
+</tbody>
+</table>
+<table class="docutils footnote" frame="void" id="id17" rules="none">
+<colgroup><col class="label" /><col /></colgroup>
+<tbody valign="top">
+<tr><td class="label"><a class="fn-backref" href="#id11">[3]</a></td><td><a class="reference external" href="https://www.haproxy.com/documentation/aloha/10-0/traffic-management/lb-layer7/health-checks/#defining-health-check-parameters">Performing Health Checks | ALOHA 10.0</a></td></tr>
+</tbody>
+</table>
+</div>
+
+                </div>
+            </div>
+            <!-- /.entry-content -->
+<section class="text-center">
+  
+<div id="donate"></div>
+
+<div class="social-share"></div>
+<div>
+<p>有任何意见欢迎在下方留言或者加我微信交流</p>
+<img src="/static/wechat.png" height="200px" width="200px"/>
+</div>
+
+</section>
+<section class="well" id="related-posts">
+    <p>Related Posts:</p>
+    <ul>
+        <li><a href="https://mozillazg.com/2019/01/rate-limiting-intro-token-bucket.html">rate limiting 之 token bucket</a></li>
+    </ul>
+</section>
+    <hr/>
+    <section class="comments" id="comments">
+        <h2>Comments</h2>
+
+        <div id="disqus_thread"></div>
+        <script type="text/javascript">
+            /* * * CONFIGURATION VARIABLES: EDIT BEFORE PASTING INTO YOUR WEBPAGE * * */
+            var disqus_shortname = 'my-github-blog'; // required: replace example with your forum shortname
+
+                    var disqus_identifier = 'notes-about-design-health-checking';
+                var disqus_url = 'https://mozillazg.com/2019/01/notes-about-design-health-checking.html';
+
+            var disqus_config = function () {
+                this.language = "zh-hans";
+            };
+
+            /* * * DON'T EDIT BELOW THIS LINE * * */
+            (function () {
+                var dsq = document.createElement('script');
+                dsq.type = 'text/javascript';
+                dsq.async = true;
+                dsq.src = '//' + disqus_shortname + '.disqus.com/embed.js';
+                (document.getElementsByTagName('head')[0] || document.getElementsByTagName('body')[0]).appendChild(dsq);
+            })();
+        </script>
+        <noscript>Please enable JavaScript to view the <a href="http://disqus.com/?ref_noscript">comments powered by
+            Disqus.</a></noscript>
+        <a href="http://disqus.com" class="dsq-brlink">comments powered by <span class="logo-disqus">Disqus</span></a>
+
+    </section>
+        </article>
+    </section>
+
+        </div>
+    </div>
+</div>
+<footer>
+   <div class="container">
+      <hr>
+      <div class="row">
+         <div class="col-xs-10">&copy; 2019 mozillazg
+            &middot; Powered by <a href="https://github.com/DandyDev/pelican-bootstrap3" target="_blank">pelican-bootstrap3</a>,
+            <a href="http://docs.getpelican.com/" target="_blank">Pelican</a>,
+            <a href="http://getbootstrap.com" target="_blank">Bootstrap</a>              <p><small>  <a rel="license" href="http://creativecommons.org/licenses/by-sa/4.0/"><img alt="Creative Commons License" style="border-width:0" src="/static/images/by-sa-80x15.png" /></a>
+    &quot;<span xmlns:dct="http://purl.org/dc/terms/" property="dct:title">Huang Huang 的博客</span>&quot; by <a xmlns:cc="http://creativecommons.org/ns#" href="https://mozillazg.com" property="cc:attributionName" rel="cc:attributionURL">mozillazg</a> is
+  licensed under a <a rel="license" href="http://creativecommons.org/licenses/by-sa/4.0/">Creative Commons Attribution-ShareAlike 4.0 International License</a>, except where indicated otherwise.
+</small></p>
+         </div>
+         <div class="col-xs-2"><p class="pull-right"><i class="fa fa-arrow-up"></i> <a href="#">Back to top</a></p></div>
+      </div>
+   </div>
+</footer>
+<script src="https://mozillazg.com/theme/js/jquery.min.js"></script>
+
+<!-- Include all compiled plugins (below), or include individual files as needed -->
+<script src="https://mozillazg.com/theme/js/bootstrap.min.js"></script>
+
+<!-- Enable responsive features in IE8 with Respond.js (https://github.com/scottjehl/Respond) -->
+<script src="https://mozillazg.com/theme/js/respond.min.js"></script>
+
+    <!-- Disqus -->
+    <script type="text/javascript">
+        /* * * CONFIGURATION VARIABLES: EDIT BEFORE PASTING INTO YOUR WEBPAGE * * */
+        var disqus_shortname = 'my-github-blog'; // required: replace example with your forum shortname
+
+        /* * * DON'T EDIT BELOW THIS LINE * * */
+        (function () {
+            var s = document.createElement('script');
+            s.async = true;
+            s.type = 'text/javascript';
+            s.src = '//' + disqus_shortname + '.disqus.com/count.js';
+            (document.getElementsByTagName('HEAD')[0] || document.getElementsByTagName('BODY')[0]).appendChild(s);
+        }());
+    </script>
+    <!-- End Disqus Code -->
+    <!-- Google Analytics Universal -->
+    <script type="text/javascript">
+        (function(i,s,o,g,r,a,m){i['GoogleAnalyticsObject']=r;i[r]=i[r]||function(){
+        (i[r].q=i[r].q||[]).push(arguments)},i[r].l=1*new Date();a=s.createElement(o),
+        m=s.getElementsByTagName(o)[0];a.async=1;a.src=g;m.parentNode.insertBefore(a,m)
+        })(window,document,'script','//www.google-analytics.com/analytics.js','ga');
+
+        ga('create', 'UA-77172981-1', 'auto');
+        ga('send', 'pageview');
+    </script>
+    <!-- End Google Analytics Universal Code -->
+
+
+<script src="https://mozillazg.com/theme/js/vdonate.js"></script>
+<script>
+$(document).ready(function(){
+new vdonate({
+  title: '如果觉得我的文章对您有用，请随意打赏。您的支持将鼓励我继续创作!', // 可选参数，打赏标题
+  btnText: '打赏支持', // 可选参数，打赏按钮文字
+  el: document.getElementById('donate'), // 必选参数，打赏按钮的容器
+  wechatImage: 'https://mozillazg.com/static/wechat_donate.png', // 必选参数，微信收款二维码
+  alipayImage: 'https://mozillazg.com/static/alipay_donate.jpg' // 必选参数，支付宝收款二维码
+});
+});
+</script>
+
+<script src="https://mozillazg.com/theme/js/tocbot.min.js"></script>
+<script>
+$(document).ready(function(){
+  tocbot.init({
+    // Where to render the table of contents.
+    tocSelector: '.js-toc',
+    // Where to grab the headings to build the table of contents.
+    contentSelector: '.entry-content',
+    // Which headings to grab inside of the contentSelector element.
+    headingSelector: 'h2, h3, h4,h5',
+    // Headings that match the ignoreSelector will be skipped.
+    ignoreSelector: '.js-toc-ignore',
+    // Main class to add to links.
+    linkClass: 'toc-link',
+    // Extra classes to add to links.
+    extraLinkClasses: '',
+    // Class to add to active links,
+    // the link corresponding to the top most heading on the page.
+    activeLinkClass: 'is-active-link',
+    // Main class to add to lists.
+    listClass: 'toc-list',
+    // Extra classes to add to lists.
+    extraListClasses: '',
+    // Class that gets added when a list should be collapsed.
+    isCollapsedClass: 'is-collapsed',
+    // Class that gets added when a list should be able
+    // to be collapsed but isn't necessarily collpased.
+    collapsibleClass: 'is-collapsible',
+    // Class to add to list items.
+    listItemClass: 'toc-list-item',
+    // How many heading levels should not be collpased.
+    // For example, number 6 will show everything since
+    // there are only 6 heading levels and number 0 will collpase them all.
+    // The sections that are hidden will open
+    // and close as you scroll to headings within them.
+    collapseDepth: 6,
+    // Smooth scrolling enabled.
+    smoothScroll: true,
+    // Smooth scroll duration.
+    smoothScrollDuration: 420,
+    // Callback for scroll end (requires: smoothScroll).
+    scrollEndCallback: function (e) {},
+    // Headings offset between the headings and the top of the document (this is meant for minor adjustments).
+    headingsOffset: 0,
+    // Timeout between events firing to make sure it's
+    // not too rapid (for performance reasons).
+    throttleTimeout: 50,
+    // Element to add the positionFixedClass to.
+    positionFixedSelector: null,
+    // Fixed position class to add to make sidebar fixed after scrolling
+    // down past the fixedSidebarOffset.
+    positionFixedClass: 'is-position-fixed',
+    // fixedSidebarOffset can be any number but by default is set
+    // to auto which sets the fixedSidebarOffset to the sidebar
+    // element's offsetTop from the top of the document on init.
+    fixedSidebarOffset: 'auto',
+    // includeHtml can be set to true to include the HTML markup from the
+    // heading node instead of just including the textContent.
+    includeHtml: false
+  });
+});
+</script>
+</body>
+</html>
