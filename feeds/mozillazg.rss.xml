@@ -1,5 +1,142 @@
 <?xml version="1.0" encoding="utf-8"?>
-<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom"><channel><title>Huang Huang 的博客</title><link>https://mozillazg.com/</link><description></description><atom:link href="https://mozillazg.com/feeds/mozillazg.rss.xml" rel="self"></atom:link><lastBuildDate>Sun, 13 Jan 2019 00:00:00 +0000</lastBuildDate><item><title>健康检查功能相关的一些备忘</title><link>https://mozillazg.com/2019/01/notes-about-design-health-checking.html</link><description>&lt;div class="section" id="id2"&gt;
+<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom"><channel><title>Huang Huang 的博客</title><link>https://mozillazg.com/</link><description></description><atom:link href="https://mozillazg.com/feeds/mozillazg.rss.xml" rel="self"></atom:link><lastBuildDate>Sun, 20 Jan 2019 00:00:00 +0000</lastBuildDate><item><title>网络负载均衡器的类别和功能介绍</title><link>https://mozillazg.com/2019/01/notes-about-load-balancer-types-and-feature.html</link><description>&lt;div class="section" id="id2"&gt;
+&lt;h2 id="hidid2"&gt;前言&lt;a class="headerlink" href="#hidid2" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;本文大部分内容都是整理自 &lt;a class="reference external" href="https://blog.envoyproxy.io/introduction-to-modern-network-load-balancing-and-proxying-a57f6ff80236"&gt;Introduction to modern network load balancing and proxying&lt;/a&gt; 感兴趣的话建议直接看那篇文章。&lt;/p&gt;
+&lt;p&gt;简单记录一下常见的网络负载均衡器的类别以及常见的功能。&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class="section" id="id3"&gt;
+&lt;h2 id="hidid3"&gt;类别&lt;a class="headerlink" href="#hidid3" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;一般分为 L4 四层负载均衡器和 L7 七层负载均衡器。&lt;/p&gt;
+&lt;div class="section" id="l4"&gt;
+&lt;h3 id="hidl4"&gt;L4 四层负载均衡器&lt;a class="headerlink" href="#hidl4" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
+&lt;p&gt;所谓的四层负载均衡器主要指的是，负载均衡器只是单纯的 TCP/UDP 数据转换不关心数据中的应用相关的协议信息，
+比如 TCP/UDP 中传输的可能是 HTTP/Redis/MongoDB 或其它应用层协议数据。&lt;/p&gt;
+&lt;p&gt;四层负载均衡器的例子：客户端与负载均衡建立一条 TCP 连接，负载均衡器与一个后端服务也建立一条 TCP 连接，
+当负载均衡器收到客户端发送过来的数据后，会把收到的数据转发给后端服务。&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;client ---&amp;gt; load balancer ----&amp;gt; backend
+       TCP1               TCP2
+       &amp;lt;---               &amp;lt;----
+&lt;/pre&gt;&lt;/div&gt;
+&lt;/div&gt;
+&lt;div class="section" id="l7"&gt;
+&lt;h3 id="hidl7"&gt;L7 七层负载均衡器&lt;a class="headerlink" href="#hidl7" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
+&lt;p&gt;所谓的七层负载均衡器主要指的是，负载均衡器会去解析客户端发送过来的数据，按照指定的应用层协议继续为该协议的请求，以请求为单位做负载均衡等操作。&lt;/p&gt;
+&lt;p&gt;七层负载均衡器的例子：客户端与负载均衡器建立一条 TCP 连接，每次客户端发送一个应用层协议的请求到负载均衡器时， 负载均衡器都会从后端选择一个节点（可能已与这个后端节点建立连接或未建立），把这个请求转发给选中的后端节点。&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;client -----------&amp;gt; load balancer ----------&amp;gt; backend 1
+       request &lt;span class="m"&gt;1&lt;/span&gt;                  request 1
+       request &lt;span class="m"&gt;2&lt;/span&gt;                  ----------&amp;gt; backend 2
+                                  request 2
+&lt;/pre&gt;&lt;/div&gt;
+&lt;p&gt;从这个例子可以看到七层负载均衡着重的应用层协议，转发到后端时也是按一个完整的应用层协议数据来转发的，
+所以一个客户端与负载均衡器建立的这个连接中可能发送了很多个请求，这些请求可能会转发到不同的后端节点上。&lt;/p&gt;
+&lt;p&gt;相比四层负载均衡器的一一对应的转发方式七层负载均衡器的这种基于协议内容的转发可以让后端节点的负载更均衡：
+比如客户端 A 在一次连接中一分钟内发送了 1000 个请求，如果是 L4 的话，这 1000 个请求的数据全部会转发到同一个后端节点上，如果是 L7 的话，则 1000 个请求按照负载均衡策略可能会分别转发到 10 个后端节点上。&lt;/p&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;div class="section" id="id4"&gt;
+&lt;h2 id="hidid4"&gt;功能&lt;a class="headerlink" href="#hidid4" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;负载均衡器一般都会有如下功能：&lt;/p&gt;
+&lt;div class="section" id="id5"&gt;
+&lt;h3 id="hidid5"&gt;服务发现&lt;a class="headerlink" href="#hidid5" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
+&lt;p&gt;发现可用的后端节点的功能。可以通过多种方式来实现这个服务发现的功能：&lt;/p&gt;
+&lt;ul class="simple"&gt;
+&lt;li&gt;可以在配置文件中指定可用的后端节点信息&lt;/li&gt;
+&lt;li&gt;或通过 DNS 来发现&lt;/li&gt;
+&lt;li&gt;也可以是通过集成第三方服务的方式来发现后端节点（比如：zookeeper, etcd, consul 等等）。&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/div&gt;
+&lt;div class="section" id="id6"&gt;
+&lt;h3 id="hidid6"&gt;健康检查&lt;a class="headerlink" href="#hidid6" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
+&lt;p&gt;健康检查用于辅助决策选择哪个后端节点来接受客户端的数据。一般有主动检查和被动检查。&lt;/p&gt;
+&lt;ul class="simple"&gt;
+&lt;li&gt;主动检查：定期向可用的后端节点做健康检查操作，及时发现不可用/无法接受新请求的后端节点。&lt;/li&gt;
+&lt;li&gt;被动检查：基于转发时的状态来被动判断节点健康状况，可以辅助主动检查增强节点时候健康判断的准确度。
+比如：L4 的话当发现一个节点多次建立连接失败就标记为不健康，L7 的话如果发现节点返回的 HTTP 响应短时间内出现了好几次状态码是 503 就可以考虑标记为不健康或者根据响应时间之类的来判断。&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/div&gt;
+&lt;div class="section" id="id7"&gt;
+&lt;h3 id="hidid7"&gt;负载均衡&lt;a class="headerlink" href="#hidid7" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
+&lt;p&gt;根据不同的负载均衡算法/策略来选择合适的节点来接收转发的数据，目的是希望后端节点能够负载均衡，不要出现所有请求都打到少部分节点上去了，希望能够分散请求达到负载均衡。常见的负载均衡算法/策略有：&lt;/p&gt;
+&lt;ul class="simple"&gt;
+&lt;li&gt;随机选择(Random Choice)&lt;/li&gt;
+&lt;li&gt;带权重的随机选择（Weighted Random Choice）&lt;/li&gt;
+&lt;li&gt;轮询（Round Robin）&lt;/li&gt;
+&lt;li&gt;带权重的轮询（Weighted Round Robin）&lt;/li&gt;
+&lt;li&gt;最少连接数（Least Connection）&lt;/li&gt;
+&lt;li&gt;带权重的最少连接数（Weighted Least Connection）&lt;/li&gt;
+&lt;li&gt;一致性哈希（Consistent Hash）&lt;/li&gt;
+&lt;li&gt;两次随机选择（Two Random Choices）等等。&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/div&gt;
+&lt;div class="section" id="sticky-session"&gt;
+&lt;h3 id="hidsticky-session"&gt;会话粘滞（sticky session）&lt;a class="headerlink" href="#hidsticky-session" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
+&lt;p&gt;后端服务的一些功能可能需要同一个客户端一段时间内的请求尽量都转发到同一个后端节点上，比如后端节点间没有共享 session 数据的 HTTP 服务，此时如果客户端请求转发到了不同的后端节点上的话，可能会出现反复提示用户登录的情况。&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class="section" id="tsl-tls-termination"&gt;
+&lt;h3 id="hidtsl-tls-termination"&gt;TSL 卸载（TLS termination）&lt;a class="headerlink" href="#hidtsl-tls-termination" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
+&lt;p&gt;所谓的 TSL 卸载指的是客户端与负载均衡器之间通过 TSL 协议进行通信，但是负载均衡器与后端服务之间将不再使用 TSL 协议进行通过，所有针对客户端的 TSL 相关的处理都在负载均衡器这一层完成：协议卸载、证书验证、使用 &lt;a class="reference external" href="https://en.wikipedia.org/wiki/Server_Name_Indication"&gt;SNI&lt;/a&gt;&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class="section" id="observability"&gt;
+&lt;h3 id="hidobservability"&gt;可观测性（Observability)&lt;a class="headerlink" href="#hidobservability" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
+&lt;p&gt;所谓的可观测性指的是负载均衡器拥有各种各样的可以用来观测运行状态或连接状态的功能，比如提供获取各种状态信息的 api 、主动上报 trace 信息、或记录一些有助于发现问题或解决问题的日志等等。&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class="section" id="ddos"&gt;
+&lt;h3 id="hidddos"&gt;安全以及 DDoS 缓解&lt;a class="headerlink" href="#hidddos" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
+&lt;p&gt;负载均衡器通常会实现一些安全相关的特性，比如：限速、限制并发、限制最大连接、IP/网段 block、认证、DDos 缓解等等。&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class="section" id="id8"&gt;
+&lt;h3 id="hidid8"&gt;动态配置以及控制面板&lt;a class="headerlink" href="#hidid8" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
+&lt;p&gt;因为要实现很多的功能所以配置项也会比较多，所以一般都会有配置文件、修改运行时配置的 API、以及可以查看运行时状态和修改运行时配置的 web 面板。&lt;/p&gt;
+&lt;p&gt;修改运行时配置的要点是程序要能支持配置文件热更新或通过 api 动态修改程序运行过程中在使用的配置项。&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class="section" id="gracefully-upgrade"&gt;
+&lt;h3 id="hidgracefully-upgrade"&gt;热升级/平滑升级（Gracefully Upgrade）&lt;a class="headerlink" href="#hidgracefully-upgrade" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
+&lt;p&gt;所谓的热升级指的是可以当需要升级正在运行的负载均衡器服务的时候，可以安全的对正在处理连接的负载均衡器进行升级操作。升级期间不会中断正在处理的连接也不会拒绝新进来的连接，实现热升级/无缝升级/平滑升级。&lt;/p&gt;
+&lt;p&gt;如果无法实现热升级的话，也可以实现平滑重启(Gracefully Restart)。&lt;/p&gt;
+&lt;p&gt;所谓的平滑重启指的是重启服务的时候不会中断正在处理的连接，等连接处理完或达到指定的超时时间后再进行重启，从而实现平滑重启。平滑重启的场景是要求不要有新的连接进来，否则新的连接会被拒绝，一般通过把准备重启的服务从 DNS 记录上删除的方式或通过 iptables 直接拒绝连接的方式或者再前面的接入层屏蔽这个节点的 方式来实现避免新连接进来。&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class="section" id="id9"&gt;
+&lt;h3 id="hidid9"&gt;七层负载均衡器的更多功能&lt;a class="headerlink" href="#hidid9" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
+&lt;div class="section" id="id10"&gt;
+&lt;h4 id="hidid10"&gt;多协议支持&lt;a class="headerlink" href="#hidid10" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h4&gt;
+&lt;p&gt;在很多场景下可能会需要多协议支持。比如支持多种应用层协议，并根据协议相关的请求内容做路由。&lt;/p&gt;
+&lt;p&gt;一些负载均衡器会支持 HTTP/1, HTTP2, gRPC, Redis, MongoDB，MySQL, PostgreSQL 或 Kafka 等常见的协议。&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class="section" id="id11"&gt;
+&lt;h4 id="hidid11"&gt;高级负载均衡&lt;a class="headerlink" href="#hidid11" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h4&gt;
+&lt;p&gt;因为会解析协议相关的请求内容所以七层负载均衡器可以做更多更高级的功能，比如：&lt;/p&gt;
+&lt;ul class="simple"&gt;
+&lt;li&gt;超时：请求或响应的超时机制&lt;/li&gt;
+&lt;li&gt;重试：请求失败时的重试&lt;/li&gt;
+&lt;li&gt;限速：基于请求的限速&lt;/li&gt;
+&lt;li&gt;限制并发：基于请求的并发限制/正在处理的请求限制&lt;/li&gt;
+&lt;li&gt;熔断：在持续异常时的特定场景下直接熔断保护后端服务&lt;/li&gt;
+&lt;li&gt;route：基于请求内容的 route 功能&lt;/li&gt;
+&lt;li&gt;等等&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/div&gt;
+&lt;div class="section" id="id12"&gt;
+&lt;h4 id="hidid12"&gt;可扩展性（插件系统）&lt;a class="headerlink" href="#hidid12" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h4&gt;
+&lt;p&gt;很多负载均衡器都支持通过脚本的方式来扩展负载均衡器已有的功能（比如支持运行 Lua 脚本的插件系统）。&lt;/p&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;div class="section" id="id13"&gt;
+&lt;h2 id="hidid13"&gt;总结&lt;a class="headerlink" href="#hidid13" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;本文简单总结了负载均衡器相关的部分知识，后面有空时候再继续更新补充 :joy&lt;/p&gt;
+&lt;p&gt;感兴趣的话强烈建议阅读 &lt;a class="reference external" href="https://blog.envoyproxy.io/introduction-to-modern-network-load-balancing-and-proxying-a57f6ff80236"&gt;Introduction to modern network load balancing and proxying&lt;/a&gt; 这篇文章。&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class="section" id="id14"&gt;
+&lt;h2 id="hidid14"&gt;参考资料&lt;a class="headerlink" href="#hidid14" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;ul class="simple"&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://blog.envoyproxy.io/introduction-to-modern-network-load-balancing-and-proxying-a57f6ff80236"&gt;Introduction to modern network load balancing and proxying&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://brooker.co.za/blog/2012/01/17/two-random.html"&gt;The power of two random choices - Marc's Blog&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://en.wikipedia.org/wiki/Load_balancing_(computing)#Server-side_load_balancers"&gt;Load balancing (computing) - Wikipedia&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://security.stackexchange.com/questions/30403/should-ssl-be-terminated-at-a-load-balancer"&gt;tls - Should SSL be terminated at a load balancer? - Information Security Stack Exchange&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://mozillazg.com/2019/01/notes-about-design-health-checking.html"&gt;健康检查功能相关的一些备忘 - Huang Huang 的博客&lt;/a&gt;&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/div&gt;
+</description><dc:creator xmlns:dc="http://purl.org/dc/elements/1.1/">mozillazg</dc:creator><pubDate>Sun, 20 Jan 2019 00:00:00 +0000</pubDate><guid>tag:mozillazg.com,2019-01-20:2019/01/notes-about-load-balancer-types-and-feature.html</guid><category>load-balancer</category></item><item><title>健康检查功能相关的一些备忘</title><link>https://mozillazg.com/2019/01/notes-about-design-health-checking.html</link><description>&lt;div class="section" id="id2"&gt;
 &lt;h2 id="hidid2"&gt;前言&lt;a class="headerlink" href="#hidid2" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;p&gt;本文记录一些健康检查功能相关的笔记/经验。&lt;/p&gt;
 &lt;/div&gt;
