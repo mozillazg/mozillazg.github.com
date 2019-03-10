@@ -1,5 +1,50 @@
 <?xml version="1.0" encoding="utf-8"?>
-<feed xmlns="http://www.w3.org/2005/Atom"><title>Huang Huang 的博客</title><link href="https://mozillazg.com/" rel="alternate"></link><link href="https://mozillazg.com/feeds/all-zh-hans.atom.xml" rel="self"></link><id>https://mozillazg.com/</id><updated>2019-03-03T00:00:00+00:00</updated><entry><title>负载均衡策略之两次随机选择策略</title><link href="https://mozillazg.com/2019/03/load-balancing-strategy-algorithm-the-power-of-two-random-choices.html" rel="alternate"></link><updated>2019-03-03T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2019-03-03:2019/03/load-balancing-strategy-algorithm-the-power-of-two-random-choices.html</id><summary type="html">&lt;div class="section" id="id2"&gt;
+<feed xmlns="http://www.w3.org/2005/Atom"><title>Huang Huang 的博客</title><link href="https://mozillazg.com/" rel="alternate"></link><link href="https://mozillazg.com/feeds/all-zh-hans.atom.xml" rel="self"></link><id>https://mozillazg.com/</id><updated>2019-03-10T00:00:00+00:00</updated><entry><title>网络负载均衡器中的动态权重功能</title><link href="https://mozillazg.com/2019/03/load-balancer-load-balancing-dynamic-weight-max-connections-slow-start-mode.html" rel="alternate"></link><updated>2019-03-10T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2019-03-10:2019/03/load-balancer-load-balancing-dynamic-weight-max-connections-slow-start-mode.html</id><summary type="html">&lt;div class="section" id="id2"&gt;
+&lt;h2 id="hidid2"&gt;前言&lt;a class="headerlink" href="#hidid2" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;有时候我们可能希望能够动态调整负载均衡器中某个节点权重和最大连接数限制，
+比如，某个节点负载有点高，当时又不想完全不接受连接，
+此时就可以通过调整权重或最大连接数限制来减少新的连接数，防止节点出现过载的情况。&lt;/p&gt;
+&lt;p&gt;下面就简单记录一下相关需求和实现。&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class="section" id="id3"&gt;
+&lt;h2 id="hidid3"&gt;手动调整&lt;a class="headerlink" href="#hidid3" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;手动调整节点权重和最大连接数是最简单也最直观的一种方法，一般可以通过下面的方法实现：&lt;/p&gt;
+&lt;ul class="simple"&gt;
+&lt;li&gt;配置文件支持热更新，通过更新配置文件中节点权重或最大连接数限制来实现。&lt;/li&gt;
+&lt;li&gt;如果配置信息不是通过文件读取而是从配置管理系统读取的话，那就只要支持监听配置管理系统的更新推送并热更新内存中的配置就好。&lt;/li&gt;
+&lt;li&gt;支持通过 API 更新运行时信息，比如支持通过 HTTP API 来更新。&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/div&gt;
+&lt;div class="section" id="id4"&gt;
+&lt;h2 id="hidid4"&gt;自动调整&lt;a class="headerlink" href="#hidid4" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;在某些场景下可能有需要负载均衡器支持自动动态调整节点权重和最大连接数限制的功能：
+比如，新加了一个节点到负载均衡器中，但是后端节点是需要一段时间的预热才能处理大量连接，
+当我们使用的是类似 【最少连接】这种负载均衡策略时，因为是新增的节点连接数最少会出现短时间连接大量涌入新节点的情况，
+此时就会出现节点过载的情况（前面说了假设我们的节点需要预热才能处理大量连接），甚至出现打垮新节点的情况。&lt;/p&gt;
+&lt;p&gt;对于这种类似需要预热的场景，需要负载均衡器支持类似 slow start 模式：
+slow start 模式下，节点的权重和最大连接数会从 1 开始随着时间线性增长，直至增长到配置的权重和最大连接数的值。
+slow start 模式给予了节点一段时间的预热期，并且预热期间的连接数是线性缓慢增长的，
+既达到了预热的效果又不会出现瞬间涌入大量连接打垮后端节点的情况，非常适合需要预热的情况。&lt;/p&gt;
+&lt;p&gt;那么，在什么情况下一个节点会自动进入 slow start 模式呢，一般在下面的情况会考虑自动进入 slow start 模式：&lt;/p&gt;
+&lt;ul class="simple"&gt;
+&lt;li&gt;新增节点。&lt;/li&gt;
+&lt;li&gt;节点健康状态从不健康切换到健康。此时一般是后端节点之前在发布或重启，亦或是刚刚从故障中恢复。&lt;/li&gt;
+&lt;li&gt;节点状态从 Down 状态切换为可以接受新连接的状态。这个状态切换可能是手动通过页面或API进行的操作，也可能是程序内部的状态自动切换。 原因一般跟上面的健康检查状态切分类似。&lt;/li&gt;
+&lt;/ul&gt;
+&lt;p&gt;关于这个 slow start 模式有一点需要注意的是：在负载均衡器启动的时候一般不会触发 slow start 模式，虽然满足上面的新增节点的情况。因为如果在负载均衡器启动的时候就触发的话，会出现所有节点都进入 slow start 模式，可能会导致只能处理少量连接的情况，无法实际需求。如果确实需要启动时就进入 slow start 模式的话需要考虑一下这种情况会导致的容量问题。&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class="section" id="id5"&gt;
+&lt;h2 id="hidid5"&gt;总结&lt;a class="headerlink" href="#hidid5" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;本文简单介绍了一下负载均衡器中动态权重相关的内容，欢迎大家补充其他知识。&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class="section" id="id6"&gt;
+&lt;h2 id="hidid6"&gt;参考资料&lt;a class="headerlink" href="#hidid6" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;ul class="simple"&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://support.citrix.com/article/CTX108886"&gt;NetScaler Load Balancing - Slow Start Mode&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://github.com/haproxy/haproxy/blob/a51885621d5bf8fa63a82e8beb8438841098251f/doc/configuration.txt#L12174"&gt;haproxy/configuration.txt at master · haproxy/haproxy&lt;/a&gt;&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/div&gt;
+</summary><category term="load-balancer"></category><category term="load-balancing"></category><category term="slow-start"></category></entry><entry><title>负载均衡策略之两次随机选择策略</title><link href="https://mozillazg.com/2019/03/load-balancing-strategy-algorithm-the-power-of-two-random-choices.html" rel="alternate"></link><updated>2019-03-03T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2019-03-03:2019/03/load-balancing-strategy-algorithm-the-power-of-two-random-choices.html</id><summary type="html">&lt;div class="section" id="id2"&gt;
 &lt;h2 id="hidid2"&gt;前言&lt;a class="headerlink" href="#hidid2" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;p&gt;本文简单介绍一下两次随机选择这个负载均衡策略。&lt;/p&gt;
 &lt;/div&gt;
@@ -110,14 +155,20 @@
     &lt;span class="k"&gt;def&lt;/span&gt; &lt;span class="nf"&gt;release&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="bp"&gt;self&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;node&lt;/span&gt;&lt;span class="p"&gt;):&lt;/span&gt;
         &lt;span class="n"&gt;node&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;connections&lt;/span&gt; &lt;span class="o"&gt;-=&lt;/span&gt; &lt;span class="mi"&gt;1&lt;/span&gt;
 &lt;/pre&gt;&lt;/div&gt;
-&lt;/div&gt;
 &lt;div class="section" id="id3"&gt;
-&lt;h2 id="hidid3"&gt;总结&lt;a class="headerlink" href="#hidid3" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;h3 id="hidid3"&gt;改进&lt;a class="headerlink" href="#hidid3" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
+&lt;p&gt;上面的 Python 简单实现其实有一点小瑕疵：当有多个节点满足条件时，上面的方法可能会连续多次选中同一个节点，
+导致结果不够平滑。&lt;/p&gt;
+&lt;p&gt;解决这个瑕疵的方法也比较简单，那就是把所有满足条件的节点都选出来，然后对这些节点应用其他负载均衡策略来选出合适的节点（比如使用前面介绍过的轮询策略、随机选择策略等）。&lt;/p&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;div class="section" id="id4"&gt;
+&lt;h2 id="hidid4"&gt;总结&lt;a class="headerlink" href="#hidid4" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;p&gt;本文简单记录了一下最少连接策略以及带权重的最少连接策略这两个负载均衡策略的实现方法，
 当然还有其他的实现方法欢迎一起探讨。&lt;/p&gt;
 &lt;/div&gt;
-&lt;div class="section" id="id4"&gt;
-&lt;h2 id="hidid4"&gt;参考资料&lt;a class="headerlink" href="#hidid4" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;div class="section" id="id5"&gt;
+&lt;h2 id="hidid5"&gt;参考资料&lt;a class="headerlink" href="#hidid5" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;ul class="simple"&gt;
 &lt;li&gt;&lt;a class="reference external" href="https://github.com/nginx/nginx/blob/d8ccef021588cf79d2dae7c132a0b1225ed52c30/src/http/modules/ngx_http_upstream_least_conn_module.c"&gt;nginx/ngx_http_upstream_least_conn_module.c at master · nginx/nginx&lt;/a&gt;&lt;/li&gt;
 &lt;li&gt;&lt;a class="reference external" href="http://kb.linuxvirtualserver.org/wiki/Weighted_Least-Connection_Scheduling"&gt;Weighted Least-Connection Scheduling - LVSKB&lt;/a&gt;&lt;/li&gt;
@@ -359,15 +410,15 @@ reduced temporarily on peer failures.&lt;/p&gt;
 &lt;/ul&gt;
 &lt;p&gt;python 示例：&lt;/p&gt;
 &lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="o"&gt;&amp;gt;&amp;gt;&amp;gt;&lt;/span&gt; &lt;span class="kn"&gt;import&lt;/span&gt; &lt;span class="nn"&gt;random&lt;/span&gt;
-&lt;span class="o"&gt;&amp;gt;&amp;gt;&amp;gt;&lt;/span&gt; &lt;span class="n"&gt;weights&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="p"&gt;{&lt;/span&gt;
-        &lt;span class="s1"&gt;&amp;#39;A&amp;#39;&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt; &lt;span class="mi"&gt;3&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;
-        &lt;span class="s1"&gt;&amp;#39;B&amp;#39;&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt; &lt;span class="mi"&gt;2&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;
-        &lt;span class="s1"&gt;&amp;#39;C&amp;#39;&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt; &lt;span class="mi"&gt;4&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;
-   &lt;span class="p"&gt;}&lt;/span&gt;
-&lt;span class="o"&gt;&amp;gt;&amp;gt;&amp;gt;&lt;/span&gt; &lt;span class="n"&gt;S&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="nb"&gt;sum&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;weights&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;values&lt;/span&gt;&lt;span class="p"&gt;())&lt;/span&gt;
+&lt;span class="o"&gt;&amp;gt;&amp;gt;&amp;gt;&lt;/span&gt; &lt;span class="n"&gt;weights&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="p"&gt;[&lt;/span&gt;
+        &lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;A&amp;#39;&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="mi"&gt;3&lt;/span&gt;&lt;span class="p"&gt;),&lt;/span&gt;
+        &lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;B&amp;#39;&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="mi"&gt;2&lt;/span&gt;&lt;span class="p"&gt;),&lt;/span&gt;
+        &lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;C&amp;#39;&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="mi"&gt;4&lt;/span&gt;&lt;span class="p"&gt;),&lt;/span&gt;
+   &lt;span class="p"&gt;]&lt;/span&gt;
+&lt;span class="o"&gt;&amp;gt;&amp;gt;&amp;gt;&lt;/span&gt; &lt;span class="n"&gt;S&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="nb"&gt;sum&lt;/span&gt;&lt;span class="p"&gt;((&lt;/span&gt;&lt;span class="n"&gt;x&lt;/span&gt;&lt;span class="p"&gt;[&lt;/span&gt;&lt;span class="mi"&gt;1&lt;/span&gt;&lt;span class="p"&gt;]&lt;/span&gt; &lt;span class="k"&gt;for&lt;/span&gt; &lt;span class="n"&gt;x&lt;/span&gt; &lt;span class="ow"&gt;in&lt;/span&gt; &lt;span class="n"&gt;weights&lt;/span&gt;&lt;span class="p"&gt;))&lt;/span&gt;
 &lt;span class="o"&gt;&amp;gt;&amp;gt;&amp;gt;&lt;/span&gt; &lt;span class="n"&gt;R&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;random&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;randint&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="mi"&gt;0&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;S&lt;/span&gt; &lt;span class="o"&gt;-&lt;/span&gt; &lt;span class="mi"&gt;1&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
 &lt;span class="o"&gt;&amp;gt;&amp;gt;&amp;gt;&lt;/span&gt; &lt;span class="n"&gt;V&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="mi"&gt;0&lt;/span&gt;
-&lt;span class="o"&gt;&amp;gt;&amp;gt;&amp;gt;&lt;/span&gt; &lt;span class="k"&gt;for&lt;/span&gt; &lt;span class="n"&gt;node&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;weight&lt;/span&gt; &lt;span class="ow"&gt;in&lt;/span&gt; &lt;span class="n"&gt;weights&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;items&lt;/span&gt;&lt;span class="p"&gt;():&lt;/span&gt;
+&lt;span class="o"&gt;&amp;gt;&amp;gt;&amp;gt;&lt;/span&gt; &lt;span class="k"&gt;for&lt;/span&gt; &lt;span class="n"&gt;node&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;weight&lt;/span&gt; &lt;span class="ow"&gt;in&lt;/span&gt; &lt;span class="n"&gt;weights&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;
    &lt;span class="n"&gt;V&lt;/span&gt; &lt;span class="o"&gt;+=&lt;/span&gt; &lt;span class="n"&gt;weight&lt;/span&gt;
    &lt;span class="k"&gt;if&lt;/span&gt; &lt;span class="n"&gt;V&lt;/span&gt; &lt;span class="o"&gt;&amp;gt;&lt;/span&gt; &lt;span class="n"&gt;R&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;
        &lt;span class="k"&gt;print&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;node&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;

@@ -1,0 +1,405 @@
+<!DOCTYPE html>
+<html lang="zh-hans" prefix="og: http://ogp.me/ns# fb: https://www.facebook.com/2008/fbml" class="han-init">
+<head>
+    <title>网络负载均衡器中的动态权重功能 - Huang Huang 的博客</title>
+    <!-- Using the latest rendering mode for IE -->
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <!-- share.css -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/social-share.js/1.0.16/css/share.min.css">
+    <!-- share.js -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/social-share.js/1.0.16/js/social-share.min.js"></script>
+
+
+    <link href="https://mozillazg.com/favicon.ico" rel="icon">
+
+<link rel="canonical" href="https://mozillazg.com/2019/03/load-balancer-load-balancing-dynamic-weight-max-connections-slow-start-mode.html">
+
+        <meta name="author" content="mozillazg" />
+        <meta name="keywords" content="load-balancer,load-balancing,slow-start" />
+    <meta name="description" content="前言¶ 有时候我们可能希望能够动态调整负载均衡器中某个节点权重和最大连接数限制， 比如，某个节点负载有点高，当时又不想完全不接受连接， 此时就可以通过调整权重或最大连接数限制来减少新的连接数，防止节点出现过载的情况。 下面就简单记录一下相关需求和实现。 手动调整¶ 手动调整节点权重和最大连接数是最简单也最直观的一种方法，一般可以通过下面的方法实现： 配置文件支持热更新，通过更新配置文件中节点权重或最大连接数限制来实现。 如果配置信息不是通过文件读取而是从配置管理系统读取的话，那就只要支持监听配置管理系统的更新推送并热更新内存中的配置就好。 支持通过 API 更新运行时信息，比如支持通过 HTTP API 来更新。 自动调整¶ 在某些场景下可能有需要负载均衡器支持自动动态调整节点权重和最大连接数限制的功能： 比如，新加了一个节点到负载均衡器中，但是后端节点是需要一段时间的预热才能处理大量连接， 当我们使用的是类似 【最少连接】这种负载均衡策略时，因为是新增的节点连接数最少会出现短时间连接大量涌入新节点的情况， 此时就会出现节点过载的情况（前面说了假设我们的节点需要预热才能处理大量连接），甚至出现打垮新节点的情况。 对于这种类似需要预热的场景，需要负载均衡器支持类似 slow start 模式： slow start 模式下，节点的权重和最大连接数会从 1 开始随着时间线性增长，直至增长到配置的权重和最大连接数的值。 slow start 模式给予了节点一段时间的预热期，并且预热期间的连接数是线性缓慢增长的， 既达到了预热的效果又不会出现瞬间涌入大量连接打垮后端节点的情况，非常适合需要预热的情况。 那么，在什么情况下一个节点会自动进入 slow start 模式呢，一般在下面的情况会考虑自动进入 slow start 模式： 新增节点。 节点健康状态从不健康切换到健康。此时一般是后端节点之前在发布或重启，亦或是刚刚从故障中恢复。 节点状态从 Down 状态切换为可以接受新连接的状态。这个状态切换可能是手动通过页面或API进行的操作，也可能是程序内部的状态自动切换。 原因一般跟上面的健康检查状态切分类似。 关于这个 slow start 模式有一点需要注意的是：在负载均衡器启动的时候一般不会触发 slow start 模式，虽然满足上面的新增节点的情况。因为如果在负载均衡器启动的时候就触发的话，会出现所有节点都进入 slow start 模式，可能会导致只能处理少量连接的情况，无法实际需求。如果确实需要启动时就进入 slow start 模式的话需要考虑一下这种情况会导致的容量问题。 总结¶ 本文简单介绍了一下负载均衡器中动态权重相关的内容，欢迎大家补充其他知识。 参考资料¶ NetScaler Load Balancing - Slow Start Mode haproxy/configuration.txt at master · haproxy/haproxy" />
+
+    <style>
+      .js-toc {
+        margin-bottom: 20px;
+      }
+      .donate-modal {
+        text-align: center;
+      }
+      #donate-modal-container .donate-image {
+        max-height: 300px !important;
+        min-height: inherit !important;
+      }
+    </style>
+
+        <meta property="og:site_name" content="Huang Huang 的博客" />
+        <meta property="og:type" content="article"/>
+        <meta property="og:title" content="网络负载均衡器中的动态权重功能"/>
+        <meta property="og:url" content="https://mozillazg.com/2019/03/load-balancer-load-balancing-dynamic-weight-max-connections-slow-start-mode.html"/>
+        <meta property="og:description" content="前言¶ 有时候我们可能希望能够动态调整负载均衡器中某个节点权重和最大连接数限制， 比如，某个节点负载有点高，当时又不想完全不接受连接， 此时就可以通过调整权重或最大连接数限制来减少新的连接数，防止节点出现过载的情况。 下面就简单记录一下相关需求和实现。 手动调整¶ 手动调整节点权重和最大连接数是最简单也最直观的一种方法，一般可以通过下面的方法实现： 配置文件支持热更新，通过更新配置文件中节点权重或最大连接数限制来实现。 如果配置信息不是通过文件读取而是从配置管理系统读取的话，那就只要支持监听配置管理系统的更新推送并热更新内存中的配置就好。 支持通过 API 更新运行时信息，比如支持通过 HTTP API 来更新。 自动调整¶ 在某些场景下可能有需要负载均衡器支持自动动态调整节点权重和最大连接数限制的功能： 比如，新加了一个节点到负载均衡器中，但是后端节点是需要一段时间的预热才能处理大量连接， 当我们使用的是类似 【最少连接】这种负载均衡策略时，因为是新增的节点连接数最少会出现短时间连接大量涌入新节点的情况， 此时就会出现节点过载的情况（前面说了假设我们的节点需要预热才能处理大量连接），甚至出现打垮新节点的情况。 对于这种类似需要预热的场景，需要负载均衡器支持类似 slow start 模式： slow start 模式下，节点的权重和最大连接数会从 1 开始随着时间线性增长，直至增长到配置的权重和最大连接数的值。 slow start 模式给予了节点一段时间的预热期，并且预热期间的连接数是线性缓慢增长的， 既达到了预热的效果又不会出现瞬间涌入大量连接打垮后端节点的情况，非常适合需要预热的情况。 那么，在什么情况下一个节点会自动进入 slow start 模式呢，一般在下面的情况会考虑自动进入 slow start 模式： 新增节点。 节点健康状态从不健康切换到健康。此时一般是后端节点之前在发布或重启，亦或是刚刚从故障中恢复。 节点状态从 Down 状态切换为可以接受新连接的状态。这个状态切换可能是手动通过页面或API进行的操作，也可能是程序内部的状态自动切换。 原因一般跟上面的健康检查状态切分类似。 关于这个 slow start 模式有一点需要注意的是：在负载均衡器启动的时候一般不会触发 slow start 模式，虽然满足上面的新增节点的情况。因为如果在负载均衡器启动的时候就触发的话，会出现所有节点都进入 slow start 模式，可能会导致只能处理少量连接的情况，无法实际需求。如果确实需要启动时就进入 slow start 模式的话需要考虑一下这种情况会导致的容量问题。 总结¶ 本文简单介绍了一下负载均衡器中动态权重相关的内容，欢迎大家补充其他知识。 参考资料¶ NetScaler Load Balancing - Slow Start Mode haproxy/configuration.txt at master · haproxy/haproxy"/>
+        <meta property="article:published_time" content="2019-03-10" />
+            <meta property="article:section" content="others" />
+            <meta property="article:tag" content="load-balancer" />
+            <meta property="article:tag" content="load-balancing" />
+            <meta property="article:tag" content="slow-start" />
+            <meta property="article:author" content="mozillazg" />
+            <meta property="og:image"
+                  content="https://mozillazg.com/static/avatar.jpeg"/>
+
+
+    <meta name="twitter:card" content="summary">
+        <meta name="twitter:site" content="@mozillazg">
+        <meta name="twitter:creator" content="@mozillazg">
+    <meta name="twitter:domain" content="https://mozillazg.com">
+            <meta property="twitter:image"
+                  content="https://mozillazg.com/static/avatar.jpeg"/>
+
+    <!-- Bootstrap -->
+        <link rel="stylesheet" href="https://mozillazg.com/theme/css/bootstrap.min.css" type="text/css"/>
+    <link href="https://mozillazg.com/theme/css/font-awesome.min.css" rel="stylesheet">
+
+    <link href="https://mozillazg.com/theme/css/pygments/github.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://mozillazg.com/theme/css/style.css" type="text/css"/>
+            <link href="https://mozillazg.com/static/custom.css" rel="stylesheet">
+
+        <link href="https://mozillazg.com/feeds/all.atom.xml" type="application/atom+xml" rel="alternate"
+              title="Huang Huang 的博客 ATOM Feed"/>
+
+        <link href="https://mozillazg.com/feeds/all.rss.xml" type="application/rss+xml" rel="alternate"
+              title="Huang Huang 的博客 RSS Feed"/>
+
+
+        <link href="https://mozillazg.com/feeds/others.atom.xml" type="application/atom+xml" rel="alternate"
+              title="Huang Huang 的博客 others ATOM Feed"/>
+
+
+    <script type="application/ld+json">
+    {
+        "@context": "https://schema.org",
+        "@type": "Website",
+        "publisher": {
+            "@type": "Person",
+            "name": "mozillazg",
+            "logo": "https://mozillazg.com/static/avatar.jpeg"
+        },
+        "author": {
+            "@type": "Person",
+            "name": "mozillazg",
+            "image": "https://mozillazg.com/static/avatar.jpeg",
+            "url": "https://mozillazg.com",
+            "sameAs": []
+        },
+        // "headline": "",
+        "url": "https://mozillazg.com/2019/03/load-balancer-load-balancing-dynamic-weight-max-connections-slow-start-mode.html",
+        "datePublished": "2019-03-10",
+        // "dateModified": "",
+        "image": "https://mozillazg.com/static/avatar.jpeg",
+        "keywords": "load-balancer, load-balancing, slow-start",
+        "description": "前言¶ 有时候我们可能希望能够动态调整负载均衡器中某个节点权重和最大连接数限制， 比如，某个节点负载有点高，当时又不想完全不接受连接， 此时就可以通过调整权重或最大连接数限制来减少新的连接数，防止节点出现过载的情况。 下面就简单记录一下相关需求和实现。 手动调整¶ 手动调整节点权重和最大连接数是最简单也最直观的一种方法，一般可以通过下面的方法实现： 配置文件支持热更新，通过更新配置文件中节点权重或最大连接数限制来实现。 如果配置信息不是通过文件读取而是从配置管理系统读取的话，那就只要支持监听配置管理系统的更新推送并热更新内存中的配置就好。 支持通过 API 更新运行时信息，比如支持通过 HTTP API 来更新。 自动调整¶ 在某些场景下可能有需要负载均衡器支持自动动态调整节点权重和最大连接数限制的功能： 比如，新加了一个节点到负载均衡器中，但是后端节点是需要一段时间的预热才能处理大量连接， 当我们使用的是类似 【最少连接】这种负载均衡策略时，因为是新增的节点连接数最少会出现短时间连接大量涌入新节点的情况， 此时就会出现节点过载的情况（前面说了假设我们的节点需要预热才能处理大量连接），甚至出现打垮新节点的情况。 对于这种类似需要预热的场景，需要负载均衡器支持类似 slow start 模式： slow start 模式下，节点的权重和最大连接数会从 1 开始随着时间线性增长，直至增长到配置的权重和最大连接数的值。 slow start 模式给予了节点一段时间的预热期，并且预热期间的连接数是线性缓慢增长的， 既达到了预热的效果又不会出现瞬间涌入大量连接打垮后端节点的情况，非常适合需要预热的情况。 那么，在什么情况下一个节点会自动进入 slow start 模式呢，一般在下面的情况会考虑自动进入 slow start 模式： 新增节点。 节点健康状态从不健康切换到健康。此时一般是后端节点之前在发布或重启，亦或是刚刚从故障中恢复。 节点状态从 Down 状态切换为可以接受新连接的状态。这个状态切换可能是手动通过页面或API进行的操作，也可能是程序内部的状态自动切换。 原因一般跟上面的健康检查状态切分类似。 关于这个 slow start 模式有一点需要注意的是：在负载均衡器启动的时候一般不会触发 slow start 模式，虽然满足上面的新增节点的情况。因为如果在负载均衡器启动的时候就触发的话，会出现所有节点都进入 slow start 模式，可能会导致只能处理少量连接的情况，无法实际需求。如果确实需要启动时就进入 slow start 模式的话需要考虑一下这种情况会导致的容量问题。 总结¶ 本文简单介绍了一下负载均衡器中动态权重相关的内容，欢迎大家补充其他知识。 参考资料¶ NetScaler Load Balancing - Slow Start Mode haproxy/configuration.txt at master · haproxy/haproxy",
+        "mainEntityOfPage": {
+            "@type": "WebPage",
+            "@id": "https://mozillazg.com"
+        }
+    }
+    </script>
+
+</head>
+<body>
+
+<div class="navbar" role="navigation">
+	<div class="container">
+        <div class="navbar-header">
+            <button type="button" class="navbar-toggle" data-toggle="collapse" data-target=".navbar-ex1-collapse">
+                <span class="sr-only">Toggle navigation</span>
+                <span class="icon-bar"></span>
+                <span class="icon-bar"></span>
+                <span class="icon-bar"></span>
+            </button>
+            <a href="https://mozillazg.com/" class="navbar-brand">
+Huang Huang 的博客            </a>
+        </div>
+        <div class="collapse navbar-collapse navbar-ex1-collapse">
+            <ul class="nav navbar-nav">
+                    <li><a href="https://mozillazg.com/feeds/all.atom.xml">Feed</a></li>
+                    <li><a href="/2014/10/pages/about-me.html">About</a></li>
+            </ul>
+            <ul class="nav navbar-nav navbar-right">
+              <li><a href="https://mozillazg.com/archives.html"><i class="fa fa-th-list"></i><span class="icon-label">Archives</span></a></li>
+            </ul>
+        </div>
+        <!-- /.navbar-collapse -->
+    </div>
+</div> <!-- /.navbar -->
+<!-- Banner -->
+<!-- End Banner -->
+<div class="container">
+    <div class="row">
+        <div class="col-lg-12">
+    <section id="content" class="yue">
+        <article>
+            <header class="text-center">
+                <h1>
+                    <a href="https://mozillazg.com/2019/03/load-balancer-load-balancing-dynamic-weight-max-connections-slow-start-mode.html"
+                       rel="bookmark"
+                       title="Permalink to 网络负载均衡器中的动态权重功能">
+                        网络负载均衡器中的动态权重功能
+                    </a>
+                </h1>
+                <p class="published">
+                    <time datetime="2019-03-10T00:00:00+00:00">
+                    2019-03-10
+                    </time>
+                </p>
+            </header>
+            <div class="entry-content">
+                <div class="well-sm article-info">
+<footer class="post-info">
+        <a href="https://mozillazg.com/category/others.html">others</a>
+
+
+<span class="label label-default hide">Tags</span>
+	<a href="https://mozillazg.com/tag/load-balancer.html">load-balancer</a>
+        /
+	<a href="https://mozillazg.com/tag/load-balancing.html">load-balancing</a>
+        /
+	<a href="https://mozillazg.com/tag/slow-start.html">slow-start</a>
+    
+</footer><!-- /.post-info -->                </div>
+                <div class="js-toc"></div>
+                <div>
+                <div class="section" id="id2">
+<h2 id="hidid2">前言<a class="headerlink" href="#hidid2" title="Permalink to this headline">¶</a></h2>
+<p>有时候我们可能希望能够动态调整负载均衡器中某个节点权重和最大连接数限制，
+比如，某个节点负载有点高，当时又不想完全不接受连接，
+此时就可以通过调整权重或最大连接数限制来减少新的连接数，防止节点出现过载的情况。</p>
+<p>下面就简单记录一下相关需求和实现。</p>
+</div>
+<div class="section" id="id3">
+<h2 id="hidid3">手动调整<a class="headerlink" href="#hidid3" title="Permalink to this headline">¶</a></h2>
+<p>手动调整节点权重和最大连接数是最简单也最直观的一种方法，一般可以通过下面的方法实现：</p>
+<ul class="simple">
+<li>配置文件支持热更新，通过更新配置文件中节点权重或最大连接数限制来实现。</li>
+<li>如果配置信息不是通过文件读取而是从配置管理系统读取的话，那就只要支持监听配置管理系统的更新推送并热更新内存中的配置就好。</li>
+<li>支持通过 API 更新运行时信息，比如支持通过 HTTP API 来更新。</li>
+</ul>
+</div>
+<div class="section" id="id4">
+<h2 id="hidid4">自动调整<a class="headerlink" href="#hidid4" title="Permalink to this headline">¶</a></h2>
+<p>在某些场景下可能有需要负载均衡器支持自动动态调整节点权重和最大连接数限制的功能：
+比如，新加了一个节点到负载均衡器中，但是后端节点是需要一段时间的预热才能处理大量连接，
+当我们使用的是类似 【最少连接】这种负载均衡策略时，因为是新增的节点连接数最少会出现短时间连接大量涌入新节点的情况，
+此时就会出现节点过载的情况（前面说了假设我们的节点需要预热才能处理大量连接），甚至出现打垮新节点的情况。</p>
+<p>对于这种类似需要预热的场景，需要负载均衡器支持类似 slow start 模式：
+slow start 模式下，节点的权重和最大连接数会从 1 开始随着时间线性增长，直至增长到配置的权重和最大连接数的值。
+slow start 模式给予了节点一段时间的预热期，并且预热期间的连接数是线性缓慢增长的，
+既达到了预热的效果又不会出现瞬间涌入大量连接打垮后端节点的情况，非常适合需要预热的情况。</p>
+<p>那么，在什么情况下一个节点会自动进入 slow start 模式呢，一般在下面的情况会考虑自动进入 slow start 模式：</p>
+<ul class="simple">
+<li>新增节点。</li>
+<li>节点健康状态从不健康切换到健康。此时一般是后端节点之前在发布或重启，亦或是刚刚从故障中恢复。</li>
+<li>节点状态从 Down 状态切换为可以接受新连接的状态。这个状态切换可能是手动通过页面或API进行的操作，也可能是程序内部的状态自动切换。 原因一般跟上面的健康检查状态切分类似。</li>
+</ul>
+<p>关于这个 slow start 模式有一点需要注意的是：在负载均衡器启动的时候一般不会触发 slow start 模式，虽然满足上面的新增节点的情况。因为如果在负载均衡器启动的时候就触发的话，会出现所有节点都进入 slow start 模式，可能会导致只能处理少量连接的情况，无法实际需求。如果确实需要启动时就进入 slow start 模式的话需要考虑一下这种情况会导致的容量问题。</p>
+</div>
+<div class="section" id="id5">
+<h2 id="hidid5">总结<a class="headerlink" href="#hidid5" title="Permalink to this headline">¶</a></h2>
+<p>本文简单介绍了一下负载均衡器中动态权重相关的内容，欢迎大家补充其他知识。</p>
+</div>
+<div class="section" id="id6">
+<h2 id="hidid6">参考资料<a class="headerlink" href="#hidid6" title="Permalink to this headline">¶</a></h2>
+<ul class="simple">
+<li><a class="reference external" href="https://support.citrix.com/article/CTX108886">NetScaler Load Balancing - Slow Start Mode</a></li>
+<li><a class="reference external" href="https://github.com/haproxy/haproxy/blob/a51885621d5bf8fa63a82e8beb8438841098251f/doc/configuration.txt#L12174">haproxy/configuration.txt at master · haproxy/haproxy</a></li>
+</ul>
+</div>
+
+                </div>
+            </div>
+            <!-- /.entry-content -->
+<section class="text-center">
+  
+<div id="donate"></div>
+
+<div class="social-share"></div>
+<div class="social-comment-note">
+<p>有任何建议和想法欢迎在下方评论区留言或者加我<a href="/static/wechat.png">微信</a>交流</p>
+</div>
+
+</section>
+<section class="well" id="related-posts">
+    <p>Related Posts:</p>
+    <ul>
+        <li><a href="https://mozillazg.com/2019/02/load-balancing-strategy-algorithm-weighted-least-connection.html">负载均衡策略之最少连接</a></li>
+        <li><a href="https://mozillazg.com/2019/02/load-balancing-strategy-algorithm-weighted-round-robin.html">负载均衡策略之轮询策略</a></li>
+        <li><a href="https://mozillazg.com/2019/03/load-balancing-strategy-algorithm-the-power-of-two-random-choices.html">负载均衡策略之两次随机选择策略</a></li>
+        <li><a href="https://mozillazg.com/2019/01/load-balancing-strategy-algorithm-weighted-random.html">负载均衡策略之随机选择</a></li>
+        <li><a href="https://mozillazg.com/2019/01/notes-about-load-balancer-types-and-feature.html">网络负载均衡器的类别和功能介绍</a></li>
+    </ul>
+</section>
+    <hr/>
+    <section class="comments" id="comments">
+        <h2>Comments</h2>
+
+        <div id="disqus_thread"></div>
+        <script type="text/javascript">
+            /* * * CONFIGURATION VARIABLES: EDIT BEFORE PASTING INTO YOUR WEBPAGE * * */
+            var disqus_shortname = 'my-github-blog'; // required: replace example with your forum shortname
+
+                    var disqus_identifier = 'load-balancer-load-balancing-dynamic-weight-max-connections-slow-start-mode';
+                var disqus_url = 'https://mozillazg.com/2019/03/load-balancer-load-balancing-dynamic-weight-max-connections-slow-start-mode.html';
+
+            var disqus_config = function () {
+                this.language = "zh-hans";
+            };
+
+            /* * * DON'T EDIT BELOW THIS LINE * * */
+            (function () {
+                var dsq = document.createElement('script');
+                dsq.type = 'text/javascript';
+                dsq.async = true;
+                dsq.src = '//' + disqus_shortname + '.disqus.com/embed.js';
+                (document.getElementsByTagName('head')[0] || document.getElementsByTagName('body')[0]).appendChild(dsq);
+            })();
+        </script>
+        <noscript>Please enable JavaScript to view the <a href="http://disqus.com/?ref_noscript">comments powered by
+            Disqus.</a></noscript>
+        <a href="http://disqus.com" class="dsq-brlink">comments powered by <span class="logo-disqus">Disqus</span></a>
+
+    </section>
+        </article>
+    </section>
+
+        </div>
+    </div>
+</div>
+<footer>
+   <div class="container">
+      <hr>
+      <div class="row">
+         <div class="col-xs-10">&copy; 2019 mozillazg
+            &middot; Powered by <a href="https://github.com/DandyDev/pelican-bootstrap3" target="_blank">pelican-bootstrap3</a>,
+            <a href="http://docs.getpelican.com/" target="_blank">Pelican</a>,
+            <a href="http://getbootstrap.com" target="_blank">Bootstrap</a>              <p><small>  <a rel="license" href="http://creativecommons.org/licenses/by-sa/4.0/"><img alt="Creative Commons License" style="border-width:0" src="/static/images/by-sa-80x15.png" /></a>
+    &quot;<span xmlns:dct="http://purl.org/dc/terms/" property="dct:title">Huang Huang 的博客</span>&quot; by <a xmlns:cc="http://creativecommons.org/ns#" href="https://mozillazg.com" property="cc:attributionName" rel="cc:attributionURL">mozillazg</a> is
+  licensed under a <a rel="license" href="http://creativecommons.org/licenses/by-sa/4.0/">Creative Commons Attribution-ShareAlike 4.0 International License</a>, except where indicated otherwise.
+</small></p>
+         </div>
+         <div class="col-xs-2"><p class="pull-right"><i class="fa fa-arrow-up"></i> <a href="#">Back to top</a></p></div>
+      </div>
+   </div>
+</footer>
+<script src="https://mozillazg.com/theme/js/jquery.min.js"></script>
+
+<!-- Include all compiled plugins (below), or include individual files as needed -->
+<script src="https://mozillazg.com/theme/js/bootstrap.min.js"></script>
+
+<!-- Enable responsive features in IE8 with Respond.js (https://github.com/scottjehl/Respond) -->
+<script src="https://mozillazg.com/theme/js/respond.min.js"></script>
+
+    <!-- Disqus -->
+    <script type="text/javascript">
+        /* * * CONFIGURATION VARIABLES: EDIT BEFORE PASTING INTO YOUR WEBPAGE * * */
+        var disqus_shortname = 'my-github-blog'; // required: replace example with your forum shortname
+
+        /* * * DON'T EDIT BELOW THIS LINE * * */
+        (function () {
+            var s = document.createElement('script');
+            s.async = true;
+            s.type = 'text/javascript';
+            s.src = '//' + disqus_shortname + '.disqus.com/count.js';
+            (document.getElementsByTagName('HEAD')[0] || document.getElementsByTagName('BODY')[0]).appendChild(s);
+        }());
+    </script>
+    <!-- End Disqus Code -->
+    <!-- Google Analytics Universal -->
+    <script type="text/javascript">
+        (function(i,s,o,g,r,a,m){i['GoogleAnalyticsObject']=r;i[r]=i[r]||function(){
+        (i[r].q=i[r].q||[]).push(arguments)},i[r].l=1*new Date();a=s.createElement(o),
+        m=s.getElementsByTagName(o)[0];a.async=1;a.src=g;m.parentNode.insertBefore(a,m)
+        })(window,document,'script','//www.google-analytics.com/analytics.js','ga');
+
+        ga('create', 'UA-77172981-1', 'auto');
+        ga('send', 'pageview');
+    </script>
+    <!-- End Google Analytics Universal Code -->
+
+
+<script src="https://mozillazg.com/theme/js/vdonate.js"></script>
+<script>
+$(document).ready(function(){
+new vdonate({
+  title: '如果觉得我的文章对您有用，请随意打赏。您的支持将鼓励我继续创作!', // 可选参数，打赏标题
+  btnText: '打赏支持', // 可选参数，打赏按钮文字
+  el: document.getElementById('donate'), // 必选参数，打赏按钮的容器
+  wechatImage: 'https://mozillazg.com/static/wechat_donate.png', // 必选参数，微信收款二维码
+  alipayImage: 'https://mozillazg.com/static/alipay_donate.jpg' // 必选参数，支付宝收款二维码
+});
+});
+</script>
+
+<script src="https://mozillazg.com/theme/js/tocbot.min.js"></script>
+<script>
+$(document).ready(function(){
+  tocbot.init({
+    // Where to render the table of contents.
+    tocSelector: '.js-toc',
+    // Where to grab the headings to build the table of contents.
+    contentSelector: '.entry-content',
+    // Which headings to grab inside of the contentSelector element.
+    headingSelector: 'h2, h3, h4,h5',
+    // Headings that match the ignoreSelector will be skipped.
+    ignoreSelector: '.js-toc-ignore',
+    // Main class to add to links.
+    linkClass: 'toc-link',
+    // Extra classes to add to links.
+    extraLinkClasses: '',
+    // Class to add to active links,
+    // the link corresponding to the top most heading on the page.
+    activeLinkClass: 'is-active-link',
+    // Main class to add to lists.
+    listClass: 'toc-list',
+    // Extra classes to add to lists.
+    extraListClasses: '',
+    // Class that gets added when a list should be collapsed.
+    isCollapsedClass: 'is-collapsed',
+    // Class that gets added when a list should be able
+    // to be collapsed but isn't necessarily collpased.
+    collapsibleClass: 'is-collapsible',
+    // Class to add to list items.
+    listItemClass: 'toc-list-item',
+    // How many heading levels should not be collpased.
+    // For example, number 6 will show everything since
+    // there are only 6 heading levels and number 0 will collpase them all.
+    // The sections that are hidden will open
+    // and close as you scroll to headings within them.
+    collapseDepth: 6,
+    // Smooth scrolling enabled.
+    smoothScroll: true,
+    // Smooth scroll duration.
+    smoothScrollDuration: 420,
+    // Callback for scroll end (requires: smoothScroll).
+    scrollEndCallback: function (e) {},
+    // Headings offset between the headings and the top of the document (this is meant for minor adjustments).
+    headingsOffset: 0,
+    // Timeout between events firing to make sure it's
+    // not too rapid (for performance reasons).
+    throttleTimeout: 50,
+    // Element to add the positionFixedClass to.
+    positionFixedSelector: null,
+    // Fixed position class to add to make sidebar fixed after scrolling
+    // down past the fixedSidebarOffset.
+    positionFixedClass: 'is-position-fixed',
+    // fixedSidebarOffset can be any number but by default is set
+    // to auto which sets the fixedSidebarOffset to the sidebar
+    // element's offsetTop from the top of the document on init.
+    fixedSidebarOffset: 'auto',
+    // includeHtml can be set to true to include the HTML markup from the
+    // heading node instead of just including the textContent.
+    includeHtml: false
+  });
+});
+</script>
+</body>
+</html>
