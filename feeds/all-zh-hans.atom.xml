@@ -1,5 +1,328 @@
 <?xml version="1.0" encoding="utf-8"?>
-<feed xmlns="http://www.w3.org/2005/Atom"><title>Huang Huang 的博客</title><link href="https://mozillazg.com/" rel="alternate"></link><link href="https://mozillazg.com/feeds/all-zh-hans.atom.xml" rel="self"></link><id>https://mozillazg.com/</id><updated>2019-03-30T00:00:00+00:00</updated><entry><title>strace 常用操作</title><link href="https://mozillazg.com/2019/03/linux-debug-with-strace-cookbook-examples.html" rel="alternate"></link><updated>2019-03-30T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2019-03-30:2019/03/linux-debug-with-strace-cookbook-examples.html</id><summary type="html">&lt;div class="section" id="id1"&gt;
+<feed xmlns="http://www.w3.org/2005/Atom"><title>Huang Huang 的博客</title><link href="https://mozillazg.com/" rel="alternate"></link><link href="https://mozillazg.com/feeds/all-zh-hans.atom.xml" rel="self"></link><id>https://mozillazg.com/</id><updated>2019-04-07T00:00:00+00:00</updated><entry><title>Go: 关于锁（mutex）的正确使用姿势</title><link href="https://mozillazg.com/2019/04/notes-about-go-lock-mutex.html" rel="alternate"></link><updated>2019-04-07T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2019-04-07:2019/04/notes-about-go-lock-mutex.html</id><summary type="html">&lt;div class="section" id="id1"&gt;
+&lt;h2 id="hidid1"&gt;前言&lt;a class="headerlink" href="#hidid1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;最近踩了一个锁的坑，所以在这里简单记录一些 Go 中关于锁（mutex）使用的一些正确姿势或注意事项。&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class="section" id="id2"&gt;
+&lt;h2 id="hidid2"&gt;尽量减少锁的持有时间&lt;a class="headerlink" href="#hidid2" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;尽量减少锁的持有时间，毕竟使用锁是有代价的，通过减少锁的持有时间来减轻这个代价：&lt;/p&gt;
+&lt;ul class="simple"&gt;
+&lt;li&gt;细化锁的粒度。通过细化锁的粒度来减少锁的持有时间以及避免在持有锁操作的时候做各种耗时的操作。&lt;/li&gt;
+&lt;li&gt;不要在持有锁的时候做 IO 操作。尽量只通过持有锁来保护 IO 操作需要的资源而不是 IO 操作本身：&lt;/li&gt;
+&lt;/ul&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="kd"&gt;func&lt;/span&gt; &lt;span class="nx"&gt;doSomething&lt;/span&gt;&lt;span class="p"&gt;()&lt;/span&gt; &lt;span class="p"&gt;{&lt;/span&gt;
+    &lt;span class="nx"&gt;m&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Lock&lt;/span&gt;&lt;span class="p"&gt;()&lt;/span&gt;
+    &lt;span class="nx"&gt;item&lt;/span&gt; &lt;span class="o"&gt;:=&lt;/span&gt; &lt;span class="o"&gt;...&lt;/span&gt;
+    &lt;span class="nx"&gt;http&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Get&lt;/span&gt;&lt;span class="p"&gt;()&lt;/span&gt;  &lt;span class="c1"&gt;// 各种耗时的 IO 操作&lt;/span&gt;
+    &lt;span class="nx"&gt;m&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Unlock&lt;/span&gt;&lt;span class="p"&gt;()&lt;/span&gt;
+&lt;span class="p"&gt;}&lt;/span&gt;
+
+&lt;span class="c1"&gt;// 改为&lt;/span&gt;
+&lt;span class="kd"&gt;func&lt;/span&gt; &lt;span class="nx"&gt;doSomething&lt;/span&gt;&lt;span class="p"&gt;()&lt;/span&gt; &lt;span class="p"&gt;{&lt;/span&gt;
+    &lt;span class="nx"&gt;m&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Lock&lt;/span&gt;&lt;span class="p"&gt;()&lt;/span&gt;
+    &lt;span class="nx"&gt;item&lt;/span&gt; &lt;span class="o"&gt;:=&lt;/span&gt; &lt;span class="o"&gt;...&lt;/span&gt;
+    &lt;span class="nx"&gt;m&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Unlock&lt;/span&gt;&lt;span class="p"&gt;()&lt;/span&gt;
+
+    &lt;span class="nx"&gt;http&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Get&lt;/span&gt;&lt;span class="p"&gt;()&lt;/span&gt;
+&lt;span class="p"&gt;}&lt;/span&gt;
+&lt;/pre&gt;&lt;/div&gt;
+&lt;/div&gt;
+&lt;div class="section" id="defer"&gt;
+&lt;h2 id="hiddefer"&gt;善用 defer 来确保在函数内正确释放了锁&lt;a class="headerlink" href="#hiddefer" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;尤其是在那些内部有好几个通过 &lt;tt class="docutils literal"&gt;if err != nil&lt;/tt&gt; 判断来提前返回的函数中，通过 &lt;tt class="docutils literal"&gt;defer&lt;/tt&gt; 可以确保不会遗漏释放锁操作，避免出现死锁问题，以及避免函数内非预期的 panic 导致死锁的问题：&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="kd"&gt;func&lt;/span&gt; &lt;span class="nx"&gt;doSomething&lt;/span&gt;&lt;span class="p"&gt;()&lt;/span&gt; &lt;span class="p"&gt;{&lt;/span&gt;
+    &lt;span class="nx"&gt;m&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Lock&lt;/span&gt;&lt;span class="p"&gt;()&lt;/span&gt;
+    &lt;span class="k"&gt;defer&lt;/span&gt; &lt;span class="nx"&gt;m&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Unlock&lt;/span&gt;&lt;span class="p"&gt;()&lt;/span&gt;
+
+    &lt;span class="nx"&gt;err&lt;/span&gt; &lt;span class="o"&gt;:=&lt;/span&gt; &lt;span class="o"&gt;...&lt;/span&gt;
+    &lt;span class="k"&gt;if&lt;/span&gt; &lt;span class="nx"&gt;err&lt;/span&gt; &lt;span class="o"&gt;!=&lt;/span&gt; &lt;span class="kc"&gt;nil&lt;/span&gt; &lt;span class="p"&gt;{&lt;/span&gt;
+        &lt;span class="k"&gt;return&lt;/span&gt;
+    &lt;span class="p"&gt;}&lt;/span&gt;
+
+    &lt;span class="nx"&gt;err&lt;/span&gt; &lt;span class="p"&gt;=&lt;/span&gt; &lt;span class="o"&gt;...&lt;/span&gt;
+    &lt;span class="k"&gt;if&lt;/span&gt; &lt;span class="nx"&gt;err&lt;/span&gt; &lt;span class="o"&gt;!=&lt;/span&gt; &lt;span class="kc"&gt;nil&lt;/span&gt; &lt;span class="p"&gt;{&lt;/span&gt;
+        &lt;span class="k"&gt;return&lt;/span&gt;
+    &lt;span class="p"&gt;}&lt;/span&gt;
+
+    &lt;span class="o"&gt;...&lt;/span&gt;
+    &lt;span class="k"&gt;return&lt;/span&gt;
+&lt;span class="p"&gt;}&lt;/span&gt;
+&lt;/pre&gt;&lt;/div&gt;
+&lt;p&gt;不过使用 defer 的时候也要注意别因为习惯性的 &lt;tt class="docutils literal"&gt;defer m.Unlock()&lt;/tt&gt; 导致无意中在持有锁的时候做了 IO 操作，出现了非预期的持有锁时间太长的问题。&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="c1"&gt;// 非预期的在持有锁期间做 IO 操作&lt;/span&gt;
+&lt;span class="kd"&gt;func&lt;/span&gt; &lt;span class="nx"&gt;doSomething&lt;/span&gt;&lt;span class="p"&gt;()&lt;/span&gt; &lt;span class="p"&gt;{&lt;/span&gt;
+    &lt;span class="nx"&gt;m&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Lock&lt;/span&gt;&lt;span class="p"&gt;()&lt;/span&gt;
+    &lt;span class="k"&gt;defer&lt;/span&gt; &lt;span class="nx"&gt;m&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Unlock&lt;/span&gt;&lt;span class="p"&gt;()&lt;/span&gt;
+
+    &lt;span class="nx"&gt;item&lt;/span&gt; &lt;span class="o"&gt;:=&lt;/span&gt; &lt;span class="o"&gt;...&lt;/span&gt;
+    &lt;span class="nx"&gt;http&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Get&lt;/span&gt;&lt;span class="p"&gt;()&lt;/span&gt;  &lt;span class="c1"&gt;// 各种耗时的 IO 操作&lt;/span&gt;
+&lt;span class="p"&gt;}&lt;/span&gt;
+&lt;/pre&gt;&lt;/div&gt;
+&lt;/div&gt;
+&lt;div class="section" id="rwmutex"&gt;
+&lt;h2 id="hidrwmutex"&gt;在适当时候使用 RWMutex&lt;a class="headerlink" href="#hidrwmutex" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;当确定操作不会修改保护的资源时，可以使用 RWMutex 来减少锁等待时间（不同的 goroutine 可以同时持有 RLock, 但是 Lock 限制了只能有一个 goroutine 持有 Lock）：&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="kd"&gt;func&lt;/span&gt; &lt;span class="nx"&gt;nickName&lt;/span&gt;&lt;span class="p"&gt;()&lt;/span&gt; &lt;span class="kt"&gt;string&lt;/span&gt; &lt;span class="p"&gt;{&lt;/span&gt;
+    &lt;span class="nx"&gt;rw&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;RLock&lt;/span&gt;&lt;span class="p"&gt;()&lt;/span&gt;
+    &lt;span class="k"&gt;defer&lt;/span&gt; &lt;span class="nx"&gt;rw&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;RUnlock&lt;/span&gt;&lt;span class="p"&gt;()&lt;/span&gt;
+
+    &lt;span class="k"&gt;return&lt;/span&gt; &lt;span class="nx"&gt;name&lt;/span&gt;
+&lt;span class="p"&gt;}&lt;/span&gt;
+
+&lt;span class="kd"&gt;func&lt;/span&gt; &lt;span class="nx"&gt;SetName&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="nx"&gt;s&lt;/span&gt; &lt;span class="kt"&gt;string&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt; &lt;span class="kt"&gt;string&lt;/span&gt; &lt;span class="p"&gt;{&lt;/span&gt;
+    &lt;span class="nx"&gt;rw&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Lock&lt;/span&gt;&lt;span class="p"&gt;()&lt;/span&gt;
+    &lt;span class="k"&gt;defer&lt;/span&gt; &lt;span class="nx"&gt;rw&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Unlock&lt;/span&gt;&lt;span class="p"&gt;()&lt;/span&gt;
+
+    &lt;span class="nx"&gt;name&lt;/span&gt; &lt;span class="p"&gt;=&lt;/span&gt; &lt;span class="nx"&gt;s&lt;/span&gt;
+&lt;span class="p"&gt;}&lt;/span&gt;
+&lt;/pre&gt;&lt;/div&gt;
+&lt;/div&gt;
+&lt;div class="section" id="copy"&gt;
+&lt;h2 id="hidcopy"&gt;copy 结构体操作可能导致非预期的死锁&lt;a class="headerlink" href="#hidcopy" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;copy 结构体时，如果结构体中有锁的话，记得重新初始化一个锁对象，否则会出现非预期的死锁：&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="kn"&gt;package&lt;/span&gt; &lt;span class="nx"&gt;main&lt;/span&gt;
+
+&lt;span class="kn"&gt;import&lt;/span&gt; &lt;span class="p"&gt;(&lt;/span&gt;
+    &lt;span class="s"&gt;&amp;quot;fmt&amp;quot;&lt;/span&gt;
+    &lt;span class="s"&gt;&amp;quot;sync&amp;quot;&lt;/span&gt;
+&lt;span class="p"&gt;)&lt;/span&gt;
+
+&lt;span class="kd"&gt;type&lt;/span&gt; &lt;span class="nx"&gt;User&lt;/span&gt; &lt;span class="kd"&gt;struct&lt;/span&gt; &lt;span class="p"&gt;{&lt;/span&gt;
+    &lt;span class="nx"&gt;sync&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Mutex&lt;/span&gt;
+
+    &lt;span class="nx"&gt;name&lt;/span&gt; &lt;span class="kt"&gt;string&lt;/span&gt;
+&lt;span class="p"&gt;}&lt;/span&gt;
+
+&lt;span class="kd"&gt;func&lt;/span&gt; &lt;span class="nx"&gt;main&lt;/span&gt;&lt;span class="p"&gt;()&lt;/span&gt; &lt;span class="p"&gt;{&lt;/span&gt;
+    &lt;span class="nx"&gt;u1&lt;/span&gt; &lt;span class="o"&gt;:=&lt;/span&gt; &lt;span class="o"&gt;&amp;amp;&lt;/span&gt;&lt;span class="nx"&gt;User&lt;/span&gt;&lt;span class="p"&gt;{&lt;/span&gt;&lt;span class="nx"&gt;name&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt; &lt;span class="s"&gt;&amp;quot;test&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;}&lt;/span&gt;
+    &lt;span class="nx"&gt;u1&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Lock&lt;/span&gt;&lt;span class="p"&gt;()&lt;/span&gt;
+    &lt;span class="k"&gt;defer&lt;/span&gt; &lt;span class="nx"&gt;u1&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Unlock&lt;/span&gt;&lt;span class="p"&gt;()&lt;/span&gt;
+
+    &lt;span class="nx"&gt;tmp&lt;/span&gt; &lt;span class="o"&gt;:=&lt;/span&gt; &lt;span class="o"&gt;*&lt;/span&gt;&lt;span class="nx"&gt;u1&lt;/span&gt;
+    &lt;span class="nx"&gt;u2&lt;/span&gt; &lt;span class="o"&gt;:=&lt;/span&gt; &lt;span class="o"&gt;&amp;amp;&lt;/span&gt;&lt;span class="nx"&gt;tmp&lt;/span&gt;
+    &lt;span class="c1"&gt;// u2.Mutex = sync.Mutex{} // 没有这一行就会死锁&lt;/span&gt;
+
+    &lt;span class="nx"&gt;fmt&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Printf&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="s"&gt;&amp;quot;%#p\n&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="nx"&gt;u1&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+    &lt;span class="nx"&gt;fmt&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Printf&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="s"&gt;&amp;quot;%#p\n&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="nx"&gt;u2&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+
+    &lt;span class="nx"&gt;u2&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Lock&lt;/span&gt;&lt;span class="p"&gt;()&lt;/span&gt;
+    &lt;span class="k"&gt;defer&lt;/span&gt; &lt;span class="nx"&gt;u2&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Unlock&lt;/span&gt;&lt;span class="p"&gt;()&lt;/span&gt;
+&lt;span class="p"&gt;}&lt;/span&gt;
+&lt;/pre&gt;&lt;/div&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;$ go run main.go
+c00000a080
+c00000a0a0
+fatal error: all goroutines are asleep - deadlock!
+
+goroutine &lt;span class="m"&gt;1&lt;/span&gt; &lt;span class="o"&gt;[&lt;/span&gt;semacquire&lt;span class="o"&gt;]&lt;/span&gt;:
+sync.runtime_SemacquireMutex&lt;span class="o"&gt;(&lt;/span&gt;0xc00000a0a4, 0x0&lt;span class="o"&gt;)&lt;/span&gt;
+    /usr/local/Cellar/go/1.11/libexec/src/runtime/sema.go:71 +0x3d
+sync.&lt;span class="o"&gt;(&lt;/span&gt;*Mutex&lt;span class="o"&gt;)&lt;/span&gt;.Lock&lt;span class="o"&gt;(&lt;/span&gt;0xc00000a0a0&lt;span class="o"&gt;)&lt;/span&gt;
+    /usr/local/Cellar/go/1.11/libexec/src/sync/mutex.go:134 +0xff
+main.main&lt;span class="o"&gt;()&lt;/span&gt;
+    /Users/xxx/tmp/golang/main.go:26 +0x17f
+&lt;span class="nb"&gt;exit&lt;/span&gt; status 2
+&lt;/pre&gt;&lt;/div&gt;
+&lt;p&gt;文档中也有类似的警告：&lt;/p&gt;
+&lt;blockquote&gt;
+&lt;p&gt;A Mutex must not be copied after first use&lt;/p&gt;
+&lt;p&gt;&lt;a class="reference external" href="https://godoc.org/sync#Mutex"&gt;https://godoc.org/sync#Mutex&lt;/a&gt;&lt;/p&gt;
+&lt;/blockquote&gt;
+&lt;/div&gt;
+&lt;div class="section" id="build-test-race"&gt;
+&lt;h2 id="hidbuild-test-race"&gt;build/test 时使用 -race 参数以便运行时检测数据竞争问题&lt;a class="headerlink" href="#hidbuild-test-race" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;可以在执行 go build 或 go test 时增加一个 &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;-race&lt;/span&gt;&lt;/tt&gt; 参数来开启数据竞争检测功能，通过这种方式来实现在本地开发环境/CI/测试环境阶段发现程序中可能存在的数据竞争问题：&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="kn"&gt;package&lt;/span&gt; &lt;span class="nx"&gt;main&lt;/span&gt;
+
+&lt;span class="kn"&gt;import&lt;/span&gt; &lt;span class="p"&gt;(&lt;/span&gt;
+    &lt;span class="s"&gt;&amp;quot;fmt&amp;quot;&lt;/span&gt;
+    &lt;span class="s"&gt;&amp;quot;sync&amp;quot;&lt;/span&gt;
+&lt;span class="p"&gt;)&lt;/span&gt;
+
+&lt;span class="kd"&gt;type&lt;/span&gt; &lt;span class="nx"&gt;Todo&lt;/span&gt; &lt;span class="kd"&gt;struct&lt;/span&gt; &lt;span class="p"&gt;{&lt;/span&gt;
+    &lt;span class="nx"&gt;sync&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Mutex&lt;/span&gt;
+
+    &lt;span class="nx"&gt;tasks&lt;/span&gt; &lt;span class="p"&gt;[]&lt;/span&gt;&lt;span class="kt"&gt;string&lt;/span&gt;
+&lt;span class="p"&gt;}&lt;/span&gt;
+
+&lt;span class="kd"&gt;func&lt;/span&gt; &lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="nx"&gt;t&lt;/span&gt; &lt;span class="o"&gt;*&lt;/span&gt;&lt;span class="nx"&gt;Todo&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt; &lt;span class="nx"&gt;do&lt;/span&gt;&lt;span class="p"&gt;()&lt;/span&gt; &lt;span class="p"&gt;{&lt;/span&gt;
+    &lt;span class="k"&gt;for&lt;/span&gt; &lt;span class="nx"&gt;_&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="nx"&gt;task&lt;/span&gt; &lt;span class="o"&gt;:=&lt;/span&gt; &lt;span class="k"&gt;range&lt;/span&gt; &lt;span class="nx"&gt;t&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;tasks&lt;/span&gt; &lt;span class="p"&gt;{&lt;/span&gt;
+        &lt;span class="nx"&gt;fmt&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Println&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="nx"&gt;task&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+    &lt;span class="p"&gt;}&lt;/span&gt;
+&lt;span class="p"&gt;}&lt;/span&gt;
+
+&lt;span class="kd"&gt;func&lt;/span&gt; &lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="nx"&gt;t&lt;/span&gt; &lt;span class="o"&gt;*&lt;/span&gt;&lt;span class="nx"&gt;Todo&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt; &lt;span class="nx"&gt;Add&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="nx"&gt;task&lt;/span&gt; &lt;span class="kt"&gt;string&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt; &lt;span class="p"&gt;{&lt;/span&gt;
+    &lt;span class="nx"&gt;t&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Lock&lt;/span&gt;&lt;span class="p"&gt;()&lt;/span&gt;
+    &lt;span class="k"&gt;defer&lt;/span&gt; &lt;span class="nx"&gt;t&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Unlock&lt;/span&gt;&lt;span class="p"&gt;()&lt;/span&gt;
+
+    &lt;span class="nx"&gt;t&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;tasks&lt;/span&gt; &lt;span class="p"&gt;=&lt;/span&gt; &lt;span class="nb"&gt;append&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="nx"&gt;t&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;tasks&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="nx"&gt;task&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+&lt;span class="p"&gt;}&lt;/span&gt;
+
+&lt;span class="kd"&gt;func&lt;/span&gt; &lt;span class="nx"&gt;main&lt;/span&gt;&lt;span class="p"&gt;()&lt;/span&gt; &lt;span class="p"&gt;{&lt;/span&gt;
+    &lt;span class="nx"&gt;t&lt;/span&gt; &lt;span class="o"&gt;:=&lt;/span&gt; &lt;span class="o"&gt;&amp;amp;&lt;/span&gt;&lt;span class="nx"&gt;Todo&lt;/span&gt;&lt;span class="p"&gt;{}&lt;/span&gt;
+
+    &lt;span class="k"&gt;for&lt;/span&gt; &lt;span class="nx"&gt;i&lt;/span&gt; &lt;span class="o"&gt;:=&lt;/span&gt; &lt;span class="mi"&gt;0&lt;/span&gt;&lt;span class="p"&gt;;&lt;/span&gt; &lt;span class="nx"&gt;i&lt;/span&gt; &lt;span class="p"&gt;&amp;lt;&lt;/span&gt; &lt;span class="mi"&gt;2&lt;/span&gt;&lt;span class="p"&gt;;&lt;/span&gt; &lt;span class="nx"&gt;i&lt;/span&gt;&lt;span class="o"&gt;++&lt;/span&gt; &lt;span class="p"&gt;{&lt;/span&gt;
+        &lt;span class="k"&gt;go&lt;/span&gt; &lt;span class="nx"&gt;t&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Add&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="nx"&gt;fmt&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Sprintf&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="s"&gt;&amp;quot;%d&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="nx"&gt;i&lt;/span&gt;&lt;span class="p"&gt;))&lt;/span&gt;
+    &lt;span class="p"&gt;}&lt;/span&gt;
+    &lt;span class="k"&gt;for&lt;/span&gt; &lt;span class="nx"&gt;i&lt;/span&gt; &lt;span class="o"&gt;:=&lt;/span&gt; &lt;span class="mi"&gt;0&lt;/span&gt;&lt;span class="p"&gt;;&lt;/span&gt; &lt;span class="nx"&gt;i&lt;/span&gt; &lt;span class="p"&gt;&amp;lt;&lt;/span&gt; &lt;span class="mi"&gt;2&lt;/span&gt;&lt;span class="p"&gt;;&lt;/span&gt; &lt;span class="nx"&gt;i&lt;/span&gt;&lt;span class="o"&gt;++&lt;/span&gt; &lt;span class="p"&gt;{&lt;/span&gt;
+        &lt;span class="nx"&gt;t&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;do&lt;/span&gt;&lt;span class="p"&gt;()&lt;/span&gt;
+    &lt;span class="p"&gt;}&lt;/span&gt;
+&lt;span class="p"&gt;}&lt;/span&gt;
+&lt;/pre&gt;&lt;/div&gt;
+&lt;p&gt;&lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;-race&lt;/span&gt;&lt;/tt&gt; 参数可以开启数据竞争检测（详见： &lt;a class="reference external" href="https://golang.org/doc/articles/race_detector.html"&gt;Data Race Detector - The Go Programming Language&lt;/a&gt; ）：&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;$ go build -race -o main .
+$
+$ ./main
+&lt;span class="o"&gt;==================&lt;/span&gt;
+WARNING: DATA RACE
+Read at 0x00c0000a0048 by main goroutine:
+  main.&lt;span class="o"&gt;(&lt;/span&gt;*Todo&lt;span class="o"&gt;)&lt;/span&gt;.do&lt;span class="o"&gt;()&lt;/span&gt;
+      /Users/xxx/tmp/golang/race/main.go:15 +0x42
+  main.main&lt;span class="o"&gt;()&lt;/span&gt;
+      /Users/xxx/tmp/golang/race/main.go:34 +0x154
+
+Previous write at 0x00c0000a0048 by goroutine 6:
+  main.&lt;span class="o"&gt;(&lt;/span&gt;*Todo&lt;span class="o"&gt;)&lt;/span&gt;.Add&lt;span class="o"&gt;()&lt;/span&gt;
+      /Users/xxx/tmp/golang/race/main.go:24 +0x11d
+
+Goroutine &lt;span class="m"&gt;6&lt;/span&gt; &lt;span class="o"&gt;(&lt;/span&gt;finished&lt;span class="o"&gt;)&lt;/span&gt; created at:
+  main.main&lt;span class="o"&gt;()&lt;/span&gt;
+      /Users/xxx/tmp/golang/race/main.go:31 +0x127
+&lt;span class="o"&gt;==================&lt;/span&gt;
+&lt;span class="nv"&gt;0&lt;/span&gt;
+&lt;span class="o"&gt;==================&lt;/span&gt;
+WARNING: DATA RACE
+Read at 0x00c0000b0010 by main goroutine:
+  main.&lt;span class="o"&gt;(&lt;/span&gt;*Todo&lt;span class="o"&gt;)&lt;/span&gt;.do&lt;span class="o"&gt;()&lt;/span&gt;
+      /Users/xxx/tmp/golang/race/main.go:15 +0x85
+  main.main&lt;span class="o"&gt;()&lt;/span&gt;
+      /Users/xxx/tmp/golang/race/main.go:34 +0x154
+
+Previous write at 0x00c0000b0010 by goroutine 7:
+  main.&lt;span class="o"&gt;(&lt;/span&gt;*Todo&lt;span class="o"&gt;)&lt;/span&gt;.Add&lt;span class="o"&gt;()&lt;/span&gt;
+      /Users/xxx/tmp/golang/race/main.go:24 +0xe3
+
+Goroutine &lt;span class="m"&gt;7&lt;/span&gt; &lt;span class="o"&gt;(&lt;/span&gt;finished&lt;span class="o"&gt;)&lt;/span&gt; created at:
+  main.main&lt;span class="o"&gt;()&lt;/span&gt;
+      /Users/xxx/tmp/golang/race/main.go:31 +0x127
+&lt;span class="o"&gt;==================&lt;/span&gt;
+1
+0
+1
+Found &lt;span class="m"&gt;2&lt;/span&gt; data race&lt;span class="o"&gt;(&lt;/span&gt;s&lt;span class="o"&gt;)&lt;/span&gt;
+&lt;/pre&gt;&lt;/div&gt;
+&lt;/div&gt;
+&lt;div class="section" id="go-deadlock"&gt;
+&lt;h2 id="hidgo-deadlock"&gt;使用 go-deadlock 检测死锁或锁等待问题&lt;a class="headerlink" href="#hidgo-deadlock" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;上面说的在持有锁的时候做 IO 操作或其他非预期的耗时超时的问题，一方面需要在写程序的时候注意一下，另一方面也有可能是无意中代入进去的（比如上面提到的习惯性 defer 导致的）。对于那些无意中代入进去的锁等待的问题人为的去 review 的话通常很难发现，此时就需要用工具来检测了。恰好有一个叫 &lt;a class="reference external" href="https://github.com/sasha-s/go-deadlock"&gt;go-deadlock&lt;/a&gt; 的工具可以实现这个功能。&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="kn"&gt;package&lt;/span&gt; &lt;span class="nx"&gt;main&lt;/span&gt;
+
+&lt;span class="kn"&gt;import&lt;/span&gt; &lt;span class="p"&gt;(&lt;/span&gt;
+    &lt;span class="s"&gt;&amp;quot;net/http&amp;quot;&lt;/span&gt;
+    &lt;span class="s"&gt;&amp;quot;time&amp;quot;&lt;/span&gt;
+
+    &lt;span class="nx"&gt;sync&lt;/span&gt; &lt;span class="s"&gt;&amp;quot;github.com/sasha-s/go-deadlock&amp;quot;&lt;/span&gt;
+&lt;span class="p"&gt;)&lt;/span&gt;
+
+&lt;span class="kd"&gt;var&lt;/span&gt; &lt;span class="nx"&gt;mu&lt;/span&gt; &lt;span class="nx"&gt;sync&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Mutex&lt;/span&gt;
+&lt;span class="kd"&gt;var&lt;/span&gt; &lt;span class="nx"&gt;url&lt;/span&gt; &lt;span class="p"&gt;=&lt;/span&gt; &lt;span class="s"&gt;&amp;quot;http://baidu.com:90&amp;quot;&lt;/span&gt;
+
+&lt;span class="kd"&gt;func&lt;/span&gt; &lt;span class="nx"&gt;do&lt;/span&gt;&lt;span class="p"&gt;()&lt;/span&gt; &lt;span class="p"&gt;{&lt;/span&gt;
+    &lt;span class="nx"&gt;mu&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Lock&lt;/span&gt;&lt;span class="p"&gt;()&lt;/span&gt;
+    &lt;span class="k"&gt;defer&lt;/span&gt; &lt;span class="nx"&gt;mu&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Unlock&lt;/span&gt;&lt;span class="p"&gt;()&lt;/span&gt;
+
+    &lt;span class="nx"&gt;u&lt;/span&gt; &lt;span class="o"&gt;:=&lt;/span&gt; &lt;span class="nx"&gt;url&lt;/span&gt;
+    &lt;span class="nx"&gt;http&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Get&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="nx"&gt;u&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;  &lt;span class="c1"&gt;// 非预期的在持有锁期间做 IO 操作，导致锁等待时间变长&lt;/span&gt;
+&lt;span class="p"&gt;}&lt;/span&gt;
+
+&lt;span class="kd"&gt;func&lt;/span&gt; &lt;span class="nx"&gt;main&lt;/span&gt;&lt;span class="p"&gt;()&lt;/span&gt; &lt;span class="p"&gt;{&lt;/span&gt;
+    &lt;span class="c1"&gt;// 检测超过 100 ms 的锁等待&lt;/span&gt;
+    &lt;span class="nx"&gt;sync&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Opts&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;DeadlockTimeout&lt;/span&gt; &lt;span class="p"&gt;=&lt;/span&gt; &lt;span class="nx"&gt;time&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Millisecond&lt;/span&gt; &lt;span class="o"&gt;*&lt;/span&gt; &lt;span class="mi"&gt;100&lt;/span&gt;
+
+    &lt;span class="kd"&gt;var&lt;/span&gt; &lt;span class="nx"&gt;wg&lt;/span&gt; &lt;span class="nx"&gt;sync&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;WaitGroup&lt;/span&gt;
+    &lt;span class="k"&gt;for&lt;/span&gt; &lt;span class="nx"&gt;i&lt;/span&gt; &lt;span class="o"&gt;:=&lt;/span&gt; &lt;span class="mi"&gt;0&lt;/span&gt;&lt;span class="p"&gt;;&lt;/span&gt; &lt;span class="nx"&gt;i&lt;/span&gt; &lt;span class="p"&gt;&amp;lt;&lt;/span&gt; &lt;span class="mi"&gt;3&lt;/span&gt;&lt;span class="p"&gt;;&lt;/span&gt; &lt;span class="nx"&gt;i&lt;/span&gt;&lt;span class="o"&gt;++&lt;/span&gt; &lt;span class="p"&gt;{&lt;/span&gt;
+        &lt;span class="nx"&gt;wg&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Add&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="mi"&gt;1&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+        &lt;span class="k"&gt;go&lt;/span&gt; &lt;span class="kd"&gt;func&lt;/span&gt;&lt;span class="p"&gt;()&lt;/span&gt; &lt;span class="p"&gt;{&lt;/span&gt;
+            &lt;span class="k"&gt;defer&lt;/span&gt; &lt;span class="nx"&gt;wg&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Done&lt;/span&gt;&lt;span class="p"&gt;()&lt;/span&gt;
+            &lt;span class="nx"&gt;do&lt;/span&gt;&lt;span class="p"&gt;()&lt;/span&gt;
+        &lt;span class="p"&gt;}()&lt;/span&gt;
+    &lt;span class="p"&gt;}&lt;/span&gt;
+
+    &lt;span class="nx"&gt;wg&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Wait&lt;/span&gt;&lt;span class="p"&gt;()&lt;/span&gt;
+&lt;span class="p"&gt;}&lt;/span&gt;
+&lt;/pre&gt;&lt;/div&gt;
+&lt;p&gt;执行结果：&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;$ go run main.go
+POTENTIAL DEADLOCK:
+Previous place where the lock was grabbed
+goroutine &lt;span class="m"&gt;36&lt;/span&gt; lock 0x1483b90
+main.go:14 main.do &lt;span class="o"&gt;{&lt;/span&gt; mu.Lock&lt;span class="o"&gt;()&lt;/span&gt; &lt;span class="o"&gt;}&lt;/span&gt; &lt;span class="o"&gt;&amp;lt;&amp;lt;&amp;lt;&lt;/span&gt;&lt;span class="s"&gt;&amp;lt;&amp;lt;&lt;/span&gt;
+&lt;span class="s"&gt;main.go:30 main&lt;/span&gt;.main.func1 &lt;span class="o"&gt;{&lt;/span&gt; &lt;span class="k"&gt;do&lt;/span&gt;&lt;span class="o"&gt;()&lt;/span&gt; &lt;span class="o"&gt;}&lt;/span&gt;
+
+Have been trying to lock it again &lt;span class="k"&gt;for&lt;/span&gt; more than 100ms
+goroutine &lt;span class="m"&gt;35&lt;/span&gt; lock 0x1483b90
+main.go:14 main.do &lt;span class="o"&gt;{&lt;/span&gt; mu.Lock&lt;span class="o"&gt;()&lt;/span&gt; &lt;span class="o"&gt;}&lt;/span&gt; &lt;span class="o"&gt;&amp;lt;&amp;lt;&amp;lt;&lt;/span&gt;&lt;span class="s"&gt;&amp;lt;&amp;lt;&lt;/span&gt;
+&lt;span class="s"&gt;main.go:30 main&lt;/span&gt;.main.func1 &lt;span class="o"&gt;{&lt;/span&gt; &lt;span class="k"&gt;do&lt;/span&gt;&lt;span class="o"&gt;()&lt;/span&gt; &lt;span class="o"&gt;}&lt;/span&gt;
+
+Here is what goroutine &lt;span class="m"&gt;36&lt;/span&gt; doing now
+goroutine &lt;span class="m"&gt;36&lt;/span&gt; &lt;span class="o"&gt;[&lt;/span&gt;&lt;span class="k"&gt;select&lt;/span&gt;&lt;span class="o"&gt;]&lt;/span&gt;:
+net/http.&lt;span class="o"&gt;(&lt;/span&gt;*Transport&lt;span class="o"&gt;)&lt;/span&gt;.getConn&lt;span class="o"&gt;(&lt;/span&gt;0x14616c0, 0xc00015e150, 0x0, 0x128adb3, 0x4, 0xc000014100, 0xc, 0x0, 0x0, 0xc0000559e8&lt;span class="o"&gt;)&lt;/span&gt;
+    /usr/local/Cellar/go/1.11/libexec/src/net/http/transport.go:1004 +0x58e
+net/http.&lt;span class="o"&gt;(&lt;/span&gt;*Transport&lt;span class="o"&gt;)&lt;/span&gt;.roundTrip&lt;span class="o"&gt;(&lt;/span&gt;0x14616c0, 0xc000160000, 0x203000, 0xc000055c90, 0x11d823a&lt;span class="o"&gt;)&lt;/span&gt;
+    /usr/local/Cellar/go/1.11/libexec/src/net/http/transport.go:451 +0x690
+net/http.&lt;span class="o"&gt;(&lt;/span&gt;*Transport&lt;span class="o"&gt;)&lt;/span&gt;.RoundTrip&lt;span class="o"&gt;(&lt;/span&gt;0x14616c0, 0xc000160000, 0x14616c0, 0x0, 0x0&lt;span class="o"&gt;)&lt;/span&gt;
+    /usr/local/Cellar/go/1.11/libexec/src/net/http/roundtrip.go:17 +0x35
+net/http.send&lt;span class="o"&gt;(&lt;/span&gt;0xc000160000, 0x12c78a0, 0x14616c0, 0x0, 0x0, 0x0, 0xc00000e030, 0x1708000, 0xc000055d20, 0x1&lt;span class="o"&gt;)&lt;/span&gt;
+    /usr/local/Cellar/go/1.11/libexec/src/net/http/client.go:250 +0x14b
+net/http.&lt;span class="o"&gt;(&lt;/span&gt;*Client&lt;span class="o"&gt;)&lt;/span&gt;.send&lt;span class="o"&gt;(&lt;/span&gt;0x1466200, 0xc000160000, 0x0, 0x0, 0x0, 0xc00000e030, 0x0, 0x1, 0x0&lt;span class="o"&gt;)&lt;/span&gt;
+    /usr/local/Cellar/go/1.11/libexec/src/net/http/client.go:174 +0xfa
+net/http.&lt;span class="o"&gt;(&lt;/span&gt;*Client&lt;span class="o"&gt;)&lt;/span&gt;.do&lt;span class="o"&gt;(&lt;/span&gt;0x1466200, 0xc000160000, 0x0, 0x0, 0x0&lt;span class="o"&gt;)&lt;/span&gt;
+    /usr/local/Cellar/go/1.11/libexec/src/net/http/client.go:641 +0x2a8
+net/http.&lt;span class="o"&gt;(&lt;/span&gt;*Client&lt;span class="o"&gt;)&lt;/span&gt;.Do&lt;span class="o"&gt;(&lt;/span&gt;0x1466200, 0xc000160000, 0x128adb3, 0x13, 0x0&lt;span class="o"&gt;)&lt;/span&gt;
+    /usr/local/Cellar/go/1.11/libexec/src/net/http/client.go:509 +0x35
+net/http.&lt;span class="o"&gt;(&lt;/span&gt;*Client&lt;span class="o"&gt;)&lt;/span&gt;.Get&lt;span class="o"&gt;(&lt;/span&gt;0x1466200, 0x128adb3, 0x13, 0xc0000220c0, 0x12412c0, 0xc000055f80&lt;span class="o"&gt;)&lt;/span&gt;
+    /usr/local/Cellar/go/1.11/libexec/src/net/http/client.go:398 +0x9d
+net/http.Get&lt;span class="o"&gt;(&lt;/span&gt;0x128adb3, 0x13, 0x1483b90, 0x0, 0xc000114fb8&lt;span class="o"&gt;)&lt;/span&gt;
+    /usr/local/Cellar/go/1.11/libexec/src/net/http/client.go:370 +0x41
+main.do&lt;span class="o"&gt;()&lt;/span&gt;
+    /Users/xxx/tmp/golang/deadlock/main.go:18 +0x75
+main.main.func1&lt;span class="o"&gt;(&lt;/span&gt;0xc00009c3f4&lt;span class="o"&gt;)&lt;/span&gt;
+    /Users/xxx/tmp/golang/deadlock/main.go:30 +0x48
+created by main.main
+    /Users/xxx/tmp/golang/deadlock/main.go:28 +0x83
+
+&lt;span class="nb"&gt;exit&lt;/span&gt; status 2
+&lt;/pre&gt;&lt;/div&gt;
+&lt;p&gt;通过上面的输出可以知道 goroutine 36 持有锁的时间过长导致其他 goroutine 获取锁的等待时间超过了 100 ms ，并且 goroutine 36 在持有锁期间正在做 18 行的 http 操作。可以看到 go-deadlock 在优化锁等待时间方面有很大的帮助，可以帮助我们及时发现异常的锁使用姿势。&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class="section" id="trylock"&gt;
+&lt;h2 id="hidtrylock"&gt;实现 tryLock 功能&lt;a class="headerlink" href="#hidtrylock" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;一般 &lt;tt class="docutils literal"&gt;Lock()&lt;/tt&gt; 如果拿不到锁的话，会一直阻塞在那里，在某些场景下这个功能不是我们所期望的结果，我们可能希望程序在一定时间内无法获取到锁的话就做其他操作或者直接返回失败：比如在一个 http server 中，处理请求时因为锁等待时间太长导致客户端大量超时，引发客户端重连以及服务端 goroutine 数量持续增长（虽然客户端超时了，但是处理请求的 goroutine 还在继续处理已超时的请求并且阻塞在了获取锁的地方，然后客户端重连又加重了这个问题，表现就是处理请求的 goroutine 数量直线上升）。这个时候我们就需要有一个类似 tryLock 的功能，在发现短时间内无法获取到锁的时候直接返回失败的响应，防止问题进一步加重（Fail Fast）。&lt;/p&gt;
+&lt;p&gt;关于 tryLock 这个功能的介绍可以参考 Java 中 &lt;a class="reference external" href="https://docs.oracle.com/javase/8/docs/api/java/util/concurrent/locks/Lock.html#tryLock-long-java.util.concurrent.TimeUnit-"&gt;tryLock&lt;/a&gt; 的介绍，至于 Go 中如何实现 tryLock 可以参考 &lt;a class="reference external" href="https://colobu.com/2017/03/09/implement-TryLock-in-Go/"&gt;为 Go Mutex 实现 TryLock 方法 | 鸟窝&lt;/a&gt;&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class="section" id="channel"&gt;
+&lt;h2 id="hidchannel"&gt;改为使用 channel&lt;a class="headerlink" href="#hidchannel" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;有些时候可能使用 channel 会更符合需求，对于这些更适合 channel 的场景可以改为使用 channel 而不是 lock （可以参考 &lt;a class="reference external" href="https://blog.golang.org/share-memory-by-communicating"&gt;Share Memory By Communicating - The Go Blog&lt;/a&gt; 这篇文章），合适的场景选择合适的方法即可，既不需要畏惧 channel 也不必畏惧 lock 。&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class="section" id="id3"&gt;
+&lt;h2 id="hidid3"&gt;总结&lt;a class="headerlink" href="#hidid3" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;目前能想到的就是这些注意事项了，欢迎纠正和补充。&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class="section" id="id4"&gt;
+&lt;h2 id="hidid4"&gt;参考资料&lt;a class="headerlink" href="#hidid4" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;ul class="simple"&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://godoc.org/sync"&gt;sync - GoDoc&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://github.com/sasha-s/go-deadlock"&gt;sasha-s/go-deadlock: Online deadlock detection in go (golang)&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://hackernoon.com/dancing-with-go-s-mutexes-92407ae927bf"&gt;Dancing with Go’s Mutexes – Hacker Noon&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://wavded.com/post/golang-deadlockish/"&gt;Debugging a potential deadlock in Go with go-deadlock&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://golang.org/doc/articles/race_detector.html"&gt;Data Race Detector - The Go Programming Language&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://blog.golang.org/share-memory-by-communicating"&gt;Share Memory By Communicating - The Go Blog&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://docs.oracle.com/javase/8/docs/api/java/util/concurrent/locks/Lock.html#tryLock-long-java.util.concurrent.TimeUnit-"&gt;Lock (Java Platform SE 8 )&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://colobu.com/2017/03/09/implement-TryLock-in-Go/"&gt;为 Go Mutex 实现 TryLock 方法 | 鸟窝&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://en.wikipedia.org/wiki/Fail-fast"&gt;Fail-fast - Wikipedia&lt;/a&gt;&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/div&gt;
+</summary><category term="lock"></category><category term="mutex"></category></entry><entry><title>strace 常用操作</title><link href="https://mozillazg.com/2019/03/linux-debug-with-strace-cookbook-examples.html" rel="alternate"></link><updated>2019-03-30T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2019-03-30:2019/03/linux-debug-with-strace-cookbook-examples.html</id><summary type="html">&lt;div class="section" id="id1"&gt;
 &lt;h2 id="hidid1"&gt;前言&lt;a class="headerlink" href="#hidid1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;p&gt;&lt;a class="reference external" href="http://man7.org/linux/man-pages/man1/strace.1.html"&gt;strace&lt;/a&gt; 可以用来查看/记录程序运行过程中调用的
 &lt;a class="reference external" href="http://man7.org/linux/man-pages/man2/syscalls.2.html"&gt;系统调用&lt;/a&gt; 以及接收到的进程信号（signal），
@@ -232,7 +555,7 @@ value 就是各种过滤条件了。
 &lt;/div&gt;
 </summary><category term="strace"></category><category term="debug"></category></entry><entry><title>安全友好的客户端行为</title><link href="https://mozillazg.com/2019/03/safe-client-behaviour-notes-retry-jitter-back-off-more.html" rel="alternate"></link><updated>2019-03-24T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2019-03-24:2019/03/safe-client-behaviour-notes-retry-jitter-back-off-more.html</id><summary type="html">&lt;div class="section" id="id2"&gt;
 &lt;h2 id="hidid2"&gt;前言&lt;a class="headerlink" href="#hidid2" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
-&lt;p&gt;本文是 &lt;a class="reference external" href="https://www.usenix.org/conference/srecon18asia/presentation/goh"&gt;Safe Client Behaviour | USENIX&lt;/a&gt; 这个视频的简单总结，可以当做是 &lt;a class="reference external" href="https://mozillazg.com/2018/08/call-remote-service-checklist.html"&gt;调用远程服务的一些备忘录 - Huang Huang 的博客&lt;/a&gt; 的延伸/补充内容。强烈建议直接查看 &lt;a class="reference external" href="https://www.usenix.org/conference/srecon18asia/presentation/goh"&gt;Safe Client Behaviour | USENIX&lt;/a&gt; 这个原始视频，本文只是个简单的笔记没啥可看的，原视频才是精华。&lt;/p&gt;
+&lt;p&gt;本文是 &lt;a class="reference external" href="https://www.usenix.org/conference/srecon18asia/presentation/goh"&gt;Safe Client Behaviour | USENIX&lt;/a&gt; 这个视频的简单总结，可以当做是 &lt;a class="reference external" href="https://mozillazg.com/2018/08/call-remote-service-checklist.html"&gt;调用远程服务的一些备忘录&lt;/a&gt; 的延伸/补充内容。强烈建议直接查看 &lt;a class="reference external" href="https://www.usenix.org/conference/srecon18asia/presentation/goh"&gt;Safe Client Behaviour | USENIX&lt;/a&gt; 这个原始视频，本文只是个简单的笔记没啥可看的，原视频才是精华。&lt;/p&gt;
 &lt;p&gt;不安全的客户端行为最直观的表现就是会在出现异常情况时 DDoS 服务端，所以安全的客户端行为就是要避免发生 DDoS 服务端的情况。视频里已一个 app 需要每 5 分钟从服务端获取一次信息为例，讲了几个原则，下面简单记录一下。&lt;/p&gt;
 &lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="nx"&gt;period&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="mi"&gt;300&lt;/span&gt; &lt;span class="c1"&gt;// Once every 5 minutes&lt;/span&gt;
 &lt;span class="k"&gt;while&lt;/span&gt; &lt;span class="kc"&gt;true&lt;/span&gt;&lt;span class="o"&gt;:&lt;/span&gt;
@@ -991,7 +1314,7 @@ reduced temporarily on peer failures.&lt;/p&gt;
 &lt;li&gt;用是否能够 ping 通来检查&lt;/li&gt;
 &lt;li&gt;尝试用 tcp 连接一下目标 ip:port ，看看是否可以连通来检查&lt;/li&gt;
 &lt;/ul&gt;
-&lt;p&gt;其中 tcp 连通性检查这里有时会用一个非常规的方法去做 tcp 健康检查 &lt;a class="footnote-reference" href="#id15" id="id5"&gt;[1]&lt;/a&gt; ：&lt;/p&gt;
+&lt;p&gt;其中 tcp 连通性检查这里有时会用一个非常规的方法去做 tcp 健康检查 &lt;a class="footnote-reference" href="#id16" id="id5"&gt;[1]&lt;/a&gt; ：&lt;/p&gt;
 &lt;p&gt;一般建立 tcp 连接都会经过 tcp 三次握手的过程:&lt;/p&gt;
 &lt;ul class="simple"&gt;
 &lt;li&gt;Client -&amp;gt; Server: SYN&lt;/li&gt;
@@ -1043,7 +1366,14 @@ reduced temporarily on peer failures.&lt;/p&gt;
 &lt;/div&gt;
 &lt;/div&gt;
 &lt;div class="section" id="id9"&gt;
-&lt;h2 id="hidid9"&gt;必要的配置项&lt;a class="headerlink" href="#hidid9" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;h2 id="hidid9"&gt;健康与不健康之外的第三种状态&lt;a class="headerlink" href="#hidid9" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;一般健康检查的结果都是只有两种状态：健康或不健康。这里介绍的是根据需要可以考虑引入第三种状态：overload 。
+这个状态的目的是应对一种 case: 服务可以正常处理健康检查，但是本身的负载已经非常高了，再接入多一点请求可能就要宕机了，然后节点宕机对整体服务的影响比较大（比如一些有状态服务宕机导致的客户端重连会对剩下的健康节点造成比较大的影响）。一般这种情况都会触发系统负载相关告警（比如 CPU 或内存使用率告警），然后人工手动介入把节点从负载均衡器或者哪里给摘除防止持续处理请求导致宕机。&lt;/p&gt;
+&lt;p&gt;对于这种 case 可以考虑引入上面所说的第三种状态 overload。对于处于 overload 状态的节点不再接受新的请求，等到节点恢复为健康状态后再接受新的请求。至于为啥不直接把 overload 的解决标记为不健康呢，因为不健康状态一般都是节点宕机了不能自动恢复的情况，以及部分系统对于不健康的节点会自动触发实例重启的操作，这个自动重启的操作可能不是我们预期的也可能会触发更大的问题（比如引发客户端大量重连），所以不健康状态跟 overload 还是有一点区别，可以根据实际情况选择是引入 overload 状态还是直接用不健康状态代替。&lt;/p&gt;
+&lt;p&gt;这第三种状态也不一样要是跟负载有关，只要是一种介于健康和不健康两者之间的状态都可以考虑引入第三种状态（比如同时支持读写操作的节点在这第三种状态的时候只支持 读 操作，不接受 写 操作）。&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class="section" id="id10"&gt;
+&lt;h2 id="hidid10"&gt;必要的配置项&lt;a class="headerlink" href="#hidid10" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;p&gt;一般健康检查都会有一些必要的配置项用来控制健康检查功能：&lt;/p&gt;
 &lt;ul class="simple"&gt;
 &lt;li&gt;最基本的肯定是要有待检查的目标服务信息，ip:port 之类的用于发送健康检查请求&lt;/li&gt;
@@ -1051,47 +1381,49 @@ reduced temporarily on peer failures.&lt;/p&gt;
 &lt;li&gt;判断服务健康的依据：&lt;ul&gt;
 &lt;li&gt;基本的连通性&lt;/li&gt;
 &lt;li&gt;响应的内容，比如表示服务健康的 http 响应状态码是哪些，响应的 body 内容需要包含什么内容等&lt;/li&gt;
-&lt;li&gt;检查不通过几次算服务不健康，从不健康到健康需要通过几次检查才算恢复健康 &lt;a class="footnote-reference" href="#id16" id="id10"&gt;[2]&lt;/a&gt; &lt;a class="footnote-reference" href="#id17" id="id11"&gt;[3]&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;检查不通过几次算服务不健康，从不健康到健康需要通过几次检查才算恢复健康 &lt;a class="footnote-reference" href="#id17" id="id11"&gt;[2]&lt;/a&gt; &lt;a class="footnote-reference" href="#id18" id="id12"&gt;[3]&lt;/a&gt;&lt;/li&gt;
 &lt;/ul&gt;
 &lt;/li&gt;
 &lt;li&gt;以及健康检查的间隔，健康检查太频繁可能会影响被检查的服务，间隔太长可能会失去健康检查的意义无法及时探查到不健康的状态&lt;/li&gt;
 &lt;li&gt;超时，访问外部服务一定不能忘了超时相关的设置，健康检查也不例外&lt;/li&gt;
 &lt;/ul&gt;
 &lt;/div&gt;
-&lt;div class="section" id="id12"&gt;
-&lt;h2 id="hidid12"&gt;手动禁用/下线服务的能力&lt;a class="headerlink" href="#hidid12" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;div class="section" id="id13"&gt;
+&lt;h2 id="hidid13"&gt;手动禁用/下线服务的能力&lt;a class="headerlink" href="#hidid13" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;p&gt;所谓的手动禁用/下线服务的能力，指的是可以在检查端或被检查端把一个服务标记为不健康/下线的能力。
 这个功能主要用于临时禁用一个服务，比如想对这个服务进行一些调试操作，但是又不希望这期间有请求进来进行干扰。&lt;/p&gt;
 &lt;/div&gt;
-&lt;div class="section" id="id13"&gt;
-&lt;h2 id="hidid13"&gt;总结&lt;a class="headerlink" href="#hidid13" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;div class="section" id="id14"&gt;
+&lt;h2 id="hidid14"&gt;总结&lt;a class="headerlink" href="#hidid14" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;p&gt;本文简单记录了一些健康检查功能相关的笔记/经验，如果以后还有新的知识会随时更新的。&lt;/p&gt;
 &lt;/div&gt;
-&lt;div class="section" id="id14"&gt;
-&lt;h2 id="hidid14"&gt;参考资料&lt;a class="headerlink" href="#hidid14" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;div class="section" id="id15"&gt;
+&lt;h2 id="hidid15"&gt;参考资料&lt;a class="headerlink" href="#hidid15" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;ul class="simple"&gt;
 &lt;li&gt;&lt;a class="reference external" href="https://medium.com/&amp;#64;copyconstruct/health-checks-in-distributed-systems-aa8a0e8c1672"&gt;Health Checks and Graceful Degradation in Distributed Systems&lt;/a&gt;&lt;/li&gt;
 &lt;li&gt;&lt;a class="reference external" href="https://docs.microsoft.com/en-us/azure/architecture/patterns/health-endpoint-monitoring"&gt;Health Endpoint Monitoring pattern - Cloud Design Patterns | Microsoft Docs&lt;/a&gt;&lt;/li&gt;
 &lt;li&gt;&lt;a class="reference external" href="https://docs.nginx.com/nginx/admin-guide/load-balancer/tcp-health-check/#fine-tuning-tcp-health-checks"&gt;NGINX Docs | TCP Health Checks&lt;/a&gt;&lt;/li&gt;
 &lt;li&gt;&lt;a class="reference external" href="https://www.haproxy.com/documentation/aloha/10-0/traffic-management/lb-layer7/health-checks/#defining-health-check-parameters"&gt;Performing Health Checks | ALOHA 10.0&lt;/a&gt;&lt;/li&gt;
 &lt;li&gt;&lt;a class="reference external" href="https://github.com/tevino/tcp-shaker"&gt;tevino/tcp-shaker: Performing TCP handshake without ACK in Go, useful for health checking, that is SYN, SYN-ACK, RST.&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://developer20.com/learning-on-mistakes/"&gt;Learning on mistakes | Developer 2.0&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://www.elastic.co/guide/en/elasticsearch/reference/current/cluster-health.html"&gt;Cluster Health | Elasticsearch Reference [6.7] | Elastic&lt;/a&gt;&lt;/li&gt;
 &lt;/ul&gt;
-&lt;table class="docutils footnote" frame="void" id="id15" rules="none"&gt;
+&lt;table class="docutils footnote" frame="void" id="id16" rules="none"&gt;
 &lt;colgroup&gt;&lt;col class="label" /&gt;&lt;col /&gt;&lt;/colgroup&gt;
 &lt;tbody valign="top"&gt;
 &lt;tr&gt;&lt;td class="label"&gt;&lt;a class="fn-backref" href="#id5"&gt;[1]&lt;/a&gt;&lt;/td&gt;&lt;td&gt;&lt;a class="reference external" href="https://github.com/tevino/tcp-shaker"&gt;tevino/tcp-shaker: Performing TCP handshake without ACK in Go, useful for health checking, that is SYN, SYN-ACK, RST.&lt;/a&gt;&lt;/td&gt;&lt;/tr&gt;
 &lt;/tbody&gt;
 &lt;/table&gt;
-&lt;table class="docutils footnote" frame="void" id="id16" rules="none"&gt;
-&lt;colgroup&gt;&lt;col class="label" /&gt;&lt;col /&gt;&lt;/colgroup&gt;
-&lt;tbody valign="top"&gt;
-&lt;tr&gt;&lt;td class="label"&gt;&lt;a class="fn-backref" href="#id10"&gt;[2]&lt;/a&gt;&lt;/td&gt;&lt;td&gt;&lt;a class="reference external" href="https://docs.nginx.com/nginx/admin-guide/load-balancer/tcp-health-check/#fine-tuning-tcp-health-checks"&gt;NGINX Docs | TCP Health Checks&lt;/a&gt;&lt;/td&gt;&lt;/tr&gt;
-&lt;/tbody&gt;
-&lt;/table&gt;
 &lt;table class="docutils footnote" frame="void" id="id17" rules="none"&gt;
 &lt;colgroup&gt;&lt;col class="label" /&gt;&lt;col /&gt;&lt;/colgroup&gt;
 &lt;tbody valign="top"&gt;
-&lt;tr&gt;&lt;td class="label"&gt;&lt;a class="fn-backref" href="#id11"&gt;[3]&lt;/a&gt;&lt;/td&gt;&lt;td&gt;&lt;a class="reference external" href="https://www.haproxy.com/documentation/aloha/10-0/traffic-management/lb-layer7/health-checks/#defining-health-check-parameters"&gt;Performing Health Checks | ALOHA 10.0&lt;/a&gt;&lt;/td&gt;&lt;/tr&gt;
+&lt;tr&gt;&lt;td class="label"&gt;&lt;a class="fn-backref" href="#id11"&gt;[2]&lt;/a&gt;&lt;/td&gt;&lt;td&gt;&lt;a class="reference external" href="https://docs.nginx.com/nginx/admin-guide/load-balancer/tcp-health-check/#fine-tuning-tcp-health-checks"&gt;NGINX Docs | TCP Health Checks&lt;/a&gt;&lt;/td&gt;&lt;/tr&gt;
+&lt;/tbody&gt;
+&lt;/table&gt;
+&lt;table class="docutils footnote" frame="void" id="id18" rules="none"&gt;
+&lt;colgroup&gt;&lt;col class="label" /&gt;&lt;col /&gt;&lt;/colgroup&gt;
+&lt;tbody valign="top"&gt;
+&lt;tr&gt;&lt;td class="label"&gt;&lt;a class="fn-backref" href="#id12"&gt;[3]&lt;/a&gt;&lt;/td&gt;&lt;td&gt;&lt;a class="reference external" href="https://www.haproxy.com/documentation/aloha/10-0/traffic-management/lb-layer7/health-checks/#defining-health-check-parameters"&gt;Performing Health Checks | ALOHA 10.0&lt;/a&gt;&lt;/td&gt;&lt;/tr&gt;
 &lt;/tbody&gt;
 &lt;/table&gt;
 &lt;/div&gt;
