@@ -1,0 +1,407 @@
+<!DOCTYPE html>
+<html lang="zh-hans" prefix="og: http://ogp.me/ns# fb: https://www.facebook.com/2008/fbml" class="han-init">
+<head>
+    <title>rate limiting 之 leaky bucket - Huang Huang 的博客</title>
+    <!-- Using the latest rendering mode for IE -->
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <!-- share.css -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/social-share.js/1.0.16/css/share.min.css">
+    <!-- share.js -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/social-share.js/1.0.16/js/social-share.min.js"></script>
+
+
+    <link href="https://mozillazg.com/favicon.ico" rel="icon">
+
+<link rel="canonical" href="https://mozillazg.com/2019/04/rate-limiting-intro-leaky-bucket.html">
+
+        <meta name="author" content="mozillazg" />
+        <meta name="keywords" content="rate-limiting,leaky-bucket" />
+    <meta name="description" content="前言¶ 简单介绍一下 leaky bucket 算法。 版本¶ leaky bucket 有两个版本：一个是 as a meter 、另一个是 as a queue 。 as a meter¶ (图片来自 https://en.wikipedia.org/wiki/Leaky_bucket ) 在 as a meter 版本中，一般用下面的方法来描述（来自 wikipedia ）： A fixed capacity bucket, associated with each virtual connection or user, leaks at a fixed rate. 一个固定容量的 bucket ，用来处理每个连接或用户，这个 bucket 以一个固定的速率往下漏东西。 If the bucket is empty, it stops leaking. 如果 bucket 为空，将不再漏东西。 For a packet to conform, it has to be possible to add a specific amount of water to the bucket: The specific amount added by a conforming packet can be the same for all packets, or can be proportional to the length of the packet. 当需要确认一个数据包的时候，把它当做一定数量的水加到 bucket 中：这个添加的水量可以跟所有的包一样，也可以按包的实际长度以一定比例来添加。 If this amount of water would cause the bucket to exceed its capacity then the packet does not conform and the water in the bucket is left unchanged. 如果 bucket 中水的总量达到了 bucket 的容量限制，那么新的包就不被接受并且 bucket 中的水不会有啥变化。 不被接受的包可以被丢弃( Traffic policing )，也可以被排队( Traffic shaping )，看具体的需求来做。 通过上面可以发现，as a meter 的 leaky bucket 其实跟前面说过的 token bucket 是类似的，只是实现上不一样而已，实际的效果其实是一样的： bucket 都有容量限制。 都允许存在波峰/尖刺，考虑一个极端情况：在 token bucket 中当 bucket 满的时候是可以一次性拿出所有 token 的，此时就是个波峰/尖刺了，在 leaky bucket 中当 bucket 空的时候是可以一次性倒入达到 bucket 容量限制的水的，此时也会有个波峰/尖刺。 as a queue¶ (图片来自 https://en.wikipedia.org/wiki/Leaky_bucket ) 在 as a queue 版本中，可以把它作为一个先进先出的队列，流量涌入到 bucket 中，但是只能以恒定的速率流出，可以用来平滑流量或消峰： 流量涌入到 bucket 中，当超出 bucket 容量限制时，排队或者被丢弃 bucket 中的流量被以一个恒定的速率流出（当然，如果 bucket 中的数据太少的话流出就会断断续续，主要是不会超过指定的速率） 通过上面的介绍，可以看出来其实 as a queue 的 leaky bucket 可以看做是 as a meter 的 leaky bucket 的一个特例： 只要 as a meter 的 leaky bucket 的 bucket 容量被设置为在一个 ticket 周期内将流出的水量就可以达到类似 as a queue 的平滑流量/消峰的效果了。比如 rate 是 10kb/s ，ticket 是 1s，那么把 as a meter 的 bucket 容量限制为 10kb 即可达到类似效果。 总结¶ 简单介绍了一下 leaky bucket 算法，基本都是 wikipedia 上的知识， 建议直接查看参考资料中的 wikipedia 。 参考资料¶ Leaky bucket - Wikipedia Token bucket - Wikipedia" />
+
+    <style>
+      .js-toc {
+        margin-bottom: 20px;
+      }
+      .donate-modal {
+        text-align: center;
+      }
+      #donate-modal-container .donate-image {
+        max-height: 300px !important;
+        min-height: inherit !important;
+      }
+    </style>
+
+        <meta property="og:site_name" content="Huang Huang 的博客" />
+        <meta property="og:type" content="article"/>
+        <meta property="og:title" content="rate limiting 之 leaky bucket"/>
+        <meta property="og:url" content="https://mozillazg.com/2019/04/rate-limiting-intro-leaky-bucket.html"/>
+        <meta property="og:description" content="前言¶ 简单介绍一下 leaky bucket 算法。 版本¶ leaky bucket 有两个版本：一个是 as a meter 、另一个是 as a queue 。 as a meter¶ (图片来自 https://en.wikipedia.org/wiki/Leaky_bucket ) 在 as a meter 版本中，一般用下面的方法来描述（来自 wikipedia ）： A fixed capacity bucket, associated with each virtual connection or user, leaks at a fixed rate. 一个固定容量的 bucket ，用来处理每个连接或用户，这个 bucket 以一个固定的速率往下漏东西。 If the bucket is empty, it stops leaking. 如果 bucket 为空，将不再漏东西。 For a packet to conform, it has to be possible to add a specific amount of water to the bucket: The specific amount added by a conforming packet can be the same for all packets, or can be proportional to the length of the packet. 当需要确认一个数据包的时候，把它当做一定数量的水加到 bucket 中：这个添加的水量可以跟所有的包一样，也可以按包的实际长度以一定比例来添加。 If this amount of water would cause the bucket to exceed its capacity then the packet does not conform and the water in the bucket is left unchanged. 如果 bucket 中水的总量达到了 bucket 的容量限制，那么新的包就不被接受并且 bucket 中的水不会有啥变化。 不被接受的包可以被丢弃( Traffic policing )，也可以被排队( Traffic shaping )，看具体的需求来做。 通过上面可以发现，as a meter 的 leaky bucket 其实跟前面说过的 token bucket 是类似的，只是实现上不一样而已，实际的效果其实是一样的： bucket 都有容量限制。 都允许存在波峰/尖刺，考虑一个极端情况：在 token bucket 中当 bucket 满的时候是可以一次性拿出所有 token 的，此时就是个波峰/尖刺了，在 leaky bucket 中当 bucket 空的时候是可以一次性倒入达到 bucket 容量限制的水的，此时也会有个波峰/尖刺。 as a queue¶ (图片来自 https://en.wikipedia.org/wiki/Leaky_bucket ) 在 as a queue 版本中，可以把它作为一个先进先出的队列，流量涌入到 bucket 中，但是只能以恒定的速率流出，可以用来平滑流量或消峰： 流量涌入到 bucket 中，当超出 bucket 容量限制时，排队或者被丢弃 bucket 中的流量被以一个恒定的速率流出（当然，如果 bucket 中的数据太少的话流出就会断断续续，主要是不会超过指定的速率） 通过上面的介绍，可以看出来其实 as a queue 的 leaky bucket 可以看做是 as a meter 的 leaky bucket 的一个特例： 只要 as a meter 的 leaky bucket 的 bucket 容量被设置为在一个 ticket 周期内将流出的水量就可以达到类似 as a queue 的平滑流量/消峰的效果了。比如 rate 是 10kb/s ，ticket 是 1s，那么把 as a meter 的 bucket 容量限制为 10kb 即可达到类似效果。 总结¶ 简单介绍了一下 leaky bucket 算法，基本都是 wikipedia 上的知识， 建议直接查看参考资料中的 wikipedia 。 参考资料¶ Leaky bucket - Wikipedia Token bucket - Wikipedia"/>
+        <meta property="article:published_time" content="2019-04-14" />
+            <meta property="article:section" content="others" />
+            <meta property="article:tag" content="rate-limiting" />
+            <meta property="article:tag" content="leaky-bucket" />
+            <meta property="article:author" content="mozillazg" />
+            <meta property="og:image"
+                  content="https://mozillazg.com/static/avatar.jpeg"/>
+
+
+    <meta name="twitter:card" content="summary">
+        <meta name="twitter:site" content="@mozillazg">
+        <meta name="twitter:creator" content="@mozillazg">
+    <meta name="twitter:domain" content="https://mozillazg.com">
+            <meta property="twitter:image"
+                  content="https://mozillazg.com/static/avatar.jpeg"/>
+
+    <!-- Bootstrap -->
+        <link rel="stylesheet" href="https://mozillazg.com/theme/css/bootstrap.min.css" type="text/css"/>
+    <link href="https://mozillazg.com/theme/css/font-awesome.min.css" rel="stylesheet">
+
+    <link href="https://mozillazg.com/theme/css/pygments/github.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://mozillazg.com/theme/css/style.css" type="text/css"/>
+            <link href="https://mozillazg.com/static/custom.css" rel="stylesheet">
+
+        <link href="https://mozillazg.com/feeds/all.atom.xml" type="application/atom+xml" rel="alternate"
+              title="Huang Huang 的博客 ATOM Feed"/>
+
+        <link href="https://mozillazg.com/feeds/all.rss.xml" type="application/rss+xml" rel="alternate"
+              title="Huang Huang 的博客 RSS Feed"/>
+
+
+        <link href="https://mozillazg.com/feeds/others.atom.xml" type="application/atom+xml" rel="alternate"
+              title="Huang Huang 的博客 others ATOM Feed"/>
+
+
+    <script type="application/ld+json">
+    {
+        "@context": "https://schema.org",
+        "@type": "Website",
+        "publisher": {
+            "@type": "Person",
+            "name": "mozillazg",
+            "logo": "https://mozillazg.com/static/avatar.jpeg"
+        },
+        "author": {
+            "@type": "Person",
+            "name": "mozillazg",
+            "image": "https://mozillazg.com/static/avatar.jpeg",
+            "url": "https://mozillazg.com",
+            "sameAs": []
+        },
+        // "headline": "",
+        "url": "https://mozillazg.com/2019/04/rate-limiting-intro-leaky-bucket.html",
+        "datePublished": "2019-04-14",
+        // "dateModified": "",
+        "image": "https://mozillazg.com/static/avatar.jpeg",
+        "keywords": "rate-limiting, leaky-bucket",
+        "description": "前言¶ 简单介绍一下 leaky bucket 算法。 版本¶ leaky bucket 有两个版本：一个是 as a meter 、另一个是 as a queue 。 as a meter¶ (图片来自 https://en.wikipedia.org/wiki/Leaky_bucket ) 在 as a meter 版本中，一般用下面的方法来描述（来自 wikipedia ）： A fixed capacity bucket, associated with each virtual connection or user, leaks at a fixed rate. 一个固定容量的 bucket ，用来处理每个连接或用户，这个 bucket 以一个固定的速率往下漏东西。 If the bucket is empty, it stops leaking. 如果 bucket 为空，将不再漏东西。 For a packet to conform, it has to be possible to add a specific amount of water to the bucket: The specific amount added by a conforming packet can be the same for all packets, or can be proportional to the length of the packet. 当需要确认一个数据包的时候，把它当做一定数量的水加到 bucket 中：这个添加的水量可以跟所有的包一样，也可以按包的实际长度以一定比例来添加。 If this amount of water would cause the bucket to exceed its capacity then the packet does not conform and the water in the bucket is left unchanged. 如果 bucket 中水的总量达到了 bucket 的容量限制，那么新的包就不被接受并且 bucket 中的水不会有啥变化。 不被接受的包可以被丢弃( Traffic policing )，也可以被排队( Traffic shaping )，看具体的需求来做。 通过上面可以发现，as a meter 的 leaky bucket 其实跟前面说过的 token bucket 是类似的，只是实现上不一样而已，实际的效果其实是一样的： bucket 都有容量限制。 都允许存在波峰/尖刺，考虑一个极端情况：在 token bucket 中当 bucket 满的时候是可以一次性拿出所有 token 的，此时就是个波峰/尖刺了，在 leaky bucket 中当 bucket 空的时候是可以一次性倒入达到 bucket 容量限制的水的，此时也会有个波峰/尖刺。 as a queue¶ (图片来自 https://en.wikipedia.org/wiki/Leaky_bucket ) 在 as a queue 版本中，可以把它作为一个先进先出的队列，流量涌入到 bucket 中，但是只能以恒定的速率流出，可以用来平滑流量或消峰： 流量涌入到 bucket 中，当超出 bucket 容量限制时，排队或者被丢弃 bucket 中的流量被以一个恒定的速率流出（当然，如果 bucket 中的数据太少的话流出就会断断续续，主要是不会超过指定的速率） 通过上面的介绍，可以看出来其实 as a queue 的 leaky bucket 可以看做是 as a meter 的 leaky bucket 的一个特例： 只要 as a meter 的 leaky bucket 的 bucket 容量被设置为在一个 ticket 周期内将流出的水量就可以达到类似 as a queue 的平滑流量/消峰的效果了。比如 rate 是 10kb/s ，ticket 是 1s，那么把 as a meter 的 bucket 容量限制为 10kb 即可达到类似效果。 总结¶ 简单介绍了一下 leaky bucket 算法，基本都是 wikipedia 上的知识， 建议直接查看参考资料中的 wikipedia 。 参考资料¶ Leaky bucket - Wikipedia Token bucket - Wikipedia",
+        "mainEntityOfPage": {
+            "@type": "WebPage",
+            "@id": "https://mozillazg.com"
+        }
+    }
+    </script>
+
+</head>
+<body>
+
+<div class="navbar" role="navigation">
+	<div class="container">
+        <div class="navbar-header">
+            <button type="button" class="navbar-toggle" data-toggle="collapse" data-target=".navbar-ex1-collapse">
+                <span class="sr-only">Toggle navigation</span>
+                <span class="icon-bar"></span>
+                <span class="icon-bar"></span>
+                <span class="icon-bar"></span>
+            </button>
+            <a href="https://mozillazg.com/" class="navbar-brand">
+Huang Huang 的博客            </a>
+        </div>
+        <div class="collapse navbar-collapse navbar-ex1-collapse">
+            <ul class="nav navbar-nav">
+                    <li><a href="https://mozillazg.com/feeds/all.atom.xml">Feed</a></li>
+                    <li><a href="/2014/10/pages/about-me.html">About</a></li>
+            </ul>
+            <ul class="nav navbar-nav navbar-right">
+              <li><a href="https://mozillazg.com/archives.html"><i class="fa fa-th-list"></i><span class="icon-label">Archives</span></a></li>
+            </ul>
+        </div>
+        <!-- /.navbar-collapse -->
+    </div>
+</div> <!-- /.navbar -->
+<!-- Banner -->
+<!-- End Banner -->
+<div class="container">
+    <div class="row">
+        <div class="col-lg-12">
+    <section id="content" class="yue">
+        <article>
+            <header class="text-center">
+                <h1>
+                    <a href="https://mozillazg.com/2019/04/rate-limiting-intro-leaky-bucket.html"
+                       rel="bookmark"
+                       title="Permalink to rate limiting 之 leaky bucket">
+                        rate limiting 之 leaky bucket
+                    </a>
+                </h1>
+                <p class="published">
+                    <time datetime="2019-04-14T00:00:00+00:00">
+                    2019-04-14
+                    </time>
+                </p>
+            </header>
+            <div class="entry-content">
+                <div class="well-sm article-info">
+<footer class="post-info">
+        <a href="https://mozillazg.com/category/others.html">others</a>
+
+
+<span class="label label-default hide">Tags</span>
+	<a href="https://mozillazg.com/tag/rate-limiting.html">rate-limiting</a>
+        /
+	<a href="https://mozillazg.com/tag/leaky-bucket.html">leaky-bucket</a>
+    
+</footer><!-- /.post-info -->                </div>
+                <div class="js-toc"></div>
+                <div>
+                <div class="section" id="id1">
+<h2 id="hidid1">前言<a class="headerlink" href="#hidid1" title="Permalink to this headline">¶</a></h2>
+<p>简单介绍一下 leaky bucket 算法。</p>
+</div>
+<div class="section" id="id2">
+<h2 id="hidid2">版本<a class="headerlink" href="#hidid2" title="Permalink to this headline">¶</a></h2>
+<p>leaky bucket 有两个版本：一个是 as a meter 、另一个是 as a queue 。</p>
+</div>
+<div class="section" id="as-a-meter">
+<h2 id="hidas-a-meter">as a meter<a class="headerlink" href="#hidas-a-meter" title="Permalink to this headline">¶</a></h2>
+<p><img alt="Leaky_bucket_image1" src="/static/images/leaky-bucket/Leaky_bucket_analogy.JPG" /></p>
+<p>(图片来自 <a class="reference external" href="https://en.wikipedia.org/wiki/Leaky_bucket">https://en.wikipedia.org/wiki/Leaky_bucket</a> )</p>
+<p>在 as a meter 版本中，一般用下面的方法来描述（来自 <a class="reference external" href="https://en.wikipedia.org/wiki/Leaky_bucket">wikipedia</a> ）：</p>
+<ul class="simple">
+<li>A fixed capacity bucket, associated with each virtual connection or user, leaks at a fixed rate.
+一个固定容量的 bucket ，用来处理每个连接或用户，这个 bucket 以一个固定的速率往下漏东西。</li>
+<li>If the bucket is empty, it stops leaking.
+如果 bucket 为空，将不再漏东西。</li>
+<li>For a packet to conform, it has to be possible to add a specific amount of water to the bucket: The specific amount added by a conforming packet can be the same for all packets, or can be proportional to the length of the packet.
+当需要确认一个数据包的时候，把它当做一定数量的水加到 bucket 中：这个添加的水量可以跟所有的包一样，也可以按包的实际长度以一定比例来添加。</li>
+<li>If this amount of water would cause the bucket to exceed its capacity then the packet does not conform and the water in the bucket is left unchanged.
+如果 bucket 中水的总量达到了 bucket 的容量限制，那么新的包就不被接受并且 bucket 中的水不会有啥变化。</li>
+<li>不被接受的包可以被丢弃( <a class="reference external" href="https://en.wikipedia.org/wiki/Traffic_police">Traffic policing</a> )，也可以被排队( <a class="reference external" href="https://en.wikipedia.org/wiki/Traffic_shaping">Traffic shaping</a> )，看具体的需求来做。</li>
+</ul>
+<p>通过上面可以发现，as a meter 的 leaky bucket 其实跟前面说过的 <a class="reference external" href="https://mozillazg.com/2019/01/rate-limiting-intro-token-bucket.html">token bucket</a> 是类似的，只是实现上不一样而已，实际的效果其实是一样的：</p>
+<ul class="simple">
+<li>bucket 都有容量限制。</li>
+<li>都允许存在波峰/尖刺，考虑一个极端情况：在 token bucket 中当 bucket 满的时候是可以一次性拿出所有 token 的，此时就是个波峰/尖刺了，在 leaky bucket 中当 bucket 空的时候是可以一次性倒入达到 bucket 容量限制的水的，此时也会有个波峰/尖刺。</li>
+</ul>
+</div>
+<div class="section" id="as-a-queue">
+<h2 id="hidas-a-queue">as a queue<a class="headerlink" href="#hidas-a-queue" title="Permalink to this headline">¶</a></h2>
+<p><img alt="Leaky_bucket_image2" src="/static/images/leaky-bucket/LeakyBucket.png" /></p>
+<p>(图片来自 <a class="reference external" href="https://en.wikipedia.org/wiki/Leaky_bucket">https://en.wikipedia.org/wiki/Leaky_bucket</a> )</p>
+<p>在 as a queue 版本中，可以把它作为一个先进先出的队列，流量涌入到 bucket 中，但是只能以恒定的速率流出，可以用来平滑流量或消峰：</p>
+<ul class="simple">
+<li>流量涌入到 bucket 中，当超出 bucket 容量限制时，排队或者被丢弃</li>
+<li>bucket 中的流量被以一个恒定的速率流出（当然，如果 bucket 中的数据太少的话流出就会断断续续，主要是不会超过指定的速率）</li>
+</ul>
+<p>通过上面的介绍，可以看出来其实 as a queue 的 leaky bucket 可以看做是 as a meter 的 leaky bucket 的一个特例：
+只要 as a meter 的 leaky bucket 的 bucket 容量被设置为在一个 ticket 周期内将流出的水量就可以达到类似 as a queue 的平滑流量/消峰的效果了。比如 rate 是 10kb/s ，ticket 是 1s，那么把 as a meter 的 bucket 容量限制为 10kb 即可达到类似效果。</p>
+</div>
+<div class="section" id="id3">
+<h2 id="hidid3">总结<a class="headerlink" href="#hidid3" title="Permalink to this headline">¶</a></h2>
+<p>简单介绍了一下 leaky bucket 算法，基本都是 wikipedia 上的知识，
+建议直接查看参考资料中的 <a class="reference external" href="https://en.wikipedia.org/wiki/Leaky_bucket">wikipedia</a> 。</p>
+</div>
+<div class="section" id="id4">
+<h2 id="hidid4">参考资料<a class="headerlink" href="#hidid4" title="Permalink to this headline">¶</a></h2>
+<ul class="simple">
+<li><a class="reference external" href="https://en.wikipedia.org/wiki/Leaky_bucket">Leaky bucket - Wikipedia</a></li>
+<li><a class="reference external" href="https://en.wikipedia.org/wiki/Token_bucket">Token bucket - Wikipedia</a></li>
+</ul>
+</div>
+
+                </div>
+            </div>
+            <!-- /.entry-content -->
+<section class="text-center">
+  
+<div id="donate"></div>
+
+<div class="social-share"></div>
+<div class="social-comment-note">
+<p>有任何建议和想法欢迎在下方评论区留言或者加我<a href="/static/wechat.png">微信</a>交流</p>
+</div>
+
+</section>
+<section class="well" id="related-posts">
+    <p>Related Posts:</p>
+    <ul>
+        <li><a href="https://mozillazg.com/2019/01/rate-limiting-intro-token-bucket.html">rate limiting 之 token bucket</a></li>
+    </ul>
+</section>
+    <hr/>
+    <section class="comments" id="comments">
+        <h2>Comments</h2>
+
+        <div id="disqus_thread"></div>
+        <script type="text/javascript">
+            /* * * CONFIGURATION VARIABLES: EDIT BEFORE PASTING INTO YOUR WEBPAGE * * */
+            var disqus_shortname = 'my-github-blog'; // required: replace example with your forum shortname
+
+                    var disqus_identifier = 'rate-limiting-intro-leaky-bucket';
+                var disqus_url = 'https://mozillazg.com/2019/04/rate-limiting-intro-leaky-bucket.html';
+
+            var disqus_config = function () {
+                this.language = "zh-hans";
+            };
+
+            /* * * DON'T EDIT BELOW THIS LINE * * */
+            (function () {
+                var dsq = document.createElement('script');
+                dsq.type = 'text/javascript';
+                dsq.async = true;
+                dsq.src = '//' + disqus_shortname + '.disqus.com/embed.js';
+                (document.getElementsByTagName('head')[0] || document.getElementsByTagName('body')[0]).appendChild(dsq);
+            })();
+        </script>
+        <noscript>Please enable JavaScript to view the <a href="http://disqus.com/?ref_noscript">comments powered by
+            Disqus.</a></noscript>
+        <a href="http://disqus.com" class="dsq-brlink">comments powered by <span class="logo-disqus">Disqus</span></a>
+
+    </section>
+        </article>
+    </section>
+
+        </div>
+    </div>
+</div>
+<footer>
+   <div class="container">
+      <hr>
+      <div class="row">
+         <div class="col-xs-10">&copy; 2019 mozillazg
+            &middot; Powered by <a href="https://github.com/DandyDev/pelican-bootstrap3" target="_blank">pelican-bootstrap3</a>,
+            <a href="http://docs.getpelican.com/" target="_blank">Pelican</a>,
+            <a href="http://getbootstrap.com" target="_blank">Bootstrap</a>              <p><small>  <a rel="license" href="http://creativecommons.org/licenses/by-sa/4.0/"><img alt="Creative Commons License" style="border-width:0" src="/static/images/by-sa-80x15.png" /></a>
+    &quot;<span xmlns:dct="http://purl.org/dc/terms/" property="dct:title">Huang Huang 的博客</span>&quot; by <a xmlns:cc="http://creativecommons.org/ns#" href="https://mozillazg.com" property="cc:attributionName" rel="cc:attributionURL">mozillazg</a> is
+  licensed under a <a rel="license" href="http://creativecommons.org/licenses/by-sa/4.0/">Creative Commons Attribution-ShareAlike 4.0 International License</a>, except where indicated otherwise.
+</small></p>
+         </div>
+         <div class="col-xs-2"><p class="pull-right"><i class="fa fa-arrow-up"></i> <a href="#">Back to top</a></p></div>
+      </div>
+   </div>
+</footer>
+<script src="https://mozillazg.com/theme/js/jquery.min.js"></script>
+
+<!-- Include all compiled plugins (below), or include individual files as needed -->
+<script src="https://mozillazg.com/theme/js/bootstrap.min.js"></script>
+
+<!-- Enable responsive features in IE8 with Respond.js (https://github.com/scottjehl/Respond) -->
+<script src="https://mozillazg.com/theme/js/respond.min.js"></script>
+
+    <!-- Disqus -->
+    <script type="text/javascript">
+        /* * * CONFIGURATION VARIABLES: EDIT BEFORE PASTING INTO YOUR WEBPAGE * * */
+        var disqus_shortname = 'my-github-blog'; // required: replace example with your forum shortname
+
+        /* * * DON'T EDIT BELOW THIS LINE * * */
+        (function () {
+            var s = document.createElement('script');
+            s.async = true;
+            s.type = 'text/javascript';
+            s.src = '//' + disqus_shortname + '.disqus.com/count.js';
+            (document.getElementsByTagName('HEAD')[0] || document.getElementsByTagName('BODY')[0]).appendChild(s);
+        }());
+    </script>
+    <!-- End Disqus Code -->
+    <!-- Google Analytics Universal -->
+    <script type="text/javascript">
+        (function(i,s,o,g,r,a,m){i['GoogleAnalyticsObject']=r;i[r]=i[r]||function(){
+        (i[r].q=i[r].q||[]).push(arguments)},i[r].l=1*new Date();a=s.createElement(o),
+        m=s.getElementsByTagName(o)[0];a.async=1;a.src=g;m.parentNode.insertBefore(a,m)
+        })(window,document,'script','//www.google-analytics.com/analytics.js','ga');
+
+        ga('create', 'UA-77172981-1', 'auto');
+        ga('send', 'pageview');
+    </script>
+    <!-- End Google Analytics Universal Code -->
+
+
+<script src="https://mozillazg.com/theme/js/vdonate.js"></script>
+<script>
+$(document).ready(function(){
+new vdonate({
+  title: '如果觉得我的文章对您有用，请随意打赏。您的支持将鼓励我继续创作!', // 可选参数，打赏标题
+  btnText: '打赏支持', // 可选参数，打赏按钮文字
+  el: document.getElementById('donate'), // 必选参数，打赏按钮的容器
+  wechatImage: 'https://mozillazg.com/static/wechat_donate.png', // 必选参数，微信收款二维码
+  alipayImage: 'https://mozillazg.com/static/alipay_donate.jpg' // 必选参数，支付宝收款二维码
+});
+});
+</script>
+
+<script src="https://mozillazg.com/theme/js/tocbot.min.js"></script>
+<script>
+$(document).ready(function(){
+  tocbot.init({
+    // Where to render the table of contents.
+    tocSelector: '.js-toc',
+    // Where to grab the headings to build the table of contents.
+    contentSelector: '.entry-content',
+    // Which headings to grab inside of the contentSelector element.
+    headingSelector: 'h2, h3, h4,h5',
+    // Headings that match the ignoreSelector will be skipped.
+    ignoreSelector: '.js-toc-ignore',
+    // Main class to add to links.
+    linkClass: 'toc-link',
+    // Extra classes to add to links.
+    extraLinkClasses: '',
+    // Class to add to active links,
+    // the link corresponding to the top most heading on the page.
+    activeLinkClass: 'is-active-link',
+    // Main class to add to lists.
+    listClass: 'toc-list',
+    // Extra classes to add to lists.
+    extraListClasses: '',
+    // Class that gets added when a list should be collapsed.
+    isCollapsedClass: 'is-collapsed',
+    // Class that gets added when a list should be able
+    // to be collapsed but isn't necessarily collpased.
+    collapsibleClass: 'is-collapsible',
+    // Class to add to list items.
+    listItemClass: 'toc-list-item',
+    // How many heading levels should not be collpased.
+    // For example, number 6 will show everything since
+    // there are only 6 heading levels and number 0 will collpase them all.
+    // The sections that are hidden will open
+    // and close as you scroll to headings within them.
+    collapseDepth: 6,
+    // Smooth scrolling enabled.
+    smoothScroll: true,
+    // Smooth scroll duration.
+    smoothScrollDuration: 420,
+    // Callback for scroll end (requires: smoothScroll).
+    scrollEndCallback: function (e) {},
+    // Headings offset between the headings and the top of the document (this is meant for minor adjustments).
+    headingsOffset: 0,
+    // Timeout between events firing to make sure it's
+    // not too rapid (for performance reasons).
+    throttleTimeout: 50,
+    // Element to add the positionFixedClass to.
+    positionFixedSelector: null,
+    // Fixed position class to add to make sidebar fixed after scrolling
+    // down past the fixedSidebarOffset.
+    positionFixedClass: 'is-position-fixed',
+    // fixedSidebarOffset can be any number but by default is set
+    // to auto which sets the fixedSidebarOffset to the sidebar
+    // element's offsetTop from the top of the document on init.
+    fixedSidebarOffset: 'auto',
+    // includeHtml can be set to true to include the HTML markup from the
+    // heading node instead of just including the textContent.
+    includeHtml: false
+  });
+});
+</script>
+</body>
+</html>
