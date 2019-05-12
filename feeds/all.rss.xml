@@ -1,5 +1,68 @@
 <?xml version="1.0" encoding="utf-8"?>
-<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom"><channel><title>Huang Huang 的博客</title><link>https://mozillazg.com/</link><description></description><atom:link href="https://mozillazg.com/feeds/all.rss.xml" rel="self"></atom:link><lastBuildDate>Sat, 04 May 2019 00:00:00 +0000</lastBuildDate><item><title>net.ipv4.ip_local_port_range 的值究竟影响了啥</title><link>https://mozillazg.com/2019/05/linux-what-net.ipv4.ip_local_port_range-effect-or-mean.html</link><description>&lt;div class="section" id="id1"&gt;
+<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom"><channel><title>Huang Huang 的博客</title><link>https://mozillazg.com/</link><description></description><atom:link href="https://mozillazg.com/feeds/all.rss.xml" rel="self"></atom:link><lastBuildDate>Sun, 12 May 2019 00:00:00 +0000</lastBuildDate><item><title>Go: 谨慎使用 math/rand 包中的默认随机数函数</title><link>https://mozillazg.com/2019/05/go-be-careful-of-math-rand-functions.html</link><description>&lt;p&gt;一句话总结：math/rand 包中默认的随机数相关函数共享了一个全局锁，
+即：所有使用默认随机函数的代码都会去竞争一个全局锁，有时这可能不是你想要的结果。&lt;/p&gt;
+&lt;div class="section" id="id1"&gt;
+&lt;h2 id="hidid1"&gt;全局锁&lt;a class="headerlink" href="#hidid1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;比如 &lt;tt class="docutils literal"&gt;rand.Int63&lt;/tt&gt; 这个函数的 &lt;a class="reference external" href="https://github.com/golang/go/blob/cdb776529ea7a4beac4c8a4d6a9ce149045bd6b5/src/math/rand/rand.go#L319"&gt;源代码&lt;/a&gt; 如下:&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="kd"&gt;func&lt;/span&gt; &lt;span class="nx"&gt;Int63n&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="nx"&gt;n&lt;/span&gt; &lt;span class="kt"&gt;int64&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt; &lt;span class="kt"&gt;int64&lt;/span&gt; &lt;span class="p"&gt;{&lt;/span&gt; &lt;span class="k"&gt;return&lt;/span&gt; &lt;span class="nx"&gt;globalRand&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Int63n&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="nx"&gt;n&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt; &lt;span class="p"&gt;}&lt;/span&gt;
+&lt;/pre&gt;&lt;/div&gt;
+&lt;p&gt;可以看到它其实是调用了一个全局的 Rand 实例 &lt;tt class="docutils literal"&gt;globalRand&lt;/tt&gt; ，我们来看一下 &lt;tt class="docutils literal"&gt;globalRand&lt;/tt&gt;
+的 &lt;a class="reference external" href="https://github.com/golang/go/blob/release-branch.go1.12/src/math/rand/rand.go#L288"&gt;定义&lt;/a&gt; :&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="kd"&gt;var&lt;/span&gt; &lt;span class="nx"&gt;globalRand&lt;/span&gt; &lt;span class="p"&gt;=&lt;/span&gt; &lt;span class="nx"&gt;New&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="o"&gt;&amp;amp;&lt;/span&gt;&lt;span class="nx"&gt;lockedSource&lt;/span&gt;&lt;span class="p"&gt;{&lt;/span&gt;&lt;span class="nx"&gt;src&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt; &lt;span class="nx"&gt;NewSource&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="mi"&gt;1&lt;/span&gt;&lt;span class="p"&gt;).(&lt;/span&gt;&lt;span class="nx"&gt;Source64&lt;/span&gt;&lt;span class="p"&gt;)})&lt;/span&gt;
+&lt;/pre&gt;&lt;/div&gt;
+&lt;p&gt;通过 &lt;a class="reference external" href="https://github.com/golang/go/blob/cdb776529ea7a4beac4c8a4d6a9ce149045bd6b5/src/math/rand/rand.go#L67"&gt;New&lt;/a&gt; 的源码以及 &lt;a class="reference external" href="https://github.com/golang/go/blob/cdb776529ea7a4beac4c8a4d6a9ce149045bd6b5/src/math/rand/rand.go#L109"&gt;globalRand.Int63n&lt;/a&gt; 的源码可以看到关键点是 &lt;tt class="docutils literal"&gt;lockedSource.Int63&lt;/tt&gt; 方法的定义:&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt; &lt;span class="kd"&gt;type&lt;/span&gt; &lt;span class="nx"&gt;lockedSource&lt;/span&gt; &lt;span class="kd"&gt;struct&lt;/span&gt; &lt;span class="p"&gt;{&lt;/span&gt;
+&lt;span class="hll"&gt;     &lt;span class="nx"&gt;lk&lt;/span&gt;  &lt;span class="nx"&gt;sync&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Mutex&lt;/span&gt;
+&lt;/span&gt;     &lt;span class="nx"&gt;src&lt;/span&gt; &lt;span class="nx"&gt;Source64&lt;/span&gt;
+ &lt;span class="p"&gt;}&lt;/span&gt;
+
+ &lt;span class="kd"&gt;func&lt;/span&gt; &lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="nx"&gt;r&lt;/span&gt; &lt;span class="o"&gt;*&lt;/span&gt;&lt;span class="nx"&gt;lockedSource&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt; &lt;span class="nx"&gt;Int63&lt;/span&gt;&lt;span class="p"&gt;()&lt;/span&gt; &lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="nx"&gt;n&lt;/span&gt; &lt;span class="kt"&gt;int64&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt; &lt;span class="p"&gt;{&lt;/span&gt;
+&lt;span class="hll"&gt;     &lt;span class="nx"&gt;r&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;lk&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Lock&lt;/span&gt;&lt;span class="p"&gt;()&lt;/span&gt;
+&lt;/span&gt;     &lt;span class="nx"&gt;n&lt;/span&gt; &lt;span class="p"&gt;=&lt;/span&gt; &lt;span class="nx"&gt;r&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;src&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Int63&lt;/span&gt;&lt;span class="p"&gt;()&lt;/span&gt;
+     &lt;span class="nx"&gt;r&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;lk&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Unlock&lt;/span&gt;&lt;span class="p"&gt;()&lt;/span&gt;
+     &lt;span class="k"&gt;return&lt;/span&gt;
+ &lt;span class="p"&gt;}&lt;/span&gt;
+&lt;/pre&gt;&lt;/div&gt;
+&lt;p&gt;通过同样的方法查看其他默认的随机函数可以发现，所有的默认随机函数都共享了一个全局锁，调用这些默认随机函数的时候都会先进行一次获取锁的操作。&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class="section" id="id2"&gt;
+&lt;h2 id="hidid2"&gt;解决方法&lt;a class="headerlink" href="#hidid2" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;大部分情况下不需要管这个全局锁的问题，因为大部分情况下都不会介意这点性能消耗。
+如果确实特别在意这点性能消耗的话，可以通过定义一个你的包共享的或者结构体实例共享的 Rand 实例来优化锁的性能消耗（最小化锁的粒度，不跟其他包/代码竞争这个锁）。&lt;/p&gt;
+&lt;p&gt;例子:&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="kd"&gt;type&lt;/span&gt; &lt;span class="nx"&gt;Xyz&lt;/span&gt; &lt;span class="kd"&gt;struct&lt;/span&gt; &lt;span class="p"&gt;{&lt;/span&gt;
+    &lt;span class="c1"&gt;// Rand 实例不是并发安全的，需要自行解决并发安全问题&lt;/span&gt;
+    &lt;span class="nx"&gt;rndMu&lt;/span&gt; &lt;span class="nx"&gt;sync&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Mutex&lt;/span&gt;
+    &lt;span class="nx"&gt;rnd&lt;/span&gt; &lt;span class="o"&gt;*&lt;/span&gt;&lt;span class="nx"&gt;rand&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Rand&lt;/span&gt;
+&lt;span class="p"&gt;}&lt;/span&gt;
+
+&lt;span class="kd"&gt;func&lt;/span&gt; &lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="nx"&gt;x&lt;/span&gt; &lt;span class="o"&gt;*&lt;/span&gt;&lt;span class="nx"&gt;Xyz&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt; &lt;span class="nx"&gt;random&lt;/span&gt;&lt;span class="p"&gt;()&lt;/span&gt; &lt;span class="kt"&gt;int32&lt;/span&gt; &lt;span class="p"&gt;{&lt;/span&gt;
+    &lt;span class="nx"&gt;x&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;rndMu&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Lock&lt;/span&gt;&lt;span class="p"&gt;()&lt;/span&gt;
+    &lt;span class="nx"&gt;n&lt;/span&gt; &lt;span class="o"&gt;:=&lt;/span&gt; &lt;span class="nx"&gt;x&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;rnd&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Int31&lt;/span&gt;&lt;span class="p"&gt;()&lt;/span&gt;
+    &lt;span class="nx"&gt;x&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;rndMu&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Unlock&lt;/span&gt;&lt;span class="p"&gt;()&lt;/span&gt;
+
+    &lt;span class="k"&gt;return&lt;/span&gt; &lt;span class="nx"&gt;n&lt;/span&gt;
+&lt;span class="p"&gt;}&lt;/span&gt;
+
+&lt;span class="kd"&gt;func&lt;/span&gt; &lt;span class="nx"&gt;main&lt;/span&gt;&lt;span class="p"&gt;()&lt;/span&gt; &lt;span class="p"&gt;{&lt;/span&gt;
+    &lt;span class="nx"&gt;x&lt;/span&gt; &lt;span class="o"&gt;:=&lt;/span&gt; &lt;span class="o"&gt;&amp;amp;&lt;/span&gt;&lt;span class="nx"&gt;Xyz&lt;/span&gt;&lt;span class="p"&gt;{&lt;/span&gt;
+        &lt;span class="nx"&gt;rnd&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt; &lt;span class="nx"&gt;rand&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;New&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="nx"&gt;rand&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;NewSource&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="nx"&gt;time&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Now&lt;/span&gt;&lt;span class="p"&gt;().&lt;/span&gt;&lt;span class="nx"&gt;UnixNano&lt;/span&gt;&lt;span class="p"&gt;())),&lt;/span&gt;
+    &lt;span class="p"&gt;}&lt;/span&gt;
+    &lt;span class="nx"&gt;fmt&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Println&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="nx"&gt;x&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;random&lt;/span&gt;&lt;span class="p"&gt;())&lt;/span&gt;
+&lt;span class="p"&gt;}&lt;/span&gt;
+&lt;/pre&gt;&lt;/div&gt;
+&lt;p&gt;或者可以考虑使用性能更好的第三方 rand 包： &lt;a class="reference external" href="https://github.com/valyala/fastrand"&gt;valyala/fastrand&lt;/a&gt;&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class="section" id="id3"&gt;
+&lt;h2 id="hidid3"&gt;参考资料&lt;a class="headerlink" href="#hidid3" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;ul class="simple"&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://blog.sgmansfield.com/2016/01/the-hidden-dangers-of-default-rand/"&gt;The Hidden Dangers of Default Rand · Scott Mansfield&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://github.com/golang/go/blob/release-branch.go1.12/src/math/rand/rand.go"&gt;go/rand.go at release-branch.go1.12 · golang/go&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://godoc.org/math/rand"&gt;rand - GoDoc&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://github.com/valyala/fastrand"&gt;valyala/fastrand: Fast and scalable pseudorandom generator for Go&lt;/a&gt;&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/div&gt;
+</description><dc:creator xmlns:dc="http://purl.org/dc/elements/1.1/">mozillazg</dc:creator><pubDate>Sun, 12 May 2019 00:00:00 +0000</pubDate><guid>tag:mozillazg.com,2019-05-12:2019/05/go-be-careful-of-math-rand-functions.html</guid><category>rand</category></item><item><title>net.ipv4.ip_local_port_range 的值究竟影响了啥</title><link>https://mozillazg.com/2019/05/linux-what-net.ipv4.ip_local_port_range-effect-or-mean.html</link><description>&lt;div class="section" id="id1"&gt;
 &lt;h2 id="hidid1"&gt;前言&lt;a class="headerlink" href="#hidid1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;p&gt;网上关于 &lt;tt class="docutils literal"&gt;net.ipv4.ip_local_port_range&lt;/tt&gt; 的值的效果众说纷纭（下面所说的连接都假定使用的是相同的协议(都是 TCP 或 UDP)）:&lt;/p&gt;
 &lt;ul class="simple"&gt;
@@ -777,6 +840,7 @@ Bits     Binary     Hex     Value
     &lt;span class="nx"&gt;http&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Get&lt;/span&gt;&lt;span class="p"&gt;()&lt;/span&gt;  &lt;span class="c1"&gt;// 各种耗时的 IO 操作&lt;/span&gt;
 &lt;span class="p"&gt;}&lt;/span&gt;
 &lt;/pre&gt;&lt;/div&gt;
+&lt;p&gt;以及 &lt;tt class="docutils literal"&gt;defer&lt;/tt&gt; 其实是有点 &lt;a class="reference external" href="https://medium.com/i0exception/runtime-overhead-of-using-defer-in-go-7140d5c40e32"&gt;性能&lt;/a&gt; &lt;a class="reference external" href="https://github.com/golang/go/issues/14939"&gt;消耗&lt;/a&gt; 的，需要取舍下酌情使用。&lt;/p&gt;
 &lt;/div&gt;
 &lt;div class="section" id="rwmutex"&gt;
 &lt;h2 id="hidrwmutex"&gt;在适当时候使用 RWMutex&lt;a class="headerlink" href="#hidrwmutex" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
@@ -1039,6 +1103,8 @@ created by main.main
 &lt;li&gt;&lt;a class="reference external" href="https://docs.oracle.com/javase/8/docs/api/java/util/concurrent/locks/Lock.html#tryLock-long-java.util.concurrent.TimeUnit-"&gt;Lock (Java Platform SE 8 )&lt;/a&gt;&lt;/li&gt;
 &lt;li&gt;&lt;a class="reference external" href="https://colobu.com/2017/03/09/implement-TryLock-in-Go/"&gt;为 Go Mutex 实现 TryLock 方法 | 鸟窝&lt;/a&gt;&lt;/li&gt;
 &lt;li&gt;&lt;a class="reference external" href="https://en.wikipedia.org/wiki/Fail-fast"&gt;Fail-fast - Wikipedia&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://medium.com/i0exception/runtime-overhead-of-using-defer-in-go-7140d5c40e32"&gt;Runtime overhead of using defer in go – i0exception – Medium&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://github.com/golang/go/issues/14939"&gt;runtime: defer is slow · Issue #14939 · golang/go&lt;/a&gt;&lt;/li&gt;
 &lt;/ul&gt;
 &lt;/div&gt;
 </description><dc:creator xmlns:dc="http://purl.org/dc/elements/1.1/">mozillazg</dc:creator><pubDate>Sun, 07 Apr 2019 00:00:00 +0000</pubDate><guid>tag:mozillazg.com,2019-04-07:2019/04/notes-about-go-lock-mutex.html</guid><category>lock</category><category>mutex</category></item><item><title>strace 常用操作</title><link>https://mozillazg.com/2019/03/linux-debug-with-strace-cookbook-examples.html</link><description>&lt;div class="section" id="id1"&gt;
