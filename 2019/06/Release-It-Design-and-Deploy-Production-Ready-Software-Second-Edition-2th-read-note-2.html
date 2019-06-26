@@ -1,0 +1,564 @@
+<!DOCTYPE html>
+<html lang="zh-hans" prefix="og: http://ogp.me/ns# fb: https://www.facebook.com/2008/fbml" class="han-init">
+<head>
+    <title>《Release It! Second Edition》阅读笔记（二） - Huang Huang 的博客</title>
+    <!-- Using the latest rendering mode for IE -->
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <!-- share.css -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/social-share.js/1.0.16/css/share.min.css">
+    <!-- share.js -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/social-share.js/1.0.16/js/social-share.min.js"></script>
+
+
+    <link href="https://mozillazg.com/favicon.ico" rel="icon">
+
+<link rel="canonical" href="https://mozillazg.com/2019/06/Release-It-Design-and-Deploy-Production-Ready-Software-Second-Edition-2th-read-note-2.html">
+
+        <meta name="author" content="mozillazg" />
+        <meta name="keywords" content="stability" />
+    <meta name="description" content="前言¶ 本文是 《Release It! Second Edition》 这本书的流水账式阅读笔记。 Stability Patterns¶ 这章将介绍一些提高系统稳定性的模式，当然不要觉得系统中应用的模式越多稳定性就越高。 Timeouts¶ Remember This 对外部依赖、阻塞线程以及慢响应使用超时技术。 使用超时技术从非预期的故障中恢复。 考虑延迟重试。 Circuit Breaker¶ 与重试不同，熔断器用于阻止操作而不是重复执行操作。 软件中应用熔断器的方法是使用一个组件包装危险的操作，这个组件可以在系统不健康时避开对其的调用，一旦系统恢复健康重新恢复对其的调用。 当熔断器处于【closed】状态的时候，它会执行常规的操作，如果操作失败的话，熔断器会记录失败情况。 一旦失败次数（或者是失败频率）达到了阈值，熔断器触发熔断，进入【open】状态。 [图] 当熔断处于【open】状态的时候，所有经过熔断器的调用都将立即失败，不会去执行真正的操作。 一段时间后，熔断器进入【half-open】状态，这个状态下，下一次的调用将执行真正的操作，如果调用成功了， 熔断器会被重置并进入【closed】状态，如果调用失败了，熔断器将进入【open】状态直到触发超时（不会一直保持 open 会有个超时期限）。 当熔断器开启时，必须对进来的调用进行处理。 最简单的答案是调用立即失败， 也许可以抛出一个异常(最好是一个不同于普通超时的异常，这样调用者可以提供有用的反馈)。 熔断器也可能有一个 fallback 策略。 也许它会返回最后一个好的响应或者一个缓存的值。 它可能返回一个通用的答案，而不是一个个性化的答案。 或者它甚至可以在主服务不可用时调用备用服务。 熔断器是在系统受到压力时实现自动降级的一种方法。 无论采用何种 fallbak 策略，都会对系统业务产生影响。 因此，在决定如何处理熔断打开发出的调用时，必须让系统的利益相关者参与进来，也就是要根据对应的业务场景来处理。 有一些有趣的实现细节需要考虑。 首先，什么是&#34;太多的失败&#34;？ 一个简单的记录所有错误的计数器可能并不那么有趣， 观察在五小时内均匀分布的五个错误和在最后三十秒内发生的五个错误之间有着天壤之别。 我们通常对故障密度比总计数更感兴趣。我喜欢漏桶模式（Leaky Bucket）。 这是一个简单的计数器，可以在每次发现错误时递增。 在后台，一个线程或计时器周期性地递减计数器(当然是递减到零) 如果计数超过一个阈值，那么你就知道错误到来的非常的快。 系统中熔断器的状态对另一些利益相关的人员来说非常的重要：运维/操作人员。 应该始终记录熔断器状态的更改事件，并且应该公开当前状态以便查询和监控。 事实上，状态变更的频率是一个随时间变化的有用指标; 它是发现企业其他部门问题的先行指标。 同样，运维/操作人员需要一些方法来直接跳闸或复位熔断器。 熔断器器也是一个方便收集调用量和响应时间指标的好地方。 一个熔断器应该建立在单进程的范围内。 也就是说， 相同的熔断器状态会影响进程中的每个线程，但不会跨多个进程共享。 这确实意味着，当调用方的多个实例各自独立地发现提供方程序宕机时，效率会有所下降。 然而，共享熔断器状态引入了另一种进程外通信机制。 这意味着安全机制将引入一个新的故障模式！ 即便只在一个进程中共享，熔断器也受制于多线程编程的各种陷阱。 确保不会意外出现一个线程处理所有对外部系统的调用的情况！ 每种语言和框架都有对应的开源熔断器库，最好是从中选一个来使用。 Remember This 如果会带来坏的影响就别做。如果外部依赖有严重的问题，那就暂时别调用它。 结合超时机制一起使用 公开，追踪，报告状态变更事件。 Bulkheads¶ 舱壁模式指的是对操作或服务做隔离，来实现类似故障隔离的功能，减轻故障对整个系统的影响。 Remember This 拯救船上其他部分。当故障发生的时候，通过舱壁模式提供的隔离功能来保护部分功能。 选择一个合适的隔离粒度。可以隔离应用中的不同线程池、服务器上的不同 CPU 或者是集群里的不同服务器。 考虑使用舱壁模式，尤其是共享服务模式下。 Steady State¶ 稳态模式认为，对于每一个积累资源的机制，都必须有一些其他的机制来回收这些资源。 让我们来看看几种可以积累的污泥，以及如何避免搅拌的需要。 Data Purging Log Files In-Memory Caching Remember This Avoid fiddling. 人为干预会导致问题。 消除重复人工干预的必要性。 你的系统应该至少运行一个典型的部署周期，而不需要手动清理磁盘或每晚重新启动。 使用应用本身的逻辑来清理数据。 限制缓存。 滚动切割日志。 Fail Fast¶ Remember This 阻止慢响应，尽量快速失败。如果你的系统无法满足 SLA 标准，那就快速告诉调用方，不要让调用方一直等待，一直等到超时，那样只是把你的问题传递到了他们那里。 谨慎对待资源，尽早验证依赖。不要做无用的工作。 使用输入校验。在请求资源前先对用户输入做基本的校验，不要出现获取了数据库连接，查询并获取了结果，最后给出少了个必选参数的情况。 Let It Crash¶ 有时创建系统级稳定性的最佳方法是放弃组件级稳定性。在 Erlang 中，这被称为&#34;Let It Crash&#34;的哲学。 程序最干净的状态是在启动之后。 &#34;Let It Crash&#34;的方法表明错误恢复是困难的和不可靠的，所以我们的目标应该是尽快回到干净的启动状态。 为了让&#34;Let It Crash&#34;起作用，我们的系统中有几件事必须是确定的。 Limited Granularity 崩溃必须有一个边界。我们想崩溃的是一个隔离的组件。系统的剩余部分必须要能够在一个级联故障中保护自己。 Fast Replacement 我们必须能够回到干净状态，并尽快恢复正常运行。 否则，当太多的实例在同时重启时，我们将看到性能下降。 极限情况下，由于所有实例都在忙于重启，我们的服务可能会无法对外提供服务。 服务实例更加棘手。 这取决于需要启动多少&#34;堆栈&#34;。 下面有几个例子: 我们在一个容器中运行 Go 二进制文件。 新容器和其中的进程的启动时间以毫秒为单位。 可以让整个容器崩溃。 这是一个在 AWS 长期运行的虚拟机上运行的 NodeJS 服务。 启动 NodeJS 进程需要毫秒级别，但启动一个新的虚拟机需要几分钟。 在这种情况下，只崩溃 NodeJS 进程。 一个带有 API 的老旧 JavaEE 应用程序，在一个数据中心的虚拟机上运行。 启动时间以分钟为单位。 &#34;Let It Crash&#34;不是正确的策略。 Supervision 需要有相应的守护程序或系统来重启崩溃的进程或实例。 Reintegration 进程/实例从崩溃中恢复后，需要有一种机制能让这个恢复后的服务能够重新对外提供服务，恢复处理外部请求。比如：当负载均衡器的健康检查发现实例恢复健康后，实例应当能够重新被加入负载均衡器中并开始接受外部请求。 Remember This 通过崩溃某个/些组件来维持整个系统的整体稳定性 快速重启然后自动重新提供服务 隔离组件以便可以独立的崩溃。使用熔断器（Circuit Breakers）帮助调用方从崩溃的组件中脱离出来。使用守护程序/系统（supervisors）来确定那部分需要快速重启，并保证崩溃不会影响不相关的功能。 不要崩溃单体/巨大的应用。 Handshaking¶ 握手（Handshaking）就是让服务器通过控制自己的工作负载来保护自己。 服务器应该有一种拒绝传入工作的方法，而不是成为对它提出的任何要求的牺牲品。 比如服务提供一个健康检查接口供负载均衡器使用，以便在异常/过载时拒绝外部请求。 健康检查这种方式只是一个粗糙的方法，最好的方法是在你实现的任何自定义协议中实现握手机制（handshaking）。 Remember This Create cooperative demand control。 考虑健康检查。 在你自己的底层协议中实现握手机制。 Test Harnesses¶ 开发环境、QA 环境以及集成测试环境中都无法测试部分分布式系统的失败模型，我们需要有一个测试套件（test harness）来帮助我们测试这些失败模型。 考虑构建一个测试套件，它可以代替每个 web 服务都会调用的远端服务。因为远程调用需要使用网络，基于 socket 的连接容易出现下面的故障： 连接可能被拒绝。 可能会待在 listen 队列中，直到调用方超时。 远端在回复了 SYN/ACK 后就不再发送任何数据了。 远端只发送 RESET 包。 远端反馈接收窗口满了，但是却不消费数据。 连接可以建立，但是远端不发送任何数据。 连接可以建立，但是丢包导致延迟重传。 连接可以建立，但是远端不发送确认收到的回复，导致无限重传。 服务可以接受请求，发送响应 header, 但是一直不发送响应 body。 服务每 30 秒发送一个字节的响应。 服务发送了一个 HTML 响应而不是预期的 XML。 服务发送了 MB 级别的数据而不是预期的 KB 级别。 服务拒绝所有身份验证凭据。 这些故障可以分为不同的类别: 网络传输问题、网络协议问题、应用协议问题和应用逻辑问题。 这种类似的测试套件其实是类似 &#34;chaos engineering&#34; 的思路。这个后面会讲到。 Remember This 模拟不合规的故障。 对调用方施加压力。测试工具可以产生缓慢的响应、无响应或垃圾响应。 然后可以可以观察你的应用程序是如何处理这些情况的。 Decoupling Middleware¶ Remember This Decide at the last responsible moment. 其他稳定性模式可以在不对设计或架构进行大规模更改的情况下实现。 解耦中间件是一个架构决策。 它会波及到系统的每一个部分。 这是几乎不可逆转的决定之一，应尽早而不是推迟作出。 通过完全解耦来避免多个故障模式。解耦单个服务、层和应用程序越完全，外部依赖、级联故障、慢响应和线程阻塞的问题就越少。 你会发现，解耦的应用程序也具有更强的适应性，因为你可以在不依赖其他参与者的情况下变更依赖。 学习多种架构，并在其中进行选择。不是每个系统都需要成为一个带有关系数据库的三层应用程序。 学习多种架构风格，为手头的问题选择最好的架构。 Shed Load¶ 服务、微服务、网站和开放 api 都有一个共同特征: 它们没法控制外部请求。在任何时候，超过10亿台设备都可以发出请求。 无论你的负载均衡器有多强大，或者你的扩容速度有多快，这个世界总是会产生超出你能力的负载。 Remember This 你无法超越整个世界。如果你的服务暴露于无法控制的环境，那么你需要能够在全世界为你疯狂时甩掉/消减负载。 使用 Shed Load（消减负载）来阻止慢响应。 使用负载均衡器作为减震器。 Create Back Pressure¶ 每个性能问题都开始于某个地方的队列开始阻塞了。可能是 socket 的 listen 队列，也可能是操作系统的运行队列或者是数据库的 I/O 队列。 无限队列基本是不可接受的，因为它们会吃掉所有可用的内存。如果队列是有限的的，我们就需要决定在队列阻塞时做啥操作，只有少量的选项： 假装接受新条目，但是实际上会直接把它丢弃。 真的接受新条目，然后把队列中的一些数据给丢弃。 拒绝新条目。 阻塞生产者，直到队列有空位。 对于某些用例，丢弃新条目可能是最好的选择。 对于价值随年龄(age)迅速下降的数据，删除队列中最老的条目可能是最佳选择。 阻塞生产者是一种流量控制手段。 它允许队列向上游施加&#34;反压力/背压(back pressure)&#34;。 据推测，背压(back pressure)会一直传递到最终的客户端，在队列释放新的空间前，客户端的速度会被降低。 Remember This 背压（Back Pressure）通过降低（服务）消费方的消费速度来创造安全性。（服务）消费方将经历减速。 唯一的替代选择是让他们崩溃（服务）提供方。 在一个系统的边界应用背压（Back Pressure）模式。跨越界限，转而关注负载的减少。尤其是当互联网是你的用户基础的时候。 为了让响应时间有限，队列必须是有限的。当队列满的时候，你只有有限的几个选择。 所有这些选择都是令人不快的: 丢失数据、拒绝工作或阻塞。（服务）消费方必须小心，不要永远阻塞在那。 Governor¶ 自动化没有判断力。 当它出错的时候，往往很快就会出错。 当一个人察觉到问题的时候，它就是一个恢复而不是干预的问题。 我们怎么能允许人为干预而不让人参与其中呢？ 我们应该使用自动化来处理人类不擅长的事情: 重复性任务和快速响应。 我们应该用人来做自动化不擅长的事情: 在更高的层次上感知整个状况。 我们可以创建调节器（Governor）来降低操作的速度。 Reddit 通过为他们的自动扩容装置添加一次只能关闭一定百分比的实例的逻辑来实现这一特性。 调节器（Governor）是有状态和时间意识的。 它知道在一段时间内做了什么操作。 它也应该是不对称的。 大多数材质都有一个&#34;安全&#34;方向和一个&#34;不安全&#34;方向。 关闭实例是不安全的。 删除数据是不安全的。 阻止客户端 IP 地址是不安全的。 你经常会在&#34;安全&#34;的定义之间找到对立。 关闭实例对于可用性是不安全的，而拉起实例对于成本是不安全的。 这些对立并不互相抵消。 相反，他们定义了一个 u 型曲线，在这个曲线上，向任何一个方向走得太远都是不好的。 这意味着操作在规定的范围内是安全的，在范围外是不安全的。 你的 AWS 预算可能允许一千个 EC2 实例，但是如果自动扩容程序开始朝着扩容两千个实例的方向前进的话，那么它需要放慢速度。 你可以将这个 u 型曲线看作是定义调节器（Governor）的响应曲线。 在安全区内行动迅速。 在范围之外调节器（Governor）增加阻力。 调节器（Governor）的全部意义就是让事情慢下来，足以让人类参与进来。 当然，这意味着连接监控系统以便警告人类有异常情况，并给他们足够的可见性来了解正在发生的事情。 Remember This 让事情慢下来，以便可以人工介入。当事情即将偏离轨道时，我们常常发现自动化工具会将其推向极限。 人类更善于基于场景的思考，所以我们需要创造机会让自己能够介入其中。 在不安全的方向施加阻力。 有些动作本身就是不安全的。 关闭，删除，阻塞... 这些都有可能中断服务。 自动化将使它们运行得更快，因此你应该应用调节器（Governor）来为人工介入预留时间。 考虑响应曲线。考虑一个响应曲线。在规定的范围内，操作可能是安全的。 在这个范围之外，它们应该遇到越来越大的&#34;阻力&#34;（通过减慢它们发生的速度）。" />
+
+    <style>
+      .js-toc {
+        margin-bottom: 20px;
+      }
+      .donate-modal {
+        text-align: center;
+      }
+      #donate-modal-container .donate-image {
+        max-height: 300px !important;
+        min-height: inherit !important;
+      }
+    </style>
+
+        <meta property="og:site_name" content="Huang Huang 的博客" />
+        <meta property="og:type" content="article"/>
+        <meta property="og:title" content="《Release It! Second Edition》阅读笔记（二）"/>
+        <meta property="og:url" content="https://mozillazg.com/2019/06/Release-It-Design-and-Deploy-Production-Ready-Software-Second-Edition-2th-read-note-2.html"/>
+        <meta property="og:description" content="前言¶ 本文是 《Release It! Second Edition》 这本书的流水账式阅读笔记。 Stability Patterns¶ 这章将介绍一些提高系统稳定性的模式，当然不要觉得系统中应用的模式越多稳定性就越高。 Timeouts¶ Remember This 对外部依赖、阻塞线程以及慢响应使用超时技术。 使用超时技术从非预期的故障中恢复。 考虑延迟重试。 Circuit Breaker¶ 与重试不同，熔断器用于阻止操作而不是重复执行操作。 软件中应用熔断器的方法是使用一个组件包装危险的操作，这个组件可以在系统不健康时避开对其的调用，一旦系统恢复健康重新恢复对其的调用。 当熔断器处于【closed】状态的时候，它会执行常规的操作，如果操作失败的话，熔断器会记录失败情况。 一旦失败次数（或者是失败频率）达到了阈值，熔断器触发熔断，进入【open】状态。 [图] 当熔断处于【open】状态的时候，所有经过熔断器的调用都将立即失败，不会去执行真正的操作。 一段时间后，熔断器进入【half-open】状态，这个状态下，下一次的调用将执行真正的操作，如果调用成功了， 熔断器会被重置并进入【closed】状态，如果调用失败了，熔断器将进入【open】状态直到触发超时（不会一直保持 open 会有个超时期限）。 当熔断器开启时，必须对进来的调用进行处理。 最简单的答案是调用立即失败， 也许可以抛出一个异常(最好是一个不同于普通超时的异常，这样调用者可以提供有用的反馈)。 熔断器也可能有一个 fallback 策略。 也许它会返回最后一个好的响应或者一个缓存的值。 它可能返回一个通用的答案，而不是一个个性化的答案。 或者它甚至可以在主服务不可用时调用备用服务。 熔断器是在系统受到压力时实现自动降级的一种方法。 无论采用何种 fallbak 策略，都会对系统业务产生影响。 因此，在决定如何处理熔断打开发出的调用时，必须让系统的利益相关者参与进来，也就是要根据对应的业务场景来处理。 有一些有趣的实现细节需要考虑。 首先，什么是&#34;太多的失败&#34;？ 一个简单的记录所有错误的计数器可能并不那么有趣， 观察在五小时内均匀分布的五个错误和在最后三十秒内发生的五个错误之间有着天壤之别。 我们通常对故障密度比总计数更感兴趣。我喜欢漏桶模式（Leaky Bucket）。 这是一个简单的计数器，可以在每次发现错误时递增。 在后台，一个线程或计时器周期性地递减计数器(当然是递减到零) 如果计数超过一个阈值，那么你就知道错误到来的非常的快。 系统中熔断器的状态对另一些利益相关的人员来说非常的重要：运维/操作人员。 应该始终记录熔断器状态的更改事件，并且应该公开当前状态以便查询和监控。 事实上，状态变更的频率是一个随时间变化的有用指标; 它是发现企业其他部门问题的先行指标。 同样，运维/操作人员需要一些方法来直接跳闸或复位熔断器。 熔断器器也是一个方便收集调用量和响应时间指标的好地方。 一个熔断器应该建立在单进程的范围内。 也就是说， 相同的熔断器状态会影响进程中的每个线程，但不会跨多个进程共享。 这确实意味着，当调用方的多个实例各自独立地发现提供方程序宕机时，效率会有所下降。 然而，共享熔断器状态引入了另一种进程外通信机制。 这意味着安全机制将引入一个新的故障模式！ 即便只在一个进程中共享，熔断器也受制于多线程编程的各种陷阱。 确保不会意外出现一个线程处理所有对外部系统的调用的情况！ 每种语言和框架都有对应的开源熔断器库，最好是从中选一个来使用。 Remember This 如果会带来坏的影响就别做。如果外部依赖有严重的问题，那就暂时别调用它。 结合超时机制一起使用 公开，追踪，报告状态变更事件。 Bulkheads¶ 舱壁模式指的是对操作或服务做隔离，来实现类似故障隔离的功能，减轻故障对整个系统的影响。 Remember This 拯救船上其他部分。当故障发生的时候，通过舱壁模式提供的隔离功能来保护部分功能。 选择一个合适的隔离粒度。可以隔离应用中的不同线程池、服务器上的不同 CPU 或者是集群里的不同服务器。 考虑使用舱壁模式，尤其是共享服务模式下。 Steady State¶ 稳态模式认为，对于每一个积累资源的机制，都必须有一些其他的机制来回收这些资源。 让我们来看看几种可以积累的污泥，以及如何避免搅拌的需要。 Data Purging Log Files In-Memory Caching Remember This Avoid fiddling. 人为干预会导致问题。 消除重复人工干预的必要性。 你的系统应该至少运行一个典型的部署周期，而不需要手动清理磁盘或每晚重新启动。 使用应用本身的逻辑来清理数据。 限制缓存。 滚动切割日志。 Fail Fast¶ Remember This 阻止慢响应，尽量快速失败。如果你的系统无法满足 SLA 标准，那就快速告诉调用方，不要让调用方一直等待，一直等到超时，那样只是把你的问题传递到了他们那里。 谨慎对待资源，尽早验证依赖。不要做无用的工作。 使用输入校验。在请求资源前先对用户输入做基本的校验，不要出现获取了数据库连接，查询并获取了结果，最后给出少了个必选参数的情况。 Let It Crash¶ 有时创建系统级稳定性的最佳方法是放弃组件级稳定性。在 Erlang 中，这被称为&#34;Let It Crash&#34;的哲学。 程序最干净的状态是在启动之后。 &#34;Let It Crash&#34;的方法表明错误恢复是困难的和不可靠的，所以我们的目标应该是尽快回到干净的启动状态。 为了让&#34;Let It Crash&#34;起作用，我们的系统中有几件事必须是确定的。 Limited Granularity 崩溃必须有一个边界。我们想崩溃的是一个隔离的组件。系统的剩余部分必须要能够在一个级联故障中保护自己。 Fast Replacement 我们必须能够回到干净状态，并尽快恢复正常运行。 否则，当太多的实例在同时重启时，我们将看到性能下降。 极限情况下，由于所有实例都在忙于重启，我们的服务可能会无法对外提供服务。 服务实例更加棘手。 这取决于需要启动多少&#34;堆栈&#34;。 下面有几个例子: 我们在一个容器中运行 Go 二进制文件。 新容器和其中的进程的启动时间以毫秒为单位。 可以让整个容器崩溃。 这是一个在 AWS 长期运行的虚拟机上运行的 NodeJS 服务。 启动 NodeJS 进程需要毫秒级别，但启动一个新的虚拟机需要几分钟。 在这种情况下，只崩溃 NodeJS 进程。 一个带有 API 的老旧 JavaEE 应用程序，在一个数据中心的虚拟机上运行。 启动时间以分钟为单位。 &#34;Let It Crash&#34;不是正确的策略。 Supervision 需要有相应的守护程序或系统来重启崩溃的进程或实例。 Reintegration 进程/实例从崩溃中恢复后，需要有一种机制能让这个恢复后的服务能够重新对外提供服务，恢复处理外部请求。比如：当负载均衡器的健康检查发现实例恢复健康后，实例应当能够重新被加入负载均衡器中并开始接受外部请求。 Remember This 通过崩溃某个/些组件来维持整个系统的整体稳定性 快速重启然后自动重新提供服务 隔离组件以便可以独立的崩溃。使用熔断器（Circuit Breakers）帮助调用方从崩溃的组件中脱离出来。使用守护程序/系统（supervisors）来确定那部分需要快速重启，并保证崩溃不会影响不相关的功能。 不要崩溃单体/巨大的应用。 Handshaking¶ 握手（Handshaking）就是让服务器通过控制自己的工作负载来保护自己。 服务器应该有一种拒绝传入工作的方法，而不是成为对它提出的任何要求的牺牲品。 比如服务提供一个健康检查接口供负载均衡器使用，以便在异常/过载时拒绝外部请求。 健康检查这种方式只是一个粗糙的方法，最好的方法是在你实现的任何自定义协议中实现握手机制（handshaking）。 Remember This Create cooperative demand control。 考虑健康检查。 在你自己的底层协议中实现握手机制。 Test Harnesses¶ 开发环境、QA 环境以及集成测试环境中都无法测试部分分布式系统的失败模型，我们需要有一个测试套件（test harness）来帮助我们测试这些失败模型。 考虑构建一个测试套件，它可以代替每个 web 服务都会调用的远端服务。因为远程调用需要使用网络，基于 socket 的连接容易出现下面的故障： 连接可能被拒绝。 可能会待在 listen 队列中，直到调用方超时。 远端在回复了 SYN/ACK 后就不再发送任何数据了。 远端只发送 RESET 包。 远端反馈接收窗口满了，但是却不消费数据。 连接可以建立，但是远端不发送任何数据。 连接可以建立，但是丢包导致延迟重传。 连接可以建立，但是远端不发送确认收到的回复，导致无限重传。 服务可以接受请求，发送响应 header, 但是一直不发送响应 body。 服务每 30 秒发送一个字节的响应。 服务发送了一个 HTML 响应而不是预期的 XML。 服务发送了 MB 级别的数据而不是预期的 KB 级别。 服务拒绝所有身份验证凭据。 这些故障可以分为不同的类别: 网络传输问题、网络协议问题、应用协议问题和应用逻辑问题。 这种类似的测试套件其实是类似 &#34;chaos engineering&#34; 的思路。这个后面会讲到。 Remember This 模拟不合规的故障。 对调用方施加压力。测试工具可以产生缓慢的响应、无响应或垃圾响应。 然后可以可以观察你的应用程序是如何处理这些情况的。 Decoupling Middleware¶ Remember This Decide at the last responsible moment. 其他稳定性模式可以在不对设计或架构进行大规模更改的情况下实现。 解耦中间件是一个架构决策。 它会波及到系统的每一个部分。 这是几乎不可逆转的决定之一，应尽早而不是推迟作出。 通过完全解耦来避免多个故障模式。解耦单个服务、层和应用程序越完全，外部依赖、级联故障、慢响应和线程阻塞的问题就越少。 你会发现，解耦的应用程序也具有更强的适应性，因为你可以在不依赖其他参与者的情况下变更依赖。 学习多种架构，并在其中进行选择。不是每个系统都需要成为一个带有关系数据库的三层应用程序。 学习多种架构风格，为手头的问题选择最好的架构。 Shed Load¶ 服务、微服务、网站和开放 api 都有一个共同特征: 它们没法控制外部请求。在任何时候，超过10亿台设备都可以发出请求。 无论你的负载均衡器有多强大，或者你的扩容速度有多快，这个世界总是会产生超出你能力的负载。 Remember This 你无法超越整个世界。如果你的服务暴露于无法控制的环境，那么你需要能够在全世界为你疯狂时甩掉/消减负载。 使用 Shed Load（消减负载）来阻止慢响应。 使用负载均衡器作为减震器。 Create Back Pressure¶ 每个性能问题都开始于某个地方的队列开始阻塞了。可能是 socket 的 listen 队列，也可能是操作系统的运行队列或者是数据库的 I/O 队列。 无限队列基本是不可接受的，因为它们会吃掉所有可用的内存。如果队列是有限的的，我们就需要决定在队列阻塞时做啥操作，只有少量的选项： 假装接受新条目，但是实际上会直接把它丢弃。 真的接受新条目，然后把队列中的一些数据给丢弃。 拒绝新条目。 阻塞生产者，直到队列有空位。 对于某些用例，丢弃新条目可能是最好的选择。 对于价值随年龄(age)迅速下降的数据，删除队列中最老的条目可能是最佳选择。 阻塞生产者是一种流量控制手段。 它允许队列向上游施加&#34;反压力/背压(back pressure)&#34;。 据推测，背压(back pressure)会一直传递到最终的客户端，在队列释放新的空间前，客户端的速度会被降低。 Remember This 背压（Back Pressure）通过降低（服务）消费方的消费速度来创造安全性。（服务）消费方将经历减速。 唯一的替代选择是让他们崩溃（服务）提供方。 在一个系统的边界应用背压（Back Pressure）模式。跨越界限，转而关注负载的减少。尤其是当互联网是你的用户基础的时候。 为了让响应时间有限，队列必须是有限的。当队列满的时候，你只有有限的几个选择。 所有这些选择都是令人不快的: 丢失数据、拒绝工作或阻塞。（服务）消费方必须小心，不要永远阻塞在那。 Governor¶ 自动化没有判断力。 当它出错的时候，往往很快就会出错。 当一个人察觉到问题的时候，它就是一个恢复而不是干预的问题。 我们怎么能允许人为干预而不让人参与其中呢？ 我们应该使用自动化来处理人类不擅长的事情: 重复性任务和快速响应。 我们应该用人来做自动化不擅长的事情: 在更高的层次上感知整个状况。 我们可以创建调节器（Governor）来降低操作的速度。 Reddit 通过为他们的自动扩容装置添加一次只能关闭一定百分比的实例的逻辑来实现这一特性。 调节器（Governor）是有状态和时间意识的。 它知道在一段时间内做了什么操作。 它也应该是不对称的。 大多数材质都有一个&#34;安全&#34;方向和一个&#34;不安全&#34;方向。 关闭实例是不安全的。 删除数据是不安全的。 阻止客户端 IP 地址是不安全的。 你经常会在&#34;安全&#34;的定义之间找到对立。 关闭实例对于可用性是不安全的，而拉起实例对于成本是不安全的。 这些对立并不互相抵消。 相反，他们定义了一个 u 型曲线，在这个曲线上，向任何一个方向走得太远都是不好的。 这意味着操作在规定的范围内是安全的，在范围外是不安全的。 你的 AWS 预算可能允许一千个 EC2 实例，但是如果自动扩容程序开始朝着扩容两千个实例的方向前进的话，那么它需要放慢速度。 你可以将这个 u 型曲线看作是定义调节器（Governor）的响应曲线。 在安全区内行动迅速。 在范围之外调节器（Governor）增加阻力。 调节器（Governor）的全部意义就是让事情慢下来，足以让人类参与进来。 当然，这意味着连接监控系统以便警告人类有异常情况，并给他们足够的可见性来了解正在发生的事情。 Remember This 让事情慢下来，以便可以人工介入。当事情即将偏离轨道时，我们常常发现自动化工具会将其推向极限。 人类更善于基于场景的思考，所以我们需要创造机会让自己能够介入其中。 在不安全的方向施加阻力。 有些动作本身就是不安全的。 关闭，删除，阻塞... 这些都有可能中断服务。 自动化将使它们运行得更快，因此你应该应用调节器（Governor）来为人工介入预留时间。 考虑响应曲线。考虑一个响应曲线。在规定的范围内，操作可能是安全的。 在这个范围之外，它们应该遇到越来越大的&#34;阻力&#34;（通过减慢它们发生的速度）。"/>
+        <meta property="article:published_time" content="2019-06-26" />
+            <meta property="article:section" content="reading" />
+            <meta property="article:tag" content="stability" />
+            <meta property="article:author" content="mozillazg" />
+            <meta property="og:image"
+                  content="https://mozillazg.com/static/avatar.jpeg"/>
+
+
+    <meta name="twitter:card" content="summary">
+        <meta name="twitter:site" content="@mozillazg">
+        <meta name="twitter:creator" content="@mozillazg">
+    <meta name="twitter:domain" content="https://mozillazg.com">
+            <meta property="twitter:image"
+                  content="https://mozillazg.com/static/avatar.jpeg"/>
+
+    <!-- Bootstrap -->
+        <link rel="stylesheet" href="https://mozillazg.com/theme/css/bootstrap.min.css" type="text/css"/>
+    <link href="https://mozillazg.com/theme/css/font-awesome.min.css" rel="stylesheet">
+
+    <link href="https://mozillazg.com/theme/css/pygments/github.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://mozillazg.com/theme/css/style.css" type="text/css"/>
+            <link href="https://mozillazg.com/static/custom.css" rel="stylesheet">
+
+        <link href="https://mozillazg.com/feeds/all.atom.xml" type="application/atom+xml" rel="alternate"
+              title="Huang Huang 的博客 ATOM Feed"/>
+
+        <link href="https://mozillazg.com/feeds/all.rss.xml" type="application/rss+xml" rel="alternate"
+              title="Huang Huang 的博客 RSS Feed"/>
+
+
+        <link href="https://mozillazg.com/feeds/reading.atom.xml" type="application/atom+xml" rel="alternate"
+              title="Huang Huang 的博客 reading ATOM Feed"/>
+
+
+    <script type="application/ld+json">
+    {
+        "@context": "https://schema.org",
+        "@type": "Website",
+        "publisher": {
+            "@type": "Person",
+            "name": "mozillazg",
+            "logo": "https://mozillazg.com/static/avatar.jpeg"
+        },
+        "author": {
+            "@type": "Person",
+            "name": "mozillazg",
+            "image": "https://mozillazg.com/static/avatar.jpeg",
+            "url": "https://mozillazg.com",
+            "sameAs": []
+        },
+        // "headline": "",
+        "url": "https://mozillazg.com/2019/06/Release-It-Design-and-Deploy-Production-Ready-Software-Second-Edition-2th-read-note-2.html",
+        "datePublished": "2019-06-26",
+        // "dateModified": "",
+        "image": "https://mozillazg.com/static/avatar.jpeg",
+        "keywords": "stability",
+        "description": "前言¶ 本文是 《Release It! Second Edition》 这本书的流水账式阅读笔记。 Stability Patterns¶ 这章将介绍一些提高系统稳定性的模式，当然不要觉得系统中应用的模式越多稳定性就越高。 Timeouts¶ Remember This 对外部依赖、阻塞线程以及慢响应使用超时技术。 使用超时技术从非预期的故障中恢复。 考虑延迟重试。 Circuit Breaker¶ 与重试不同，熔断器用于阻止操作而不是重复执行操作。 软件中应用熔断器的方法是使用一个组件包装危险的操作，这个组件可以在系统不健康时避开对其的调用，一旦系统恢复健康重新恢复对其的调用。 当熔断器处于【closed】状态的时候，它会执行常规的操作，如果操作失败的话，熔断器会记录失败情况。 一旦失败次数（或者是失败频率）达到了阈值，熔断器触发熔断，进入【open】状态。 [图] 当熔断处于【open】状态的时候，所有经过熔断器的调用都将立即失败，不会去执行真正的操作。 一段时间后，熔断器进入【half-open】状态，这个状态下，下一次的调用将执行真正的操作，如果调用成功了， 熔断器会被重置并进入【closed】状态，如果调用失败了，熔断器将进入【open】状态直到触发超时（不会一直保持 open 会有个超时期限）。 当熔断器开启时，必须对进来的调用进行处理。 最简单的答案是调用立即失败， 也许可以抛出一个异常(最好是一个不同于普通超时的异常，这样调用者可以提供有用的反馈)。 熔断器也可能有一个 fallback 策略。 也许它会返回最后一个好的响应或者一个缓存的值。 它可能返回一个通用的答案，而不是一个个性化的答案。 或者它甚至可以在主服务不可用时调用备用服务。 熔断器是在系统受到压力时实现自动降级的一种方法。 无论采用何种 fallbak 策略，都会对系统业务产生影响。 因此，在决定如何处理熔断打开发出的调用时，必须让系统的利益相关者参与进来，也就是要根据对应的业务场景来处理。 有一些有趣的实现细节需要考虑。 首先，什么是&#34;太多的失败&#34;？ 一个简单的记录所有错误的计数器可能并不那么有趣， 观察在五小时内均匀分布的五个错误和在最后三十秒内发生的五个错误之间有着天壤之别。 我们通常对故障密度比总计数更感兴趣。我喜欢漏桶模式（Leaky Bucket）。 这是一个简单的计数器，可以在每次发现错误时递增。 在后台，一个线程或计时器周期性地递减计数器(当然是递减到零) 如果计数超过一个阈值，那么你就知道错误到来的非常的快。 系统中熔断器的状态对另一些利益相关的人员来说非常的重要：运维/操作人员。 应该始终记录熔断器状态的更改事件，并且应该公开当前状态以便查询和监控。 事实上，状态变更的频率是一个随时间变化的有用指标; 它是发现企业其他部门问题的先行指标。 同样，运维/操作人员需要一些方法来直接跳闸或复位熔断器。 熔断器器也是一个方便收集调用量和响应时间指标的好地方。 一个熔断器应该建立在单进程的范围内。 也就是说， 相同的熔断器状态会影响进程中的每个线程，但不会跨多个进程共享。 这确实意味着，当调用方的多个实例各自独立地发现提供方程序宕机时，效率会有所下降。 然而，共享熔断器状态引入了另一种进程外通信机制。 这意味着安全机制将引入一个新的故障模式！ 即便只在一个进程中共享，熔断器也受制于多线程编程的各种陷阱。 确保不会意外出现一个线程处理所有对外部系统的调用的情况！ 每种语言和框架都有对应的开源熔断器库，最好是从中选一个来使用。 Remember This 如果会带来坏的影响就别做。如果外部依赖有严重的问题，那就暂时别调用它。 结合超时机制一起使用 公开，追踪，报告状态变更事件。 Bulkheads¶ 舱壁模式指的是对操作或服务做隔离，来实现类似故障隔离的功能，减轻故障对整个系统的影响。 Remember This 拯救船上其他部分。当故障发生的时候，通过舱壁模式提供的隔离功能来保护部分功能。 选择一个合适的隔离粒度。可以隔离应用中的不同线程池、服务器上的不同 CPU 或者是集群里的不同服务器。 考虑使用舱壁模式，尤其是共享服务模式下。 Steady State¶ 稳态模式认为，对于每一个积累资源的机制，都必须有一些其他的机制来回收这些资源。 让我们来看看几种可以积累的污泥，以及如何避免搅拌的需要。 Data Purging Log Files In-Memory Caching Remember This Avoid fiddling. 人为干预会导致问题。 消除重复人工干预的必要性。 你的系统应该至少运行一个典型的部署周期，而不需要手动清理磁盘或每晚重新启动。 使用应用本身的逻辑来清理数据。 限制缓存。 滚动切割日志。 Fail Fast¶ Remember This 阻止慢响应，尽量快速失败。如果你的系统无法满足 SLA 标准，那就快速告诉调用方，不要让调用方一直等待，一直等到超时，那样只是把你的问题传递到了他们那里。 谨慎对待资源，尽早验证依赖。不要做无用的工作。 使用输入校验。在请求资源前先对用户输入做基本的校验，不要出现获取了数据库连接，查询并获取了结果，最后给出少了个必选参数的情况。 Let It Crash¶ 有时创建系统级稳定性的最佳方法是放弃组件级稳定性。在 Erlang 中，这被称为&#34;Let It Crash&#34;的哲学。 程序最干净的状态是在启动之后。 &#34;Let It Crash&#34;的方法表明错误恢复是困难的和不可靠的，所以我们的目标应该是尽快回到干净的启动状态。 为了让&#34;Let It Crash&#34;起作用，我们的系统中有几件事必须是确定的。 Limited Granularity 崩溃必须有一个边界。我们想崩溃的是一个隔离的组件。系统的剩余部分必须要能够在一个级联故障中保护自己。 Fast Replacement 我们必须能够回到干净状态，并尽快恢复正常运行。 否则，当太多的实例在同时重启时，我们将看到性能下降。 极限情况下，由于所有实例都在忙于重启，我们的服务可能会无法对外提供服务。 服务实例更加棘手。 这取决于需要启动多少&#34;堆栈&#34;。 下面有几个例子: 我们在一个容器中运行 Go 二进制文件。 新容器和其中的进程的启动时间以毫秒为单位。 可以让整个容器崩溃。 这是一个在 AWS 长期运行的虚拟机上运行的 NodeJS 服务。 启动 NodeJS 进程需要毫秒级别，但启动一个新的虚拟机需要几分钟。 在这种情况下，只崩溃 NodeJS 进程。 一个带有 API 的老旧 JavaEE 应用程序，在一个数据中心的虚拟机上运行。 启动时间以分钟为单位。 &#34;Let It Crash&#34;不是正确的策略。 Supervision 需要有相应的守护程序或系统来重启崩溃的进程或实例。 Reintegration 进程/实例从崩溃中恢复后，需要有一种机制能让这个恢复后的服务能够重新对外提供服务，恢复处理外部请求。比如：当负载均衡器的健康检查发现实例恢复健康后，实例应当能够重新被加入负载均衡器中并开始接受外部请求。 Remember This 通过崩溃某个/些组件来维持整个系统的整体稳定性 快速重启然后自动重新提供服务 隔离组件以便可以独立的崩溃。使用熔断器（Circuit Breakers）帮助调用方从崩溃的组件中脱离出来。使用守护程序/系统（supervisors）来确定那部分需要快速重启，并保证崩溃不会影响不相关的功能。 不要崩溃单体/巨大的应用。 Handshaking¶ 握手（Handshaking）就是让服务器通过控制自己的工作负载来保护自己。 服务器应该有一种拒绝传入工作的方法，而不是成为对它提出的任何要求的牺牲品。 比如服务提供一个健康检查接口供负载均衡器使用，以便在异常/过载时拒绝外部请求。 健康检查这种方式只是一个粗糙的方法，最好的方法是在你实现的任何自定义协议中实现握手机制（handshaking）。 Remember This Create cooperative demand control。 考虑健康检查。 在你自己的底层协议中实现握手机制。 Test Harnesses¶ 开发环境、QA 环境以及集成测试环境中都无法测试部分分布式系统的失败模型，我们需要有一个测试套件（test harness）来帮助我们测试这些失败模型。 考虑构建一个测试套件，它可以代替每个 web 服务都会调用的远端服务。因为远程调用需要使用网络，基于 socket 的连接容易出现下面的故障： 连接可能被拒绝。 可能会待在 listen 队列中，直到调用方超时。 远端在回复了 SYN/ACK 后就不再发送任何数据了。 远端只发送 RESET 包。 远端反馈接收窗口满了，但是却不消费数据。 连接可以建立，但是远端不发送任何数据。 连接可以建立，但是丢包导致延迟重传。 连接可以建立，但是远端不发送确认收到的回复，导致无限重传。 服务可以接受请求，发送响应 header, 但是一直不发送响应 body。 服务每 30 秒发送一个字节的响应。 服务发送了一个 HTML 响应而不是预期的 XML。 服务发送了 MB 级别的数据而不是预期的 KB 级别。 服务拒绝所有身份验证凭据。 这些故障可以分为不同的类别: 网络传输问题、网络协议问题、应用协议问题和应用逻辑问题。 这种类似的测试套件其实是类似 &#34;chaos engineering&#34; 的思路。这个后面会讲到。 Remember This 模拟不合规的故障。 对调用方施加压力。测试工具可以产生缓慢的响应、无响应或垃圾响应。 然后可以可以观察你的应用程序是如何处理这些情况的。 Decoupling Middleware¶ Remember This Decide at the last responsible moment. 其他稳定性模式可以在不对设计或架构进行大规模更改的情况下实现。 解耦中间件是一个架构决策。 它会波及到系统的每一个部分。 这是几乎不可逆转的决定之一，应尽早而不是推迟作出。 通过完全解耦来避免多个故障模式。解耦单个服务、层和应用程序越完全，外部依赖、级联故障、慢响应和线程阻塞的问题就越少。 你会发现，解耦的应用程序也具有更强的适应性，因为你可以在不依赖其他参与者的情况下变更依赖。 学习多种架构，并在其中进行选择。不是每个系统都需要成为一个带有关系数据库的三层应用程序。 学习多种架构风格，为手头的问题选择最好的架构。 Shed Load¶ 服务、微服务、网站和开放 api 都有一个共同特征: 它们没法控制外部请求。在任何时候，超过10亿台设备都可以发出请求。 无论你的负载均衡器有多强大，或者你的扩容速度有多快，这个世界总是会产生超出你能力的负载。 Remember This 你无法超越整个世界。如果你的服务暴露于无法控制的环境，那么你需要能够在全世界为你疯狂时甩掉/消减负载。 使用 Shed Load（消减负载）来阻止慢响应。 使用负载均衡器作为减震器。 Create Back Pressure¶ 每个性能问题都开始于某个地方的队列开始阻塞了。可能是 socket 的 listen 队列，也可能是操作系统的运行队列或者是数据库的 I/O 队列。 无限队列基本是不可接受的，因为它们会吃掉所有可用的内存。如果队列是有限的的，我们就需要决定在队列阻塞时做啥操作，只有少量的选项： 假装接受新条目，但是实际上会直接把它丢弃。 真的接受新条目，然后把队列中的一些数据给丢弃。 拒绝新条目。 阻塞生产者，直到队列有空位。 对于某些用例，丢弃新条目可能是最好的选择。 对于价值随年龄(age)迅速下降的数据，删除队列中最老的条目可能是最佳选择。 阻塞生产者是一种流量控制手段。 它允许队列向上游施加&#34;反压力/背压(back pressure)&#34;。 据推测，背压(back pressure)会一直传递到最终的客户端，在队列释放新的空间前，客户端的速度会被降低。 Remember This 背压（Back Pressure）通过降低（服务）消费方的消费速度来创造安全性。（服务）消费方将经历减速。 唯一的替代选择是让他们崩溃（服务）提供方。 在一个系统的边界应用背压（Back Pressure）模式。跨越界限，转而关注负载的减少。尤其是当互联网是你的用户基础的时候。 为了让响应时间有限，队列必须是有限的。当队列满的时候，你只有有限的几个选择。 所有这些选择都是令人不快的: 丢失数据、拒绝工作或阻塞。（服务）消费方必须小心，不要永远阻塞在那。 Governor¶ 自动化没有判断力。 当它出错的时候，往往很快就会出错。 当一个人察觉到问题的时候，它就是一个恢复而不是干预的问题。 我们怎么能允许人为干预而不让人参与其中呢？ 我们应该使用自动化来处理人类不擅长的事情: 重复性任务和快速响应。 我们应该用人来做自动化不擅长的事情: 在更高的层次上感知整个状况。 我们可以创建调节器（Governor）来降低操作的速度。 Reddit 通过为他们的自动扩容装置添加一次只能关闭一定百分比的实例的逻辑来实现这一特性。 调节器（Governor）是有状态和时间意识的。 它知道在一段时间内做了什么操作。 它也应该是不对称的。 大多数材质都有一个&#34;安全&#34;方向和一个&#34;不安全&#34;方向。 关闭实例是不安全的。 删除数据是不安全的。 阻止客户端 IP 地址是不安全的。 你经常会在&#34;安全&#34;的定义之间找到对立。 关闭实例对于可用性是不安全的，而拉起实例对于成本是不安全的。 这些对立并不互相抵消。 相反，他们定义了一个 u 型曲线，在这个曲线上，向任何一个方向走得太远都是不好的。 这意味着操作在规定的范围内是安全的，在范围外是不安全的。 你的 AWS 预算可能允许一千个 EC2 实例，但是如果自动扩容程序开始朝着扩容两千个实例的方向前进的话，那么它需要放慢速度。 你可以将这个 u 型曲线看作是定义调节器（Governor）的响应曲线。 在安全区内行动迅速。 在范围之外调节器（Governor）增加阻力。 调节器（Governor）的全部意义就是让事情慢下来，足以让人类参与进来。 当然，这意味着连接监控系统以便警告人类有异常情况，并给他们足够的可见性来了解正在发生的事情。 Remember This 让事情慢下来，以便可以人工介入。当事情即将偏离轨道时，我们常常发现自动化工具会将其推向极限。 人类更善于基于场景的思考，所以我们需要创造机会让自己能够介入其中。 在不安全的方向施加阻力。 有些动作本身就是不安全的。 关闭，删除，阻塞... 这些都有可能中断服务。 自动化将使它们运行得更快，因此你应该应用调节器（Governor）来为人工介入预留时间。 考虑响应曲线。考虑一个响应曲线。在规定的范围内，操作可能是安全的。 在这个范围之外，它们应该遇到越来越大的&#34;阻力&#34;（通过减慢它们发生的速度）。",
+        "mainEntityOfPage": {
+            "@type": "WebPage",
+            "@id": "https://mozillazg.com"
+        }
+    }
+    </script>
+
+</head>
+<body>
+
+<div class="navbar" role="navigation">
+	<div class="container">
+        <div class="navbar-header">
+            <button type="button" class="navbar-toggle" data-toggle="collapse" data-target=".navbar-ex1-collapse">
+                <span class="sr-only">Toggle navigation</span>
+                <span class="icon-bar"></span>
+                <span class="icon-bar"></span>
+                <span class="icon-bar"></span>
+            </button>
+            <a href="https://mozillazg.com/" class="navbar-brand">
+Huang Huang 的博客            </a>
+        </div>
+        <div class="collapse navbar-collapse navbar-ex1-collapse">
+            <ul class="nav navbar-nav">
+                    <li><a href="https://mozillazg.com/feeds/all.atom.xml">Feed</a></li>
+                    <li><a href="/2014/10/pages/about-me.html">About</a></li>
+            </ul>
+            <ul class="nav navbar-nav navbar-right">
+              <li><a href="https://mozillazg.com/archives.html"><i class="fa fa-th-list"></i><span class="icon-label">Archives</span></a></li>
+            </ul>
+        </div>
+        <!-- /.navbar-collapse -->
+    </div>
+</div> <!-- /.navbar -->
+<!-- Banner -->
+<!-- End Banner -->
+<div class="container">
+    <div class="row">
+        <div class="col-lg-12">
+    <section id="content" class="yue">
+        <article>
+            <header class="text-center">
+                <h1>
+                    <a href="https://mozillazg.com/2019/06/Release-It-Design-and-Deploy-Production-Ready-Software-Second-Edition-2th-read-note-2.html"
+                       rel="bookmark"
+                       title="Permalink to 《Release It! Second Edition》阅读笔记（二）">
+                        《Release It! Second Edition》阅读笔记（二）
+                    </a>
+                </h1>
+                <p class="published">
+                    <time datetime="2019-06-26T00:00:00+00:00">
+                    2019-06-26
+                    </time>
+                </p>
+            </header>
+            <div class="entry-content">
+                <div class="well-sm article-info">
+<footer class="post-info">
+        <a href="https://mozillazg.com/category/reading.html">reading</a>
+
+
+<span class="label label-default hide">Tags</span>
+	<a href="https://mozillazg.com/tag/stability.html">stability</a>
+    
+</footer><!-- /.post-info -->                </div>
+                <div class="js-toc"></div>
+                <div>
+                <div class="section" id="id1">
+<h2 id="hidid1">前言<a class="headerlink" href="#hidid1" title="Permalink to this headline">¶</a></h2>
+<p>本文是 <a class="reference external" href="https://pragprog.com/book/mnee2/release-it-second-edition">《Release It! Second Edition》</a> 这本书的流水账式阅读笔记。</p>
+</div>
+<div class="section" id="stability-patterns">
+<h2 id="hidstability-patterns">Stability Patterns<a class="headerlink" href="#hidstability-patterns" title="Permalink to this headline">¶</a></h2>
+<p>这章将介绍一些提高系统稳定性的模式，当然不要觉得系统中应用的模式越多稳定性就越高。</p>
+<div class="section" id="timeouts">
+<h3 id="hidtimeouts">Timeouts<a class="headerlink" href="#hidtimeouts" title="Permalink to this headline">¶</a></h3>
+<p>Remember This</p>
+<ul class="simple">
+<li>对外部依赖、阻塞线程以及慢响应使用超时技术。</li>
+<li>使用超时技术从非预期的故障中恢复。</li>
+<li>考虑延迟重试。</li>
+</ul>
+</div>
+<div class="section" id="circuit-breaker">
+<h3 id="hidcircuit-breaker">Circuit Breaker<a class="headerlink" href="#hidcircuit-breaker" title="Permalink to this headline">¶</a></h3>
+<p>与重试不同，熔断器用于阻止操作而不是重复执行操作。
+软件中应用熔断器的方法是使用一个组件包装危险的操作，这个组件可以在系统不健康时避开对其的调用，一旦系统恢复健康重新恢复对其的调用。</p>
+<p>当熔断器处于【closed】状态的时候，它会执行常规的操作，如果操作失败的话，熔断器会记录失败情况。
+一旦失败次数（或者是失败频率）达到了阈值，熔断器触发熔断，进入【open】状态。</p>
+<p>[图]</p>
+<p>当熔断处于【open】状态的时候，所有经过熔断器的调用都将立即失败，不会去执行真正的操作。
+一段时间后，熔断器进入【half-open】状态，这个状态下，下一次的调用将执行真正的操作，如果调用成功了，
+熔断器会被重置并进入【closed】状态，如果调用失败了，熔断器将进入【open】状态直到触发超时（不会一直保持 open 会有个超时期限）。</p>
+<p>当熔断器开启时，必须对进来的调用进行处理。 最简单的答案是调用立即失败，
+也许可以抛出一个异常(最好是一个不同于普通超时的异常，这样调用者可以提供有用的反馈)。
+熔断器也可能有一个 fallback 策略。 也许它会返回最后一个好的响应或者一个缓存的值。
+它可能返回一个通用的答案，而不是一个个性化的答案。
+或者它甚至可以在主服务不可用时调用备用服务。</p>
+<p>熔断器是在系统受到压力时实现自动降级的一种方法。
+无论采用何种 fallbak 策略，都会对系统业务产生影响。
+因此，在决定如何处理熔断打开发出的调用时，必须让系统的利益相关者参与进来，也就是要根据对应的业务场景来处理。</p>
+<p>有一些有趣的实现细节需要考虑。 首先，什么是&quot;太多的失败&quot;？
+一个简单的记录所有错误的计数器可能并不那么有趣，
+观察在五小时内均匀分布的五个错误和在最后三十秒内发生的五个错误之间有着天壤之别。
+我们通常对故障密度比总计数更感兴趣。我喜欢漏桶模式（Leaky Bucket）。
+这是一个简单的计数器，可以在每次发现错误时递增。
+在后台，一个线程或计时器周期性地递减计数器(当然是递减到零) 如果计数超过一个阈值，那么你就知道错误到来的非常的快。</p>
+<p>系统中熔断器的状态对另一些利益相关的人员来说非常的重要：运维/操作人员。
+应该始终记录熔断器状态的更改事件，并且应该公开当前状态以便查询和监控。
+事实上，状态变更的频率是一个随时间变化的有用指标; 它是发现企业其他部门问题的先行指标。
+同样，运维/操作人员需要一些方法来直接跳闸或复位熔断器。
+熔断器器也是一个方便收集调用量和响应时间指标的好地方。</p>
+<p>一个熔断器应该建立在单进程的范围内。 也就是说，
+相同的熔断器状态会影响进程中的每个线程，但不会跨多个进程共享。
+这确实意味着，当调用方的多个实例各自独立地发现提供方程序宕机时，效率会有所下降。
+然而，共享熔断器状态引入了另一种进程外通信机制。 这意味着安全机制将引入一个新的故障模式！</p>
+<p>即便只在一个进程中共享，熔断器也受制于多线程编程的各种陷阱。 确保不会意外出现一个线程处理所有对外部系统的调用的情况！
+每种语言和框架都有对应的开源熔断器库，最好是从中选一个来使用。</p>
+<p>Remember This</p>
+<ul class="simple">
+<li>如果会带来坏的影响就别做。如果外部依赖有严重的问题，那就暂时别调用它。</li>
+<li>结合超时机制一起使用</li>
+<li>公开，追踪，报告状态变更事件。</li>
+</ul>
+</div>
+<div class="section" id="bulkheads">
+<h3 id="hidbulkheads">Bulkheads<a class="headerlink" href="#hidbulkheads" title="Permalink to this headline">¶</a></h3>
+<p>舱壁模式指的是对操作或服务做隔离，来实现类似故障隔离的功能，减轻故障对整个系统的影响。</p>
+<p>Remember This</p>
+<ul class="simple">
+<li>拯救船上其他部分。当故障发生的时候，通过舱壁模式提供的隔离功能来保护部分功能。</li>
+<li>选择一个合适的隔离粒度。可以隔离应用中的不同线程池、服务器上的不同 CPU 或者是集群里的不同服务器。</li>
+<li>考虑使用舱壁模式，尤其是共享服务模式下。</li>
+</ul>
+</div>
+<div class="section" id="steady-state">
+<h3 id="hidsteady-state">Steady State<a class="headerlink" href="#hidsteady-state" title="Permalink to this headline">¶</a></h3>
+<p>稳态模式认为，对于每一个积累资源的机制，都必须有一些其他的机制来回收这些资源。
+让我们来看看几种可以积累的污泥，以及如何避免搅拌的需要。</p>
+<p>Data Purging</p>
+<p>Log Files</p>
+<p>In-Memory Caching</p>
+<p>Remember This</p>
+<ul class="simple">
+<li>Avoid fiddling. 人为干预会导致问题。 消除重复人工干预的必要性。 你的系统应该至少运行一个典型的部署周期，而不需要手动清理磁盘或每晚重新启动。</li>
+<li>使用应用本身的逻辑来清理数据。</li>
+<li>限制缓存。</li>
+<li>滚动切割日志。</li>
+</ul>
+</div>
+<div class="section" id="fail-fast">
+<h3 id="hidfail-fast">Fail Fast<a class="headerlink" href="#hidfail-fast" title="Permalink to this headline">¶</a></h3>
+<p>Remember This</p>
+<ul class="simple">
+<li>阻止慢响应，尽量快速失败。如果你的系统无法满足 SLA 标准，那就快速告诉调用方，不要让调用方一直等待，一直等到超时，那样只是把你的问题传递到了他们那里。</li>
+<li>谨慎对待资源，尽早验证依赖。不要做无用的工作。</li>
+<li>使用输入校验。在请求资源前先对用户输入做基本的校验，不要出现获取了数据库连接，查询并获取了结果，最后给出少了个必选参数的情况。</li>
+</ul>
+</div>
+<div class="section" id="let-it-crash">
+<h3 id="hidlet-it-crash">Let It Crash<a class="headerlink" href="#hidlet-it-crash" title="Permalink to this headline">¶</a></h3>
+<p>有时创建系统级稳定性的最佳方法是放弃组件级稳定性。在 Erlang 中，这被称为&quot;Let It Crash&quot;的哲学。</p>
+<p>程序最干净的状态是在启动之后。 &quot;Let It Crash&quot;的方法表明错误恢复是困难的和不可靠的，所以我们的目标应该是尽快回到干净的启动状态。</p>
+<p>为了让&quot;Let It Crash&quot;起作用，我们的系统中有几件事必须是确定的。</p>
+<p>Limited Granularity</p>
+<p>崩溃必须有一个边界。我们想崩溃的是一个隔离的组件。系统的剩余部分必须要能够在一个级联故障中保护自己。</p>
+<p>Fast Replacement</p>
+<p>我们必须能够回到干净状态，并尽快恢复正常运行。 否则，当太多的实例在同时重启时，我们将看到性能下降。 极限情况下，由于所有实例都在忙于重启，我们的服务可能会无法对外提供服务。</p>
+<p>服务实例更加棘手。 这取决于需要启动多少&quot;堆栈&quot;。 下面有几个例子:</p>
+<ul class="simple">
+<li>我们在一个容器中运行 Go 二进制文件。 新容器和其中的进程的启动时间以毫秒为单位。 可以让整个容器崩溃。</li>
+<li>这是一个在 AWS 长期运行的虚拟机上运行的 NodeJS 服务。 启动 NodeJS 进程需要毫秒级别，但启动一个新的虚拟机需要几分钟。 在这种情况下，只崩溃 NodeJS 进程。</li>
+<li>一个带有 API 的老旧 JavaEE 应用程序，在一个数据中心的虚拟机上运行。 启动时间以分钟为单位。 &quot;Let It Crash&quot;不是正确的策略。</li>
+</ul>
+<p>Supervision</p>
+<p>需要有相应的守护程序或系统来重启崩溃的进程或实例。</p>
+<p>Reintegration</p>
+<p>进程/实例从崩溃中恢复后，需要有一种机制能让这个恢复后的服务能够重新对外提供服务，恢复处理外部请求。比如：当负载均衡器的健康检查发现实例恢复健康后，实例应当能够重新被加入负载均衡器中并开始接受外部请求。</p>
+<p>Remember This</p>
+<ul class="simple">
+<li>通过崩溃某个/些组件来维持整个系统的整体稳定性</li>
+<li>快速重启然后自动重新提供服务</li>
+<li>隔离组件以便可以独立的崩溃。使用熔断器（Circuit Breakers）帮助调用方从崩溃的组件中脱离出来。使用守护程序/系统（supervisors）来确定那部分需要快速重启，并保证崩溃不会影响不相关的功能。</li>
+<li>不要崩溃单体/巨大的应用。</li>
+</ul>
+</div>
+<div class="section" id="handshaking">
+<h3 id="hidhandshaking">Handshaking<a class="headerlink" href="#hidhandshaking" title="Permalink to this headline">¶</a></h3>
+<p>握手（Handshaking）就是让服务器通过控制自己的工作负载来保护自己。 服务器应该有一种拒绝传入工作的方法，而不是成为对它提出的任何要求的牺牲品。</p>
+<p>比如服务提供一个健康检查接口供负载均衡器使用，以便在异常/过载时拒绝外部请求。
+健康检查这种方式只是一个粗糙的方法，最好的方法是在你实现的任何自定义协议中实现握手机制（handshaking）。</p>
+<p>Remember This</p>
+<ul class="simple">
+<li>Create cooperative demand control。</li>
+<li>考虑健康检查。</li>
+<li>在你自己的底层协议中实现握手机制。</li>
+</ul>
+</div>
+<div class="section" id="test-harnesses">
+<h3 id="hidtest-harnesses">Test Harnesses<a class="headerlink" href="#hidtest-harnesses" title="Permalink to this headline">¶</a></h3>
+<p>开发环境、QA 环境以及集成测试环境中都无法测试部分分布式系统的失败模型，我们需要有一个测试套件（test harness）来帮助我们测试这些失败模型。</p>
+<p>考虑构建一个测试套件，它可以代替每个 web 服务都会调用的远端服务。因为远程调用需要使用网络，基于 socket 的连接容易出现下面的故障：</p>
+<ul class="simple">
+<li>连接可能被拒绝。</li>
+<li>可能会待在 listen 队列中，直到调用方超时。</li>
+<li>远端在回复了 SYN/ACK 后就不再发送任何数据了。</li>
+<li>远端只发送 RESET 包。</li>
+<li>远端反馈接收窗口满了，但是却不消费数据。</li>
+<li>连接可以建立，但是远端不发送任何数据。</li>
+<li>连接可以建立，但是丢包导致延迟重传。</li>
+<li>连接可以建立，但是远端不发送确认收到的回复，导致无限重传。</li>
+<li>服务可以接受请求，发送响应 header, 但是一直不发送响应 body。</li>
+<li>服务每 30 秒发送一个字节的响应。</li>
+<li>服务发送了一个 HTML 响应而不是预期的 XML。</li>
+<li>服务发送了 MB 级别的数据而不是预期的 KB 级别。</li>
+<li>服务拒绝所有身份验证凭据。</li>
+</ul>
+<p>这些故障可以分为不同的类别: 网络传输问题、网络协议问题、应用协议问题和应用逻辑问题。</p>
+<p>这种类似的测试套件其实是类似 &quot;chaos engineering&quot; 的思路。这个后面会讲到。</p>
+<p>Remember This</p>
+<ul class="simple">
+<li>模拟不合规的故障。</li>
+<li>对调用方施加压力。测试工具可以产生缓慢的响应、无响应或垃圾响应。 然后可以可以观察你的应用程序是如何处理这些情况的。</li>
+<li></li>
+</ul>
+</div>
+<div class="section" id="decoupling-middleware">
+<h3 id="hiddecoupling-middleware">Decoupling Middleware<a class="headerlink" href="#hiddecoupling-middleware" title="Permalink to this headline">¶</a></h3>
+<p>Remember This</p>
+<ul class="simple">
+<li>Decide at the last responsible moment. 其他稳定性模式可以在不对设计或架构进行大规模更改的情况下实现。 解耦中间件是一个架构决策。 它会波及到系统的每一个部分。 这是几乎不可逆转的决定之一，应尽早而不是推迟作出。</li>
+<li>通过完全解耦来避免多个故障模式。解耦单个服务、层和应用程序越完全，外部依赖、级联故障、慢响应和线程阻塞的问题就越少。 你会发现，解耦的应用程序也具有更强的适应性，因为你可以在不依赖其他参与者的情况下变更依赖。</li>
+<li>学习多种架构，并在其中进行选择。不是每个系统都需要成为一个带有关系数据库的三层应用程序。 学习多种架构风格，为手头的问题选择最好的架构。</li>
+</ul>
+</div>
+<div class="section" id="shed-load">
+<h3 id="hidshed-load">Shed Load<a class="headerlink" href="#hidshed-load" title="Permalink to this headline">¶</a></h3>
+<p>服务、微服务、网站和开放 api 都有一个共同特征: 它们没法控制外部请求。在任何时候，超过10亿台设备都可以发出请求。 无论你的负载均衡器有多强大，或者你的扩容速度有多快，这个世界总是会产生超出你能力的负载。</p>
+<p>Remember This</p>
+<ul class="simple">
+<li>你无法超越整个世界。如果你的服务暴露于无法控制的环境，那么你需要能够在全世界为你疯狂时甩掉/消减负载。</li>
+<li>使用 Shed Load（消减负载）来阻止慢响应。</li>
+<li>使用负载均衡器作为减震器。</li>
+</ul>
+</div>
+<div class="section" id="create-back-pressure">
+<h3 id="hidcreate-back-pressure">Create Back Pressure<a class="headerlink" href="#hidcreate-back-pressure" title="Permalink to this headline">¶</a></h3>
+<p>每个性能问题都开始于某个地方的队列开始阻塞了。可能是 socket 的 listen 队列，也可能是操作系统的运行队列或者是数据库的 I/O 队列。</p>
+<p>无限队列基本是不可接受的，因为它们会吃掉所有可用的内存。如果队列是有限的的，我们就需要决定在队列阻塞时做啥操作，只有少量的选项：</p>
+<ul class="simple">
+<li>假装接受新条目，但是实际上会直接把它丢弃。</li>
+<li>真的接受新条目，然后把队列中的一些数据给丢弃。</li>
+<li>拒绝新条目。</li>
+<li>阻塞生产者，直到队列有空位。</li>
+</ul>
+<p>对于某些用例，丢弃新条目可能是最好的选择。 对于价值随年龄(age)迅速下降的数据，删除队列中最老的条目可能是最佳选择。</p>
+<p>阻塞生产者是一种流量控制手段。 它允许队列向上游施加&quot;反压力/背压(back pressure)&quot;。 据推测，背压(back pressure)会一直传递到最终的客户端，在队列释放新的空间前，客户端的速度会被降低。</p>
+<p>Remember This</p>
+<ul class="simple">
+<li>背压（Back Pressure）通过降低（服务）消费方的消费速度来创造安全性。（服务）消费方将经历减速。 唯一的替代选择是让他们崩溃（服务）提供方。</li>
+<li>在一个系统的边界应用背压（Back Pressure）模式。跨越界限，转而关注负载的减少。尤其是当互联网是你的用户基础的时候。</li>
+<li>为了让响应时间有限，队列必须是有限的。当队列满的时候，你只有有限的几个选择。 所有这些选择都是令人不快的: 丢失数据、拒绝工作或阻塞。（服务）消费方必须小心，不要永远阻塞在那。</li>
+</ul>
+</div>
+<div class="section" id="governor">
+<h3 id="hidgovernor">Governor<a class="headerlink" href="#hidgovernor" title="Permalink to this headline">¶</a></h3>
+<p>自动化没有判断力。 当它出错的时候，往往很快就会出错。 当一个人察觉到问题的时候，它就是一个恢复而不是干预的问题。 我们怎么能允许人为干预而不让人参与其中呢？ 我们应该使用自动化来处理人类不擅长的事情: 重复性任务和快速响应。 我们应该用人来做自动化不擅长的事情: 在更高的层次上感知整个状况。</p>
+<p>我们可以创建调节器（Governor）来降低操作的速度。 Reddit 通过为他们的自动扩容装置添加一次只能关闭一定百分比的实例的逻辑来实现这一特性。</p>
+<p>调节器（Governor）是有状态和时间意识的。 它知道在一段时间内做了什么操作。 它也应该是不对称的。 大多数材质都有一个&quot;安全&quot;方向和一个&quot;不安全&quot;方向。 关闭实例是不安全的。 删除数据是不安全的。 阻止客户端 IP 地址是不安全的。</p>
+<p>你经常会在&quot;安全&quot;的定义之间找到对立。 关闭实例对于可用性是不安全的，而拉起实例对于成本是不安全的。 这些对立并不互相抵消。 相反，他们定义了一个 u 型曲线，在这个曲线上，向任何一个方向走得太远都是不好的。 这意味着操作在规定的范围内是安全的，在范围外是不安全的。
+你的 AWS 预算可能允许一千个 EC2 实例，但是如果自动扩容程序开始朝着扩容两千个实例的方向前进的话，那么它需要放慢速度。</p>
+<p>你可以将这个 u 型曲线看作是定义调节器（Governor）的响应曲线。 在安全区内行动迅速。 在范围之外调节器（Governor）增加阻力。</p>
+<p>调节器（Governor）的全部意义就是让事情慢下来，足以让人类参与进来。 当然，这意味着连接监控系统以便警告人类有异常情况，并给他们足够的可见性来了解正在发生的事情。</p>
+<p>Remember This</p>
+<ul class="simple">
+<li>让事情慢下来，以便可以人工介入。当事情即将偏离轨道时，我们常常发现自动化工具会将其推向极限。 人类更善于基于场景的思考，所以我们需要创造机会让自己能够介入其中。</li>
+<li>在不安全的方向施加阻力。 有些动作本身就是不安全的。 关闭，删除，阻塞... 这些都有可能中断服务。 自动化将使它们运行得更快，因此你应该应用调节器（Governor）来为人工介入预留时间。</li>
+<li>考虑响应曲线。考虑一个响应曲线。在规定的范围内，操作可能是安全的。 在这个范围之外，它们应该遇到越来越大的&quot;阻力&quot;（通过减慢它们发生的速度）。</li>
+</ul>
+</div>
+</div>
+
+                </div>
+            </div>
+            <!-- /.entry-content -->
+<section class="text-center">
+  
+<div id="donate"></div>
+
+<div class="social-share"></div>
+<div class="social-comment-note">
+<p>有任何建议和想法欢迎在下方评论区留言或者加我<a href="/static/wechat.png">微信</a>交流</p>
+</div>
+
+</section>
+<section class="well" id="related-posts">
+    <p>Related Posts:</p>
+    <ul>
+        <li><a href="https://mozillazg.com/2019/06/Release-It-Design-and-Deploy-Production-Ready-Software-Second-Edition-2th-read-note-1.html">《Release It! Second Edition》阅读笔记（一）</a></li>
+    </ul>
+</section>
+    <hr/>
+    <section class="comments" id="comments">
+        <h2>Comments</h2>
+
+        <div id="disqus_thread"></div>
+        <script type="text/javascript">
+            /* * * CONFIGURATION VARIABLES: EDIT BEFORE PASTING INTO YOUR WEBPAGE * * */
+            var disqus_shortname = 'my-github-blog'; // required: replace example with your forum shortname
+
+                    var disqus_identifier = 'Release-It-Design-and-Deploy-Production-Ready-Software-Second-Edition-2th-read-note-2';
+                var disqus_url = 'https://mozillazg.com/2019/06/Release-It-Design-and-Deploy-Production-Ready-Software-Second-Edition-2th-read-note-2.html';
+
+            var disqus_config = function () {
+                this.language = "zh-hans";
+            };
+
+            /* * * DON'T EDIT BELOW THIS LINE * * */
+            (function () {
+                var dsq = document.createElement('script');
+                dsq.type = 'text/javascript';
+                dsq.async = true;
+                dsq.src = '//' + disqus_shortname + '.disqus.com/embed.js';
+                (document.getElementsByTagName('head')[0] || document.getElementsByTagName('body')[0]).appendChild(dsq);
+            })();
+        </script>
+        <noscript>Please enable JavaScript to view the <a href="http://disqus.com/?ref_noscript">comments powered by
+            Disqus.</a></noscript>
+        <a href="http://disqus.com" class="dsq-brlink">comments powered by <span class="logo-disqus">Disqus</span></a>
+
+    </section>
+        </article>
+    </section>
+
+        </div>
+    </div>
+</div>
+<footer>
+   <div class="container">
+      <hr>
+      <div class="row">
+         <div class="col-xs-10">&copy; 2019 mozillazg
+            &middot; Powered by <a href="https://github.com/DandyDev/pelican-bootstrap3" target="_blank">pelican-bootstrap3</a>,
+            <a href="http://docs.getpelican.com/" target="_blank">Pelican</a>,
+            <a href="http://getbootstrap.com" target="_blank">Bootstrap</a>              <p><small>  <a rel="license" href="http://creativecommons.org/licenses/by-sa/4.0/"><img alt="Creative Commons License" style="border-width:0" src="/static/images/by-sa-80x15.png" /></a>
+    &quot;<span xmlns:dct="http://purl.org/dc/terms/" property="dct:title">Huang Huang 的博客</span>&quot; by <a xmlns:cc="http://creativecommons.org/ns#" href="https://mozillazg.com" property="cc:attributionName" rel="cc:attributionURL">mozillazg</a> is
+  licensed under a <a rel="license" href="http://creativecommons.org/licenses/by-sa/4.0/">Creative Commons Attribution-ShareAlike 4.0 International License</a>, except where indicated otherwise.
+</small></p>
+         </div>
+         <div class="col-xs-2"><p class="pull-right"><i class="fa fa-arrow-up"></i> <a href="#">Back to top</a></p></div>
+      </div>
+   </div>
+</footer>
+<script src="https://mozillazg.com/theme/js/jquery.min.js"></script>
+
+<!-- Include all compiled plugins (below), or include individual files as needed -->
+<script src="https://mozillazg.com/theme/js/bootstrap.min.js"></script>
+
+<!-- Enable responsive features in IE8 with Respond.js (https://github.com/scottjehl/Respond) -->
+<script src="https://mozillazg.com/theme/js/respond.min.js"></script>
+
+    <!-- Disqus -->
+    <script type="text/javascript">
+        /* * * CONFIGURATION VARIABLES: EDIT BEFORE PASTING INTO YOUR WEBPAGE * * */
+        var disqus_shortname = 'my-github-blog'; // required: replace example with your forum shortname
+
+        /* * * DON'T EDIT BELOW THIS LINE * * */
+        (function () {
+            var s = document.createElement('script');
+            s.async = true;
+            s.type = 'text/javascript';
+            s.src = '//' + disqus_shortname + '.disqus.com/count.js';
+            (document.getElementsByTagName('HEAD')[0] || document.getElementsByTagName('BODY')[0]).appendChild(s);
+        }());
+    </script>
+    <!-- End Disqus Code -->
+    <!-- Google Analytics Universal -->
+    <script type="text/javascript">
+        (function(i,s,o,g,r,a,m){i['GoogleAnalyticsObject']=r;i[r]=i[r]||function(){
+        (i[r].q=i[r].q||[]).push(arguments)},i[r].l=1*new Date();a=s.createElement(o),
+        m=s.getElementsByTagName(o)[0];a.async=1;a.src=g;m.parentNode.insertBefore(a,m)
+        })(window,document,'script','//www.google-analytics.com/analytics.js','ga');
+
+        ga('create', 'UA-77172981-1', 'auto');
+        ga('send', 'pageview');
+    </script>
+    <!-- End Google Analytics Universal Code -->
+
+
+<script src="https://mozillazg.com/theme/js/vdonate.js"></script>
+<script>
+$(document).ready(function(){
+new vdonate({
+  title: '如果觉得我的文章对您有用，请随意打赏。您的支持将鼓励我继续创作!', // 可选参数，打赏标题
+  btnText: '打赏支持', // 可选参数，打赏按钮文字
+  el: document.getElementById('donate'), // 必选参数，打赏按钮的容器
+  wechatImage: 'https://mozillazg.com/static/wechat_donate.png', // 必选参数，微信收款二维码
+  alipayImage: 'https://mozillazg.com/static/alipay_donate.jpg' // 必选参数，支付宝收款二维码
+});
+});
+</script>
+
+<script src="https://mozillazg.com/theme/js/tocbot.min.js"></script>
+<script>
+$(document).ready(function(){
+  tocbot.init({
+    // Where to render the table of contents.
+    tocSelector: '.js-toc',
+    // Where to grab the headings to build the table of contents.
+    contentSelector: '.entry-content',
+    // Which headings to grab inside of the contentSelector element.
+    headingSelector: 'h2, h3, h4,h5',
+    // Headings that match the ignoreSelector will be skipped.
+    ignoreSelector: '.js-toc-ignore',
+    // Main class to add to links.
+    linkClass: 'toc-link',
+    // Extra classes to add to links.
+    extraLinkClasses: '',
+    // Class to add to active links,
+    // the link corresponding to the top most heading on the page.
+    activeLinkClass: 'is-active-link',
+    // Main class to add to lists.
+    listClass: 'toc-list',
+    // Extra classes to add to lists.
+    extraListClasses: '',
+    // Class that gets added when a list should be collapsed.
+    isCollapsedClass: 'is-collapsed',
+    // Class that gets added when a list should be able
+    // to be collapsed but isn't necessarily collpased.
+    collapsibleClass: 'is-collapsible',
+    // Class to add to list items.
+    listItemClass: 'toc-list-item',
+    // How many heading levels should not be collpased.
+    // For example, number 6 will show everything since
+    // there are only 6 heading levels and number 0 will collpase them all.
+    // The sections that are hidden will open
+    // and close as you scroll to headings within them.
+    collapseDepth: 6,
+    // Smooth scrolling enabled.
+    smoothScroll: true,
+    // Smooth scroll duration.
+    smoothScrollDuration: 420,
+    // Callback for scroll end (requires: smoothScroll).
+    scrollEndCallback: function (e) {},
+    // Headings offset between the headings and the top of the document (this is meant for minor adjustments).
+    headingsOffset: 0,
+    // Timeout between events firing to make sure it's
+    // not too rapid (for performance reasons).
+    throttleTimeout: 50,
+    // Element to add the positionFixedClass to.
+    positionFixedSelector: null,
+    // Fixed position class to add to make sidebar fixed after scrolling
+    // down past the fixedSidebarOffset.
+    positionFixedClass: 'is-position-fixed',
+    // fixedSidebarOffset can be any number but by default is set
+    // to auto which sets the fixedSidebarOffset to the sidebar
+    // element's offsetTop from the top of the document on init.
+    fixedSidebarOffset: 'auto',
+    // includeHtml can be set to true to include the HTML markup from the
+    // heading node instead of just including the textContent.
+    includeHtml: false
+  });
+});
+</script>
+</body>
+</html>
