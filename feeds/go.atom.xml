@@ -497,9 +497,9 @@ Bits     Binary     Hex     Value
 &lt;li&gt;&lt;a class="reference external" href="https://www.ardanlabs.com/blog/2015/01/stack-traces-in-go.html"&gt;Stack Traces In Go&lt;/a&gt;&lt;/li&gt;
 &lt;/ul&gt;
 &lt;/div&gt;
-</summary><category term="debug"></category></entry><entry><title>Go: 关于锁（mutex）的正确使用姿势</title><link href="https://mozillazg.com/2019/04/notes-about-go-lock-mutex.html" rel="alternate"></link><updated>2019-04-07T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2019-04-07:2019/04/notes-about-go-lock-mutex.html</id><summary type="html">&lt;div class="section" id="id1"&gt;
+</summary><category term="debug"></category></entry><entry><title>Go: 关于锁（mutex）的一些使用注意事项</title><link href="https://mozillazg.com/2019/04/notes-about-go-lock-mutex.html" rel="alternate"></link><updated>2019-04-07T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2019-04-07:2019/04/notes-about-go-lock-mutex.html</id><summary type="html">&lt;div class="section" id="id1"&gt;
 &lt;h2 id="hidid1"&gt;前言&lt;a class="headerlink" href="#hidid1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
-&lt;p&gt;最近踩了一个锁的坑，所以在这里简单记录一些 Go 中关于锁（mutex）使用的一些正确姿势或注意事项。&lt;/p&gt;
+&lt;p&gt;最近踩了一个锁的坑，所以在这里简单记录一些 Go 中关于锁（mutex）使用的一些注意事项。&lt;/p&gt;
 &lt;/div&gt;
 &lt;div class="section" id="id2"&gt;
 &lt;h2 id="hidid2"&gt;尽量减少锁的持有时间&lt;a class="headerlink" href="#hidid2" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
@@ -579,36 +579,63 @@ Bits     Binary     Hex     Value
 &lt;div class="section" id="copy"&gt;
 &lt;h2 id="hidcopy"&gt;copy 结构体操作可能导致非预期的死锁&lt;a class="headerlink" href="#hidcopy" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;p&gt;copy 结构体时，如果结构体中有锁的话，记得重新初始化一个锁对象，否则会出现非预期的死锁：&lt;/p&gt;
-&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="kn"&gt;package&lt;/span&gt; &lt;span class="nx"&gt;main&lt;/span&gt;
+&lt;table class="highlighttable"&gt;&lt;tr&gt;&lt;td class="linenos"&gt;&lt;div class="linenodiv"&gt;&lt;pre&gt; 1
+ 2
+ 3
+ 4
+ 5
+ 6
+ 7
+ 8
+ 9
+10
+11
+12
+13
+14
+15
+16
+17
+18
+19
+20
+21
+22
+23
+24
+25
+26
+27
+28&lt;/pre&gt;&lt;/div&gt;&lt;/td&gt;&lt;td class="code"&gt;&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt; &lt;span class="kn"&gt;package&lt;/span&gt; &lt;span class="nx"&gt;main&lt;/span&gt;
 
-&lt;span class="kn"&gt;import&lt;/span&gt; &lt;span class="p"&gt;(&lt;/span&gt;
-    &lt;span class="s"&gt;&amp;quot;fmt&amp;quot;&lt;/span&gt;
-    &lt;span class="s"&gt;&amp;quot;sync&amp;quot;&lt;/span&gt;
-&lt;span class="p"&gt;)&lt;/span&gt;
+ &lt;span class="kn"&gt;import&lt;/span&gt; &lt;span class="p"&gt;(&lt;/span&gt;
+     &lt;span class="s"&gt;&amp;quot;fmt&amp;quot;&lt;/span&gt;
+     &lt;span class="s"&gt;&amp;quot;sync&amp;quot;&lt;/span&gt;
+ &lt;span class="p"&gt;)&lt;/span&gt;
 
-&lt;span class="kd"&gt;type&lt;/span&gt; &lt;span class="nx"&gt;User&lt;/span&gt; &lt;span class="kd"&gt;struct&lt;/span&gt; &lt;span class="p"&gt;{&lt;/span&gt;
-    &lt;span class="nx"&gt;sync&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Mutex&lt;/span&gt;
+ &lt;span class="kd"&gt;type&lt;/span&gt; &lt;span class="nx"&gt;User&lt;/span&gt; &lt;span class="kd"&gt;struct&lt;/span&gt; &lt;span class="p"&gt;{&lt;/span&gt;
+     &lt;span class="nx"&gt;sync&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Mutex&lt;/span&gt;
 
-    &lt;span class="nx"&gt;name&lt;/span&gt; &lt;span class="kt"&gt;string&lt;/span&gt;
-&lt;span class="p"&gt;}&lt;/span&gt;
+     &lt;span class="nx"&gt;name&lt;/span&gt; &lt;span class="kt"&gt;string&lt;/span&gt;
+ &lt;span class="p"&gt;}&lt;/span&gt;
 
-&lt;span class="kd"&gt;func&lt;/span&gt; &lt;span class="nx"&gt;main&lt;/span&gt;&lt;span class="p"&gt;()&lt;/span&gt; &lt;span class="p"&gt;{&lt;/span&gt;
-    &lt;span class="nx"&gt;u1&lt;/span&gt; &lt;span class="o"&gt;:=&lt;/span&gt; &lt;span class="o"&gt;&amp;amp;&lt;/span&gt;&lt;span class="nx"&gt;User&lt;/span&gt;&lt;span class="p"&gt;{&lt;/span&gt;&lt;span class="nx"&gt;name&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt; &lt;span class="s"&gt;&amp;quot;test&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;}&lt;/span&gt;
-    &lt;span class="nx"&gt;u1&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Lock&lt;/span&gt;&lt;span class="p"&gt;()&lt;/span&gt;
-    &lt;span class="k"&gt;defer&lt;/span&gt; &lt;span class="nx"&gt;u1&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Unlock&lt;/span&gt;&lt;span class="p"&gt;()&lt;/span&gt;
+ &lt;span class="kd"&gt;func&lt;/span&gt; &lt;span class="nx"&gt;main&lt;/span&gt;&lt;span class="p"&gt;()&lt;/span&gt; &lt;span class="p"&gt;{&lt;/span&gt;
+     &lt;span class="nx"&gt;u1&lt;/span&gt; &lt;span class="o"&gt;:=&lt;/span&gt; &lt;span class="o"&gt;&amp;amp;&lt;/span&gt;&lt;span class="nx"&gt;User&lt;/span&gt;&lt;span class="p"&gt;{&lt;/span&gt;&lt;span class="nx"&gt;name&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt; &lt;span class="s"&gt;&amp;quot;test&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;}&lt;/span&gt;
+     &lt;span class="nx"&gt;u1&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Lock&lt;/span&gt;&lt;span class="p"&gt;()&lt;/span&gt;
+     &lt;span class="k"&gt;defer&lt;/span&gt; &lt;span class="nx"&gt;u1&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Unlock&lt;/span&gt;&lt;span class="p"&gt;()&lt;/span&gt;
 
-    &lt;span class="nx"&gt;tmp&lt;/span&gt; &lt;span class="o"&gt;:=&lt;/span&gt; &lt;span class="o"&gt;*&lt;/span&gt;&lt;span class="nx"&gt;u1&lt;/span&gt;
-    &lt;span class="nx"&gt;u2&lt;/span&gt; &lt;span class="o"&gt;:=&lt;/span&gt; &lt;span class="o"&gt;&amp;amp;&lt;/span&gt;&lt;span class="nx"&gt;tmp&lt;/span&gt;
-    &lt;span class="c1"&gt;// u2.Mutex = sync.Mutex{} // 没有这一行就会死锁&lt;/span&gt;
+&lt;span class="hll"&gt;     &lt;span class="nx"&gt;tmp&lt;/span&gt; &lt;span class="o"&gt;:=&lt;/span&gt; &lt;span class="o"&gt;*&lt;/span&gt;&lt;span class="nx"&gt;u1&lt;/span&gt;
+&lt;/span&gt;&lt;span class="hll"&gt;     &lt;span class="nx"&gt;u2&lt;/span&gt; &lt;span class="o"&gt;:=&lt;/span&gt; &lt;span class="o"&gt;&amp;amp;&lt;/span&gt;&lt;span class="nx"&gt;tmp&lt;/span&gt;
+&lt;/span&gt;&lt;span class="hll"&gt;     &lt;span class="c1"&gt;// u2.Mutex = sync.Mutex{} // 没有这一行就会死锁&lt;/span&gt;
+&lt;/span&gt;
+     &lt;span class="nx"&gt;fmt&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Printf&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="s"&gt;&amp;quot;%#p\n&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="nx"&gt;u1&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+     &lt;span class="nx"&gt;fmt&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Printf&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="s"&gt;&amp;quot;%#p\n&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="nx"&gt;u2&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
 
-    &lt;span class="nx"&gt;fmt&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Printf&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="s"&gt;&amp;quot;%#p\n&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="nx"&gt;u1&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
-    &lt;span class="nx"&gt;fmt&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Printf&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="s"&gt;&amp;quot;%#p\n&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="nx"&gt;u2&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
-
-    &lt;span class="nx"&gt;u2&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Lock&lt;/span&gt;&lt;span class="p"&gt;()&lt;/span&gt;
-    &lt;span class="k"&gt;defer&lt;/span&gt; &lt;span class="nx"&gt;u2&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Unlock&lt;/span&gt;&lt;span class="p"&gt;()&lt;/span&gt;
-&lt;span class="p"&gt;}&lt;/span&gt;
+     &lt;span class="nx"&gt;u2&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Lock&lt;/span&gt;&lt;span class="p"&gt;()&lt;/span&gt;
+     &lt;span class="k"&gt;defer&lt;/span&gt; &lt;span class="nx"&gt;u2&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Unlock&lt;/span&gt;&lt;span class="p"&gt;()&lt;/span&gt;
+ &lt;span class="p"&gt;}&lt;/span&gt;
 &lt;/pre&gt;&lt;/div&gt;
-&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;$ go run main.go
+&lt;/td&gt;&lt;/tr&gt;&lt;/table&gt;&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;$ go run main.go
 c00000a080
 c00000a0a0
 fatal error: all goroutines are asleep - deadlock!
@@ -627,6 +654,17 @@ main.main&lt;span class="o"&gt;()&lt;/span&gt;
 &lt;p&gt;A Mutex must not be copied after first use&lt;/p&gt;
 &lt;p&gt;&lt;a class="reference external" href="https://godoc.org/sync#Mutex"&gt;https://godoc.org/sync#Mutex&lt;/a&gt;&lt;/p&gt;
 &lt;/blockquote&gt;
+&lt;/div&gt;
+&lt;div class="section" id="go-vet"&gt;
+&lt;h2 id="hidgo-vet"&gt;使用 go vet 工具检查代码中锁的使用问题&lt;a class="headerlink" href="#hidgo-vet" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;可以通过 &lt;a class="reference external" href="https://golang.org/cmd/vet/"&gt;vet&lt;/a&gt; 这个命令行来检查上面的锁 copy 的问题。比如上面的例子的检查结果如下：:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+$ go vet main.go
+# command-line-arguments
+./main.go:19:9: assignment copies lock value to tmp: command-line-arguments.User
+&lt;/pre&gt;
+&lt;p&gt;可以看到 vet 提示 19 行那里的 copy 操作中 copy 了一个锁。&lt;/p&gt;
+&lt;p&gt;BTW，使用 go vet 命令对整个项目进行检查时，可以通过 &lt;tt class="docutils literal"&gt;go vet $(go list &lt;span class="pre"&gt;./...&lt;/span&gt; | grep &lt;span class="pre"&gt;-v&lt;/span&gt; /vendor/)&lt;/tt&gt; 这个命令忽略掉 vendor 下的包。&lt;/p&gt;
 &lt;/div&gt;
 &lt;div class="section" id="build-test-race"&gt;
 &lt;h2 id="hidbuild-test-race"&gt;build/test 时使用 -race 参数以便运行时检测数据竞争问题&lt;a class="headerlink" href="#hidbuild-test-race" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
@@ -821,6 +859,7 @@ created by main.main
 &lt;li&gt;&lt;a class="reference external" href="https://en.wikipedia.org/wiki/Fail-fast"&gt;Fail-fast - Wikipedia&lt;/a&gt;&lt;/li&gt;
 &lt;li&gt;&lt;a class="reference external" href="https://medium.com/i0exception/runtime-overhead-of-using-defer-in-go-7140d5c40e32"&gt;Runtime overhead of using defer in go – i0exception – Medium&lt;/a&gt;&lt;/li&gt;
 &lt;li&gt;&lt;a class="reference external" href="https://github.com/golang/go/issues/14939"&gt;runtime: defer is slow · Issue #14939 · golang/go&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://golang.org/cmd/vet/"&gt;vet - The Go Programming Language&lt;/a&gt;&lt;/li&gt;
 &lt;/ul&gt;
 &lt;/div&gt;
 </summary><category term="lock"></category><category term="mutex"></category></entry><entry><title>go-httpheader：将 struct 转换为 http.Header</title><link href="https://mozillazg.com/2017/07/go-intro-go-httpheader.html" rel="alternate"></link><updated>2017-07-02T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2017-07-02:2017/07/go-intro-go-httpheader.html</id><summary type="html">&lt;p&gt;最近在开发 &lt;a class="reference external" href="https://github.com/mozillazg/go-cos"&gt;go-cos&lt;/a&gt; 时，

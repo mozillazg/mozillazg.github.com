@@ -1674,9 +1674,9 @@ Bits     Binary     Hex     Value
 &lt;li&gt;&lt;a class="reference external" href="https://en.wikipedia.org/wiki/Token_bucket"&gt;Token bucket - Wikipedia&lt;/a&gt;&lt;/li&gt;
 &lt;/ul&gt;
 &lt;/div&gt;
-</description><dc:creator xmlns:dc="http://purl.org/dc/elements/1.1/">mozillazg</dc:creator><pubDate>Sun, 14 Apr 2019 00:00:00 +0000</pubDate><guid>tag:mozillazg.com,2019-04-14:2019/04/rate-limiting-intro-leaky-bucket.html</guid><category>rate-limiting</category><category>leaky-bucket</category></item><item><title>Go: 关于锁（mutex）的正确使用姿势</title><link>https://mozillazg.com/2019/04/notes-about-go-lock-mutex.html</link><description>&lt;div class="section" id="id1"&gt;
+</description><dc:creator xmlns:dc="http://purl.org/dc/elements/1.1/">mozillazg</dc:creator><pubDate>Sun, 14 Apr 2019 00:00:00 +0000</pubDate><guid>tag:mozillazg.com,2019-04-14:2019/04/rate-limiting-intro-leaky-bucket.html</guid><category>rate-limiting</category><category>leaky-bucket</category></item><item><title>Go: 关于锁（mutex）的一些使用注意事项</title><link>https://mozillazg.com/2019/04/notes-about-go-lock-mutex.html</link><description>&lt;div class="section" id="id1"&gt;
 &lt;h2 id="hidid1"&gt;前言&lt;a class="headerlink" href="#hidid1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
-&lt;p&gt;最近踩了一个锁的坑，所以在这里简单记录一些 Go 中关于锁（mutex）使用的一些正确姿势或注意事项。&lt;/p&gt;
+&lt;p&gt;最近踩了一个锁的坑，所以在这里简单记录一些 Go 中关于锁（mutex）使用的一些注意事项。&lt;/p&gt;
 &lt;/div&gt;
 &lt;div class="section" id="id2"&gt;
 &lt;h2 id="hidid2"&gt;尽量减少锁的持有时间&lt;a class="headerlink" href="#hidid2" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
@@ -1756,36 +1756,63 @@ Bits     Binary     Hex     Value
 &lt;div class="section" id="copy"&gt;
 &lt;h2 id="hidcopy"&gt;copy 结构体操作可能导致非预期的死锁&lt;a class="headerlink" href="#hidcopy" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;p&gt;copy 结构体时，如果结构体中有锁的话，记得重新初始化一个锁对象，否则会出现非预期的死锁：&lt;/p&gt;
-&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="kn"&gt;package&lt;/span&gt; &lt;span class="nx"&gt;main&lt;/span&gt;
+&lt;table class="highlighttable"&gt;&lt;tr&gt;&lt;td class="linenos"&gt;&lt;div class="linenodiv"&gt;&lt;pre&gt; 1
+ 2
+ 3
+ 4
+ 5
+ 6
+ 7
+ 8
+ 9
+10
+11
+12
+13
+14
+15
+16
+17
+18
+19
+20
+21
+22
+23
+24
+25
+26
+27
+28&lt;/pre&gt;&lt;/div&gt;&lt;/td&gt;&lt;td class="code"&gt;&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt; &lt;span class="kn"&gt;package&lt;/span&gt; &lt;span class="nx"&gt;main&lt;/span&gt;
 
-&lt;span class="kn"&gt;import&lt;/span&gt; &lt;span class="p"&gt;(&lt;/span&gt;
-    &lt;span class="s"&gt;&amp;quot;fmt&amp;quot;&lt;/span&gt;
-    &lt;span class="s"&gt;&amp;quot;sync&amp;quot;&lt;/span&gt;
-&lt;span class="p"&gt;)&lt;/span&gt;
+ &lt;span class="kn"&gt;import&lt;/span&gt; &lt;span class="p"&gt;(&lt;/span&gt;
+     &lt;span class="s"&gt;&amp;quot;fmt&amp;quot;&lt;/span&gt;
+     &lt;span class="s"&gt;&amp;quot;sync&amp;quot;&lt;/span&gt;
+ &lt;span class="p"&gt;)&lt;/span&gt;
 
-&lt;span class="kd"&gt;type&lt;/span&gt; &lt;span class="nx"&gt;User&lt;/span&gt; &lt;span class="kd"&gt;struct&lt;/span&gt; &lt;span class="p"&gt;{&lt;/span&gt;
-    &lt;span class="nx"&gt;sync&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Mutex&lt;/span&gt;
+ &lt;span class="kd"&gt;type&lt;/span&gt; &lt;span class="nx"&gt;User&lt;/span&gt; &lt;span class="kd"&gt;struct&lt;/span&gt; &lt;span class="p"&gt;{&lt;/span&gt;
+     &lt;span class="nx"&gt;sync&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Mutex&lt;/span&gt;
 
-    &lt;span class="nx"&gt;name&lt;/span&gt; &lt;span class="kt"&gt;string&lt;/span&gt;
-&lt;span class="p"&gt;}&lt;/span&gt;
+     &lt;span class="nx"&gt;name&lt;/span&gt; &lt;span class="kt"&gt;string&lt;/span&gt;
+ &lt;span class="p"&gt;}&lt;/span&gt;
 
-&lt;span class="kd"&gt;func&lt;/span&gt; &lt;span class="nx"&gt;main&lt;/span&gt;&lt;span class="p"&gt;()&lt;/span&gt; &lt;span class="p"&gt;{&lt;/span&gt;
-    &lt;span class="nx"&gt;u1&lt;/span&gt; &lt;span class="o"&gt;:=&lt;/span&gt; &lt;span class="o"&gt;&amp;amp;&lt;/span&gt;&lt;span class="nx"&gt;User&lt;/span&gt;&lt;span class="p"&gt;{&lt;/span&gt;&lt;span class="nx"&gt;name&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt; &lt;span class="s"&gt;&amp;quot;test&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;}&lt;/span&gt;
-    &lt;span class="nx"&gt;u1&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Lock&lt;/span&gt;&lt;span class="p"&gt;()&lt;/span&gt;
-    &lt;span class="k"&gt;defer&lt;/span&gt; &lt;span class="nx"&gt;u1&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Unlock&lt;/span&gt;&lt;span class="p"&gt;()&lt;/span&gt;
+ &lt;span class="kd"&gt;func&lt;/span&gt; &lt;span class="nx"&gt;main&lt;/span&gt;&lt;span class="p"&gt;()&lt;/span&gt; &lt;span class="p"&gt;{&lt;/span&gt;
+     &lt;span class="nx"&gt;u1&lt;/span&gt; &lt;span class="o"&gt;:=&lt;/span&gt; &lt;span class="o"&gt;&amp;amp;&lt;/span&gt;&lt;span class="nx"&gt;User&lt;/span&gt;&lt;span class="p"&gt;{&lt;/span&gt;&lt;span class="nx"&gt;name&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt; &lt;span class="s"&gt;&amp;quot;test&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;}&lt;/span&gt;
+     &lt;span class="nx"&gt;u1&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Lock&lt;/span&gt;&lt;span class="p"&gt;()&lt;/span&gt;
+     &lt;span class="k"&gt;defer&lt;/span&gt; &lt;span class="nx"&gt;u1&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Unlock&lt;/span&gt;&lt;span class="p"&gt;()&lt;/span&gt;
 
-    &lt;span class="nx"&gt;tmp&lt;/span&gt; &lt;span class="o"&gt;:=&lt;/span&gt; &lt;span class="o"&gt;*&lt;/span&gt;&lt;span class="nx"&gt;u1&lt;/span&gt;
-    &lt;span class="nx"&gt;u2&lt;/span&gt; &lt;span class="o"&gt;:=&lt;/span&gt; &lt;span class="o"&gt;&amp;amp;&lt;/span&gt;&lt;span class="nx"&gt;tmp&lt;/span&gt;
-    &lt;span class="c1"&gt;// u2.Mutex = sync.Mutex{} // 没有这一行就会死锁&lt;/span&gt;
+&lt;span class="hll"&gt;     &lt;span class="nx"&gt;tmp&lt;/span&gt; &lt;span class="o"&gt;:=&lt;/span&gt; &lt;span class="o"&gt;*&lt;/span&gt;&lt;span class="nx"&gt;u1&lt;/span&gt;
+&lt;/span&gt;&lt;span class="hll"&gt;     &lt;span class="nx"&gt;u2&lt;/span&gt; &lt;span class="o"&gt;:=&lt;/span&gt; &lt;span class="o"&gt;&amp;amp;&lt;/span&gt;&lt;span class="nx"&gt;tmp&lt;/span&gt;
+&lt;/span&gt;&lt;span class="hll"&gt;     &lt;span class="c1"&gt;// u2.Mutex = sync.Mutex{} // 没有这一行就会死锁&lt;/span&gt;
+&lt;/span&gt;
+     &lt;span class="nx"&gt;fmt&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Printf&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="s"&gt;&amp;quot;%#p\n&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="nx"&gt;u1&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+     &lt;span class="nx"&gt;fmt&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Printf&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="s"&gt;&amp;quot;%#p\n&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="nx"&gt;u2&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
 
-    &lt;span class="nx"&gt;fmt&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Printf&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="s"&gt;&amp;quot;%#p\n&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="nx"&gt;u1&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
-    &lt;span class="nx"&gt;fmt&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Printf&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="s"&gt;&amp;quot;%#p\n&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="nx"&gt;u2&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
-
-    &lt;span class="nx"&gt;u2&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Lock&lt;/span&gt;&lt;span class="p"&gt;()&lt;/span&gt;
-    &lt;span class="k"&gt;defer&lt;/span&gt; &lt;span class="nx"&gt;u2&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Unlock&lt;/span&gt;&lt;span class="p"&gt;()&lt;/span&gt;
-&lt;span class="p"&gt;}&lt;/span&gt;
+     &lt;span class="nx"&gt;u2&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Lock&lt;/span&gt;&lt;span class="p"&gt;()&lt;/span&gt;
+     &lt;span class="k"&gt;defer&lt;/span&gt; &lt;span class="nx"&gt;u2&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Unlock&lt;/span&gt;&lt;span class="p"&gt;()&lt;/span&gt;
+ &lt;span class="p"&gt;}&lt;/span&gt;
 &lt;/pre&gt;&lt;/div&gt;
-&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;$ go run main.go
+&lt;/td&gt;&lt;/tr&gt;&lt;/table&gt;&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;$ go run main.go
 c00000a080
 c00000a0a0
 fatal error: all goroutines are asleep - deadlock!
@@ -1804,6 +1831,17 @@ main.main&lt;span class="o"&gt;()&lt;/span&gt;
 &lt;p&gt;A Mutex must not be copied after first use&lt;/p&gt;
 &lt;p&gt;&lt;a class="reference external" href="https://godoc.org/sync#Mutex"&gt;https://godoc.org/sync#Mutex&lt;/a&gt;&lt;/p&gt;
 &lt;/blockquote&gt;
+&lt;/div&gt;
+&lt;div class="section" id="go-vet"&gt;
+&lt;h2 id="hidgo-vet"&gt;使用 go vet 工具检查代码中锁的使用问题&lt;a class="headerlink" href="#hidgo-vet" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;可以通过 &lt;a class="reference external" href="https://golang.org/cmd/vet/"&gt;vet&lt;/a&gt; 这个命令行来检查上面的锁 copy 的问题。比如上面的例子的检查结果如下：:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+$ go vet main.go
+# command-line-arguments
+./main.go:19:9: assignment copies lock value to tmp: command-line-arguments.User
+&lt;/pre&gt;
+&lt;p&gt;可以看到 vet 提示 19 行那里的 copy 操作中 copy 了一个锁。&lt;/p&gt;
+&lt;p&gt;BTW，使用 go vet 命令对整个项目进行检查时，可以通过 &lt;tt class="docutils literal"&gt;go vet $(go list &lt;span class="pre"&gt;./...&lt;/span&gt; | grep &lt;span class="pre"&gt;-v&lt;/span&gt; /vendor/)&lt;/tt&gt; 这个命令忽略掉 vendor 下的包。&lt;/p&gt;
 &lt;/div&gt;
 &lt;div class="section" id="build-test-race"&gt;
 &lt;h2 id="hidbuild-test-race"&gt;build/test 时使用 -race 参数以便运行时检测数据竞争问题&lt;a class="headerlink" href="#hidbuild-test-race" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
@@ -1998,6 +2036,7 @@ created by main.main
 &lt;li&gt;&lt;a class="reference external" href="https://en.wikipedia.org/wiki/Fail-fast"&gt;Fail-fast - Wikipedia&lt;/a&gt;&lt;/li&gt;
 &lt;li&gt;&lt;a class="reference external" href="https://medium.com/i0exception/runtime-overhead-of-using-defer-in-go-7140d5c40e32"&gt;Runtime overhead of using defer in go – i0exception – Medium&lt;/a&gt;&lt;/li&gt;
 &lt;li&gt;&lt;a class="reference external" href="https://github.com/golang/go/issues/14939"&gt;runtime: defer is slow · Issue #14939 · golang/go&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://golang.org/cmd/vet/"&gt;vet - The Go Programming Language&lt;/a&gt;&lt;/li&gt;
 &lt;/ul&gt;
 &lt;/div&gt;
 </description><dc:creator xmlns:dc="http://purl.org/dc/elements/1.1/">mozillazg</dc:creator><pubDate>Sun, 07 Apr 2019 00:00:00 +0000</pubDate><guid>tag:mozillazg.com,2019-04-07:2019/04/notes-about-go-lock-mutex.html</guid><category>lock</category><category>mutex</category></item><item><title>strace 常用操作</title><link>https://mozillazg.com/2019/03/linux-debug-with-strace-cookbook-examples.html</link><description>&lt;div class="section" id="id1"&gt;
@@ -2435,8 +2474,8 @@ slow start 模式给予了节点一段时间的预热期，并且预热期间的
 &lt;p&gt;关于这个 slow start 模式有一点需要注意的是：在负载均衡器启动的时候一般不会触发 slow start 模式，虽然满足上面的新增节点的情况。因为如果在负载均衡器启动的时候就触发的话，会出现所有节点都进入 slow start 模式，可能会导致只能处理少量连接的情况，无法实际需求。如果确实需要启动时就进入 slow start 模式的话需要考虑一下这种情况会导致的容量问题。&lt;/p&gt;
 &lt;/div&gt;
 &lt;div class="section" id="id5"&gt;
-&lt;h3 id="hidid5"&gt;根据响应情况自动调整&lt;a class="headerlink" href="#hidid5" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
-&lt;p&gt;还有一种方式是根据后端响应情况来自动调整，比如后端连续多次返回的响应码是 5xx  或者响应时间超出阈值等，此时可以根据需要降低一下该节点的权重和最大连接数限制（注意要在适当的时机把权重恢复回来，比如一段时间不再返回 5xx 则逐步恢复到原来的权重值）或者把节点切换为不接受新请求的状态，一段时间后进入 slow start 模式慢慢恢复正常。&lt;/p&gt;
+&lt;h3 id="hidid5"&gt;根据响应/负载情况自动调整&lt;a class="headerlink" href="#hidid5" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
+&lt;p&gt;还有一种方式是根据后端负载或响应情况来自动调整，比如后端连续多次返回的响应码是 5xx  或者响应时间或后端服务负载超出阈值等，此时可以根据需要降低一下该节点的权重和最大连接数限制（注意要在适当的时机把权重恢复回来，比如一段时间不再返回 5xx 或后端负载恢复到正常水平 则逐步恢复到原来的权重值）或者把节点切换为不接受新请求的状态，一段时间后进入 slow start 模式慢慢恢复正常。&lt;/p&gt;
 &lt;/div&gt;
 &lt;/div&gt;
 &lt;div class="section" id="id6"&gt;
@@ -4356,8 +4395,23 @@ unittest.mock is a library for testing in Python. It allows you to replace parts
 &lt;/pre&gt;&lt;/div&gt;
 &lt;/div&gt;
 &lt;div class="section" id="id9"&gt;
-&lt;h3 id="hidid9"&gt;mock 特殊属性&lt;a class="headerlink" href="#hidid9" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
-&lt;p&gt;所谓的特殊属性就是 &lt;tt class="docutils literal"&gt;Mock&lt;/tt&gt;/&lt;tt class="docutils literal"&gt;MagicMock&lt;/tt&gt; 对象自带的属性（自带一些可选参数 &lt;a class="footnote-reference" href="#id18" id="id10"&gt;[1]&lt;/a&gt; ），
+&lt;h3 id="hidid9"&gt;mock 真值判断&lt;a class="headerlink" href="#hidid9" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
+&lt;p&gt;可以通过 mock &lt;tt class="docutils literal"&gt;__bool__&lt;/tt&gt; 方法（Python 3） 或 &lt;tt class="docutils literal"&gt;__nonzero__&lt;/tt&gt; 方法(Python 2) 来 mock 对对象的真值判断:&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="o"&gt;&amp;gt;&amp;gt;&amp;gt;&lt;/span&gt; &lt;span class="n"&gt;m&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;MagicMock&lt;/span&gt;&lt;span class="p"&gt;()&lt;/span&gt;
+&lt;span class="o"&gt;&amp;gt;&amp;gt;&amp;gt;&lt;/span&gt; &lt;span class="nb"&gt;bool&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;m&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+&lt;span class="bp"&gt;True&lt;/span&gt;
+&lt;span class="o"&gt;&amp;gt;&amp;gt;&amp;gt;&lt;/span&gt; &lt;span class="n"&gt;m&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;MagicMock&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;__bool__&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="n"&gt;MagicMock&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;return_value&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="bp"&gt;False&lt;/span&gt;&lt;span class="p"&gt;))&lt;/span&gt;
+&lt;span class="o"&gt;&amp;gt;&amp;gt;&amp;gt;&lt;/span&gt; &lt;span class="nb"&gt;bool&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;m&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+&lt;span class="bp"&gt;False&lt;/span&gt;
+&lt;span class="o"&gt;&amp;gt;&amp;gt;&amp;gt;&lt;/span&gt; &lt;span class="k"&gt;if&lt;/span&gt; &lt;span class="ow"&gt;not&lt;/span&gt; &lt;span class="n"&gt;m&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt; &lt;span class="k"&gt;print&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;false&amp;#39;&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+&lt;span class="o"&gt;...&lt;/span&gt;
+&lt;span class="n"&gt;false&lt;/span&gt;
+&lt;span class="o"&gt;&amp;gt;&amp;gt;&amp;gt;&lt;/span&gt;
+&lt;/pre&gt;&lt;/div&gt;
+&lt;/div&gt;
+&lt;div class="section" id="id10"&gt;
+&lt;h3 id="hidid10"&gt;mock 特殊属性&lt;a class="headerlink" href="#hidid10" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
+&lt;p&gt;所谓的特殊属性就是 &lt;tt class="docutils literal"&gt;Mock&lt;/tt&gt;/&lt;tt class="docutils literal"&gt;MagicMock&lt;/tt&gt; 对象自带的属性（自带一些可选参数 &lt;a class="footnote-reference" href="#id19" id="id11"&gt;[1]&lt;/a&gt; ），
 比如 &lt;tt class="docutils literal"&gt;name&lt;/tt&gt; ， 如果我们要 mock 的对象也有一个 &lt;tt class="docutils literal"&gt;name&lt;/tt&gt; 属性的话，
 通过 &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;MagicMock(name='foo')&lt;/span&gt;&lt;/tt&gt; 是无法 mock &lt;tt class="docutils literal"&gt;name&lt;/tt&gt; 这个属性的，
 可以用下面两种方法实现 mock 特殊属性:&lt;/p&gt;
@@ -4382,8 +4436,8 @@ unittest.mock is a library for testing in Python. It allows you to replace parts
 &lt;span class="o"&gt;&amp;gt;&amp;gt;&amp;gt;&lt;/span&gt;
 &lt;/pre&gt;&lt;/div&gt;
 &lt;/div&gt;
-&lt;div class="section" id="id11"&gt;
-&lt;h3 id="hidid11"&gt;自动撤销 mock&lt;a class="headerlink" href="#hidid11" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
+&lt;div class="section" id="id12"&gt;
+&lt;h3 id="hidid12"&gt;自动撤销 mock&lt;a class="headerlink" href="#hidid12" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
 &lt;p&gt;&lt;tt class="docutils literal"&gt;patch&lt;/tt&gt;, &lt;tt class="docutils literal"&gt;patch.object&lt;/tt&gt; 都支持通过 with 语句或者装饰器可以实现
 只在指定函数/方法/块中应用 mock ，函数/方法/块结束后自动撤销 mock&lt;/p&gt;
 &lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="o"&gt;&amp;gt;&amp;gt;&amp;gt;&lt;/span&gt; &lt;span class="nb"&gt;str&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;abc&amp;#39;&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
@@ -4414,11 +4468,11 @@ unittest.mock is a library for testing in Python. It allows you to replace parts
 &lt;/pre&gt;&lt;/div&gt;
 &lt;/div&gt;
 &lt;/div&gt;
-&lt;div class="section" id="id12"&gt;
-&lt;h2 id="hidid12"&gt;常用检查方法&lt;a class="headerlink" href="#hidid12" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
-&lt;p&gt;mock 的对象拥有一些可以用于单元测试的检查方法，可以用来测试 mock 对象的调用情况。&lt;/p&gt;
 &lt;div class="section" id="id13"&gt;
-&lt;h3 id="hidid13"&gt;检查调用次数&lt;a class="headerlink" href="#hidid13" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
+&lt;h2 id="hidid13"&gt;常用检查方法&lt;a class="headerlink" href="#hidid13" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;mock 的对象拥有一些可以用于单元测试的检查方法，可以用来测试 mock 对象的调用情况。&lt;/p&gt;
+&lt;div class="section" id="id14"&gt;
+&lt;h3 id="hidid14"&gt;检查调用次数&lt;a class="headerlink" href="#hidid14" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
 &lt;p&gt;待检查的 mock 对象:&lt;/p&gt;
 &lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="o"&gt;&amp;gt;&amp;gt;&amp;gt;&lt;/span&gt; &lt;span class="n"&gt;m&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;MagicMock&lt;/span&gt;&lt;span class="p"&gt;()&lt;/span&gt;
 &lt;span class="o"&gt;&amp;gt;&amp;gt;&amp;gt;&lt;/span&gt; &lt;span class="n"&gt;m&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="mi"&gt;1&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
@@ -4460,8 +4514,8 @@ unittest.mock is a library for testing in Python. It allows you to replace parts
 &lt;span class="ne"&gt;AssertionError&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt; &lt;span class="n"&gt;Expected&lt;/span&gt; &lt;span class="s1"&gt;&amp;#39;mock&amp;#39;&lt;/span&gt; &lt;span class="n"&gt;to&lt;/span&gt; &lt;span class="ow"&gt;not&lt;/span&gt; &lt;span class="n"&gt;have&lt;/span&gt; &lt;span class="n"&gt;been&lt;/span&gt; &lt;span class="n"&gt;called&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt; &lt;span class="n"&gt;Called&lt;/span&gt; &lt;span class="mi"&gt;3&lt;/span&gt; &lt;span class="n"&gt;times&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;
 &lt;/pre&gt;&lt;/div&gt;
 &lt;/div&gt;
-&lt;div class="section" id="id14"&gt;
-&lt;h3 id="hidid14"&gt;检查调用时使用的参数&lt;a class="headerlink" href="#hidid14" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
+&lt;div class="section" id="id15"&gt;
+&lt;h3 id="hidid15"&gt;检查调用时使用的参数&lt;a class="headerlink" href="#hidid15" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
 &lt;p&gt;待检查的 mock 对象:&lt;/p&gt;
 &lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="o"&gt;&amp;gt;&amp;gt;&amp;gt;&lt;/span&gt; &lt;span class="n"&gt;m&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;MagicMock&lt;/span&gt;&lt;span class="p"&gt;()&lt;/span&gt;
 &lt;span class="o"&gt;&amp;gt;&amp;gt;&amp;gt;&lt;/span&gt; &lt;span class="n"&gt;m&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="mi"&gt;1&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="mi"&gt;2&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;foo&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;bar&amp;#39;&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
@@ -4544,8 +4598,8 @@ unittest.mock is a library for testing in Python. It allows you to replace parts
 &lt;span class="p"&gt;[&lt;/span&gt;&lt;span class="n"&gt;call&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="mi"&gt;1&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="mi"&gt;2&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;foo&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;bar&amp;#39;&lt;/span&gt;&lt;span class="p"&gt;),&lt;/span&gt; &lt;span class="n"&gt;call&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="mi"&gt;2&lt;/span&gt;&lt;span class="p"&gt;),&lt;/span&gt; &lt;span class="n"&gt;call&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="mi"&gt;3&lt;/span&gt;&lt;span class="p"&gt;)]&lt;/span&gt;
 &lt;/pre&gt;&lt;/div&gt;
 &lt;/div&gt;
-&lt;div class="section" id="id15"&gt;
-&lt;h3 id="hidid15"&gt;手动重置 mock 调用记录&lt;a class="headerlink" href="#hidid15" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
+&lt;div class="section" id="id16"&gt;
+&lt;h3 id="hidid16"&gt;手动重置 mock 调用记录&lt;a class="headerlink" href="#hidid16" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
 &lt;p&gt;可以使用 &lt;tt class="docutils literal"&gt;.reset_mock()&lt;/tt&gt; 重置 mock 对象记录的调用记录:&lt;/p&gt;
 &lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="o"&gt;&amp;gt;&amp;gt;&amp;gt;&lt;/span&gt; &lt;span class="n"&gt;m&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;mock_calls&lt;/span&gt;
 &lt;span class="p"&gt;[&lt;/span&gt;&lt;span class="n"&gt;call&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="mi"&gt;1&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="mi"&gt;2&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;foo&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;bar&amp;#39;&lt;/span&gt;&lt;span class="p"&gt;),&lt;/span&gt; &lt;span class="n"&gt;call&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="mi"&gt;2&lt;/span&gt;&lt;span class="p"&gt;),&lt;/span&gt; &lt;span class="n"&gt;call&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="mi"&gt;3&lt;/span&gt;&lt;span class="p"&gt;),&lt;/span&gt; &lt;span class="n"&gt;call&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;test_method&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="mi"&gt;2&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="mi"&gt;3&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="mi"&gt;3&lt;/span&gt;&lt;span class="p"&gt;)]&lt;/span&gt;
@@ -4563,19 +4617,19 @@ unittest.mock is a library for testing in Python. It allows you to replace parts
 &lt;/pre&gt;&lt;/div&gt;
 &lt;/div&gt;
 &lt;/div&gt;
-&lt;div class="section" id="id16"&gt;
-&lt;h2 id="hidid16"&gt;总结&lt;a class="headerlink" href="#hidid16" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;div class="section" id="id17"&gt;
+&lt;h2 id="hidid17"&gt;总结&lt;a class="headerlink" href="#hidid17" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;p&gt;本文记录的是平时常用的一些 mock 相关的功能，更多内容详见 &lt;a class="reference external" href="https://docs.python.org/3/library/unittest.mock.html"&gt;官方文档&lt;/a&gt; 。&lt;/p&gt;
 &lt;/div&gt;
-&lt;div class="section" id="id17"&gt;
-&lt;h2 id="hidid17"&gt;参考资料&lt;a class="headerlink" href="#hidid17" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;div class="section" id="id18"&gt;
+&lt;h2 id="hidid18"&gt;参考资料&lt;a class="headerlink" href="#hidid18" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;ul class="simple"&gt;
 &lt;li&gt;&lt;a class="reference external" href="https://docs.python.org/3/library/unittest.mock.html"&gt;26.5. unittest.mock — mock object library — Python 3.6.4 documentation&lt;/a&gt;&lt;/li&gt;
 &lt;/ul&gt;
-&lt;table class="docutils footnote" frame="void" id="id18" rules="none"&gt;
+&lt;table class="docutils footnote" frame="void" id="id19" rules="none"&gt;
 &lt;colgroup&gt;&lt;col class="label" /&gt;&lt;col /&gt;&lt;/colgroup&gt;
 &lt;tbody valign="top"&gt;
-&lt;tr&gt;&lt;td class="label"&gt;&lt;a class="fn-backref" href="#id10"&gt;[1]&lt;/a&gt;&lt;/td&gt;&lt;td&gt;&lt;a class="reference external" href="https://docs.python.org/3/library/unittest.mock.html#unittest.mock.Mock"&gt;26.5. unittest.mock — mock object library — Python 3.6.4 documentation&lt;/a&gt;&lt;/td&gt;&lt;/tr&gt;
+&lt;tr&gt;&lt;td class="label"&gt;&lt;a class="fn-backref" href="#id11"&gt;[1]&lt;/a&gt;&lt;/td&gt;&lt;td&gt;&lt;a class="reference external" href="https://docs.python.org/3/library/unittest.mock.html#unittest.mock.Mock"&gt;26.5. unittest.mock — mock object library — Python 3.6.4 documentation&lt;/a&gt;&lt;/td&gt;&lt;/tr&gt;
 &lt;/tbody&gt;
 &lt;/table&gt;
 &lt;/div&gt;
@@ -5086,6 +5140,10 @@ tcp-fin, tcp-syn, tcp-rst, tcp-push, tcp-ack, tcp-urg, tcp-ece, tcp-cwr
 &lt;pre class="literal-block"&gt;
 'tcp[((tcp[12:1] &amp;amp; 0xf0) &amp;gt;&amp;gt; 2):4] = 0x48545450 &amp;amp;&amp;amp; tcp[((tcp[12:1] &amp;amp; 0xf0) &amp;gt;&amp;gt; 2) + 4:2] = 0x2f31 &amp;amp;&amp;amp; tcp[((tcp[12:1] &amp;amp; 0xf0) &amp;gt;&amp;gt; 2) + 6:1] = 0x2e'
 &lt;/pre&gt;
+&lt;p&gt;HTTP request header &amp;amp;&amp;amp; body &amp;amp;&amp;amp; response header &amp;amp;&amp;amp; body:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+'(((ip[2:2] - ((ip[0]&amp;amp;0xf)&amp;lt;&amp;lt;2)) - ((tcp[12]&amp;amp;0xf0)&amp;gt;&amp;gt;2)) != 0)'
+&lt;/pre&gt;
 &lt;p&gt;自动生成 HTTP 相关过滤规则的脚本: &lt;a class="reference external" href="https://www.wireshark.org/tools/string-cf.html"&gt;https://www.wireshark.org/tools/string-cf.html&lt;/a&gt;&lt;/p&gt;
 &lt;p&gt;上面的规则可以通过括号和操作符进行各种组合，从而组合出复杂的过滤规则。&lt;/p&gt;
 &lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;sudo tcpdump host 192.168.8.3 -Avv
@@ -5105,6 +5163,7 @@ sudo tcpdump dst host baidu.com and &lt;span class="s1"&gt;&amp;#39;tcp[tcpflags
 &lt;li&gt;&lt;a class="reference external" href="http://www.zioer.org/2017/07/14/linux-command-for-tcpdump/"&gt;tcpdump命令常用方法 | 卡卡罗特&lt;/a&gt;&lt;/li&gt;
 &lt;li&gt;&lt;a class="reference external" href="http://linuxwiki.github.io/NetTools/tcpdump.html#210http-get"&gt;tcpdump - Linux Wiki&lt;/a&gt;&lt;/li&gt;
 &lt;li&gt;&lt;a class="reference external" href="https://blog.wains.be/2007/2007-10-01-tcpdump-advanced-filters/"&gt;Tcpdump advanced filters - Sebastien Wains - A blog about Linux and Open Source&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://stackoverflow.com/questions/4777042/can-i-use-tcpdump-to-get-http-requests-response-header-and-response-body"&gt;android - Can I use tcpdump to get HTTP requests, response header and response body? - Stack Overflow&lt;/a&gt;&lt;/li&gt;
 &lt;/ul&gt;
 &lt;/div&gt;
 </description><dc:creator xmlns:dc="http://purl.org/dc/elements/1.1/">mozillazg</dc:creator><pubDate>Sun, 14 Jan 2018 00:00:00 +0000</pubDate><guid>tag:mozillazg.com,2018-01-14:2018/01/tcpdump-common-useful-examples-cookbook.html</guid><category>tcpdump</category></item><item><title>Python: 通过预置后门（调试接口）的方式调试运行中的进程</title><link>https://mozillazg.com/2017/12/python-debug-running-process-threading-gevent-eventlet-asyncio-via-preset-backdoor.html</link><description>&lt;div class="section" id="id1"&gt;
@@ -9817,7 +9876,7 @@ self is &amp;lt;__main__.D object at 0x10d02cf98&amp;gt; &amp;#64;A.add
 &lt;/ul&gt;
 &lt;/div&gt;
 </description><dc:creator xmlns:dc="http://purl.org/dc/elements/1.1/">mozillazg</dc:creator><pubDate>Mon, 12 Dec 2016 00:00:00 +0000</pubDate><guid>tag:mozillazg.com,2016-12-12:2016/12/python-super-is-not-as-simple-as-you-thought.html</guid><category>super</category><category>mro</category></item><item><title>Python: 多继承模式下 MRO(Method Resolution Order) 的计算方式</title><link>https://mozillazg.com/2016/11/python-mro-compute.html</link><description>&lt;p&gt;大家可能已经知道了，在 Python 3(Python 2 的新式类)中多继承模式是使用 C3 算法来确定 MRO(Method Resolution Order) 的。&lt;/p&gt;
-&lt;p&gt;那么具体是怎么计算的呢？本文将基于 &lt;a class="reference external" href="https://www.python.org/download/releases/2.3/mro/"&gt;https://www.python.org/download/releases/2.3/mro/&lt;/a&gt; 中的几个例子来讲解 MRO 是怎么计算的。&lt;/p&gt;
+&lt;p&gt;那么具体是怎么计算的呢？本文将基于 &lt;a class="reference external" href="https://www.python.org/download/releases/2.3/mro/"&gt;https://www.python.org/download/releases/2.3/mro/&lt;/a&gt; 中的几个例子来讲解 MRO 是怎么计算的。（备注：我的理解不一定完全匹配原文的内容，建议直接阅读 &lt;a class="reference external" href="https://www.python.org/download/releases/2.3/mro/"&gt;https://www.python.org/download/releases/2.3/mro/&lt;/a&gt; 这份原始材料）&lt;/p&gt;
 &lt;p&gt;我们首先来定义一些符号：&lt;/p&gt;
 &lt;pre class="literal-block"&gt;
 用 CN 表示一个类：C1, C2, C3, ..., CN
@@ -9848,15 +9907,9 @@ L[C(B1 ... BN)] = C + merge(L[B1] ... L[BN], B1 ... BN)
 &lt;p&gt;merge 的计算规则如下 &lt;a class="footnote-reference" href="#id3" id="id1"&gt;[1]&lt;/a&gt; ：&lt;/p&gt;
 &lt;blockquote&gt;
 &lt;ol class="arabic simple"&gt;
-&lt;li&gt;take the head of the first list, i.e L[B1][0];
-(取第一个列表的第一个元素)&lt;/li&gt;
-&lt;li&gt;if this head is not in the tail of any of the other lists, then add it to the linearization of C and remove it from the lists in the merge, otherwise look at the head of the next list and take it, if it is a good head.
-(如果这个元素是其他包含这个元素的列表的第一个元素或者其他列表都不包含这个元素，把它加到 C
-的线性化值列表中，并从待计算的 merge 列表中删除这个元素，否则就从下个列表中取第一个元素进行比较，
-如果这个元素满足条件的话就用它)&lt;/li&gt;
-&lt;li&gt;Then repeat the operation until all the class are removed or it is impossible to find good heads. In this case, it is impossible to construct the merge, Python 2.3 will refuse to create the class C and will raise an exception.
-(一直重复这个步骤，直到所有的类都被从 merge 列表中删除或者当出现无法找到符合规则的元素时。
-当出现无法计算 merge 规则的情况时，Python 2.3 将拒绝创建类 C 同时抛出一个异常）&lt;/li&gt;
+&lt;li&gt;take the head of the first list, i.e L[B1][0];&lt;/li&gt;
+&lt;li&gt;if this head is not in the tail of any of the other lists, then add it to the linearization of C and remove it from the lists in the merge, otherwise look at the head of the next list and take it, if it is a good head.&lt;/li&gt;
+&lt;li&gt;Then repeat the operation until all the class are removed or it is impossible to find good heads. In this case, it is impossible to construct the merge, Python 2.3 will refuse to create the class C and will raise an exception.&lt;/li&gt;
 &lt;/ol&gt;
 &lt;/blockquote&gt;
 &lt;div class="section" id="mro"&gt;
@@ -11157,7 +11210,7 @@ OperationFailure: database error: Executor error: Overflow sort stage buffered d
 &lt;li&gt;已经改为使用 &lt;tt class="docutils literal"&gt;tokenize&lt;/tt&gt; 分析生成的代码（可以分析嵌套函数）。&lt;/li&gt;
 &lt;/ul&gt;
 &lt;/div&gt;
-</description><dc:creator xmlns:dc="http://purl.org/dc/elements/1.1/">mozillazg</dc:creator><pubDate>Wed, 01 Jun 2016 00:00:00 +0000</pubDate><guid>tag:mozillazg.com,2016-06-01:2016/06/let-us-build-a-template-engine-part4.html</guid><category>lsbate</category><category>让我们一起来构建一个模板引擎</category></item><item><title>在 python 中使用 exec 函数时需要注意的一些安全问题</title><link>https://mozillazg.com/2016/05/python-some-security-problems-about-use-exec-function.rst.html</link><description>&lt;p&gt;众所周知，在 python 中可以使用 &lt;tt class="docutils literal"&gt;exec&lt;/tt&gt; 函数来执行包含 python 源代码的字符串:&lt;/p&gt;
+</description><dc:creator xmlns:dc="http://purl.org/dc/elements/1.1/">mozillazg</dc:creator><pubDate>Wed, 01 Jun 2016 00:00:00 +0000</pubDate><guid>tag:mozillazg.com,2016-06-01:2016/06/let-us-build-a-template-engine-part4.html</guid><category>let-us-build</category><category>lsbate</category><category>让我们一起来构建一个模板引擎</category></item><item><title>在 python 中使用 exec 函数时需要注意的一些安全问题</title><link>https://mozillazg.com/2016/05/python-some-security-problems-about-use-exec-function.rst.html</link><description>&lt;p&gt;众所周知，在 python 中可以使用 &lt;tt class="docutils literal"&gt;exec&lt;/tt&gt; 函数来执行包含 python 源代码的字符串:&lt;/p&gt;
 &lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="o"&gt;&amp;gt;&amp;gt;&amp;gt;&lt;/span&gt; &lt;span class="n"&gt;code&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="s1"&gt;&amp;#39;&amp;#39;&amp;#39;&lt;/span&gt;
 &lt;span class="s1"&gt;   ...: a = &amp;quot;hello&amp;quot;&lt;/span&gt;
 &lt;span class="s1"&gt;   ...: print(a)&lt;/span&gt;
@@ -12087,7 +12140,7 @@ spent 3.005035161972046s
 针对 html 做一点优化，比如去掉多余的空格，转义之类的，还有就是一些 Web 安全方面的考虑。&lt;/p&gt;
 &lt;p&gt;至于怎么实现这些优化项，我将在 &lt;a class="reference external" href="http://mozillazg.com/2016/06/let-us-build-a-template-engine-part4.html"&gt;第四篇文章&lt;/a&gt; 中向你详细的讲解。敬请期待。&lt;/p&gt;
 &lt;/div&gt;
-</description><dc:creator xmlns:dc="http://purl.org/dc/elements/1.1/">mozillazg</dc:creator><pubDate>Thu, 24 Mar 2016 00:00:00 +0000</pubDate><guid>tag:mozillazg.com,2016-03-24:2016/03/let-us-build-a-template-engine-part3.html</guid><category>lsbate</category><category>让我们一起来构建一个模板引擎</category></item><item><title>Cyanide &amp; Happiness #4244：减肥药</title><link>https://mozillazg.com/2016/03/4244.thinnerpills.zh-cn.html</link><description>&lt;p&gt;译自：&lt;a href="http://explosm.net/comics/4244/"&gt;Cyanide &amp;amp; Happiness #4244 - Explosm.net&lt;/a&gt;&lt;/p&gt;
+</description><dc:creator xmlns:dc="http://purl.org/dc/elements/1.1/">mozillazg</dc:creator><pubDate>Thu, 24 Mar 2016 00:00:00 +0000</pubDate><guid>tag:mozillazg.com,2016-03-24:2016/03/let-us-build-a-template-engine-part3.html</guid><category>let-us-build</category><category>lsbate</category><category>让我们一起来构建一个模板引擎</category></item><item><title>Cyanide &amp; Happiness #4244：减肥药</title><link>https://mozillazg.com/2016/03/4244.thinnerpills.zh-cn.html</link><description>&lt;p&gt;译自：&lt;a href="http://explosm.net/comics/4244/"&gt;Cyanide &amp;amp; Happiness #4244 - Explosm.net&lt;/a&gt;&lt;/p&gt;
 &lt;p&gt;&lt;img alt="4244.thinnerpills.zh-cn.png" src="/static/images/comics/4244.thinnerpills.zh-cn.png" /&gt;&lt;/p&gt;
 &lt;p&gt;I got these pills
 that make you thinner!    &lt;br /&gt;
@@ -12474,7 +12527,7 @@ that make you thinner!    &lt;br /&gt;
 &lt;p&gt;那么，该如何实现 &lt;tt class="docutils literal"&gt;include&lt;/tt&gt; 和 &lt;tt class="docutils literal"&gt;extends&lt;/tt&gt; 功能呢？
 我将在 &lt;a class="reference external" href="http://mozillazg.com/2016/03/let-us-build-a-template-engine-part3.html"&gt;第三篇文章&lt;/a&gt; 中向你详细的讲解。敬请期待。&lt;/p&gt;
 &lt;/div&gt;
-</description><dc:creator xmlns:dc="http://purl.org/dc/elements/1.1/">mozillazg</dc:creator><pubDate>Sat, 19 Mar 2016 00:00:00 +0000</pubDate><guid>tag:mozillazg.com,2016-03-19:2016/03/let-us-build-a-template-engine-part2.html</guid><category>lsbate</category><category>让我们一起来构建一个模板引擎</category></item><item><title>Cyanide &amp; Happiness #2191：你喜欢我吗</title><link>https://mozillazg.com/2016/03/2191.doyoulikeme.zh-cn.html</link><description>&lt;p&gt;译自：&lt;a href="http://explosm.net/comics/2191/"&gt;Cyanide &amp;amp; Happiness #2191 - Explosm.net&lt;/a&gt;&lt;/p&gt;
+</description><dc:creator xmlns:dc="http://purl.org/dc/elements/1.1/">mozillazg</dc:creator><pubDate>Sat, 19 Mar 2016 00:00:00 +0000</pubDate><guid>tag:mozillazg.com,2016-03-19:2016/03/let-us-build-a-template-engine-part2.html</guid><category>let-us-build</category><category>lsbate</category><category>让我们一起来构建一个模板引擎</category></item><item><title>Cyanide &amp; Happiness #2191：你喜欢我吗</title><link>https://mozillazg.com/2016/03/2191.doyoulikeme.zh-cn.html</link><description>&lt;p&gt;译自：&lt;a href="http://explosm.net/comics/2191/"&gt;Cyanide &amp;amp; Happiness #2191 - Explosm.net&lt;/a&gt;&lt;/p&gt;
 &lt;p&gt;&lt;img alt="2191.doyoulikeme.zh-cn.png" src="/static/images/comics/2191.doyoulikeme.zh-cn.png" /&gt;&lt;/p&gt;</description><dc:creator xmlns:dc="http://purl.org/dc/elements/1.1/">mozillazg</dc:creator><pubDate>Fri, 18 Mar 2016 00:00:00 +0000</pubDate><guid>tag:mozillazg.com,2016-03-18:2016/03/2191.doyoulikeme.zh-cn.html</guid><category>Cyanide and Happiness</category></item><item><title>Cyanide &amp; Happiness #1445：裤裆</title><link>https://mozillazg.com/2016/03/1445.pants2.zh-cn.html</link><description>&lt;p&gt;译自：&lt;a href="http://explosm.net/comics/1445/"&gt;Cyanide &amp;amp; Happiness #1445 - Explosm.net&lt;/a&gt;&lt;/p&gt;
 &lt;p&gt;&lt;img alt="1445.pants2.zh-cn.png" src="/static/images/comics/1445.pants2.zh-cn.png" /&gt;&lt;/p&gt;
 &lt;p&gt;is that a gun in your pants?
@@ -12852,7 +12905,7 @@ if age &amp;gt; 13:      # 生成完这一行以后，需要切换缩进了 ``fo
 &lt;/pre&gt;&lt;/div&gt;
 &lt;p&gt;我将在 &lt;a class="reference external" href="http://mozillazg.com/2016/03/let-us-build-a-template-engine-part2.html"&gt;第二篇文章&lt;/a&gt; 中向你详细的讲解。敬请期待。&lt;/p&gt;
 &lt;/div&gt;
-</description><dc:creator xmlns:dc="http://purl.org/dc/elements/1.1/">mozillazg</dc:creator><pubDate>Tue, 15 Mar 2016 00:00:00 +0000</pubDate><guid>tag:mozillazg.com,2016-03-15:2016/03/let-us-build-a-template-engine-part1.html</guid><category>lsbate</category><category>让我们一起来构建一个模板引擎</category></item><item><title>Victims of Circumsolar：医生知道</title><link>https://mozillazg.com/2016/03/19.dr_know.zh-cn.html</link><description>&lt;p&gt;译自：&lt;a href="http://www.victimsofcircumsolar.com/comic/dr-know/"&gt;http://www.victimsofcircumsolar.com/comic/dr-know/&lt;/a&gt;&lt;/p&gt;
+</description><dc:creator xmlns:dc="http://purl.org/dc/elements/1.1/">mozillazg</dc:creator><pubDate>Tue, 15 Mar 2016 00:00:00 +0000</pubDate><guid>tag:mozillazg.com,2016-03-15:2016/03/let-us-build-a-template-engine-part1.html</guid><category>let-us-build</category><category>lsbate</category><category>让我们一起来构建一个模板引擎</category></item><item><title>Victims of Circumsolar：医生知道</title><link>https://mozillazg.com/2016/03/19.dr_know.zh-cn.html</link><description>&lt;p&gt;译自：&lt;a href="http://www.victimsofcircumsolar.com/comic/dr-know/"&gt;http://www.victimsofcircumsolar.com/comic/dr-know/&lt;/a&gt;&lt;/p&gt;
 &lt;p&gt;&lt;img alt="19.dr_know.zh-cn.png" src="/static/images/comics/19.dr_know.zh-cn.png" /&gt;&lt;/p&gt;
 &lt;p&gt;bond, james bond          &lt;br /&gt;
 邦德，詹姆斯邦德&lt;/p&gt;
@@ -18469,7 +18522,7 @@ $ python client3.py --max-clients 128
 &lt;tr&gt;&lt;td class="label"&gt;&lt;a class="fn-backref" href="#id2"&gt;[2]&lt;/a&gt;&lt;/td&gt;&lt;td&gt;&lt;a class="reference external" href="http://book.douban.com/subject/3666232/"&gt;The Little Book of SEMAPHORES (2nd Edition): The Ins and Outs of Concurrency Control and Common Mistakes&lt;/a&gt;&lt;/td&gt;&lt;/tr&gt;
 &lt;/tbody&gt;
 &lt;/table&gt;
-</description><dc:creator xmlns:dc="http://purl.org/dc/elements/1.1/">mozillazg</dc:creator><pubDate>Thu, 27 Aug 2015 00:00:00 +0000</pubDate><guid>tag:mozillazg.com,2015-08-04:2015/08/let-us-build-a-web-server-part-3-zh-cn.html</guid><category>server</category><category>http</category><category>fork</category><category>lsbaws</category><category>让我们一起来构建一个 Web 服务器</category></item><item><title>Cyanide &amp; Happiness #1000：面具</title><link>https://mozillazg.com/2015/08/1000.chainsaw.zh-cn.html</link><description>&lt;p&gt;译自：&lt;a href="http://explosm.net/comics/1000/"&gt;Cyanide &amp;amp; Happiness #1000 - Explosm.net&lt;/a&gt;&lt;/p&gt;
+</description><dc:creator xmlns:dc="http://purl.org/dc/elements/1.1/">mozillazg</dc:creator><pubDate>Thu, 27 Aug 2015 00:00:00 +0000</pubDate><guid>tag:mozillazg.com,2015-08-04:2015/08/let-us-build-a-web-server-part-3-zh-cn.html</guid><category>let-us-build</category><category>server</category><category>http</category><category>fork</category><category>lsbaws</category><category>让我们一起来构建一个 Web 服务器</category></item><item><title>Cyanide &amp; Happiness #1000：面具</title><link>https://mozillazg.com/2015/08/1000.chainsaw.zh-cn.html</link><description>&lt;p&gt;译自：&lt;a href="http://explosm.net/comics/1000/"&gt;Cyanide &amp;amp; Happiness #1000 - Explosm.net&lt;/a&gt;&lt;/p&gt;
 &lt;p&gt;&lt;img alt="1000.chainsaw.zh-cn.png" src="/static/images/comics/1000.chainsaw.zh-cn.png" /&gt;&lt;/p&gt;</description><dc:creator xmlns:dc="http://purl.org/dc/elements/1.1/">mozillazg</dc:creator><pubDate>Mon, 03 Aug 2015 00:00:00 +0000</pubDate><guid>tag:mozillazg.com,2015-08-03:2015/08/1000.chainsaw.zh-cn.html</guid><category>Cyanide and Happiness</category></item><item><title>Cyanide &amp; Happiness #4001：生日</title><link>https://mozillazg.com/2015/08/4001.depressing20152.zh-cn.html</link><description>&lt;p&gt;译自：&lt;a href="http://explosm.net/comics/4001/"&gt;Cyanide &amp;amp; Happiness #4001 - Explosm.net&lt;/a&gt;&lt;/p&gt;
 &lt;p&gt;&lt;img alt="4001.depressing20152.zh-cn.png" src="/static/images/comics/4001.depressing20152.zh-cn.png" /&gt;&lt;/p&gt;</description><dc:creator xmlns:dc="http://purl.org/dc/elements/1.1/">mozillazg</dc:creator><pubDate>Sun, 02 Aug 2015 00:00:00 +0000</pubDate><guid>tag:mozillazg.com,2015-08-02:2015/08/4001.depressing20152.zh-cn.html</guid><category>Cyanide and Happiness</category></item><item><title>Cyanide &amp; Happiness #2257：假设</title><link>https://mozillazg.com/2015/08/2257.hypothetical.zh-cn.html</link><description>&lt;p&gt;译自：&lt;a href="http://explosm.net/comics/2257/"&gt;Cyanide &amp;amp; Happiness #2257 - Explosm.net&lt;/a&gt;&lt;/p&gt;
 &lt;p&gt;&lt;img alt="2257.hypothetical.zh-cn.png" src="/static/images/comics/2257.hypothetical.zh-cn.png" /&gt;&lt;/p&gt;
@@ -19790,7 +19843,7 @@ WSGIServer: Serving HTTP on port 8888 ...
 &lt;p&gt;就这些了。你现在有了一个可以工作的 WSGI 服务器，它能够服务那些用 WSGI 兼容的 Web 框架（比如：&lt;a class="reference external" href="https://www.djangoproject.com/"&gt;Django&lt;/a&gt;, &lt;a class="reference external" href="http://flask.pocoo.org/"&gt;Flask&lt;/a&gt;, &lt;a class="reference external" href="http://trypyramid.com/"&gt;Pyramid&lt;/a&gt; 或者是你自己开发的 WSGI 框架) 开发的基础的 Web 应用。最棒的是不需要修改任何的服务器代码就可以与多个 Web 框架一起使用。目前看起来还不赖嘛。&lt;/p&gt;
 &lt;p&gt;在你离开前，这里有另一个问题需要你思考，”如何让你的服务器能够在同一时刻处理多个请求？“&lt;/p&gt;
 &lt;p&gt;敬请期待，在 &lt;a class="reference external" href="http://mozillazg.com/2015/08/let-us-build-a-web-server-part-3-zh-cn.html"&gt;第三部分&lt;/a&gt; 我将向你展示一种方法。加油！&lt;/p&gt;
-</description><dc:creator xmlns:dc="http://purl.org/dc/elements/1.1/">mozillazg</dc:creator><pubDate>Wed, 10 Jun 2015 00:00:00 +0000</pubDate><guid>tag:mozillazg.com,2015-06-06:2015/06/let-us-build-a-web-server-part-2-zh-cn.html</guid><category>server</category><category>http</category><category>wsgi</category><category>lsbaws</category><category>让我们一起来构建一个 Web 服务器</category></item><item><title>[译][漫]Cyanide &amp; Happiness #3105：外面</title><link>https://mozillazg.com/2015/06/3105.outside.zh-cn.html</link><description>&lt;p&gt;译自：&lt;a href="http://explosm.net/comics/3105/"&gt;Cyanide &amp;amp; Happiness #3105 - Explosm.net&lt;/a&gt;&lt;/p&gt;
+</description><dc:creator xmlns:dc="http://purl.org/dc/elements/1.1/">mozillazg</dc:creator><pubDate>Wed, 10 Jun 2015 00:00:00 +0000</pubDate><guid>tag:mozillazg.com,2015-06-06:2015/06/let-us-build-a-web-server-part-2-zh-cn.html</guid><category>let-us-build</category><category>server</category><category>http</category><category>wsgi</category><category>lsbaws</category><category>让我们一起来构建一个 Web 服务器</category></item><item><title>[译][漫]Cyanide &amp; Happiness #3105：外面</title><link>https://mozillazg.com/2015/06/3105.outside.zh-cn.html</link><description>&lt;p&gt;译自：&lt;a href="http://explosm.net/comics/3105/"&gt;Cyanide &amp;amp; Happiness #3105 - Explosm.net&lt;/a&gt;&lt;/p&gt;
 &lt;p&gt;&lt;img alt="3105.outside.zh-cn.png" src="/static/images/comics/3105.outside.zh-cn.png" /&gt;&lt;/p&gt;
 &lt;p&gt;it's such a beautiful day!
 nobody ever grows up
@@ -19956,7 +20009,7 @@ Flask 应用，以及 Pyramid 应用，并且不需要做任何的改动就可�
 &lt;tr&gt;&lt;td class="label"&gt;&lt;a class="fn-backref" href="#id1"&gt;[1]&lt;/a&gt;&lt;/td&gt;&lt;td&gt;灵感来自 &lt;a class="reference external" href="http://www.amazon.com/gp/product/0814420303/ref=as_li_tl?ie=UTF8&amp;amp;camp=1789&amp;amp;creative=9325&amp;amp;creativeASIN=0814420303&amp;amp;linkCode=as2&amp;amp;tag=russblo0b-20&amp;amp;linkId=HY2LNXTSGPPFZ2EV"&gt;Lead with a Story: A Guide to Crafting Business Narratives That Captivate, Convince, and Inspire&lt;/a&gt;&lt;/td&gt;&lt;/tr&gt;
 &lt;/tbody&gt;
 &lt;/table&gt;
-</description><dc:creator xmlns:dc="http://purl.org/dc/elements/1.1/">mozillazg</dc:creator><pubDate>Wed, 03 Jun 2015 00:00:00 +0000</pubDate><guid>tag:mozillazg.com,2015-06-03:2015/06/let-us-build-a-web-server-part-1-zh-cn.html</guid><category>server</category><category>http</category><category>lsbaws</category><category>让我们一起来构建一个 Web 服务器</category></item><item><title>[译][漫]Cyanide &amp; Happiness #3103：丑</title><link>https://mozillazg.com/2015/06/3103.ugly.zh-cn.html</link><description>&lt;p&gt;译自：&lt;a href="http://explosm.net/comics/3103/"&gt;Cyanide &amp;amp; Happiness #3103 - Explosm.net&lt;/a&gt;&lt;/p&gt;
+</description><dc:creator xmlns:dc="http://purl.org/dc/elements/1.1/">mozillazg</dc:creator><pubDate>Wed, 03 Jun 2015 00:00:00 +0000</pubDate><guid>tag:mozillazg.com,2015-06-03:2015/06/let-us-build-a-web-server-part-1-zh-cn.html</guid><category>let-us-build</category><category>server</category><category>http</category><category>lsbaws</category><category>让我们一起来构建一个 Web 服务器</category></item><item><title>[译][漫]Cyanide &amp; Happiness #3103：丑</title><link>https://mozillazg.com/2015/06/3103.ugly.zh-cn.html</link><description>&lt;p&gt;译自：&lt;a href="http://explosm.net/comics/3103/"&gt;Cyanide &amp;amp; Happiness #3103 - Explosm.net&lt;/a&gt;&lt;/p&gt;
 &lt;p&gt;&lt;img alt="3103.ugly.zh-cn.png" src="/static/images/comics/3103.ugly.zh-cn.png" /&gt;&lt;/p&gt;
 &lt;p&gt;your face is ugly!    &lt;br /&gt;
 你的脸好丑！&lt;/p&gt;
