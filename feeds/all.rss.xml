@@ -1,5 +1,98 @@
 <?xml version="1.0" encoding="utf-8"?>
-<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom"><channel><title>Huang Huang 的博客</title><link>https://mozillazg.com/</link><description></description><atom:link href="https://mozillazg.com/feeds/all.rss.xml" rel="self"></atom:link><lastBuildDate>Sat, 26 Oct 2019 00:00:00 +0000</lastBuildDate><item><title>Python: multiprocessing.Queue 在特定场景下会出现内部锁异常</title><link>https://mozillazg.com/2019/10/python-multiprocessing-queue-both-full-and-empty-are-true-internal-deadlock.html</link><description>&lt;div class="section" id="id1"&gt;
+<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom"><channel><title>Huang Huang 的博客</title><link>https://mozillazg.com/</link><description></description><atom:link href="https://mozillazg.com/feeds/all.rss.xml" rel="self"></atom:link><lastBuildDate>Tue, 31 Mar 2020 00:00:00 +0000</lastBuildDate><item><title>使用 Apline 作为基础镜像时可能会遇到的常见问题的解决方法</title><link>https://mozillazg.com/2020/03/use-alpine-image-common-issues.rst.html</link><description>&lt;div class="section" id="id1"&gt;
+&lt;h2 id="hidid1"&gt;前言&lt;a class="headerlink" href="#hidid1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;简单记录一下使用 Apline 作为基础镜像时可能会遇到的常见问题的解决方法。&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class="section" id="id2"&gt;
+&lt;h2 id="hidid2"&gt;设置国内软件仓库镜像&lt;a class="headerlink" href="#hidid2" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;alpine 镜像默认的软件仓库在国外，有时 docker build 的时候安装软件包会很慢。&lt;/p&gt;
+&lt;p&gt;解决方法：使用国内的软件包镜像，比如 &lt;a class="reference external" href="https://mirrors.ustc.edu.cn"&gt;https://mirrors.ustc.edu.cn&lt;/a&gt; 的镜像:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+RUN sed -i 's!http://dl-cdn.alpinelinux.org/!https://mirrors.ustc.edu.cn/!g' /etc/apk/repositories
+&lt;/pre&gt;
+&lt;/div&gt;
+&lt;div class="section" id="panic-open-usr-local-go-lib-time-zoneinfo-zip-no-such-file-or-directory"&gt;
+&lt;h2 id="hidpanic-open-usr-local-go-lib-time-zoneinfo-zip-no-such-file-or-directory"&gt;panic: open /usr/local/go/lib/time/zoneinfo.zip: no such file or directory&lt;a class="headerlink" href="#hidpanic-open-usr-local-go-lib-time-zoneinfo-zip-no-such-file-or-directory" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;有些使用 alpine 作为基础镜像的 go 程序镜像可能会出现类似下面这样的错误:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+panic: open /usr/local/go/lib/time/zoneinfo.zip: no such file or directory
+&lt;/pre&gt;
+&lt;p&gt;常见原因：alpine 基础镜像中没有包含时区信息文件，当代码中有调用类似下面这样的通过名称获取时区信息的时候，就会出现上面的错误:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+lc, err := time.LoadLocation(&amp;quot;Asia/Shanghai&amp;quot;)
+if err != nil {
+    panic(err)
+}
+
+panic: open /usr/local/go/lib/time/zoneinfo.zip: no such file or directory
+&lt;/pre&gt;
+&lt;p&gt;解决方法：安装 &lt;tt class="docutils literal"&gt;tzdata&lt;/tt&gt; 这个包:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+RUN apk --no-cache add tzdata
+&lt;/pre&gt;
+&lt;/div&gt;
+&lt;div class="section" id="id3"&gt;
+&lt;h2 id="hidid3"&gt;配置时区&lt;a class="headerlink" href="#hidid3" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;可以通过下面的方法配置时区，大部分程序都会认这个配置:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+RUN apk --no-cache add tzdata &amp;amp;&amp;amp; \
+    cp /usr/share/zoneinfo/Asia/Shanghai /etc/localtime &amp;amp;&amp;amp; \
+    echo &amp;quot;Asia/Shanghai&amp;quot; &amp;gt; /etc/timezone
+ENV TZ Asia/Shanghai
+&lt;/pre&gt;
+&lt;/div&gt;
+&lt;div class="section" id="not-found-no-such-file"&gt;
+&lt;h2 id="hidnot-found-no-such-file"&gt;明明镜像中有对应的二进制文件，但是执行时却提示 not found 或 no such file&lt;a class="headerlink" href="#hidnot-found-no-such-file" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;有时可能会遇到明明镜像中存在相应的二进制文件，但是执行对应的二进制文件时却提示 &lt;tt class="docutils literal"&gt;not found&lt;/tt&gt; 或 &lt;tt class="docutils literal"&gt;no such file&lt;/tt&gt; 错误，类似下面这样:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+# ls /usr/bin/grep
+/usr/bin/grep
+
+# /usr/bin/grep
+/bin/sh: /usr/bin/grep: not found
+&lt;/pre&gt;
+&lt;p&gt;常见原因：该二进制文件是使用动态链接方式编译了一个使用了 &lt;tt class="docutils literal"&gt;GLIBC&lt;/tt&gt; 库的程序生成的，但是 alpne 镜像中没有 &lt;tt class="docutils literal"&gt;GLIBC&lt;/tt&gt; 库而是用的 &lt;tt class="docutils literal"&gt;MUSL LIBC&lt;/tt&gt; 库，这样就会导致该二进制文件无法被执行。&lt;/p&gt;
+&lt;p&gt;解决办法：下面两个解决方法&lt;/p&gt;
+&lt;ul class="simple"&gt;
+&lt;li&gt;改为静态编译&lt;/li&gt;
+&lt;li&gt;如果要使用动态链接函数编译的话，不要依赖 &lt;tt class="docutils literal"&gt;GLIBC&lt;/tt&gt; （比如编译 Go 程序的时候指定 &lt;tt class="docutils literal"&gt;CGO_ENABLED=0&lt;/tt&gt; ） 或者在 alpine 中编译一个依赖 &lt;tt class="docutils literal"&gt;MUSL LIBC&lt;/tt&gt; 的版本&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/div&gt;
+&lt;div class="section" id="go-https-x509-certificate-signed-by-unknown-authority"&gt;
+&lt;h2 id="hidgo-https-x509-certificate-signed-by-unknown-authority"&gt;Go 程序访问 https 服务时提示证书问题：x509: certificate signed by unknown authority&lt;a class="headerlink" href="#hidgo-https-x509-certificate-signed-by-unknown-authority" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;Go 程序使用 alpine 作为基础镜像时有时可能会遇到程序中访问 https 服务时会提示证书问题 &lt;tt class="docutils literal"&gt;x509: certificate signed by unknown authority&lt;/tt&gt;&lt;/p&gt;
+&lt;p&gt;常见原因：镜像内的 CA 证书信息太老了，需要更新一下:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+RUN apk add --no-cache ca-certificates &amp;amp;&amp;amp; \
+    update-ca-certificates
+&lt;/pre&gt;
+&lt;p&gt;还有另一个证书错误（待补充对应的 case 和详细错误信息）的原因是：编译的时候没有禁用 CGO，导致编译时使用了部分依赖 glic 的代码，解决方法就是通过 &lt;tt class="docutils literal"&gt;CGO_ENABLED=0&lt;/tt&gt; 禁用 CGO（只在确认程序确实不依赖 CGO 也可以正常工作的情况下禁用）:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+CGO_ENABLED=0 go build
+&lt;/pre&gt;
+&lt;/div&gt;
+&lt;div class="section" id="exec-user-process-caused-exec-format-error"&gt;
+&lt;h2 id="hidexec-user-process-caused-exec-format-error"&gt;exec user process caused &amp;quot;exec format error&amp;quot;&lt;a class="headerlink" href="#hidexec-user-process-caused-exec-format-error" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;有时运行有些基于 alpine 的容器会提示 &lt;tt class="docutils literal"&gt;exec user process caused &amp;quot;exec format error&amp;quot;&lt;/tt&gt; 。&lt;/p&gt;
+&lt;p&gt;常见原因：镜像中的程序编译的时候适配的不是当前运行该镜像的机器的 CPU 架构，比如程序和镜像编译时是为 x86 架构编译的，此时这个镜像就无法在 amd64 架构下运行，会报上面的错误。&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class="section" id="id4"&gt;
+&lt;h2 id="hidid4"&gt;总结&lt;a class="headerlink" href="#hidid4" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;简单记录了一下使用 Apline 作为基础镜像时可能会遇到的常见问题的解决方法（后面会持续更新）。&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class="section" id="id5"&gt;
+&lt;h2 id="hidid5"&gt;参考资料&lt;a class="headerlink" href="#hidid5" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;ul class="simple"&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://mirrors.ustc.edu.cn/help/alpine.html"&gt;Alpine Linux 源使用帮助 — USTC Mirror Help 文档&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://github.com/takecy/tz-sample"&gt;takecy/tz-sample: Sample for alpine with timezone in Golang&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://github.com/aquasecurity/kube-bench/issues/501"&gt;Error Executing 'ps' Command RHEL 7.x/8x - Ubuntu 19x · Issue #501 · aquasecurity/kube-bench&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://stackoverflow.com/questions/36279253/go-compiled-binary-wont-run-in-an-alpine-docker-container-on-ubuntu-host"&gt;Go-compiled binary won't run in an alpine docker container on Ubuntu host - Stack Overflow&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="http://www.jeffsloyer.io/post/cross-compiling-docker-alpine-golang/"&gt;Cross Compiling Golang with a Docker Alpine Container -- JeffSloyer.io&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://golang.org/pkg/net/#hdr-Name_Resolution"&gt;net - The Go Programming Language&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://wiki.alpinelinux.org/wiki/Setting_the_timezone"&gt;Setting the timezone - Alpine Linux&lt;/a&gt;&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/div&gt;
+</description><dc:creator xmlns:dc="http://purl.org/dc/elements/1.1/">mozillazg</dc:creator><pubDate>Tue, 31 Mar 2020 00:00:00 +0000</pubDate><guid>tag:mozillazg.com,2020-03-31:2020/03/use-alpine-image-common-issues.rst.html</guid><category>alpine</category></item><item><title>Python: multiprocessing.Queue 在特定场景下会出现内部锁异常</title><link>https://mozillazg.com/2019/10/python-multiprocessing-queue-both-full-and-empty-are-true-internal-deadlock.html</link><description>&lt;div class="section" id="id1"&gt;
 &lt;h2 id="hidid1"&gt;前言&lt;a class="headerlink" href="#hidid1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;p&gt;如题所述，multiprocessing.Queue 在特定场景下会出现内部锁异常，
 导致 &lt;tt class="docutils literal"&gt;Queue&lt;/tt&gt; 实例出现既无法写入数据也无法读取数据的情况。&lt;/p&gt;
@@ -208,17 +301,20 @@ reader error: Empty&lt;span class="o"&gt;()&lt;/span&gt;, &amp;lt;Lock&lt;span c
 writer error: Full&lt;span class="o"&gt;()&lt;/span&gt;
 &lt;/pre&gt;&lt;/div&gt;
 &lt;/div&gt;
-&lt;/div&gt;
 &lt;div class="section" id="id6"&gt;
-&lt;h2 id="hidid6"&gt;写入方意外退出导致内部异常&lt;a class="headerlink" href="#hidid6" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;h3 id="hidid6"&gt;应对方法&lt;a class="headerlink" href="#hidid6" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;div class="section" id="id7"&gt;
+&lt;h2 id="hidid7"&gt;写入方意外退出导致内部异常&lt;a class="headerlink" href="#hidid7" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;p&gt;另一个场景是当写入方意外退出后，极端情况下会出现内部异常导致读取方无法读取数据、
 同时新加入的写入方也无法写入数据的问题。&lt;/p&gt;
-&lt;div class="section" id="id7"&gt;
-&lt;h3 id="hidid7"&gt;复现问题&lt;a class="headerlink" href="#hidid7" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
+&lt;div class="section" id="id8"&gt;
+&lt;h3 id="hidid8"&gt;复现问题&lt;a class="headerlink" href="#hidid8" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
 &lt;p&gt;因为是极端情况下会出现的问题，暂时没找到 100% 复现问题的方法，只能从代码实现层面分析。&lt;/p&gt;
 &lt;/div&gt;
-&lt;div class="section" id="id8"&gt;
-&lt;h3 id="hidid8"&gt;原因&lt;a class="headerlink" href="#hidid8" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
+&lt;div class="section" id="id9"&gt;
+&lt;h3 id="hidid9"&gt;原因&lt;a class="headerlink" href="#hidid9" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
 &lt;p&gt;先来看一下 &lt;tt class="docutils literal"&gt;Queue&lt;/tt&gt; 的 &lt;a class="reference external" href="https://github.com/python/cpython/blob/v3.8.0/Lib/multiprocessing/queues.py"&gt;内部实现逻辑&lt;/a&gt; :&lt;/p&gt;
 &lt;table class="highlighttable"&gt;&lt;tr&gt;&lt;td class="linenos"&gt;&lt;div class="linenodiv"&gt;&lt;pre&gt;  1
   2
@@ -584,12 +680,15 @@ writer error: Full&lt;span class="o"&gt;()&lt;/span&gt;
 导致 &lt;tt class="docutils literal"&gt;put(object)&lt;/tt&gt; 中 acquire 的 semaphore 永远不会被释放，也就是说当前队列可用大小会比实际大小小1。
 如果这个进程意外退出的场景多出现几次，最终的结果就是有很多个 semaphore 永远不会被释放，极端情况下出现队列可用大小为 0 的情况，但是实际上队列中并没有数据，出现既写不进去数据又读取不了数据的情况。&lt;/p&gt;
 &lt;/div&gt;
-&lt;/div&gt;
-&lt;div class="section" id="id9"&gt;
-&lt;h2 id="hidid9"&gt;总结&lt;a class="headerlink" href="#hidid9" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
-&lt;/div&gt;
 &lt;div class="section" id="id10"&gt;
-&lt;h2 id="hidid10"&gt;参考资料&lt;a class="headerlink" href="#hidid10" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;h3 id="hidid10"&gt;应对方法&lt;a class="headerlink" href="#hidid10" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;div class="section" id="id11"&gt;
+&lt;h2 id="hidid11"&gt;总结&lt;a class="headerlink" href="#hidid11" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;/div&gt;
+&lt;div class="section" id="id12"&gt;
+&lt;h2 id="hidid12"&gt;参考资料&lt;a class="headerlink" href="#hidid12" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;ul class="simple"&gt;
 &lt;li&gt;&lt;a class="reference external" href="https://bugs.python.org/issue20527"&gt;Issue 20527: multiprocessing.Queue deadlocks after “reader” process death - Python tracker&lt;/a&gt;&lt;/li&gt;
 &lt;li&gt;&lt;a class="reference external" href="https://docs.python.org/3.8/library/multiprocessing.html#pipes-and-queues"&gt;multiprocessing — Process-based parallelism — Python 3.8.0 documentation&lt;/a&gt;&lt;/li&gt;
@@ -24241,7 +24340,7 @@ rpm -Uvh http://download.fedoraproject.org/pub/epel/6/i386/epel-release-6-8.noar
 rpm -Uvh http://download.fedoraproject.org/pub/epel/6/x86_64/epel-release-6-8.noarch.rpm
 
 # centos 7
-rpm -Uvh http://download.fedoraproject.org/pub/epel/7/x86_64/e/epel-release-7-10.noarch.rpm
+rpm -Uvh http://download.fedoraproject.org/pub/epel/7/x86_64/Packages/e/epel-release-7-12.noarch.rpm
 &lt;/pre&gt;&lt;/div&gt;
 
 
@@ -24268,7 +24367,7 @@ rpm -Uvh http://dl.iuscommunity.org/pub/ius/stable/CentOS/6/i386/ius-release-1.0
 rpm -Uvh http://dl.iuscommunity.org/pub/ius/stable/CentOS/6/x86_64/ius-release-1.0-13.ius.centos6.noarch.rpm
 
 # centos 7
-rpm -Uvh http://dl.iuscommunity.org/pub/ius/stable/CentOS/7/x86_64/ius-release-1.0-14.ius.centos7.noarch.rpm
+rpm http://dl.iuscommunity.org/pub/ius/stable/CentOS/7/x86_64/ius-release-1.0-15.ius.centos7.noarch.rpm
 &lt;/pre&gt;&lt;/div&gt;
 
 
@@ -30200,7 +30299,7 @@ browser.urlbar.restrict.typed         ~      只搜索曾经在地址栏输入�
 &lt;/pre&gt;&lt;/div&gt;
 
 
-&lt;h2&gt;配置防火墙&lt;/h2&gt;
+&lt;h2&gt;配置防火墙 (centos 5/6, ubuntu)&lt;/h2&gt;
 &lt;p&gt;下面将使用 iptables 作为服务器的防火墙，如果服务器没有安装的话需要先安装 iptables。&lt;/p&gt;
 &lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="gp"&gt;$&lt;/span&gt; sudo apt-get install iptables             &lt;span class="c1"&gt;# ubuntu&lt;/span&gt;
 &lt;span class="gp"&gt;$&lt;/span&gt; yum install iptables                      &lt;span class="c1"&gt;# centos&lt;/span&gt;
@@ -30247,6 +30346,14 @@ browser.urlbar.restrict.typed         ~      只搜索曾经在地址栏输入�
 
 &lt;span class="gp"&gt;$&lt;/span&gt; sudo apt-get install sysv-rc-conf  &lt;span class="c1"&gt;# ubuntu&lt;/span&gt;
 &lt;span class="gp"&gt;$&lt;/span&gt; sudo sysv-rc-conf iptables on    &lt;span class="c1"&gt;# ubuntu&lt;/span&gt;
+&lt;/pre&gt;&lt;/div&gt;
+
+
+&lt;h3&gt;centos 7/8&lt;/h3&gt;
+&lt;p&gt;centos 使用 firewalld 服务管理 iptables，上面的配置方法不再生效，需要使用下面的配置方法。&lt;/p&gt;
+&lt;h2&gt;修改时区&lt;/h2&gt;
+&lt;p&gt;修改时区为东八区，提示信息中输入 &lt;code&gt;y&lt;/code&gt;&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;cp /usr/share/zoneinfo/Asia/Shanghai /etc/localtime
 &lt;/pre&gt;&lt;/div&gt;
 
 

@@ -1,0 +1,95 @@
+<?xml version="1.0" encoding="utf-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom"><title>Huang Huang 的博客</title><link href="https://mozillazg.com/" rel="alternate"></link><link href="https://mozillazg.com/feeds/container.atom.xml" rel="self"></link><id>https://mozillazg.com/</id><updated>2020-03-31T00:00:00+00:00</updated><entry><title>使用 Apline 作为基础镜像时可能会遇到的常见问题的解决方法</title><link href="https://mozillazg.com/2020/03/use-alpine-image-common-issues.rst.html" rel="alternate"></link><updated>2020-03-31T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2020-03-31:2020/03/use-alpine-image-common-issues.rst.html</id><summary type="html">&lt;div class="section" id="id1"&gt;
+&lt;h2 id="hidid1"&gt;前言&lt;a class="headerlink" href="#hidid1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;简单记录一下使用 Apline 作为基础镜像时可能会遇到的常见问题的解决方法。&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class="section" id="id2"&gt;
+&lt;h2 id="hidid2"&gt;设置国内软件仓库镜像&lt;a class="headerlink" href="#hidid2" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;alpine 镜像默认的软件仓库在国外，有时 docker build 的时候安装软件包会很慢。&lt;/p&gt;
+&lt;p&gt;解决方法：使用国内的软件包镜像，比如 &lt;a class="reference external" href="https://mirrors.ustc.edu.cn"&gt;https://mirrors.ustc.edu.cn&lt;/a&gt; 的镜像:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+RUN sed -i 's!http://dl-cdn.alpinelinux.org/!https://mirrors.ustc.edu.cn/!g' /etc/apk/repositories
+&lt;/pre&gt;
+&lt;/div&gt;
+&lt;div class="section" id="panic-open-usr-local-go-lib-time-zoneinfo-zip-no-such-file-or-directory"&gt;
+&lt;h2 id="hidpanic-open-usr-local-go-lib-time-zoneinfo-zip-no-such-file-or-directory"&gt;panic: open /usr/local/go/lib/time/zoneinfo.zip: no such file or directory&lt;a class="headerlink" href="#hidpanic-open-usr-local-go-lib-time-zoneinfo-zip-no-such-file-or-directory" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;有些使用 alpine 作为基础镜像的 go 程序镜像可能会出现类似下面这样的错误:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+panic: open /usr/local/go/lib/time/zoneinfo.zip: no such file or directory
+&lt;/pre&gt;
+&lt;p&gt;常见原因：alpine 基础镜像中没有包含时区信息文件，当代码中有调用类似下面这样的通过名称获取时区信息的时候，就会出现上面的错误:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+lc, err := time.LoadLocation(&amp;quot;Asia/Shanghai&amp;quot;)
+if err != nil {
+    panic(err)
+}
+
+panic: open /usr/local/go/lib/time/zoneinfo.zip: no such file or directory
+&lt;/pre&gt;
+&lt;p&gt;解决方法：安装 &lt;tt class="docutils literal"&gt;tzdata&lt;/tt&gt; 这个包:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+RUN apk --no-cache add tzdata
+&lt;/pre&gt;
+&lt;/div&gt;
+&lt;div class="section" id="id3"&gt;
+&lt;h2 id="hidid3"&gt;配置时区&lt;a class="headerlink" href="#hidid3" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;可以通过下面的方法配置时区，大部分程序都会认这个配置:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+RUN apk --no-cache add tzdata &amp;amp;&amp;amp; \
+    cp /usr/share/zoneinfo/Asia/Shanghai /etc/localtime &amp;amp;&amp;amp; \
+    echo &amp;quot;Asia/Shanghai&amp;quot; &amp;gt; /etc/timezone
+ENV TZ Asia/Shanghai
+&lt;/pre&gt;
+&lt;/div&gt;
+&lt;div class="section" id="not-found-no-such-file"&gt;
+&lt;h2 id="hidnot-found-no-such-file"&gt;明明镜像中有对应的二进制文件，但是执行时却提示 not found 或 no such file&lt;a class="headerlink" href="#hidnot-found-no-such-file" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;有时可能会遇到明明镜像中存在相应的二进制文件，但是执行对应的二进制文件时却提示 &lt;tt class="docutils literal"&gt;not found&lt;/tt&gt; 或 &lt;tt class="docutils literal"&gt;no such file&lt;/tt&gt; 错误，类似下面这样:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+# ls /usr/bin/grep
+/usr/bin/grep
+
+# /usr/bin/grep
+/bin/sh: /usr/bin/grep: not found
+&lt;/pre&gt;
+&lt;p&gt;常见原因：该二进制文件是使用动态链接方式编译了一个使用了 &lt;tt class="docutils literal"&gt;GLIBC&lt;/tt&gt; 库的程序生成的，但是 alpne 镜像中没有 &lt;tt class="docutils literal"&gt;GLIBC&lt;/tt&gt; 库而是用的 &lt;tt class="docutils literal"&gt;MUSL LIBC&lt;/tt&gt; 库，这样就会导致该二进制文件无法被执行。&lt;/p&gt;
+&lt;p&gt;解决办法：下面两个解决方法&lt;/p&gt;
+&lt;ul class="simple"&gt;
+&lt;li&gt;改为静态编译&lt;/li&gt;
+&lt;li&gt;如果要使用动态链接函数编译的话，不要依赖 &lt;tt class="docutils literal"&gt;GLIBC&lt;/tt&gt; （比如编译 Go 程序的时候指定 &lt;tt class="docutils literal"&gt;CGO_ENABLED=0&lt;/tt&gt; ） 或者在 alpine 中编译一个依赖 &lt;tt class="docutils literal"&gt;MUSL LIBC&lt;/tt&gt; 的版本&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/div&gt;
+&lt;div class="section" id="go-https-x509-certificate-signed-by-unknown-authority"&gt;
+&lt;h2 id="hidgo-https-x509-certificate-signed-by-unknown-authority"&gt;Go 程序访问 https 服务时提示证书问题：x509: certificate signed by unknown authority&lt;a class="headerlink" href="#hidgo-https-x509-certificate-signed-by-unknown-authority" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;Go 程序使用 alpine 作为基础镜像时有时可能会遇到程序中访问 https 服务时会提示证书问题 &lt;tt class="docutils literal"&gt;x509: certificate signed by unknown authority&lt;/tt&gt;&lt;/p&gt;
+&lt;p&gt;常见原因：镜像内的 CA 证书信息太老了，需要更新一下:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+RUN apk add --no-cache ca-certificates &amp;amp;&amp;amp; \
+    update-ca-certificates
+&lt;/pre&gt;
+&lt;p&gt;还有另一个证书错误（待补充对应的 case 和详细错误信息）的原因是：编译的时候没有禁用 CGO，导致编译时使用了部分依赖 glic 的代码，解决方法就是通过 &lt;tt class="docutils literal"&gt;CGO_ENABLED=0&lt;/tt&gt; 禁用 CGO（只在确认程序确实不依赖 CGO 也可以正常工作的情况下禁用）:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+CGO_ENABLED=0 go build
+&lt;/pre&gt;
+&lt;/div&gt;
+&lt;div class="section" id="exec-user-process-caused-exec-format-error"&gt;
+&lt;h2 id="hidexec-user-process-caused-exec-format-error"&gt;exec user process caused &amp;quot;exec format error&amp;quot;&lt;a class="headerlink" href="#hidexec-user-process-caused-exec-format-error" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;有时运行有些基于 alpine 的容器会提示 &lt;tt class="docutils literal"&gt;exec user process caused &amp;quot;exec format error&amp;quot;&lt;/tt&gt; 。&lt;/p&gt;
+&lt;p&gt;常见原因：镜像中的程序编译的时候适配的不是当前运行该镜像的机器的 CPU 架构，比如程序和镜像编译时是为 x86 架构编译的，此时这个镜像就无法在 amd64 架构下运行，会报上面的错误。&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class="section" id="id4"&gt;
+&lt;h2 id="hidid4"&gt;总结&lt;a class="headerlink" href="#hidid4" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;简单记录了一下使用 Apline 作为基础镜像时可能会遇到的常见问题的解决方法（后面会持续更新）。&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class="section" id="id5"&gt;
+&lt;h2 id="hidid5"&gt;参考资料&lt;a class="headerlink" href="#hidid5" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;ul class="simple"&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://mirrors.ustc.edu.cn/help/alpine.html"&gt;Alpine Linux 源使用帮助 — USTC Mirror Help 文档&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://github.com/takecy/tz-sample"&gt;takecy/tz-sample: Sample for alpine with timezone in Golang&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://github.com/aquasecurity/kube-bench/issues/501"&gt;Error Executing 'ps' Command RHEL 7.x/8x - Ubuntu 19x · Issue #501 · aquasecurity/kube-bench&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://stackoverflow.com/questions/36279253/go-compiled-binary-wont-run-in-an-alpine-docker-container-on-ubuntu-host"&gt;Go-compiled binary won't run in an alpine docker container on Ubuntu host - Stack Overflow&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="http://www.jeffsloyer.io/post/cross-compiling-docker-alpine-golang/"&gt;Cross Compiling Golang with a Docker Alpine Container -- JeffSloyer.io&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://golang.org/pkg/net/#hdr-Name_Resolution"&gt;net - The Go Programming Language&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://wiki.alpinelinux.org/wiki/Setting_the_timezone"&gt;Setting the timezone - Alpine Linux&lt;/a&gt;&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/div&gt;
+</summary><category term="alpine"></category></entry></feed>
