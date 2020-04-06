@@ -1,5 +1,125 @@
 <?xml version="1.0" encoding="utf-8"?>
-<feed xmlns="http://www.w3.org/2005/Atom"><title>Huang Huang 的博客</title><link href="https://mozillazg.com/" rel="alternate"></link><link href="https://mozillazg.com/feeds/container.atom.xml" rel="self"></link><id>https://mozillazg.com/</id><updated>2020-03-31T00:00:00+00:00</updated><entry><title>使用 Apline 作为基础镜像时可能会遇到的常见问题的解决方法</title><link href="https://mozillazg.com/2020/03/use-alpine-image-common-issues.rst.html" rel="alternate"></link><updated>2020-03-31T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2020-03-31:2020/03/use-alpine-image-common-issues.rst.html</id><summary type="html">&lt;div class="section" id="id1"&gt;
+<feed xmlns="http://www.w3.org/2005/Atom"><title>Huang Huang 的博客</title><link href="https://mozillazg.com/" rel="alternate"></link><link href="https://mozillazg.com/feeds/container.atom.xml" rel="self"></link><id>https://mozillazg.com/</id><updated>2020-04-04T00:00:00+00:00</updated><entry><title>一个在容器外用 tcpdump 命令对容器内的网络请求抓包的方法</title><link href="https://mozillazg.com/2020/04/use-tcpdump-for-a-container-but-outside-container.html" rel="alternate"></link><updated>2020-04-04T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2020-04-04:2020/04/use-tcpdump-for-a-container-but-outside-container.html</id><summary type="html">&lt;div class="section" id="id1"&gt;
+&lt;h2 id="hidid1"&gt;前言&lt;a class="headerlink" href="#hidid1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;如题所述，记录一种在不进入容器的情况下对容器进行抓包的方法。&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class="section" id="id2"&gt;
+&lt;h2 id="hidid2"&gt;方法介绍&lt;a class="headerlink" href="#hidid2" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;简单来说就是找到容器所用的网卡，然后在 host 机器上对该网卡进行抓包就可以了 :joy&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class="section" id="id3"&gt;
+&lt;h2 id="hidid3"&gt;操作示例&lt;a class="headerlink" href="#hidid3" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;创建一个测试容器:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+$ docker run -d --rm --name test2 busybox sh -c 'while true; do wget baidu.com -O /tmp/test ; sleep 1; done'
+1adfbbc5e3519eed16334590934c48cce778728660508a255f6fafe600c6bcd1
+&lt;/pre&gt;
+&lt;p&gt;找到这个容器使用的网卡:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+$ PID=$(docker inspect --format {{.State.Pid}} test2)
+
+$ nsenter -n -t $PID ip addr
+1: lo: &amp;lt;LOOPBACK,UP,LOWER_UP&amp;gt; mtu 65536 qdisc noqueue state UNKNOWN group default qlen 1000
+    link/loopback 00:00:00:00:00:00 brd 00:00:00:00:00:00
+    inet 127.0.0.1/8 scope host lo
+       valid_lft forever preferred_lft forever
+18: eth0&amp;#64;if19: &amp;lt;BROADCAST,MULTICAST,UP,LOWER_UP&amp;gt; mtu 1500 qdisc noqueue state UP group default
+    link/ether 02:42:ac:11:00:02 brd ff:ff:ff:ff:ff:ff link-netnsid 0
+    inet 172.17.0.2/16 brd 172.17.255.255 scope global eth0
+       valid_lft forever preferred_lft forever
+&lt;/pre&gt;
+&lt;p&gt;上面的那个 &lt;tt class="docutils literal"&gt;&amp;#64;if19&lt;/tt&gt; 是关键信息，然后在 host 机器上找到这个 &lt;tt class="docutils literal"&gt;&amp;#64;if19&lt;/tt&gt; 对应的网卡:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+# ip addr
+...
+19: veth504d7e6&amp;#64;if18: &amp;lt;BROADCAST,MULTICAST,UP,LOWER_UP&amp;gt; mtu 1500 qdisc noqueue master docker0 state UP group default
+    link/ether 9a:e8:ea:58:9d:f1 brd ff:ff:ff:ff:ff:ff link-netnsid 0
+    inet6 fe80::98e8:eaff:fe58:9df1/64 scope link
+       valid_lft forever preferred_lft forever
+&lt;/pre&gt;
+&lt;p&gt;这个 &lt;tt class="docutils literal"&gt;19:&lt;/tt&gt; 就是我们要找的 &lt;tt class="docutils literal"&gt;&amp;#64;if19&lt;/tt&gt; 网卡信息，抓包的时候指定对应的网卡 &lt;tt class="docutils literal"&gt;veth504d7e6&lt;/tt&gt; ， 现在可以抓包了:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+$ tcpdump -i veth504d7e6 port 80 -A
+tcpdump: verbose output suppressed, use -v or -vv for full protocol decode
+listening on veth504d7e6, link-type EN10MB (Ethernet), capture size 262144 bytes
+05:39:43.181244 IP 172.17.0.2.33430 &amp;gt; 39.156.69.79.http: Flags [S], seq 2619505737, win 29200, options [mss 1460,sackOK,TS val 812639981 ecr 0,nop,wscale 7], length 0
+E..&amp;lt;Vj&amp;#64;.&amp;#64;..S....'.EO...P.&amp;quot;|I......r..-.........
+0o..........
+05:39:43.270550 IP 39.156.69.79.http &amp;gt; 172.17.0.2.33430: Flags [S.], seq 820750215, ack 2619505738, win 8192, options [mss 1452,sackOK,nop,nop,nop,nop,nop,nop,nop,nop,nop,nop,nop,wscale 5], length 0
+E..&amp;lt;Vj&amp;#64;.,..O'.EO.....P..0....&amp;quot;|J.. ..:......................
+05:39:43.270608 IP 172.17.0.2.33430 &amp;gt; 39.156.69.79.http: Flags [.], ack 1, win 229, length 0
+E..(Vk&amp;#64;.&amp;#64;..f....'.EO...P.&amp;quot;|J0...P.......
+05:39:43.270686 IP 172.17.0.2.33430 &amp;gt; 39.156.69.79.http: Flags [P.], seq 1:73, ack 1, win 229, length 72: HTTP: GET / HTTP/1.1
+E..pVl&amp;#64;.&amp;#64;.......'.EO...P.&amp;quot;|J0...P....a..GET / HTTP/1.1
+Host: baidu.com
+User-Agent: Wget
+Connection: close
+&lt;/pre&gt;
+&lt;/div&gt;
+&lt;div class="section" id="id4"&gt;
+&lt;h2 id="hidid4"&gt;总结&lt;a class="headerlink" href="#hidid4" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;/div&gt;
+&lt;div class="section" id="id5"&gt;
+&lt;h2 id="hidid5"&gt;参考资料&lt;a class="headerlink" href="#hidid5" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;ul class="simple"&gt;
+&lt;li&gt;&lt;a class="reference external" href="http://man7.org/linux/man-pages/man1/nsenter.1.html"&gt;nsenter(1) - Linux manual page&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://docs.docker.com/engine/reference/commandline/inspect/"&gt;docker inspect | Docker Documentation&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://mozillazg.com/2018/01/tcpdump-common-useful-examples-cookbook.html"&gt;tcpdump 常用操作&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://mozillazg.com/2020/04/nsenter-usage.html"&gt;nsenter 常用操作&lt;/a&gt;&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/div&gt;
+</summary><category term="debug"></category><category term="tcpdump"></category></entry><entry><title>nsenter 常用操作</title><link href="https://mozillazg.com/2020/04/nsenter-usage.html" rel="alternate"></link><updated>2020-04-03T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2020-04-03:2020/04/nsenter-usage.html</id><summary type="html">&lt;div class="section" id="id1"&gt;
+&lt;h2 id="hidid1"&gt;前言&lt;a class="headerlink" href="#hidid1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;nsenter 是一个可以用来进入到目标程序说在 namespace 中运行命令的工具，一般可以用于在容器外 debug 容器中运行的程序。简单记录一下 nsenter 的常用用法。&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class="section" id="id2"&gt;
+&lt;h2 id="hidid2"&gt;常用参数&lt;a class="headerlink" href="#hidid2" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;最常用的参数组合是:&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;nsenter -m -u -i -n -p -t &amp;lt;pid&amp;gt; &amp;lt;command&amp;gt;
+&lt;/pre&gt;&lt;/div&gt;
+&lt;p&gt;参数的含义如下:&lt;/p&gt;
+&lt;ul class="simple"&gt;
+&lt;li&gt;&lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;-m,&lt;/span&gt; &lt;span class="pre"&gt;--mount[=&amp;lt;file&amp;gt;]&lt;/span&gt;&lt;/tt&gt;   enter mount namespace&lt;/li&gt;
+&lt;li&gt;&lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;-u,&lt;/span&gt; &lt;span class="pre"&gt;--uts[=&amp;lt;file&amp;gt;]&lt;/span&gt;&lt;/tt&gt;     enter UTS namespace (hostname etc)&lt;/li&gt;
+&lt;li&gt;&lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;-i,&lt;/span&gt; &lt;span class="pre"&gt;--ipc[=&amp;lt;file&amp;gt;]&lt;/span&gt;&lt;/tt&gt;     enter System V IPC namespace&lt;/li&gt;
+&lt;li&gt;&lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;-n,&lt;/span&gt; &lt;span class="pre"&gt;--net[=&amp;lt;file&amp;gt;]&lt;/span&gt;&lt;/tt&gt;     enter network namespace&lt;/li&gt;
+&lt;li&gt;&lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;-p,&lt;/span&gt; &lt;span class="pre"&gt;--pid[=&amp;lt;file&amp;gt;]&lt;/span&gt;&lt;/tt&gt;     enter pid namespace&lt;/li&gt;
+&lt;li&gt;&lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;-t,&lt;/span&gt; &lt;span class="pre"&gt;--target&lt;/span&gt; &amp;lt;pid&amp;gt;&lt;/tt&gt;     target process to get namespaces from&lt;/li&gt;
+&lt;/ul&gt;
+&lt;p&gt;结合 docker 使用用于在某个容器的 namespace 中运行指定程序的常用命令是:&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="nv"&gt;PID&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="k"&gt;$(&lt;/span&gt;docker inspect --format &lt;span class="o"&gt;{{&lt;/span&gt;.State.Pid&lt;span class="o"&gt;}}&lt;/span&gt; &amp;lt;container_name_or_ID&amp;gt;&lt;span class="k"&gt;)&lt;/span&gt;
+nsenter -m -u -i -n -p -t &lt;span class="nv"&gt;$PID&lt;/span&gt; &amp;lt;command&amp;gt;
+&lt;/pre&gt;&lt;/div&gt;
+&lt;p&gt;例子:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+$ docker run --rm --name test -d busybox  sleep 10000
+8115009baccc53a2a5f6dfff642e0d8ab1dfb95dde473d14fb9a06ce4e89364c
+
+$ docker ps |grep busybox
+8115009baccc        busybox             &amp;quot;sleep 10000&amp;quot;            9 seconds ago       Up 8 seconds                            test
+
+$ PID=$(docker inspect --format {{.State.Pid}} 8115009baccc)
+
+$ nsenter -m -u -i -n -p -t $PID ps aux
+PID   USER     TIME  COMMAND
+    1 root      0:00 sleep 10000
+    7 root      0:00 ps aux
+
+$ nsenter -m -u -i -n -p -t $PID hostname
+8115009baccc
+&lt;/pre&gt;
+&lt;/div&gt;
+&lt;div class="section" id="id3"&gt;
+&lt;h2 id="hidid3"&gt;总结&lt;a class="headerlink" href="#hidid3" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;/div&gt;
+&lt;div class="section" id="id4"&gt;
+&lt;h2 id="hidid4"&gt;参考资料&lt;a class="headerlink" href="#hidid4" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;ul class="simple"&gt;
+&lt;li&gt;&lt;a class="reference external" href="http://man7.org/linux/man-pages/man1/nsenter.1.html"&gt;nsenter(1) - Linux manual page&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://docs.docker.com/engine/reference/commandline/inspect/"&gt;docker inspect | Docker Documentation&lt;/a&gt;&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/div&gt;
+</summary><category term="nsenter"></category><category term="debug"></category><category term="tools"></category></entry><entry><title>使用 Apline 作为基础镜像时可能会遇到的常见问题的解决方法</title><link href="https://mozillazg.com/2020/03/use-alpine-image-common-issues.rst.html" rel="alternate"></link><updated>2020-03-31T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2020-03-31:2020/03/use-alpine-image-common-issues.rst.html</id><summary type="html">&lt;div class="section" id="id1"&gt;
 &lt;h2 id="hidid1"&gt;前言&lt;a class="headerlink" href="#hidid1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;p&gt;简单记录一下使用 Apline 作为基础镜像时可能会遇到的常见问题的解决方法。&lt;/p&gt;
 &lt;/div&gt;
@@ -66,10 +186,9 @@ ENV TZ Asia/Shanghai
 RUN apk add --no-cache ca-certificates &amp;amp;&amp;amp; \
     update-ca-certificates
 &lt;/pre&gt;
-&lt;p&gt;还有另一个证书错误（待补充对应的 case 和详细错误信息）的原因是：编译的时候没有禁用 CGO，导致编译时使用了部分依赖 glic 的代码，解决方法就是通过 &lt;tt class="docutils literal"&gt;CGO_ENABLED=0&lt;/tt&gt; 禁用 CGO（只在确认程序确实不依赖 CGO 也可以正常工作的情况下禁用）:&lt;/p&gt;
-&lt;pre class="literal-block"&gt;
-CGO_ENABLED=0 go build
-&lt;/pre&gt;
+&lt;!-- 还有另一个证书错误（待补充对应的 case 和详细错误信息）的原因是：编译的时候没有禁用 CGO，导致编译时使用了部分依赖 glic 的代码，解决方法就是通过 ``CGO_ENABLED=0`` 禁用 CGO（只在确认程序确实不依赖 CGO 也可以正常工作的情况下禁用）:: --&gt;
+&lt;!--  --&gt;
+&lt;!-- CGO_ENABLED=0 go build --&gt;
 &lt;/div&gt;
 &lt;div class="section" id="exec-user-process-caused-exec-format-error"&gt;
 &lt;h2 id="hidexec-user-process-caused-exec-format-error"&gt;exec user process caused &amp;quot;exec format error&amp;quot;&lt;a class="headerlink" href="#hidexec-user-process-caused-exec-format-error" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;

@@ -1,5 +1,125 @@
 <?xml version="1.0" encoding="utf-8"?>
-<feed xmlns="http://www.w3.org/2005/Atom"><title>Huang Huang 的博客</title><link href="https://mozillazg.com/" rel="alternate"></link><link href="https://mozillazg.com/feeds/mozillazg.atom.xml" rel="self"></link><id>https://mozillazg.com/</id><updated>2020-03-31T00:00:00+00:00</updated><entry><title>使用 Apline 作为基础镜像时可能会遇到的常见问题的解决方法</title><link href="https://mozillazg.com/2020/03/use-alpine-image-common-issues.rst.html" rel="alternate"></link><updated>2020-03-31T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2020-03-31:2020/03/use-alpine-image-common-issues.rst.html</id><summary type="html">&lt;div class="section" id="id1"&gt;
+<feed xmlns="http://www.w3.org/2005/Atom"><title>Huang Huang 的博客</title><link href="https://mozillazg.com/" rel="alternate"></link><link href="https://mozillazg.com/feeds/mozillazg.atom.xml" rel="self"></link><id>https://mozillazg.com/</id><updated>2020-04-04T00:00:00+00:00</updated><entry><title>一个在容器外用 tcpdump 命令对容器内的网络请求抓包的方法</title><link href="https://mozillazg.com/2020/04/use-tcpdump-for-a-container-but-outside-container.html" rel="alternate"></link><updated>2020-04-04T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2020-04-04:2020/04/use-tcpdump-for-a-container-but-outside-container.html</id><summary type="html">&lt;div class="section" id="id1"&gt;
+&lt;h2 id="hidid1"&gt;前言&lt;a class="headerlink" href="#hidid1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;如题所述，记录一种在不进入容器的情况下对容器进行抓包的方法。&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class="section" id="id2"&gt;
+&lt;h2 id="hidid2"&gt;方法介绍&lt;a class="headerlink" href="#hidid2" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;简单来说就是找到容器所用的网卡，然后在 host 机器上对该网卡进行抓包就可以了 :joy&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class="section" id="id3"&gt;
+&lt;h2 id="hidid3"&gt;操作示例&lt;a class="headerlink" href="#hidid3" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;创建一个测试容器:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+$ docker run -d --rm --name test2 busybox sh -c 'while true; do wget baidu.com -O /tmp/test ; sleep 1; done'
+1adfbbc5e3519eed16334590934c48cce778728660508a255f6fafe600c6bcd1
+&lt;/pre&gt;
+&lt;p&gt;找到这个容器使用的网卡:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+$ PID=$(docker inspect --format {{.State.Pid}} test2)
+
+$ nsenter -n -t $PID ip addr
+1: lo: &amp;lt;LOOPBACK,UP,LOWER_UP&amp;gt; mtu 65536 qdisc noqueue state UNKNOWN group default qlen 1000
+    link/loopback 00:00:00:00:00:00 brd 00:00:00:00:00:00
+    inet 127.0.0.1/8 scope host lo
+       valid_lft forever preferred_lft forever
+18: eth0&amp;#64;if19: &amp;lt;BROADCAST,MULTICAST,UP,LOWER_UP&amp;gt; mtu 1500 qdisc noqueue state UP group default
+    link/ether 02:42:ac:11:00:02 brd ff:ff:ff:ff:ff:ff link-netnsid 0
+    inet 172.17.0.2/16 brd 172.17.255.255 scope global eth0
+       valid_lft forever preferred_lft forever
+&lt;/pre&gt;
+&lt;p&gt;上面的那个 &lt;tt class="docutils literal"&gt;&amp;#64;if19&lt;/tt&gt; 是关键信息，然后在 host 机器上找到这个 &lt;tt class="docutils literal"&gt;&amp;#64;if19&lt;/tt&gt; 对应的网卡:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+# ip addr
+...
+19: veth504d7e6&amp;#64;if18: &amp;lt;BROADCAST,MULTICAST,UP,LOWER_UP&amp;gt; mtu 1500 qdisc noqueue master docker0 state UP group default
+    link/ether 9a:e8:ea:58:9d:f1 brd ff:ff:ff:ff:ff:ff link-netnsid 0
+    inet6 fe80::98e8:eaff:fe58:9df1/64 scope link
+       valid_lft forever preferred_lft forever
+&lt;/pre&gt;
+&lt;p&gt;这个 &lt;tt class="docutils literal"&gt;19:&lt;/tt&gt; 就是我们要找的 &lt;tt class="docutils literal"&gt;&amp;#64;if19&lt;/tt&gt; 网卡信息，抓包的时候指定对应的网卡 &lt;tt class="docutils literal"&gt;veth504d7e6&lt;/tt&gt; ， 现在可以抓包了:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+$ tcpdump -i veth504d7e6 port 80 -A
+tcpdump: verbose output suppressed, use -v or -vv for full protocol decode
+listening on veth504d7e6, link-type EN10MB (Ethernet), capture size 262144 bytes
+05:39:43.181244 IP 172.17.0.2.33430 &amp;gt; 39.156.69.79.http: Flags [S], seq 2619505737, win 29200, options [mss 1460,sackOK,TS val 812639981 ecr 0,nop,wscale 7], length 0
+E..&amp;lt;Vj&amp;#64;.&amp;#64;..S....'.EO...P.&amp;quot;|I......r..-.........
+0o..........
+05:39:43.270550 IP 39.156.69.79.http &amp;gt; 172.17.0.2.33430: Flags [S.], seq 820750215, ack 2619505738, win 8192, options [mss 1452,sackOK,nop,nop,nop,nop,nop,nop,nop,nop,nop,nop,nop,wscale 5], length 0
+E..&amp;lt;Vj&amp;#64;.,..O'.EO.....P..0....&amp;quot;|J.. ..:......................
+05:39:43.270608 IP 172.17.0.2.33430 &amp;gt; 39.156.69.79.http: Flags [.], ack 1, win 229, length 0
+E..(Vk&amp;#64;.&amp;#64;..f....'.EO...P.&amp;quot;|J0...P.......
+05:39:43.270686 IP 172.17.0.2.33430 &amp;gt; 39.156.69.79.http: Flags [P.], seq 1:73, ack 1, win 229, length 72: HTTP: GET / HTTP/1.1
+E..pVl&amp;#64;.&amp;#64;.......'.EO...P.&amp;quot;|J0...P....a..GET / HTTP/1.1
+Host: baidu.com
+User-Agent: Wget
+Connection: close
+&lt;/pre&gt;
+&lt;/div&gt;
+&lt;div class="section" id="id4"&gt;
+&lt;h2 id="hidid4"&gt;总结&lt;a class="headerlink" href="#hidid4" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;/div&gt;
+&lt;div class="section" id="id5"&gt;
+&lt;h2 id="hidid5"&gt;参考资料&lt;a class="headerlink" href="#hidid5" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;ul class="simple"&gt;
+&lt;li&gt;&lt;a class="reference external" href="http://man7.org/linux/man-pages/man1/nsenter.1.html"&gt;nsenter(1) - Linux manual page&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://docs.docker.com/engine/reference/commandline/inspect/"&gt;docker inspect | Docker Documentation&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://mozillazg.com/2018/01/tcpdump-common-useful-examples-cookbook.html"&gt;tcpdump 常用操作&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://mozillazg.com/2020/04/nsenter-usage.html"&gt;nsenter 常用操作&lt;/a&gt;&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/div&gt;
+</summary><category term="debug"></category><category term="tcpdump"></category></entry><entry><title>nsenter 常用操作</title><link href="https://mozillazg.com/2020/04/nsenter-usage.html" rel="alternate"></link><updated>2020-04-03T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2020-04-03:2020/04/nsenter-usage.html</id><summary type="html">&lt;div class="section" id="id1"&gt;
+&lt;h2 id="hidid1"&gt;前言&lt;a class="headerlink" href="#hidid1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;nsenter 是一个可以用来进入到目标程序说在 namespace 中运行命令的工具，一般可以用于在容器外 debug 容器中运行的程序。简单记录一下 nsenter 的常用用法。&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class="section" id="id2"&gt;
+&lt;h2 id="hidid2"&gt;常用参数&lt;a class="headerlink" href="#hidid2" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;最常用的参数组合是:&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;nsenter -m -u -i -n -p -t &amp;lt;pid&amp;gt; &amp;lt;command&amp;gt;
+&lt;/pre&gt;&lt;/div&gt;
+&lt;p&gt;参数的含义如下:&lt;/p&gt;
+&lt;ul class="simple"&gt;
+&lt;li&gt;&lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;-m,&lt;/span&gt; &lt;span class="pre"&gt;--mount[=&amp;lt;file&amp;gt;]&lt;/span&gt;&lt;/tt&gt;   enter mount namespace&lt;/li&gt;
+&lt;li&gt;&lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;-u,&lt;/span&gt; &lt;span class="pre"&gt;--uts[=&amp;lt;file&amp;gt;]&lt;/span&gt;&lt;/tt&gt;     enter UTS namespace (hostname etc)&lt;/li&gt;
+&lt;li&gt;&lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;-i,&lt;/span&gt; &lt;span class="pre"&gt;--ipc[=&amp;lt;file&amp;gt;]&lt;/span&gt;&lt;/tt&gt;     enter System V IPC namespace&lt;/li&gt;
+&lt;li&gt;&lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;-n,&lt;/span&gt; &lt;span class="pre"&gt;--net[=&amp;lt;file&amp;gt;]&lt;/span&gt;&lt;/tt&gt;     enter network namespace&lt;/li&gt;
+&lt;li&gt;&lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;-p,&lt;/span&gt; &lt;span class="pre"&gt;--pid[=&amp;lt;file&amp;gt;]&lt;/span&gt;&lt;/tt&gt;     enter pid namespace&lt;/li&gt;
+&lt;li&gt;&lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;-t,&lt;/span&gt; &lt;span class="pre"&gt;--target&lt;/span&gt; &amp;lt;pid&amp;gt;&lt;/tt&gt;     target process to get namespaces from&lt;/li&gt;
+&lt;/ul&gt;
+&lt;p&gt;结合 docker 使用用于在某个容器的 namespace 中运行指定程序的常用命令是:&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="nv"&gt;PID&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="k"&gt;$(&lt;/span&gt;docker inspect --format &lt;span class="o"&gt;{{&lt;/span&gt;.State.Pid&lt;span class="o"&gt;}}&lt;/span&gt; &amp;lt;container_name_or_ID&amp;gt;&lt;span class="k"&gt;)&lt;/span&gt;
+nsenter -m -u -i -n -p -t &lt;span class="nv"&gt;$PID&lt;/span&gt; &amp;lt;command&amp;gt;
+&lt;/pre&gt;&lt;/div&gt;
+&lt;p&gt;例子:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+$ docker run --rm --name test -d busybox  sleep 10000
+8115009baccc53a2a5f6dfff642e0d8ab1dfb95dde473d14fb9a06ce4e89364c
+
+$ docker ps |grep busybox
+8115009baccc        busybox             &amp;quot;sleep 10000&amp;quot;            9 seconds ago       Up 8 seconds                            test
+
+$ PID=$(docker inspect --format {{.State.Pid}} 8115009baccc)
+
+$ nsenter -m -u -i -n -p -t $PID ps aux
+PID   USER     TIME  COMMAND
+    1 root      0:00 sleep 10000
+    7 root      0:00 ps aux
+
+$ nsenter -m -u -i -n -p -t $PID hostname
+8115009baccc
+&lt;/pre&gt;
+&lt;/div&gt;
+&lt;div class="section" id="id3"&gt;
+&lt;h2 id="hidid3"&gt;总结&lt;a class="headerlink" href="#hidid3" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;/div&gt;
+&lt;div class="section" id="id4"&gt;
+&lt;h2 id="hidid4"&gt;参考资料&lt;a class="headerlink" href="#hidid4" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;ul class="simple"&gt;
+&lt;li&gt;&lt;a class="reference external" href="http://man7.org/linux/man-pages/man1/nsenter.1.html"&gt;nsenter(1) - Linux manual page&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://docs.docker.com/engine/reference/commandline/inspect/"&gt;docker inspect | Docker Documentation&lt;/a&gt;&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/div&gt;
+</summary><category term="nsenter"></category><category term="debug"></category><category term="tools"></category></entry><entry><title>使用 Apline 作为基础镜像时可能会遇到的常见问题的解决方法</title><link href="https://mozillazg.com/2020/03/use-alpine-image-common-issues.rst.html" rel="alternate"></link><updated>2020-03-31T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2020-03-31:2020/03/use-alpine-image-common-issues.rst.html</id><summary type="html">&lt;div class="section" id="id1"&gt;
 &lt;h2 id="hidid1"&gt;前言&lt;a class="headerlink" href="#hidid1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;p&gt;简单记录一下使用 Apline 作为基础镜像时可能会遇到的常见问题的解决方法。&lt;/p&gt;
 &lt;/div&gt;
@@ -66,10 +186,9 @@ ENV TZ Asia/Shanghai
 RUN apk add --no-cache ca-certificates &amp;amp;&amp;amp; \
     update-ca-certificates
 &lt;/pre&gt;
-&lt;p&gt;还有另一个证书错误（待补充对应的 case 和详细错误信息）的原因是：编译的时候没有禁用 CGO，导致编译时使用了部分依赖 glic 的代码，解决方法就是通过 &lt;tt class="docutils literal"&gt;CGO_ENABLED=0&lt;/tt&gt; 禁用 CGO（只在确认程序确实不依赖 CGO 也可以正常工作的情况下禁用）:&lt;/p&gt;
-&lt;pre class="literal-block"&gt;
-CGO_ENABLED=0 go build
-&lt;/pre&gt;
+&lt;!-- 还有另一个证书错误（待补充对应的 case 和详细错误信息）的原因是：编译的时候没有禁用 CGO，导致编译时使用了部分依赖 glic 的代码，解决方法就是通过 ``CGO_ENABLED=0`` 禁用 CGO（只在确认程序确实不依赖 CGO 也可以正常工作的情况下禁用）:: --&gt;
+&lt;!--  --&gt;
+&lt;!-- CGO_ENABLED=0 go build --&gt;
 &lt;/div&gt;
 &lt;div class="section" id="exec-user-process-caused-exec-format-error"&gt;
 &lt;h2 id="hidexec-user-process-caused-exec-format-error"&gt;exec user process caused &amp;quot;exec format error&amp;quot;&lt;a class="headerlink" href="#hidexec-user-process-caused-exec-format-error" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
@@ -2938,6 +3057,7 @@ value 就是各种过滤条件了。
 &lt;li&gt;&lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;-e&lt;/span&gt; &lt;span class="pre"&gt;trace=%ipc&lt;/span&gt;&lt;/tt&gt;: IPC 相关。&lt;/li&gt;
 &lt;li&gt;&lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;-e&lt;/span&gt; &lt;span class="pre"&gt;trace=%memory&lt;/span&gt;&lt;/tt&gt;: 内存 mapping 相关。&lt;/li&gt;
 &lt;li&gt;&lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;-e&lt;/span&gt; &lt;span class="pre"&gt;signal=&amp;lt;set&amp;gt;&lt;/span&gt;&lt;/tt&gt;: &lt;tt class="docutils literal"&gt;&amp;lt;set&amp;gt;&lt;/tt&gt; 是进程信号的名称（默认是 &lt;tt class="docutils literal"&gt;signal=all&lt;/tt&gt; ），比如 &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;-e&lt;/span&gt; signal=SIGTERM&lt;/tt&gt;&lt;/li&gt;
+&lt;li&gt;&lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;-e&lt;/span&gt; &lt;span class="pre"&gt;read=&amp;lt;set&amp;gt;&lt;/span&gt;&lt;/tt&gt;: 追踪指定 fd 上的数据并打印 hex 和 ascii 格式的数据， &lt;tt class="docutils literal"&gt;&amp;lt;set&amp;gt;&lt;/tt&gt; 是 fd 比如:&lt;tt class="docutils literal"&gt;read=3,5&lt;/tt&gt;&lt;/li&gt;
 &lt;/ul&gt;
 &lt;/div&gt;
 &lt;/div&gt;
@@ -5960,7 +6080,7 @@ thread &amp;lt;_MainThread&lt;span class="o"&gt;(&lt;/span&gt;MainThread, starte
   File &lt;span class="s2"&gt;&amp;quot;testa.py&amp;quot;&lt;/span&gt;, line 15, in output_tracebacks
     &lt;span class="nv"&gt;stack_list&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; traceback.format_list&lt;span class="o"&gt;(&lt;/span&gt;traceback.extract_stack&lt;span class="o"&gt;(&lt;/span&gt;stack&lt;span class="o"&gt;))&lt;/span&gt;
 &lt;/pre&gt;&lt;/div&gt;
-&lt;p&gt;关于获取 traceback 信息的更多内容详见 &lt;a class="reference external" href="https://mozillazg.com/2017/12/python-get-concurrency-programm-all-tracebacks-threading-gevent-asyncio-etc.html"&gt;Python: 获取并发程序的 traceback 信息（threading/gevent/asyncio）&lt;/a&gt;&lt;/p&gt;
+&lt;p&gt;关于获取 traceback 信息的更多内容详见 &lt;a class="reference external" href="http://mozillazg.com/2017/12/python-get-concurrency-programm-all-tracebacks-threading-gevent-asyncio-etc.html"&gt;Python: 获取并发程序的 traceback 信息（threading/gevent/asyncio）&lt;/a&gt;&lt;/p&gt;
 &lt;/div&gt;
 &lt;div class="section" id="id3"&gt;
 &lt;h2 id="hidid3"&gt;接收到信号时开启远程调试服务&lt;a class="headerlink" href="#hidid3" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
@@ -6198,7 +6318,7 @@ thread &amp;lt;_MainThread&lt;span class="o"&gt;(&lt;/span&gt;MainThread, starte
 &lt;h2 id="hidid5"&gt;参考资料&lt;a class="headerlink" href="#hidid5" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;ul class="simple"&gt;
 &lt;li&gt;&lt;a class="reference external" href="https://docs.python.org/3.6/library/signal.html#signal.signal"&gt;18.8. signal — Set handlers for asynchronous events — Python 3.6.4 documentation&lt;/a&gt;&lt;/li&gt;
-&lt;li&gt;&lt;a class="reference external" href="https://mozillazg.com/2017/12/python-get-concurrency-programm-all-tracebacks-threading-gevent-asyncio-etc.html"&gt;Python: 获取并发程序的 traceback 信息（threading/gevent/asyncio） - Huang Huang 的博客&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="http://mozillazg.com/2017/12/python-get-concurrency-programm-all-tracebacks-threading-gevent-asyncio-etc.html"&gt;Python: 获取并发程序的 traceback 信息（threading/gevent/asyncio） - Huang Huang 的博客&lt;/a&gt;&lt;/li&gt;
 &lt;li&gt;&lt;a class="reference external" href="http://www.gevent.org/gevent.backdoor.html"&gt;gevent.backdoor – Interactive greenlet-based network console that can be used in any process — gevent 1.3.0.dev0 documentation&lt;/a&gt;&lt;/li&gt;
 &lt;li&gt;&lt;a class="reference external" href="http://twistedmatrix.com/documents/current/api/twisted.conch.manhole.html"&gt;twisted.conch.manhole : API documentation&lt;/a&gt;&lt;/li&gt;
 &lt;li&gt;&lt;a class="reference external" href="https://github.com/ionelmc/python-manhole"&gt;ionelmc/python-manhole: Debugging manhole for python applications.&lt;/a&gt;&lt;/li&gt;
@@ -11684,7 +11804,7 @@ OperationFailure: database error: Executor error: Overflow sort stage buffered d
 &lt;li&gt;&lt;a href="http://askubuntu.com/questions/501937/how-to-increase-buffered-data-limit"&gt;mongodb - How to increase buffered data limit? - Ask Ubuntu&lt;/a&gt;&lt;/li&gt;
 &lt;li&gt;&lt;a href="https://docs.mongodb.com/manual/reference/limits/#Sort-Operations"&gt;MongoDB Limits and Thresholds &amp;mdash; MongoDB Manual 3.2&lt;/a&gt;&lt;/li&gt;
 &lt;/ul&gt;</summary></entry><entry><title>buttersafe：第一次约会</title><link href="https://mozillazg.com/2016/06/2016-03-01-firstdate.zh-cn.html" rel="alternate"></link><updated>2016-06-09T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2016-06-09:2016/06/2016-03-01-firstdate.zh-cn.html</id><summary type="html">&lt;p&gt;译自：&lt;a href="http://buttersafe.com/2016/03/01/first-date/"&gt;http://buttersafe.com/2016/03/01/first-date/&lt;/a&gt;&lt;/p&gt;
-&lt;p&gt;&lt;img alt="2016-03-01-firstdate.zh-cn.png" src="/static/images/comics/2016-03-01-firstdate.zh-cn.png" /&gt;&lt;/p&gt;</summary><category term="buttersafe"></category></entry><entry><title>让我们一起来构建一个模板引擎（四）</title><link href="https://mozillazg.com/2016/06/let-us-build-a-template-engine-part4.html" rel="alternate"></link><updated>2016-06-01T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2016-06-01:2016/06/let-us-build-a-template-engine-part4.html</id><summary type="html">&lt;p&gt;在 &lt;a class="reference external" href="https://mozillazg.com/2016/03/let-us-build-a-template-engine-part3.html"&gt;上篇文章&lt;/a&gt; 中我们的模板引擎实现了对 &lt;tt class="docutils literal"&gt;include&lt;/tt&gt; 和 &lt;tt class="docutils literal"&gt;extends&lt;/tt&gt; 的支持，
+&lt;p&gt;&lt;img alt="2016-03-01-firstdate.zh-cn.png" src="/static/images/comics/2016-03-01-firstdate.zh-cn.png" /&gt;&lt;/p&gt;</summary><category term="buttersafe"></category></entry><entry><title>让我们一起来构建一个模板引擎（四）</title><link href="https://mozillazg.com/2016/06/let-us-build-a-template-engine-part4.html" rel="alternate"></link><updated>2016-06-01T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2016-06-01:2016/06/let-us-build-a-template-engine-part4.html</id><summary type="html">&lt;p&gt;在 &lt;a class="reference external" href="http://mozillazg.com/2016/03/let-us-build-a-template-engine-part3.html"&gt;上篇文章&lt;/a&gt; 中我们的模板引擎实现了对 &lt;tt class="docutils literal"&gt;include&lt;/tt&gt; 和 &lt;tt class="docutils literal"&gt;extends&lt;/tt&gt; 的支持，
 到此为止我们已经实现了模板引擎所需的大部分功能。
 在本文中我们将解决一些用于生成 html 的模板引擎需要面对的一些安全问题。&lt;/p&gt;
 &lt;div class="section" id="id2"&gt;
@@ -11799,7 +11919,7 @@ OperationFailure: database error: Executor error: Overflow sort stage buffered d
 &lt;div class="section" id="exec"&gt;
 &lt;h2 id="hidexec"&gt;exec 的安全问题&lt;a class="headerlink" href="#hidexec" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;p&gt;由于我们的模板引擎是使用 &lt;tt class="docutils literal"&gt;exec&lt;/tt&gt; 函数来执行生成的代码的，所以就需要注意一下
-&lt;tt class="docutils literal"&gt;exec&lt;/tt&gt; 函数的安全问题，预防可能的服务端模板注入攻击（详见 &lt;a class="reference external" href="https://mozillazg.com/2016/05/python-some-security-problems-about-use-exec-function.rst.html"&gt;使用 exec 函数时需要注意的一些安全问题&lt;/a&gt; ）。&lt;/p&gt;
+&lt;tt class="docutils literal"&gt;exec&lt;/tt&gt; 函数的安全问题，预防可能的服务端模板注入攻击（详见 &lt;a class="reference external" href="http://mozillazg.com/2016/05/python-some-security-problems-about-use-exec-function.rst.html"&gt;使用 exec 函数时需要注意的一些安全问题&lt;/a&gt; ）。&lt;/p&gt;
 &lt;p&gt;首先要限制的是在模板中使用内置函数和执行时上下文变量( &lt;a class="reference external" href="https://github.com/mozillazg/lsbate/raw/master/part4/template4b.py"&gt;template4b.py&lt;/a&gt; ):&lt;/p&gt;
 &lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="k"&gt;class&lt;/span&gt; &lt;span class="nc"&gt;Template&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;
     &lt;span class="o"&gt;...&lt;/span&gt;
@@ -11891,16 +12011,16 @@ OperationFailure: database error: Executor error: Overflow sort stage buffered d
 即: 使用词法分析/语法分析的方式来解析模板内容（欢迎分享实现过程）。&lt;/p&gt;
 &lt;p&gt;P.S. 整个系列的所有文章地址：&lt;/p&gt;
 &lt;ul class="simple"&gt;
-&lt;li&gt;&lt;a class="reference external" href="https://mozillazg.com/2016/03/let-us-build-a-template-engine-part1.html"&gt;让我们一起来构建一个模板引擎（一）&lt;/a&gt;&lt;/li&gt;
-&lt;li&gt;&lt;a class="reference external" href="https://mozillazg.com/2016/03/let-us-build-a-template-engine-part2.html"&gt;让我们一起来构建一个模板引擎（二）&lt;/a&gt;&lt;/li&gt;
-&lt;li&gt;&lt;a class="reference external" href="https://mozillazg.com/2016/03/let-us-build-a-template-engine-part3.html"&gt;让我们一起来构建一个模板引擎（三）&lt;/a&gt;&lt;/li&gt;
-&lt;li&gt;&lt;a class="reference external" href="https://mozillazg.com/2016/06/let-us-build-a-template-engine-part4.html"&gt;让我们一起来构建一个模板引擎（四）&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="http://mozillazg.com/2016/03/let-us-build-a-template-engine-part1.html"&gt;让我们一起来构建一个模板引擎（一）&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="http://mozillazg.com/2016/03/let-us-build-a-template-engine-part2.html"&gt;让我们一起来构建一个模板引擎（二）&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="http://mozillazg.com/2016/03/let-us-build-a-template-engine-part3.html"&gt;让我们一起来构建一个模板引擎（三）&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="http://mozillazg.com/2016/06/let-us-build-a-template-engine-part4.html"&gt;让我们一起来构建一个模板引擎（四）&lt;/a&gt;&lt;/li&gt;
 &lt;/ul&gt;
 &lt;p&gt;P.S. 文章中涉及的代码已经放到 GitHub 上了: &lt;a class="reference external" href="https://github.com/mozillazg/lsbate"&gt;https://github.com/mozillazg/lsbate&lt;/a&gt;&lt;/p&gt;
 &lt;p&gt;2016.06.18 更新：&lt;/p&gt;
 &lt;ul class="simple"&gt;
 &lt;li&gt;使用 &lt;tt class="docutils literal"&gt;dis&lt;/tt&gt; 没法分析嵌套函数的代码，所以 &lt;tt class="docutils literal"&gt;check_unsafe_attributes&lt;/tt&gt; 部分还需要再完善，
-详见 &lt;a class="reference external" href="https://mozillazg.com/2016/05/python-some-security-problems-about-use-exec-function.rst.html"&gt;使用 exec 函数时需要注意的一些安全问题&lt;/a&gt; 下面的评论。&lt;/li&gt;
+详见 &lt;a class="reference external" href="http://mozillazg.com/2016/05/python-some-security-problems-about-use-exec-function.rst.html"&gt;使用 exec 函数时需要注意的一些安全问题&lt;/a&gt; 下面的评论。&lt;/li&gt;
 &lt;/ul&gt;
 &lt;p&gt;2016.07.10 更新:&lt;/p&gt;
 &lt;ul class="simple"&gt;
@@ -11923,7 +12043,7 @@ OperationFailure: database error: Executor error: Overflow sort stage buffered d
 &lt;p&gt;在 &lt;tt class="docutils literal"&gt;exec&lt;/tt&gt; 执行的代码中，默认可以访问执行 &lt;tt class="docutils literal"&gt;exec&lt;/tt&gt; 时的局部变量和全局变量，
 同样也会修改全局变量。如果 exec 执行的代码是根据用户提交的数据生产的话，这种默认行为就是一个安全隐患。&lt;/p&gt;
 &lt;p&gt;如何更改这种默认行为呢？可以通过执行 &lt;tt class="docutils literal"&gt;exec&lt;/tt&gt; 函数的时候再传两个参数的方式来
-修改这种行为（详见 &lt;a class="reference external" href="https://mozillazg.com/2016/03/python-exec-function-globals-and-locals-arguments.html"&gt;之前&lt;/a&gt;  关于 exec 的文章）:&lt;/p&gt;
+修改这种行为（详见 &lt;a class="reference external" href="http://mozillazg.com/2016/03/python-exec-function-globals-and-locals-arguments.html"&gt;之前&lt;/a&gt;  关于 exec 的文章）:&lt;/p&gt;
 &lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="o"&gt;&amp;gt;&amp;gt;&amp;gt;&lt;/span&gt; &lt;span class="n"&gt;g&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="p"&gt;{}&lt;/span&gt;
 &lt;span class="o"&gt;&amp;gt;&amp;gt;&amp;gt;&lt;/span&gt; &lt;span class="n"&gt;l&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="p"&gt;{&lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;b&amp;#39;&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt; &lt;span class="s1"&gt;&amp;#39;world&amp;#39;&lt;/span&gt;&lt;span class="p"&gt;}&lt;/span&gt;
 &lt;span class="o"&gt;&amp;gt;&amp;gt;&amp;gt;&lt;/span&gt; &lt;span class="k"&gt;exec&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;hello = &amp;quot;hello&amp;quot; + b&amp;#39;&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;g&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;l&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
@@ -12527,7 +12647,7 @@ spent 3.005035161972046s
 &lt;!-- OneAPM: https://www.v2ex.com/t/125736 --&gt;
 &lt;!-- TingYun: https://www.v2ex.com/t/214359 --&gt;
 &lt;/div&gt;
-</summary><category term="import"></category><category term="sys.meta_path"></category><category term="sitecustomize"></category><category term="usercustomize"></category><category term="探针"></category><category term="APM"></category></entry><entry><title>让我们一起来构建一个模板引擎（三）</title><link href="https://mozillazg.com/2016/03/let-us-build-a-template-engine-part3.html" rel="alternate"></link><updated>2016-03-24T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2016-03-24:2016/03/let-us-build-a-template-engine-part3.html</id><summary type="html">&lt;p&gt;在 &lt;a class="reference external" href="https://mozillazg.com/2016/03/let-us-build-a-template-engine-part2.html"&gt;上篇文章&lt;/a&gt; 中我们的模板引擎实现了对 &lt;tt class="docutils literal"&gt;if&lt;/tt&gt; 和 &lt;tt class="docutils literal"&gt;for&lt;/tt&gt; 对支持，同时在文章的最后我给大家留了一个
+</summary><category term="import"></category><category term="sys.meta_path"></category><category term="sitecustomize"></category><category term="usercustomize"></category><category term="探针"></category><category term="APM"></category></entry><entry><title>让我们一起来构建一个模板引擎（三）</title><link href="https://mozillazg.com/2016/03/let-us-build-a-template-engine-part3.html" rel="alternate"></link><updated>2016-03-24T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2016-03-24:2016/03/let-us-build-a-template-engine-part3.html</id><summary type="html">&lt;p&gt;在 &lt;a class="reference external" href="http://mozillazg.com/2016/03/let-us-build-a-template-engine-part2.html"&gt;上篇文章&lt;/a&gt; 中我们的模板引擎实现了对 &lt;tt class="docutils literal"&gt;if&lt;/tt&gt; 和 &lt;tt class="docutils literal"&gt;for&lt;/tt&gt; 对支持，同时在文章的最后我给大家留了一个
 问题：如何实现支持 &lt;tt class="docutils literal"&gt;include&lt;/tt&gt; 和 &lt;tt class="docutils literal"&gt;extends&lt;/tt&gt; 的标签功能。&lt;/p&gt;
 &lt;p&gt;在本篇文章中我们将一起来动手实现这两个功能。&lt;/p&gt;
 &lt;div class="section" id="include"&gt;
@@ -12835,7 +12955,7 @@ spent 3.005035161972046s
 &lt;p&gt;不知道大家有没有注意到，我之前都是用生成 html 来试验模板引擎的功能的，
 这是因为模板引擎确实是在 web 开发中用的比较多，既然是生成 html 源码那就需要考虑
 针对 html 做一点优化，比如去掉多余的空格，转义之类的，还有就是一些 Web 安全方面的考虑。&lt;/p&gt;
-&lt;p&gt;至于怎么实现这些优化项，我将在 &lt;a class="reference external" href="https://mozillazg.com/2016/06/let-us-build-a-template-engine-part4.html"&gt;第四篇文章&lt;/a&gt; 中向你详细的讲解。敬请期待。&lt;/p&gt;
+&lt;p&gt;至于怎么实现这些优化项，我将在 &lt;a class="reference external" href="http://mozillazg.com/2016/06/let-us-build-a-template-engine-part4.html"&gt;第四篇文章&lt;/a&gt; 中向你详细的讲解。敬请期待。&lt;/p&gt;
 &lt;/div&gt;
 </summary><category term="let-us-build"></category><category term="lsbate"></category><category term="让我们一起来构建一个模板引擎"></category></entry><entry><title>Cyanide &amp; Happiness #4244：减肥药</title><link href="https://mozillazg.com/2016/03/4244.thinnerpills.zh-cn.html" rel="alternate"></link><updated>2016-03-20T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2016-03-20:2016/03/4244.thinnerpills.zh-cn.html</id><summary type="html">&lt;p&gt;译自：&lt;a href="http://explosm.net/comics/4244/"&gt;Cyanide &amp;amp; Happiness #4244 - Explosm.net&lt;/a&gt;&lt;/p&gt;
 &lt;p&gt;&lt;img alt="4244.thinnerpills.zh-cn.png" src="/static/images/comics/4244.thinnerpills.zh-cn.png" /&gt;&lt;/p&gt;
@@ -12848,7 +12968,7 @@ that make you thinner!    &lt;br /&gt;
 唔，不对，你确实看起来更廋了&lt;/p&gt;</summary><category term="Cyanide and Happiness"></category></entry><entry><title>Victims of Circumsolar：这是结局</title><link href="https://mozillazg.com/2016/03/84.thisistheend.zh-cn.html" rel="alternate"></link><updated>2016-03-19T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2016-03-19:2016/03/84.thisistheend.zh-cn.html</id><summary type="html">&lt;p&gt;译自：&lt;a href="http://www.victimsofcircumsolar.com/comic/this-is-the-end/"&gt;http://www.victimsofcircumsolar.com/comic/this-is-the-end/&lt;/a&gt;&lt;/p&gt;
 &lt;p&gt;&lt;img alt="84.thisistheend.zh-cn.png" src="/static/images/comics/84.thisistheend.zh-cn.png" /&gt;&lt;/p&gt;
 &lt;p&gt;this is the end
-这是结局&lt;/p&gt;</summary><category term="Victims of Circumsolar"></category></entry><entry><title>让我们一起来构建一个模板引擎（二）</title><link href="https://mozillazg.com/2016/03/let-us-build-a-template-engine-part2.html" rel="alternate"></link><updated>2016-03-19T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2016-03-19:2016/03/let-us-build-a-template-engine-part2.html</id><summary type="html">&lt;p&gt;在 &lt;a class="reference external" href="https://mozillazg.com/2016/03/let-us-build-a-template-engine-part1.html"&gt;上篇文章&lt;/a&gt; 中我们的模板引擎实现了变量和注释功能，同时在文章的最后我给大家留了一个
+这是结局&lt;/p&gt;</summary><category term="Victims of Circumsolar"></category></entry><entry><title>让我们一起来构建一个模板引擎（二）</title><link href="https://mozillazg.com/2016/03/let-us-build-a-template-engine-part2.html" rel="alternate"></link><updated>2016-03-19T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2016-03-19:2016/03/let-us-build-a-template-engine-part2.html</id><summary type="html">&lt;p&gt;在 &lt;a class="reference external" href="http://mozillazg.com/2016/03/let-us-build-a-template-engine-part1.html"&gt;上篇文章&lt;/a&gt; 中我们的模板引擎实现了变量和注释功能，同时在文章的最后我给大家留了一个
 问题：如何实现支持 &lt;tt class="docutils literal"&gt;if&lt;/tt&gt; 和 &lt;tt class="docutils literal"&gt;for&lt;/tt&gt; 的标签功能:&lt;/p&gt;
 &lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="cp"&gt;{%&lt;/span&gt; &lt;span class="k"&gt;if&lt;/span&gt; &lt;span class="nv"&gt;user.is_admin&lt;/span&gt; &lt;span class="cp"&gt;%}&lt;/span&gt;
     admin, &lt;span class="cp"&gt;{{&lt;/span&gt; &lt;span class="nv"&gt;user.name&lt;/span&gt; &lt;span class="cp"&gt;}}&lt;/span&gt;
@@ -13222,7 +13342,7 @@ that make you thinner!    &lt;br /&gt;
 &lt;span class="p"&gt;&amp;lt;/&lt;/span&gt;&lt;span class="nt"&gt;footer&lt;/span&gt;&lt;span class="p"&gt;&amp;gt;&lt;/span&gt;
 &lt;/pre&gt;&lt;/div&gt;
 &lt;p&gt;那么，该如何实现 &lt;tt class="docutils literal"&gt;include&lt;/tt&gt; 和 &lt;tt class="docutils literal"&gt;extends&lt;/tt&gt; 功能呢？
-我将在 &lt;a class="reference external" href="https://mozillazg.com/2016/03/let-us-build-a-template-engine-part3.html"&gt;第三篇文章&lt;/a&gt; 中向你详细的讲解。敬请期待。&lt;/p&gt;
+我将在 &lt;a class="reference external" href="http://mozillazg.com/2016/03/let-us-build-a-template-engine-part3.html"&gt;第三篇文章&lt;/a&gt; 中向你详细的讲解。敬请期待。&lt;/p&gt;
 &lt;/div&gt;
 </summary><category term="let-us-build"></category><category term="lsbate"></category><category term="让我们一起来构建一个模板引擎"></category></entry><entry><title>Cyanide &amp; Happiness #2191：你喜欢我吗</title><link href="https://mozillazg.com/2016/03/2191.doyoulikeme.zh-cn.html" rel="alternate"></link><updated>2016-03-18T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2016-03-18:2016/03/2191.doyoulikeme.zh-cn.html</id><summary type="html">&lt;p&gt;译自：&lt;a href="http://explosm.net/comics/2191/"&gt;Cyanide &amp;amp; Happiness #2191 - Explosm.net&lt;/a&gt;&lt;/p&gt;
 &lt;p&gt;&lt;img alt="2191.doyoulikeme.zh-cn.png" src="/static/images/comics/2191.doyoulikeme.zh-cn.png" /&gt;&lt;/p&gt;</summary><category term="Cyanide and Happiness"></category></entry><entry><title>Cyanide &amp; Happiness #1445：裤裆</title><link href="https://mozillazg.com/2016/03/1445.pants2.zh-cn.html" rel="alternate"></link><updated>2016-03-17T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2016-03-17:2016/03/1445.pants2.zh-cn.html</id><summary type="html">&lt;p&gt;译自：&lt;a href="http://explosm.net/comics/1445/"&gt;Cyanide &amp;amp; Happiness #1445 - Explosm.net&lt;/a&gt;&lt;/p&gt;
@@ -13600,7 +13720,7 @@ if age &amp;gt; 13:      # 生成完这一行以后，需要切换缩进了 ``fo
     &lt;span class="cp"&gt;{{&lt;/span&gt; &lt;span class="nv"&gt;name&lt;/span&gt; &lt;span class="cp"&gt;}}&lt;/span&gt;
 &lt;span class="cp"&gt;{%&lt;/span&gt; &lt;span class="k"&gt;endfor&lt;/span&gt; &lt;span class="cp"&gt;%}&lt;/span&gt;
 &lt;/pre&gt;&lt;/div&gt;
-&lt;p&gt;我将在 &lt;a class="reference external" href="https://mozillazg.com/2016/03/let-us-build-a-template-engine-part2.html"&gt;第二篇文章&lt;/a&gt; 中向你详细的讲解。敬请期待。&lt;/p&gt;
+&lt;p&gt;我将在 &lt;a class="reference external" href="http://mozillazg.com/2016/03/let-us-build-a-template-engine-part2.html"&gt;第二篇文章&lt;/a&gt; 中向你详细的讲解。敬请期待。&lt;/p&gt;
 &lt;/div&gt;
 </summary><category term="let-us-build"></category><category term="lsbate"></category><category term="让我们一起来构建一个模板引擎"></category></entry><entry><title>Victims of Circumsolar：医生知道</title><link href="https://mozillazg.com/2016/03/19.dr_know.zh-cn.html" rel="alternate"></link><updated>2016-03-14T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2016-03-14:2016/03/19.dr_know.zh-cn.html</id><summary type="html">&lt;p&gt;译自：&lt;a href="http://www.victimsofcircumsolar.com/comic/dr-know/"&gt;http://www.victimsofcircumsolar.com/comic/dr-know/&lt;/a&gt;&lt;/p&gt;
 &lt;p&gt;&lt;img alt="19.dr_know.zh-cn.png" src="/static/images/comics/19.dr_know.zh-cn.png" /&gt;&lt;/p&gt;
@@ -17908,7 +18028,7 @@ instagram！&lt;/p&gt;
 年份十足！&lt;/p&gt;</summary><category term="Cyanide and Happiness"></category></entry><entry><title>使用 git-remote-hg 镜像一个 Hg 仓库</title><link href="https://mozillazg.com/2015/08/git-how-to-mirror-an-Mercurial-hg-repo-with-git-remote-hg.html" rel="alternate"></link><updated>2015-08-16T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2015-08-16:2015/08/git-how-to-mirror-an-Mercurial-hg-repo-with-git-remote-hg.html</id><summary type="html">&lt;p&gt;前段时间在 github 上建了一个 PyPy 的 &lt;a href="https://github.com/mozillazg/pypy"&gt;镜像仓库&lt;/a&gt; （官方 PyPy 仓库是个存放在  bitbucket 上的 Mercurial(Hg) 仓库）。本文将记录我使用 git-remote-hg 镜像 Hg 仓库的步骤以及后续的同步更新操作。&lt;/p&gt;
 &lt;ol&gt;
 &lt;li&gt;
-&lt;p&gt;安装 git 2.x （如果系统上的 git 是 2.x 版本可以跳过本步骤）。由于我用的是 CentOS 6 系统，通过 yum 安装的 git 版本是 1.x ，所以需要编译安装 2.x 版本的 git。详细步骤在这里: &lt;a href="https://mozillazg.com/2015/08/install-git-2-on-centos-6.html"&gt;在 CentOS 6 上编译安装 git 2.x&lt;/a&gt;&lt;/p&gt;
+&lt;p&gt;安装 git 2.x （如果系统上的 git 是 2.x 版本可以跳过本步骤）。由于我用的是 CentOS 6 系统，通过 yum 安装的 git 版本是 1.x ，所以需要编译安装 2.x 版本的 git。详细步骤在这里: &lt;a href="http://mozillazg.com/2015/08/install-git-2-on-centos-6.html"&gt;在 CentOS 6 上编译安装 git 2.x&lt;/a&gt;&lt;/p&gt;
 &lt;/li&gt;
 &lt;li&gt;
 &lt;p&gt;安装 Python 包：mercurial&lt;/p&gt;
@@ -18279,7 +18399,7 @@ impressions       &lt;br /&gt;
 抱歉，我不擅长第一印象&lt;/p&gt;</summary><category term="Cyanide and Happiness"></category></entry><entry><title>让我们一起来构建一个 Web 服务器（三）</title><link href="https://mozillazg.com/2015/08/let-us-build-a-web-server-part-3-zh-cn.html" rel="alternate"></link><updated>2015-08-27T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2015-08-04:2015/08/let-us-build-a-web-server-part-3-zh-cn.html</id><summary type="html">&lt;p&gt;本文译自： &lt;a class="reference external" href="http://ruslanspivak.com/lsbaws-part3/"&gt;http://ruslanspivak.com/lsbaws-part3/&lt;/a&gt;&lt;/p&gt;
 &lt;blockquote&gt;
 “当我们必须要发明创造的时候学到的东西最多” —— Piaget&lt;/blockquote&gt;
-&lt;p&gt;在 &lt;a class="reference external" href="https://mozillazg.com/2015/06/let-us-build-a-web-server-part-2-zh-cn.html"&gt;第二部分&lt;/a&gt; 你创建了一个能够处理基本的 GET 请求的微型 WSGI 服务器。
+&lt;p&gt;在 &lt;a class="reference external" href="http://mozillazg.com/2015/06/let-us-build-a-web-server-part-2-zh-cn.html"&gt;第二部分&lt;/a&gt; 你创建了一个能够处理基本的 GET 请求的微型 WSGI 服务器。
 同时我向你提了一个问题，“如何才能让你的服务器在同一时刻能够处理多个请求？”
 在本篇文章中你可以找到答案。那么，系好安全带，加足马力吧。
 你将会有一趟非常快速的旅程。
@@ -18287,7 +18407,7 @@ impressions       &lt;br /&gt;
 本文所有的源代码都已经放在 &lt;a class="reference external" href="https://github.com/rspivak/lsbaws/blob/master/part3/"&gt;Github&lt;/a&gt; 上了。&lt;/p&gt;
 &lt;p&gt;首先，让我们来回顾一下一个非常基础的 Web 服务器看起来是啥样的，
 以及这个服务器需要做些什么才能服务来自客户端的请求。
-你在 &lt;a class="reference external" href="https://mozillazg.com/2015/06/let-us-build-a-web-server-part-1-zh-cn.html"&gt;第一部分&lt;/a&gt; 和 &lt;a class="reference external" href="https://mozillazg.com/2015/06/let-us-build-a-web-server-part-2-zh-cn.html"&gt;第二部分&lt;/a&gt; 创建的服务器是个一次只能处理一个客户端请求的循环服务器。
+你在 &lt;a class="reference external" href="http://mozillazg.com/2015/06/let-us-build-a-web-server-part-1-zh-cn.html"&gt;第一部分&lt;/a&gt; 和 &lt;a class="reference external" href="http://mozillazg.com/2015/06/let-us-build-a-web-server-part-2-zh-cn.html"&gt;第二部分&lt;/a&gt; 创建的服务器是个一次只能处理一个客户端请求的循环服务器。
 在它处理完正在处理的客户端请求之前，它是无法接受新的连接的。
 一些客户端可能会不高兴，因为它们必须得排队等待，
 对于那些非常繁忙的服务器，这个等待可能会是个非常漫长的过程。&lt;/p&gt;
@@ -18403,7 +18523,7 @@ $ curl http://localhost:8888/hello
 开始处理第二个请求。这将导致出现顺序，或一步一步的循环，或在这里是一次只能处理一个客户端请求。&lt;/p&gt;
 &lt;p&gt;让我们抽出一点时间来说一下关于客户端和服务器之间的通信方面的东西。
 为了让两个程序能够在网络进行中进行通信，它们需要使用套接字（socket）。
-你已经在 &lt;a class="reference external" href="https://mozillazg.com/2015/06/let-us-build-a-web-server-part-1-zh-cn.html"&gt;第一部分&lt;/a&gt; 和 &lt;a class="reference external" href="https://mozillazg.com/2015/06/let-us-build-a-web-server-part-2-zh-cn.html"&gt;第二部分&lt;/a&gt; 中见过 socket 了。但是什么是一个 socket 呢？&lt;/p&gt;
+你已经在 &lt;a class="reference external" href="http://mozillazg.com/2015/06/let-us-build-a-web-server-part-1-zh-cn.html"&gt;第一部分&lt;/a&gt; 和 &lt;a class="reference external" href="http://mozillazg.com/2015/06/let-us-build-a-web-server-part-2-zh-cn.html"&gt;第二部分&lt;/a&gt; 中见过 socket 了。但是什么是一个 socket 呢？&lt;/p&gt;
 &lt;p&gt;&lt;img alt="lsbaws_part3_it_socket.png" src="/static/images/lsbaws-part3/lsbaws_part3_it_socket.png" /&gt;&lt;/p&gt;
 &lt;p&gt;一个 socket 是一个通信端点的抽象概念，
 它允许你的程序通过文件描述与另一个程序进行通信。
@@ -18487,7 +18607,7 @@ sock.connect(('localhost', 8888))
 ('127.0.0.1', 60589)
 &lt;/pre&gt;
 &lt;p&gt;在上面的例子中，内核给那个套接字分配了一个临时端口 60589。&lt;/p&gt;
-&lt;p&gt;在回答 &lt;a class="reference external" href="https://mozillazg.com/2015/06/let-us-build-a-web-server-part-2-zh-cn.html"&gt;第二部分&lt;/a&gt; 的问题前我还需要快速讲一下其他一些重要的概念。
+&lt;p&gt;在回答 &lt;a class="reference external" href="http://mozillazg.com/2015/06/let-us-build-a-web-server-part-2-zh-cn.html"&gt;第二部分&lt;/a&gt; 的问题前我还需要快速讲一下其他一些重要的概念。
 你很快就会看到为什么它们是重要的。
 这两个概念是 &lt;em&gt;进程&lt;/em&gt; 和 &lt;em&gt;文件描述符&lt;/em&gt; 。&lt;/p&gt;
 &lt;p&gt;什么是进程？一个进程只是一个正在执行的程序的实例。
@@ -18590,7 +18710,7 @@ hello
 &lt;li&gt;文件描述符&lt;/li&gt;
 &lt;li&gt;&lt;tt class="docutils literal"&gt;listen&lt;/tt&gt; socket 方法的 &lt;tt class="docutils literal"&gt;BACKLOG&lt;/tt&gt; 参数的含义&lt;/li&gt;
 &lt;/ul&gt;
-&lt;p&gt;现在，我已经准备号回答 &lt;a class="reference external" href="https://mozillazg.com/2015/06/let-us-build-a-web-server-part-2-zh-cn.html"&gt;第二部分&lt;/a&gt; 的问题了：“如何让你的服务器在同一时刻
+&lt;p&gt;现在，我已经准备号回答 &lt;a class="reference external" href="http://mozillazg.com/2015/06/let-us-build-a-web-server-part-2-zh-cn.html"&gt;第二部分&lt;/a&gt; 的问题了：“如何让你的服务器在同一时刻
 处理多个请求？” 或者换一种方式“如何写一个并发服务器？”&lt;/p&gt;
 &lt;p&gt;&lt;img alt="lsbaws_part3_conc2_service_clients.png" src="/static/images/lsbaws-part3/lsbaws_part3_conc2_service_clients.png" /&gt;&lt;/p&gt;
 &lt;p&gt;在 Unix 下写一个并发服务器的最简单的方法是使用 &lt;a class="reference external" href="https://docs.python.org/2.7/library/os.html#os.fork"&gt;fork()&lt;/a&gt; 系统调用。&lt;/p&gt;
@@ -19188,7 +19308,7 @@ $ python client3.py --max-clients 128
 &lt;p&gt;&lt;img alt="lsbaws_part3_conc5_no_zombies.png" src="/static/images/lsbaws-part3/lsbaws_part3_conc5_no_zombies.png" /&gt;&lt;/p&gt;
 &lt;p&gt;恭喜！这可真是个漫长的旅程，但是我希望你能喜欢它。
 现在你已经有了你自己的简单的并发服务器，这些代码可以作为你将来开发产品级 Web 服务器的基础。&lt;/p&gt;
-&lt;p&gt;我要给你留一个练习，那就是将的 &lt;a class="reference external" href="https://mozillazg.com/2015/06/let-us-build-a-web-server-part-2-zh-cn.html"&gt;第二部分&lt;/a&gt; 的 WSGI 服务器更新为并发服务器。
+&lt;p&gt;我要给你留一个练习，那就是将的 &lt;a class="reference external" href="http://mozillazg.com/2015/06/let-us-build-a-web-server-part-2-zh-cn.html"&gt;第二部分&lt;/a&gt; 的 WSGI 服务器更新为并发服务器。
 你可以从 &lt;a class="reference external" href="https://github.com/rspivak/lsbaws/blob/master/part3/webserver3h.py"&gt;这里&lt;/a&gt; 得到最终的修改版。但是，只在你完成你的版本后才能查看我的代码。
 你已经具备了完成这项工作的所必需的所有信息了。所以，放手去做吧：）&lt;/p&gt;
 &lt;p&gt;下一步是什么？正如 Josh Billings 说过的，&lt;/p&gt;
@@ -20163,7 +20283,7 @@ mchid             # ** 在其他支付 api 中参数的名称是 mch_id **
 &lt;p&gt;&lt;img alt="1378.comicrunning3.zh-cn.png" src="/static/images/comics/1378.comicrunning3.zh-cn.png" /&gt;&lt;/p&gt;
 &lt;p&gt;race you to that tree over there!
 我们比比谁先跑到那棵树那里！&lt;/p&gt;</summary><category term="Cyanide and Happiness"></category></entry><entry><title>让我们一起来构建一个 Web 服务器（二）</title><link href="https://mozillazg.com/2015/06/let-us-build-a-web-server-part-2-zh-cn.html" rel="alternate"></link><updated>2015-06-10T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2015-06-06:2015/06/let-us-build-a-web-server-part-2-zh-cn.html</id><summary type="html">&lt;p&gt;本文译自：&lt;a class="reference external" href="http://ruslanspivak.com/lsbaws-part2/"&gt;http://ruslanspivak.com/lsbaws-part2/&lt;/a&gt;&lt;/p&gt;
-&lt;p&gt;还记得吗？在 &lt;a class="reference external" href="https://mozillazg.com/2015/06/let-us-build-a-web-server-part-1-zh-cn.html"&gt;第一部分&lt;/a&gt; 我向你问了一个问题：”如何在你新鲜出炉的 Web 服务器上不做任何修改的就运行 Django 应用，Flask 应用， Pyramid 应用?“
+&lt;p&gt;还记得吗？在 &lt;a class="reference external" href="http://mozillazg.com/2015/06/let-us-build-a-web-server-part-1-zh-cn.html"&gt;第一部分&lt;/a&gt; 我向你问了一个问题：”如何在你新鲜出炉的 Web 服务器上不做任何修改的就运行 Django 应用，Flask 应用， Pyramid 应用?“
 往下读就可以找到答案。&lt;/p&gt;
 &lt;p&gt;在过去，当你选择的 Python Web 框架会限制你所能选择的 Web 服务器, 如果那个框架和服务器被设计的可以一起工作的话，那就皆大欢喜了：&lt;/p&gt;
 &lt;p&gt;&lt;img alt="Server Framework Fit" src="/static/images/lsbaws-part2/lsbaws_part2_before_wsgi.png" /&gt;&lt;/p&gt;
@@ -20177,7 +20297,7 @@ mchid             # ** 在其他支付 api 中参数的名称是 mch_id **
 比如，你可以 用 &lt;a class="reference external" href="http://gunicorn.org/"&gt;Gunicorn&lt;/a&gt; or &lt;a class="reference external" href="http://uwsgi-docs.readthedocs.org/"&gt;Nginx/uWSGI&lt;/a&gt; or &lt;a class="reference external" href="http://waitress.readthedocs.org/"&gt;Waitress&lt;/a&gt; 运行 &lt;a class="reference external" href="https://www.djangoproject.com/"&gt;Django&lt;/a&gt;, &lt;a class="reference external" href="http://flask.pocoo.org/"&gt;Flask&lt;/a&gt;, 或 &lt;a class="reference external" href="http://trypyramid.com/"&gt;Pyramid&lt;/a&gt; .
 真正的随意混搭，感谢那些服务器和框架对 WSGI 的支持：&lt;/p&gt;
 &lt;p&gt;&lt;img alt="Mix &amp;amp; Match" src="/static/images/lsbaws-part2/lsbaws_part2_wsgi_interop.png" /&gt;&lt;/p&gt;
-&lt;p&gt;因此，&lt;a class="reference external" href="https://www.python.org/dev/peps/pep-0333/"&gt;WSGI&lt;/a&gt; 就是我在 &lt;a class="reference external" href="https://mozillazg.com/2015/06/let-us-build-a-web-server-part-1-zh-cn.html"&gt;第一部分&lt;/a&gt; 向你问的并在文章开头重复过的问题的答案。
+&lt;p&gt;因此，&lt;a class="reference external" href="https://www.python.org/dev/peps/pep-0333/"&gt;WSGI&lt;/a&gt; 就是我在 &lt;a class="reference external" href="http://mozillazg.com/2015/06/let-us-build-a-web-server-part-1-zh-cn.html"&gt;第一部分&lt;/a&gt; 向你问的并在文章开头重复过的问题的答案。
 你的 Web 服务器必须实现 WSGI 接口的服务器端部分，
 所有的现代 Python Web 框架都已经实现了 WSGI 接口的框架端部分，
 这部分允许你不需要修改你的服务器代码去适应某个特定的框架就可以使用这些框架。&lt;/p&gt;
@@ -20329,7 +20449,7 @@ mchid             # ** 在其他支付 api 中参数的名称是 mch_id **
     &lt;span class="k"&gt;print&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;WSGIServer: Serving HTTP on port {port} ...&lt;/span&gt;&lt;span class="se"&gt;\n&lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;format&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;port&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="n"&gt;PORT&lt;/span&gt;&lt;span class="p"&gt;))&lt;/span&gt;
     &lt;span class="n"&gt;httpd&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;serve_forever&lt;/span&gt;&lt;span class="p"&gt;()&lt;/span&gt;
 &lt;/pre&gt;&lt;/div&gt;
-&lt;p&gt;上面的代码比 &lt;a class="reference external" href="https://mozillazg.com/2015/06/let-us-build-a-web-server-part-1-zh-cn.html"&gt;第一部分&lt;/a&gt; 的服务器代码更长，但是，为了让你能够理解而不至于陷入细节的泥潭中，它已经足够小了（只有不到 150 行）。
+&lt;p&gt;上面的代码比 &lt;a class="reference external" href="http://mozillazg.com/2015/06/let-us-build-a-web-server-part-1-zh-cn.html"&gt;第一部分&lt;/a&gt; 的服务器代码更长，但是，为了让你能够理解而不至于陷入细节的泥潭中，它已经足够小了（只有不到 150 行）。
 上面的服务器代码同样也能做更多的工作——它能运行用你上面所见的 Web 框架（&lt;a class="reference external" href="http://trypyramid.com/"&gt;Pyramid&lt;/a&gt;, &lt;a class="reference external" href="http://flask.pocoo.org/"&gt;Flask&lt;/a&gt;, &lt;a class="reference external" href="https://www.djangoproject.com/"&gt;Django&lt;/a&gt;, 或其他的 Python WSGI 框架）所写的基础 Web 应用，&lt;/p&gt;
 &lt;p&gt;不信？动手试一下吧。把上面的代码保存为 &lt;tt class="docutils literal"&gt;webserver2.py&lt;/tt&gt; 或者直接从 &lt;a class="reference external" href="https://github.com/rspivak/lsbaws/blob/master/part2/webserver2.py"&gt;GitHub&lt;/a&gt; 上下载下来。如果你不带任何参数就运行这个程序的话，它会向你抱怨，然后退出。&lt;/p&gt;
 &lt;pre class="literal-block"&gt;
@@ -20512,7 +20632,7 @@ WSGIServer: Serving HTTP on port 8888 ...
 &lt;p&gt;现在，让我们回到服务器都给客户端传输了什么东西。
 下面是当你使用 HTTP 客户端调用你的 Pyramind 应用时，服务器生成的 HTTP 响应：&lt;/p&gt;
 &lt;p&gt;&lt;img alt="HTTP Response Part 1" src="/static/images/lsbaws-part2/lsbaws_part2_http_response.png" /&gt;&lt;/p&gt;
-&lt;p&gt;这个响应有一些你在 &lt;a class="reference external" href="https://mozillazg.com/2015/06/let-us-build-a-web-server-part-1-zh-cn.html"&gt;第一部分&lt;/a&gt; 看到过的东西，但是它也有一些新东西。比如说，它有四个你之前还没见过的 &lt;a class="reference external" href="http://en.wikipedia.org/wiki/List_of_HTTP_header_fields"&gt;HTTP headers&lt;/a&gt;：
+&lt;p&gt;这个响应有一些你在 &lt;a class="reference external" href="http://mozillazg.com/2015/06/let-us-build-a-web-server-part-1-zh-cn.html"&gt;第一部分&lt;/a&gt; 看到过的东西，但是它也有一些新东西。比如说，它有四个你之前还没见过的 &lt;a class="reference external" href="http://en.wikipedia.org/wiki/List_of_HTTP_header_fields"&gt;HTTP headers&lt;/a&gt;：
 &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;Content-Type&lt;/span&gt;&lt;/tt&gt; , &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;Content-Length&lt;/span&gt;&lt;/tt&gt; , &lt;tt class="docutils literal"&gt;Date&lt;/tt&gt; 以及 &lt;tt class="docutils literal"&gt;Server&lt;/tt&gt; .
 这些包含在响应里的头信息是一个 Web 服务器应该要生成的信息。
 虽然它们中没有一个是严格要求必须提供的。
@@ -20539,7 +20659,7 @@ WSGIServer: Serving HTTP on port 8888 ...
 &lt;p&gt;&lt;img alt="Server Summary" src="/static/images/lsbaws-part2/lsbaws_part2_server_summary.png" /&gt;&lt;/p&gt;
 &lt;p&gt;就这些了。你现在有了一个可以工作的 WSGI 服务器，它能够服务那些用 WSGI 兼容的 Web 框架（比如：&lt;a class="reference external" href="https://www.djangoproject.com/"&gt;Django&lt;/a&gt;, &lt;a class="reference external" href="http://flask.pocoo.org/"&gt;Flask&lt;/a&gt;, &lt;a class="reference external" href="http://trypyramid.com/"&gt;Pyramid&lt;/a&gt; 或者是你自己开发的 WSGI 框架) 开发的基础的 Web 应用。最棒的是不需要修改任何的服务器代码就可以与多个 Web 框架一起使用。目前看起来还不赖嘛。&lt;/p&gt;
 &lt;p&gt;在你离开前，这里有另一个问题需要你思考，”如何让你的服务器能够在同一时刻处理多个请求？“&lt;/p&gt;
-&lt;p&gt;敬请期待，在 &lt;a class="reference external" href="https://mozillazg.com/2015/08/let-us-build-a-web-server-part-3-zh-cn.html"&gt;第三部分&lt;/a&gt; 我将向你展示一种方法。加油！&lt;/p&gt;
+&lt;p&gt;敬请期待，在 &lt;a class="reference external" href="http://mozillazg.com/2015/08/let-us-build-a-web-server-part-3-zh-cn.html"&gt;第三部分&lt;/a&gt; 我将向你展示一种方法。加油！&lt;/p&gt;
 </summary><category term="let-us-build"></category><category term="server"></category><category term="http"></category><category term="wsgi"></category><category term="lsbaws"></category><category term="让我们一起来构建一个 Web 服务器"></category></entry><entry><title>[译][漫]Cyanide &amp; Happiness #3105：外面</title><link href="https://mozillazg.com/2015/06/3105.outside.zh-cn.html" rel="alternate"></link><updated>2015-06-05T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2015-06-05:2015/06/3105.outside.zh-cn.html</id><summary type="html">&lt;p&gt;译自：&lt;a href="http://explosm.net/comics/3105/"&gt;Cyanide &amp;amp; Happiness #3105 - Explosm.net&lt;/a&gt;&lt;/p&gt;
 &lt;p&gt;&lt;img alt="3105.outside.zh-cn.png" src="/static/images/comics/3105.outside.zh-cn.png" /&gt;&lt;/p&gt;
 &lt;p&gt;it's such a beautiful day!
@@ -20699,7 +20819,7 @@ Hello, World!
 正如你见过的，如果想尝试的话你也可以通过使用 telent 手动输入 HTTP 请求的方式成为一个人肉 HTTP 客户端。&lt;/p&gt;
 &lt;p&gt;有个问题要问你：“如何在你这个新鲜出炉的 Web server 上运行一个 Django 应用，
 Flask 应用，以及 Pyramid 应用，并且不需要做任何的改动就可以适应这些不同的 Web 框架？”&lt;/p&gt;
-&lt;p&gt;我将在 &lt;a class="reference external" href="https://mozillazg.com/2015/06/let-us-build-a-web-server-part-2-zh-cn.html"&gt;第二篇文章&lt;/a&gt; 中向你详细的讲解。敬请期待。&lt;/p&gt;
+&lt;p&gt;我将在 &lt;a class="reference external" href="http://mozillazg.com/2015/06/let-us-build-a-web-server-part-2-zh-cn.html"&gt;第二篇文章&lt;/a&gt; 中向你详细的讲解。敬请期待。&lt;/p&gt;
 &lt;table class="docutils footnote" frame="void" id="id2" rules="none"&gt;
 &lt;colgroup&gt;&lt;col class="label" /&gt;&lt;col /&gt;&lt;/colgroup&gt;
 &lt;tbody valign="top"&gt;
@@ -28277,11 +28397,11 @@ checking whether the C compiler works... yes
 
 &lt;p&gt;&lt;strong&gt;使用 sorted 函数排序（按对象属性排序）&lt;/strong&gt;。
 关于排序请参考博文：
-&lt;a href="https://mozillazg.com/2013/03/python-sorting-how-to.html"&gt;[python]排序（Sorting Mini-HOW TO）&lt;/a&gt;&lt;/p&gt;
+&lt;a href="http://mozillazg.com/2013/03/python-sorting-how-to.html"&gt;[python]排序（Sorting Mini-HOW TO）&lt;/a&gt;&lt;/p&gt;
 &lt;h2&gt;参考&lt;/h2&gt;
 &lt;ul&gt;
 &lt;li&gt;&lt;a href="http://docs.python.org/2/library/itertools.html#itertools.chain"&gt;itertools — Functions creating iterators for efficient looping — Python v2.7.3 documentation&lt;/a&gt;&lt;/li&gt;
-&lt;li&gt;&lt;a href="https://mozillazg.com/2013/03/python-sorting-how-to.html"&gt;[python]排序（Sorting Mini-HOW TO）&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a href="http://mozillazg.com/2013/03/python-sorting-how-to.html"&gt;[python]排序（Sorting Mini-HOW TO）&lt;/a&gt;&lt;/li&gt;
 &lt;/ul&gt;</summary><category term="django"></category><category term="python"></category><category term="queryset"></category><category term="sort"></category><category term="merge"></category></entry><entry><title>[python]在 zope2 中获取当前时间及格式化输出</title><link href="https://mozillazg.com/2013/03/python-zope2-datetime.html" rel="alternate"></link><updated>2013-03-18T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2013-03-18:2013/03/python-zope2-datetime.html</id><summary type="html">&lt;p&gt;可以使用 Zope2 内置的 &lt;code&gt;DateTime()&lt;/code&gt; 获取当前时间。&lt;/p&gt;
 &lt;h2&gt;Script(Python)&lt;/h2&gt;
 &lt;p&gt;新建 Script(Python) 文件：&lt;/p&gt;
