@@ -1,5 +1,269 @@
 <?xml version="1.0" encoding="utf-8"?>
-<feed xmlns="http://www.w3.org/2005/Atom"><title>Huang Huang 的博客</title><link href="https://mozillazg.com/" rel="alternate"></link><link href="https://mozillazg.com/feeds/mozillazg.atom.xml" rel="self"></link><id>https://mozillazg.com/</id><updated>2020-04-04T00:00:00+00:00</updated><entry><title>一个在容器外用 tcpdump 命令对容器内的网络请求抓包的方法</title><link href="https://mozillazg.com/2020/04/use-tcpdump-for-a-container-but-outside-container.html" rel="alternate"></link><updated>2020-04-04T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2020-04-04:2020/04/use-tcpdump-for-a-container-but-outside-container.html</id><summary type="html">&lt;div class="section" id="id1"&gt;
+<feed xmlns="http://www.w3.org/2005/Atom"><title>Huang Huang 的博客</title><link href="https://mozillazg.com/" rel="alternate"></link><link href="https://mozillazg.com/feeds/mozillazg.atom.xml" rel="self"></link><id>https://mozillazg.com/</id><updated>2020-05-17T00:00:00+00:00</updated><entry><title>当有多个可用的 Pod Security Policy 时 k8s 的 PSP 选择策略</title><link href="https://mozillazg.com/2020/05/k8s-kubernetes-use-which-psp-when-there-are-multiple-pod-security-policies.html" rel="alternate"></link><updated>2020-05-17T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2020-05-17:2020/05/k8s-kubernetes-use-which-psp-when-there-are-multiple-pod-security-policies.html</id><summary type="html">&lt;div class="section" id="id1"&gt;
+&lt;h2 id="hidid1"&gt;前言&lt;a class="headerlink" href="#hidid1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;简单记录一下，当有多个可用的 psp 时，k8s 会为当前 pod 选择哪个 psp，即 psp 的选择策略是啥。&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class="section" id="id2"&gt;
+&lt;h2 id="hidid2"&gt;官方文档的介绍&lt;a class="headerlink" href="#hidid2" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;&lt;a class="reference external" href="https://kubernetes.io/docs/concepts/policy/pod-security-policy/#policy-order"&gt;官方文档&lt;/a&gt; 对这种情况的介绍如下：&lt;/p&gt;
+&lt;blockquote&gt;
+&lt;p&gt;Policy Order&lt;/p&gt;
+&lt;p&gt;In addition to restricting pod creation and update, pod security policies can also be used to provide default values for many of the fields that it controls. When multiple policies are available, the pod security policy controller selects policies according to the following criteria:&lt;/p&gt;
+&lt;blockquote&gt;
+&lt;ol class="arabic simple"&gt;
+&lt;li&gt;PodSecurityPolicies which allow the pod as-is, without changing defaults or mutating the pod, are preferred. The order of these non-mutating PodSecurityPolicies doesn’t matter.&lt;/li&gt;
+&lt;li&gt;If the pod must be defaulted or mutated, the first PodSecurityPolicy (ordered by name) to allow the pod is selected.&lt;/li&gt;
+&lt;/ol&gt;
+&lt;/blockquote&gt;
+&lt;p&gt;Note: During update operations (during which mutations to pod specs are disallowed) only non-mutating PodSecurityPolicies are used to validate the pod.&lt;/p&gt;
+&lt;/blockquote&gt;
+&lt;p&gt;简单来说就是：&lt;/p&gt;
+&lt;ul class="simple"&gt;
+&lt;li&gt;优先考虑不用修改默认值（修改 pod/container 的 securityContext 值）或改变 pod spec（增加安全相关注解等） 的 psp（详见 &lt;a class="reference external" href="https://github.com/kubernetes/kubernetes/blob/af0e1319c35fa143ef6dcb891d753099b6ac1e4b/pkg/security/podsecuritypolicy/provider.go#L67"&gt;源码&lt;/a&gt;  &lt;a class="reference external" href="https://github.com/kubernetes/kubernetes/blob/af0e1319c35fa143ef6dcb891d753099b6ac1e4b/pkg/security/podsecuritypolicy/provider.go#L128"&gt;源码&lt;/a&gt; ），如果没有满足不变条件的 psp 则选择按名称从小到大(a-z)排序后的第一个 psp。&lt;/li&gt;
+&lt;li&gt;当然，还有一个没有明说的策略是，可供选择的 psp 必须满足 pod 声明所需的安全相关需求（securityContext 中定义的），对于不满足需求的 psp 自然是直接就过滤掉了不会参与上面的选择。&lt;/li&gt;
+&lt;/ul&gt;
+&lt;p&gt;下面我们来做一些实验来验证这几个选择策略。&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class="section" id="id3"&gt;
+&lt;h2 id="hidid3"&gt;按名称排序选择第一个&lt;a class="headerlink" href="#hidid3" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;首先，我们定义以下两个 PSP 并且配置 default namespace 的 psp serviceaccount 可以使用这两个 psp （假设文件名叫 psp.yaml）:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+apiVersion: policy/v1beta1
+kind: PodSecurityPolicy
+metadata:
+  name: psp-a
+  annotations:
+    seccomp.security.alpha.kubernetes.io/defaultProfileName:  'docker/default'
+    seccomp.security.alpha.kubernetes.io/allowedProfileNames: 'docker/default'
+spec:
+  privileged: false
+  runAsUser:
+    rule: 'RunAsAny'
+  supplementalGroups:
+    rule: 'RunAsAny'
+  fsGroup:
+    rule: 'RunAsAny'
+  seLinux:
+    rule: 'RunAsAny'
+  volumes:
+  - configMap
+  - emptyDir
+  - secret
+---
+apiVersion: policy/v1beta1
+kind: PodSecurityPolicy
+metadata:
+  name: psp-b
+  annotations:
+    seccomp.security.alpha.kubernetes.io/defaultProfileName:  'docker/default'
+    seccomp.security.alpha.kubernetes.io/allowedProfileNames: 'docker/default'
+spec:
+  privileged: false
+  runAsUser:
+    rule: 'RunAsAny'
+  supplementalGroups:
+    rule: 'RunAsAny'
+  fsGroup:
+    rule: 'RunAsAny'
+  seLinux:
+    rule: 'RunAsAny'
+  volumes:
+  - configMap
+  - emptyDir
+  - secret
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: psp:test
+  namespace: default
+rules:
+- apiGroups:
+  - policy
+  resourceNames:
+  - psp-b
+  - psp-a
+  resources:
+  - podsecuritypolicies
+  verbs:
+  - use
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: psp:test:binding
+  namespace: default
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: psp:test
+subjects:
+  - kind: ServiceAccount
+    name: psp
+    namespace: default
+&lt;/pre&gt;
+&lt;p&gt;应用一下上面的 yaml 文件:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+$ kubectl create sa psp
+serviceaccount/psp created
+$ kubectl apply -f psp.yaml
+podsecuritypolicy.policy/psp-a created
+podsecuritypolicy.policy/psp-b created
+role.rbac.authorization.k8s.io/psp:test created
+rolebinding.rbac.authorization.k8s.io/psp:test:binding created
+$ kubectl get psp
+NAME    PRIV    CAPS   SELINUX    RUNASUSER   FSGROUP    SUPGROUP   READONLYROOTFS   VOLUMES
+psp-a   false          RunAsAny   RunAsAny    RunAsAny   RunAsAny   false            configMap,emptyDir,secret
+psp-b   false          RunAsAny   RunAsAny    RunAsAny   RunAsAny   false            configMap,emptyDir,secret
+&lt;/pre&gt;
+&lt;p&gt;然后创建一个 deployment，看看出来的 pod 实际会用哪个 psp （假设文件名称叫 deployment.yaml）:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: test
+  name: test
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: test
+  template:
+    metadata:
+      labels:
+        app: test
+    spec:
+      serviceAccountName: psp
+      containers:
+      - image: busybox
+        name: busybox
+        command:
+          - sleep
+          - &amp;quot;233666&amp;quot;
+&lt;/pre&gt;
+&lt;p&gt;创建 deployment 并查看生成的 pod 使用的 psp:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+$ kubectl apply -f deployment.yaml
+deployment.apps/test created
+$ kubectl get pod -l app=test
+NAME                    READY   STATUS              RESTARTS   AGE
+test-7ff7bc8569-s9487   0/1     ContainerCreating   0          12s
+$ kubectl get pod test-7ff7bc8569-s9487 -o jsonpath='{.metadata.annotations}'
+map[kubernetes.io/psp:psp-a seccomp.security.alpha.kubernetes.io/pod:docker/default]
+&lt;/pre&gt;
+&lt;p&gt;通过 pod 的注解我们可以知道这个 pod 使用的 psp 是 &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;psp-a&lt;/span&gt;&lt;/tt&gt; ， &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;psp-a&lt;/span&gt;&lt;/tt&gt; 和 &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;psp-b&lt;/span&gt;&lt;/tt&gt; 两个定义的 psp 策略完全一样，当时却使用了 &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;psp-a&lt;/span&gt;&lt;/tt&gt; 符合第二个按名称排序选择第一个的选择策略。&lt;/p&gt;
+&lt;p&gt;下面我们来验证一下第一个策略。&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class="section" id="pod-psp"&gt;
+&lt;h2 id="hidpod-psp"&gt;优先考虑不用修改默认值或改变 pod 的 psp&lt;a class="headerlink" href="#hidpod-psp" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;前面定义的 &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;psp-a&lt;/span&gt;&lt;/tt&gt; 和 &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;psp-b&lt;/span&gt;&lt;/tt&gt; 中的注解 &lt;tt class="docutils literal"&gt;seccomp.security.alpha.kubernetes.io/defaultProfileName&lt;/tt&gt; 和 &lt;tt class="docutils literal"&gt;seccomp.security.alpha.kubernetes.io/allowedProfileNames&lt;/tt&gt; 就是一个会改变 pod 的规则，下面删除一下 &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;psp-b&lt;/span&gt;&lt;/tt&gt; 中的这两个注解，按照选择策略，这次应该会使用 &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;psp-b&lt;/span&gt;&lt;/tt&gt; 这个 psp。&lt;/p&gt;
+&lt;p&gt;修改 &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;psp-b&lt;/span&gt;&lt;/tt&gt; 删除 seccomp 注解:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+apiVersion: policy/v1beta1
+kind: PodSecurityPolicy
+metadata:
+  name: psp-a
+  annotations:
+    seccomp.security.alpha.kubernetes.io/defaultProfileName:  'docker/default'
+    seccomp.security.alpha.kubernetes.io/allowedProfileNames: 'docker/default'
+spec:
+  privileged: false
+  runAsUser:
+    rule: 'RunAsAny'
+  supplementalGroups:
+    rule: 'RunAsAny'
+  fsGroup:
+    rule: 'RunAsAny'
+  seLinux:
+    rule: 'RunAsAny'
+  volumes:
+  - configMap
+  - emptyDir
+  - secret
+---
+apiVersion: policy/v1beta1
+kind: PodSecurityPolicy
+metadata:
+  name: psp-b
+spec:
+  privileged: false
+  runAsUser:
+    rule: 'RunAsAny'
+  supplementalGroups:
+    rule: 'RunAsAny'
+  fsGroup:
+    rule: 'RunAsAny'
+  seLinux:
+    rule: 'RunAsAny'
+  volumes:
+  - configMap
+  - emptyDir
+  - secret
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: psp:test
+  namespace: default
+rules:
+- apiGroups:
+  - policy
+  resourceNames:
+  - psp-b
+  - psp-a
+  resources:
+  - podsecuritypolicies
+  verbs:
+  - use
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: psp:test:binding
+  namespace: default
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: psp:test
+subjects:
+  - kind: ServiceAccount
+    name: psp
+    namespace: default
+&lt;/pre&gt;
+&lt;p&gt;更新一下已有的 psp:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+$ kubectl apply -f psp.yaml
+podsecuritypolicy.policy/psp-a configured
+podsecuritypolicy.policy/psp-b configured
+role.rbac.authorization.k8s.io/psp:test unchanged
+rolebinding.rbac.authorization.k8s.io/psp:test:binding unchanged
+&lt;/pre&gt;
+&lt;p&gt;还是使用前面的 deployment.yaml 来测试:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+$ kubectl delete -f deployment.yaml
+deployment.apps &amp;quot;test&amp;quot; deleted
+$ kubectl apply -f deployment.yaml
+deployment.apps/test created
+$ kubectl get pod -l app=test
+NAME                    READY   STATUS              RESTARTS   AGE
+test-7ff7bc8569-bc62g   0/1     ContainerCreating   0          8s
+$ kubectl get pod test-7ff7bc8569-bc62g -o jsonpath='{.metadata.annotations}'
+map[kubernetes.io/psp:psp-b]
+&lt;/pre&gt;
+&lt;p&gt;可以看到，这次确实是使用了 &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;psp-b&lt;/span&gt;&lt;/tt&gt; 这个 psp，验证了第一个选择策略。&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class="section" id="id4"&gt;
+&lt;h2 id="hidid4"&gt;参考资料&lt;a class="headerlink" href="#hidid4" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;ul class="simple"&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://kubernetes.io/docs/concepts/policy/pod-security-policy/#policy-order"&gt;Pod Security Policies - Kubernetes&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://banzaicloud.com/blog/pod-security-policy/"&gt;An illustrated deepdive into Pod Security Policies · Banzai Cloud&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://kubernetes.io/docs/tasks/configure-pod-container/configure-service-account/"&gt;Configure Service Accounts for Pods - Kubernetes&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://github.com/kubernetes/kubernetes/blob/92ea33efc509052b208e094390a363c5dbd21b7c/plugin/pkg/admission/security/podsecuritypolicy/admission.go"&gt;kubernetes/admission.go at 92ea33efc509052b208e094390a363c5dbd21b7c · kubernetes/kubernetes&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://github.com/kubernetes/kubernetes/blob/af0e1319c35fa143ef6dcb891d753099b6ac1e4b/pkg/security/podsecuritypolicy/provider.go"&gt;kubernetes/provider.go at af0e1319c35fa143ef6dcb891d753099b6ac1e4b · kubernetes/kubernetes&lt;/a&gt;&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/div&gt;
+</summary><category term="k8s"></category><category term="kubernetes"></category><category term="psp"></category><category term="pod-security-policy"></category></entry><entry><title>一个在容器外用 tcpdump 命令对容器内的网络请求抓包的方法</title><link href="https://mozillazg.com/2020/04/use-tcpdump-for-a-container-but-outside-container.html" rel="alternate"></link><updated>2020-04-04T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2020-04-04:2020/04/use-tcpdump-for-a-container-but-outside-container.html</id><summary type="html">&lt;div class="section" id="id1"&gt;
 &lt;h2 id="hidid1"&gt;前言&lt;a class="headerlink" href="#hidid1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;p&gt;如题所述，记录一种在不进入容器的情况下对容器进行抓包的方法。&lt;/p&gt;
 &lt;/div&gt;
@@ -68,7 +332,7 @@ Connection: close
 &lt;li&gt;&lt;a class="reference external" href="https://mozillazg.com/2020/04/nsenter-usage.html"&gt;nsenter 常用操作&lt;/a&gt;&lt;/li&gt;
 &lt;/ul&gt;
 &lt;/div&gt;
-</summary><category term="debug"></category><category term="tcpdump"></category></entry><entry><title>nsenter 常用操作</title><link href="https://mozillazg.com/2020/04/nsenter-usage.html" rel="alternate"></link><updated>2020-04-03T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2020-04-03:2020/04/nsenter-usage.html</id><summary type="html">&lt;div class="section" id="id1"&gt;
+</summary><category term="debug"></category><category term="tcpdump"></category><category term="nsenter"></category><category term="docker"></category></entry><entry><title>nsenter 常用操作</title><link href="https://mozillazg.com/2020/04/nsenter-usage.html" rel="alternate"></link><updated>2020-04-03T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2020-04-03:2020/04/nsenter-usage.html</id><summary type="html">&lt;div class="section" id="id1"&gt;
 &lt;h2 id="hidid1"&gt;前言&lt;a class="headerlink" href="#hidid1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;p&gt;nsenter 是一个可以用来进入到目标程序说在 namespace 中运行命令的工具，一般可以用于在容器外 debug 容器中运行的程序。简单记录一下 nsenter 的常用用法。&lt;/p&gt;
 &lt;/div&gt;
@@ -119,7 +383,7 @@ $ nsenter -m -u -i -n -p -t $PID hostname
 &lt;li&gt;&lt;a class="reference external" href="https://docs.docker.com/engine/reference/commandline/inspect/"&gt;docker inspect | Docker Documentation&lt;/a&gt;&lt;/li&gt;
 &lt;/ul&gt;
 &lt;/div&gt;
-</summary><category term="nsenter"></category><category term="debug"></category><category term="tools"></category></entry><entry><title>使用 Apline 作为基础镜像时可能会遇到的常见问题的解决方法</title><link href="https://mozillazg.com/2020/03/use-alpine-image-common-issues.rst.html" rel="alternate"></link><updated>2020-03-31T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2020-03-31:2020/03/use-alpine-image-common-issues.rst.html</id><summary type="html">&lt;div class="section" id="id1"&gt;
+</summary><category term="nsenter"></category><category term="debug"></category><category term="tools"></category><category term="docker"></category></entry><entry><title>使用 Apline 作为基础镜像时可能会遇到的常见问题的解决方法</title><link href="https://mozillazg.com/2020/03/use-alpine-image-common-issues.rst.html" rel="alternate"></link><updated>2020-03-31T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2020-03-31:2020/03/use-alpine-image-common-issues.rst.html</id><summary type="html">&lt;div class="section" id="id1"&gt;
 &lt;h2 id="hidid1"&gt;前言&lt;a class="headerlink" href="#hidid1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;p&gt;简单记录一下使用 Apline 作为基础镜像时可能会遇到的常见问题的解决方法。&lt;/p&gt;
 &lt;/div&gt;
