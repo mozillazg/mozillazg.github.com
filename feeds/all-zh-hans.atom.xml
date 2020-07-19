@@ -1,5 +1,420 @@
 <?xml version="1.0" encoding="utf-8"?>
-<feed xmlns="http://www.w3.org/2005/Atom"><title>Huang Huang 的博客</title><link href="https://mozillazg.com/" rel="alternate"></link><link href="https://mozillazg.com/feeds/all-zh-hans.atom.xml" rel="self"></link><id>https://mozillazg.com/</id><updated>2020-06-07T00:00:00+00:00</updated><entry><title>kubernetes 用户扮演 API</title><link href="https://mozillazg.com/2020/06/k8s-kubernetes-kubectl-syntax-of-impersonate-as-user-or-serviceaccount-or-group.html" rel="alternate"></link><updated>2020-06-07T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2020-06-07:2020/06/k8s-kubernetes-kubectl-syntax-of-impersonate-as-user-or-serviceaccount-or-group.html</id><summary type="html">&lt;div class="section" id="id1"&gt;
+<feed xmlns="http://www.w3.org/2005/Atom"><title>Huang Huang 的博客</title><link href="https://mozillazg.com/" rel="alternate"></link><link href="https://mozillazg.com/feeds/all-zh-hans.atom.xml" rel="self"></link><id>https://mozillazg.com/</id><updated>2020-07-19T00:00:00+00:00</updated><entry><title>在不生成 crd client 代码的情况下通过 client-go 增删改查 k8s crd 资源</title><link href="https://mozillazg.com/2020/07/k8s-kubernetes-client-go-list-get-create-update-patch-delete-crd-resource-without-generate-client-code-update-or-create-via-yaml.html" rel="alternate"></link><updated>2020-07-19T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2020-07-19:2020/07/k8s-kubernetes-client-go-list-get-create-update-patch-delete-crd-resource-without-generate-client-code-update-or-create-via-yaml.html</id><summary type="html">&lt;div class="section" id="id1"&gt;
+&lt;h2 id="hidid1"&gt;前言&lt;a class="headerlink" href="#hidid1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;一般情况下管理 crd 资源都是通过由 &lt;a class="reference external" href="https://github.com/kubernetes/code-generator"&gt;code-generator&lt;/a&gt; 生成的 crd client 来操作，但是有时也会有只想简单的操作一下资源不想去导入或生成 crd client 相关代码的需求，这里简单的记录一下在不生成 crd client 代码的情况下通过 client-go 增删改查 k8s crd 资源的方法。&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class="section" id="crd"&gt;
+&lt;h2 id="hidcrd"&gt;示例 CRD&lt;a class="headerlink" href="#hidcrd" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;先来定义一个测试用的 CRD （其实已有的 Pod 之类的也是可以的，没啥特别的不一定要自定义 CRD，这里只是展示这个能力，因为一般如果是内置的资源的话，直接用内置的 client 和内置的资源 struct 就可以了）（这个 crd 来自 &lt;a class="reference external" href="https://kubernetes.io/docs/tasks/extend-kubernetes/custom-resources/custom-resource-definitions/"&gt;官方文档&lt;/a&gt; ）：&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="l l-Scalar l-Scalar-Plain"&gt;apiVersion&lt;/span&gt;&lt;span class="p p-Indicator"&gt;:&lt;/span&gt; &lt;span class="l l-Scalar l-Scalar-Plain"&gt;apiextensions.k8s.io/v1&lt;/span&gt;
+&lt;span class="l l-Scalar l-Scalar-Plain"&gt;kind&lt;/span&gt;&lt;span class="p p-Indicator"&gt;:&lt;/span&gt; &lt;span class="l l-Scalar l-Scalar-Plain"&gt;CustomResourceDefinition&lt;/span&gt;
+&lt;span class="l l-Scalar l-Scalar-Plain"&gt;metadata&lt;/span&gt;&lt;span class="p p-Indicator"&gt;:&lt;/span&gt;
+  &lt;span class="c1"&gt;# name must match the spec fields below, and be in the form: &amp;lt;plural&amp;gt;.&amp;lt;group&amp;gt;&lt;/span&gt;
+  &lt;span class="l l-Scalar l-Scalar-Plain"&gt;name&lt;/span&gt;&lt;span class="p p-Indicator"&gt;:&lt;/span&gt; &lt;span class="l l-Scalar l-Scalar-Plain"&gt;crontabs.stable.example.com&lt;/span&gt;
+&lt;span class="l l-Scalar l-Scalar-Plain"&gt;spec&lt;/span&gt;&lt;span class="p p-Indicator"&gt;:&lt;/span&gt;
+  &lt;span class="c1"&gt;# group name to use for REST API: /apis/&amp;lt;group&amp;gt;/&amp;lt;version&amp;gt;&lt;/span&gt;
+  &lt;span class="l l-Scalar l-Scalar-Plain"&gt;group&lt;/span&gt;&lt;span class="p p-Indicator"&gt;:&lt;/span&gt; &lt;span class="l l-Scalar l-Scalar-Plain"&gt;stable.example.com&lt;/span&gt;
+  &lt;span class="c1"&gt;# list of versions supported by this CustomResourceDefinition&lt;/span&gt;
+  &lt;span class="l l-Scalar l-Scalar-Plain"&gt;versions&lt;/span&gt;&lt;span class="p p-Indicator"&gt;:&lt;/span&gt;
+    &lt;span class="p p-Indicator"&gt;-&lt;/span&gt; &lt;span class="l l-Scalar l-Scalar-Plain"&gt;name&lt;/span&gt;&lt;span class="p p-Indicator"&gt;:&lt;/span&gt; &lt;span class="l l-Scalar l-Scalar-Plain"&gt;v1&lt;/span&gt;
+      &lt;span class="c1"&gt;# Each version can be enabled/disabled by Served flag.&lt;/span&gt;
+      &lt;span class="l l-Scalar l-Scalar-Plain"&gt;served&lt;/span&gt;&lt;span class="p p-Indicator"&gt;:&lt;/span&gt; &lt;span class="l l-Scalar l-Scalar-Plain"&gt;true&lt;/span&gt;
+      &lt;span class="c1"&gt;# One and only one version must be marked as the storage version.&lt;/span&gt;
+      &lt;span class="l l-Scalar l-Scalar-Plain"&gt;storage&lt;/span&gt;&lt;span class="p p-Indicator"&gt;:&lt;/span&gt; &lt;span class="l l-Scalar l-Scalar-Plain"&gt;true&lt;/span&gt;
+      &lt;span class="l l-Scalar l-Scalar-Plain"&gt;schema&lt;/span&gt;&lt;span class="p p-Indicator"&gt;:&lt;/span&gt;
+        &lt;span class="l l-Scalar l-Scalar-Plain"&gt;openAPIV3Schema&lt;/span&gt;&lt;span class="p p-Indicator"&gt;:&lt;/span&gt;
+          &lt;span class="l l-Scalar l-Scalar-Plain"&gt;type&lt;/span&gt;&lt;span class="p p-Indicator"&gt;:&lt;/span&gt; &lt;span class="l l-Scalar l-Scalar-Plain"&gt;object&lt;/span&gt;
+          &lt;span class="l l-Scalar l-Scalar-Plain"&gt;properties&lt;/span&gt;&lt;span class="p p-Indicator"&gt;:&lt;/span&gt;
+            &lt;span class="l l-Scalar l-Scalar-Plain"&gt;spec&lt;/span&gt;&lt;span class="p p-Indicator"&gt;:&lt;/span&gt;
+              &lt;span class="l l-Scalar l-Scalar-Plain"&gt;type&lt;/span&gt;&lt;span class="p p-Indicator"&gt;:&lt;/span&gt; &lt;span class="l l-Scalar l-Scalar-Plain"&gt;object&lt;/span&gt;
+              &lt;span class="l l-Scalar l-Scalar-Plain"&gt;properties&lt;/span&gt;&lt;span class="p p-Indicator"&gt;:&lt;/span&gt;
+                &lt;span class="l l-Scalar l-Scalar-Plain"&gt;cronSpec&lt;/span&gt;&lt;span class="p p-Indicator"&gt;:&lt;/span&gt;
+                  &lt;span class="l l-Scalar l-Scalar-Plain"&gt;type&lt;/span&gt;&lt;span class="p p-Indicator"&gt;:&lt;/span&gt; &lt;span class="l l-Scalar l-Scalar-Plain"&gt;string&lt;/span&gt;
+                &lt;span class="l l-Scalar l-Scalar-Plain"&gt;image&lt;/span&gt;&lt;span class="p p-Indicator"&gt;:&lt;/span&gt;
+                  &lt;span class="l l-Scalar l-Scalar-Plain"&gt;type&lt;/span&gt;&lt;span class="p p-Indicator"&gt;:&lt;/span&gt; &lt;span class="l l-Scalar l-Scalar-Plain"&gt;string&lt;/span&gt;
+                &lt;span class="l l-Scalar l-Scalar-Plain"&gt;replicas&lt;/span&gt;&lt;span class="p p-Indicator"&gt;:&lt;/span&gt;
+                  &lt;span class="l l-Scalar l-Scalar-Plain"&gt;type&lt;/span&gt;&lt;span class="p p-Indicator"&gt;:&lt;/span&gt; &lt;span class="l l-Scalar l-Scalar-Plain"&gt;integer&lt;/span&gt;
+  &lt;span class="c1"&gt;# either Namespaced or Cluster&lt;/span&gt;
+  &lt;span class="l l-Scalar l-Scalar-Plain"&gt;scope&lt;/span&gt;&lt;span class="p p-Indicator"&gt;:&lt;/span&gt; &lt;span class="l l-Scalar l-Scalar-Plain"&gt;Namespaced&lt;/span&gt;
+  &lt;span class="l l-Scalar l-Scalar-Plain"&gt;names&lt;/span&gt;&lt;span class="p p-Indicator"&gt;:&lt;/span&gt;
+    &lt;span class="c1"&gt;# plural name to be used in the URL: /apis/&amp;lt;group&amp;gt;/&amp;lt;version&amp;gt;/&amp;lt;plural&amp;gt;&lt;/span&gt;
+    &lt;span class="l l-Scalar l-Scalar-Plain"&gt;plural&lt;/span&gt;&lt;span class="p p-Indicator"&gt;:&lt;/span&gt; &lt;span class="l l-Scalar l-Scalar-Plain"&gt;crontabs&lt;/span&gt;
+    &lt;span class="c1"&gt;# singular name to be used as an alias on the CLI and for display&lt;/span&gt;
+    &lt;span class="l l-Scalar l-Scalar-Plain"&gt;singular&lt;/span&gt;&lt;span class="p p-Indicator"&gt;:&lt;/span&gt; &lt;span class="l l-Scalar l-Scalar-Plain"&gt;crontab&lt;/span&gt;
+    &lt;span class="c1"&gt;# kind is normally the CamelCased singular type. Your resource manifests use this.&lt;/span&gt;
+    &lt;span class="l l-Scalar l-Scalar-Plain"&gt;kind&lt;/span&gt;&lt;span class="p p-Indicator"&gt;:&lt;/span&gt; &lt;span class="l l-Scalar l-Scalar-Plain"&gt;CronTab&lt;/span&gt;
+    &lt;span class="c1"&gt;# shortNames allow shorter string to match your resource on the CLI&lt;/span&gt;
+    &lt;span class="l l-Scalar l-Scalar-Plain"&gt;shortNames&lt;/span&gt;&lt;span class="p p-Indicator"&gt;:&lt;/span&gt;
+    &lt;span class="p p-Indicator"&gt;-&lt;/span&gt; &lt;span class="l l-Scalar l-Scalar-Plain"&gt;ct&lt;/span&gt;
+&lt;/pre&gt;&lt;/div&gt;
+&lt;p&gt;然后通过 kubectl 创建一下这个 crd ，然后再创建几个 crd 对象&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+$ kubectl apply -f crd.yaml
+customresourcedefinition.apiextensions.k8s.io/crontabs.stable.example.com created
+
+$ cat c.yaml
+---
+apiVersion: &amp;quot;stable.example.com/v1&amp;quot;
+kind: CronTab
+metadata:
+  name: cron-1
+spec:
+  cronSpec: &amp;quot;* * * * */5&amp;quot;
+  image: my-awesome-cron-image-1
+
+---
+apiVersion: &amp;quot;stable.example.com/v1&amp;quot;
+kind: CronTab
+metadata:
+  name: cron-2
+spec:
+  cronSpec: &amp;quot;* * * * */8&amp;quot;
+  image: my-awesome-cron-image-2
+
+---
+apiVersion: &amp;quot;stable.example.com/v1&amp;quot;
+kind: CronTab
+metadata:
+  name: cron-3
+spec:
+  cronSpec: &amp;quot;* * * * */10&amp;quot;
+  image: my-awesome-cron-image-3
+
+$ kubectl apply -f c.yaml
+crontab.stable.example.com/cron-1 created
+crontab.stable.example.com/cron-2 created
+crontab.stable.example.com/cron-3 created
+
+$ kubectl get crontab.stable.example.com
+NAME     AGE
+cron-1   9s
+cron-2   9s
+cron-3   9s
+&lt;/pre&gt;
+&lt;/div&gt;
+&lt;div class="section" id="list"&gt;
+&lt;h2 id="hidlist"&gt;list 资源&lt;a class="headerlink" href="#hidlist" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;首先是如何 list 前面创建的3个资源，类似 &lt;tt class="docutils literal"&gt;kubectl get crontab.stable.example.com&lt;/tt&gt; 的效果。&lt;/p&gt;
+&lt;p&gt;简单来说就是通过 &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;k8s.io/client-go/dynamic&lt;/span&gt;&lt;/tt&gt; 里的 &lt;tt class="docutils literal"&gt;Interface&lt;/tt&gt; 提供的方法来操作 crd 资源。
+关键是怎么拿到 &lt;tt class="docutils literal"&gt;NamespaceableResourceInterface&lt;/tt&gt; 实例以及把结果转换为自定义的结构体。&lt;/p&gt;
+&lt;p&gt;完整的 list 资源的代码如下:&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="kn"&gt;package&lt;/span&gt; &lt;span class="nx"&gt;main&lt;/span&gt;
+
+&lt;span class="kn"&gt;import&lt;/span&gt; &lt;span class="p"&gt;(&lt;/span&gt;
+        &lt;span class="s"&gt;&amp;quot;encoding/json&amp;quot;&lt;/span&gt;
+        &lt;span class="s"&gt;&amp;quot;fmt&amp;quot;&lt;/span&gt;
+        &lt;span class="s"&gt;&amp;quot;os&amp;quot;&lt;/span&gt;
+        &lt;span class="s"&gt;&amp;quot;path/filepath&amp;quot;&lt;/span&gt;
+
+        &lt;span class="nx"&gt;metav1&lt;/span&gt; &lt;span class="s"&gt;&amp;quot;k8s.io/apimachinery/pkg/apis/meta/v1&amp;quot;&lt;/span&gt;
+        &lt;span class="s"&gt;&amp;quot;k8s.io/apimachinery/pkg/runtime/schema&amp;quot;&lt;/span&gt;
+        &lt;span class="s"&gt;&amp;quot;k8s.io/client-go/dynamic&amp;quot;&lt;/span&gt;
+        &lt;span class="s"&gt;&amp;quot;k8s.io/client-go/tools/clientcmd&amp;quot;&lt;/span&gt;
+&lt;span class="p"&gt;)&lt;/span&gt;
+
+&lt;span class="kd"&gt;var&lt;/span&gt; &lt;span class="nx"&gt;gvr&lt;/span&gt; &lt;span class="p"&gt;=&lt;/span&gt; &lt;span class="nx"&gt;schema&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;GroupVersionResource&lt;/span&gt;&lt;span class="p"&gt;{&lt;/span&gt;
+        &lt;span class="nx"&gt;Group&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;    &lt;span class="s"&gt;&amp;quot;stable.example.com&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;
+        &lt;span class="nx"&gt;Version&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;  &lt;span class="s"&gt;&amp;quot;v1&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;
+        &lt;span class="nx"&gt;Resource&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt; &lt;span class="s"&gt;&amp;quot;crontabs&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;
+&lt;span class="p"&gt;}&lt;/span&gt;
+
+&lt;span class="kd"&gt;type&lt;/span&gt; &lt;span class="nx"&gt;CrontabSpec&lt;/span&gt; &lt;span class="kd"&gt;struct&lt;/span&gt; &lt;span class="p"&gt;{&lt;/span&gt;
+        &lt;span class="nx"&gt;CronSpec&lt;/span&gt; &lt;span class="kt"&gt;string&lt;/span&gt; &lt;span class="s"&gt;`json:&amp;quot;cronSpec&amp;quot;`&lt;/span&gt;
+        &lt;span class="nx"&gt;Image&lt;/span&gt;    &lt;span class="kt"&gt;string&lt;/span&gt; &lt;span class="s"&gt;`json:&amp;quot;image&amp;quot;`&lt;/span&gt;
+&lt;span class="p"&gt;}&lt;/span&gt;
+
+&lt;span class="kd"&gt;type&lt;/span&gt; &lt;span class="nx"&gt;Crontab&lt;/span&gt; &lt;span class="kd"&gt;struct&lt;/span&gt; &lt;span class="p"&gt;{&lt;/span&gt;
+        &lt;span class="nx"&gt;metav1&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;TypeMeta&lt;/span&gt;   &lt;span class="s"&gt;`json:&amp;quot;,inline&amp;quot;`&lt;/span&gt;
+        &lt;span class="nx"&gt;metav1&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;ObjectMeta&lt;/span&gt; &lt;span class="s"&gt;`json:&amp;quot;metadata,omitempty&amp;quot;`&lt;/span&gt;
+
+        &lt;span class="nx"&gt;Spec&lt;/span&gt; &lt;span class="nx"&gt;CrontabSpec&lt;/span&gt; &lt;span class="s"&gt;`json:&amp;quot;spec,omitempty&amp;quot;`&lt;/span&gt;
+&lt;span class="p"&gt;}&lt;/span&gt;
+
+&lt;span class="kd"&gt;type&lt;/span&gt; &lt;span class="nx"&gt;CrontabList&lt;/span&gt; &lt;span class="kd"&gt;struct&lt;/span&gt; &lt;span class="p"&gt;{&lt;/span&gt;
+        &lt;span class="nx"&gt;metav1&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;TypeMeta&lt;/span&gt; &lt;span class="s"&gt;`json:&amp;quot;,inline&amp;quot;`&lt;/span&gt;
+        &lt;span class="nx"&gt;metav1&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;ListMeta&lt;/span&gt; &lt;span class="s"&gt;`json:&amp;quot;metadata,omitempty&amp;quot;`&lt;/span&gt;
+
+        &lt;span class="nx"&gt;Items&lt;/span&gt; &lt;span class="p"&gt;[]&lt;/span&gt;&lt;span class="nx"&gt;Crontab&lt;/span&gt; &lt;span class="s"&gt;`json:&amp;quot;items&amp;quot;`&lt;/span&gt;
+&lt;span class="p"&gt;}&lt;/span&gt;
+
+&lt;span class="kd"&gt;func&lt;/span&gt; &lt;span class="nx"&gt;listCrontabs&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="nx"&gt;client&lt;/span&gt; &lt;span class="nx"&gt;dynamic&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Interface&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="nx"&gt;namespace&lt;/span&gt; &lt;span class="kt"&gt;string&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt; &lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="o"&gt;*&lt;/span&gt;&lt;span class="nx"&gt;CrontabList&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="kt"&gt;error&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt; &lt;span class="p"&gt;{&lt;/span&gt;
+        &lt;span class="nx"&gt;list&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="nx"&gt;err&lt;/span&gt; &lt;span class="o"&gt;:=&lt;/span&gt; &lt;span class="nx"&gt;client&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Resource&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="nx"&gt;gvr&lt;/span&gt;&lt;span class="p"&gt;).&lt;/span&gt;&lt;span class="nx"&gt;Namespace&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="nx"&gt;namespace&lt;/span&gt;&lt;span class="p"&gt;).&lt;/span&gt;&lt;span class="nx"&gt;List&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="nx"&gt;metav1&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;ListOptions&lt;/span&gt;&lt;span class="p"&gt;{})&lt;/span&gt;
+        &lt;span class="k"&gt;if&lt;/span&gt; &lt;span class="nx"&gt;err&lt;/span&gt; &lt;span class="o"&gt;!=&lt;/span&gt; &lt;span class="kc"&gt;nil&lt;/span&gt; &lt;span class="p"&gt;{&lt;/span&gt;
+                &lt;span class="k"&gt;return&lt;/span&gt; &lt;span class="kc"&gt;nil&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="nx"&gt;err&lt;/span&gt;
+        &lt;span class="p"&gt;}&lt;/span&gt;
+        &lt;span class="nx"&gt;data&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="nx"&gt;err&lt;/span&gt; &lt;span class="o"&gt;:=&lt;/span&gt; &lt;span class="nx"&gt;list&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;MarshalJSON&lt;/span&gt;&lt;span class="p"&gt;()&lt;/span&gt;
+        &lt;span class="k"&gt;if&lt;/span&gt; &lt;span class="nx"&gt;err&lt;/span&gt; &lt;span class="o"&gt;!=&lt;/span&gt; &lt;span class="kc"&gt;nil&lt;/span&gt; &lt;span class="p"&gt;{&lt;/span&gt;
+                &lt;span class="k"&gt;return&lt;/span&gt; &lt;span class="kc"&gt;nil&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="nx"&gt;err&lt;/span&gt;
+        &lt;span class="p"&gt;}&lt;/span&gt;
+        &lt;span class="kd"&gt;var&lt;/span&gt; &lt;span class="nx"&gt;ctList&lt;/span&gt; &lt;span class="nx"&gt;CrontabList&lt;/span&gt;
+        &lt;span class="k"&gt;if&lt;/span&gt; &lt;span class="nx"&gt;err&lt;/span&gt; &lt;span class="o"&gt;:=&lt;/span&gt; &lt;span class="nx"&gt;json&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Unmarshal&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="nx"&gt;data&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="o"&gt;&amp;amp;&lt;/span&gt;&lt;span class="nx"&gt;ctList&lt;/span&gt;&lt;span class="p"&gt;);&lt;/span&gt; &lt;span class="nx"&gt;err&lt;/span&gt; &lt;span class="o"&gt;!=&lt;/span&gt; &lt;span class="kc"&gt;nil&lt;/span&gt; &lt;span class="p"&gt;{&lt;/span&gt;
+                &lt;span class="k"&gt;return&lt;/span&gt; &lt;span class="kc"&gt;nil&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="nx"&gt;err&lt;/span&gt;
+        &lt;span class="p"&gt;}&lt;/span&gt;
+        &lt;span class="k"&gt;return&lt;/span&gt; &lt;span class="o"&gt;&amp;amp;&lt;/span&gt;&lt;span class="nx"&gt;ctList&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="kc"&gt;nil&lt;/span&gt;
+&lt;span class="p"&gt;}&lt;/span&gt;
+
+&lt;span class="kd"&gt;func&lt;/span&gt; &lt;span class="nx"&gt;main&lt;/span&gt;&lt;span class="p"&gt;()&lt;/span&gt; &lt;span class="p"&gt;{&lt;/span&gt;
+        &lt;span class="nx"&gt;kubeconfig&lt;/span&gt; &lt;span class="o"&gt;:=&lt;/span&gt; &lt;span class="nx"&gt;filepath&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Join&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="nx"&gt;os&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Getenv&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="s"&gt;&amp;quot;HOME&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;),&lt;/span&gt; &lt;span class="s"&gt;&amp;quot;.kube&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="s"&gt;&amp;quot;config&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+        &lt;span class="nx"&gt;config&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="nx"&gt;err&lt;/span&gt; &lt;span class="o"&gt;:=&lt;/span&gt; &lt;span class="nx"&gt;clientcmd&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;BuildConfigFromFlags&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="s"&gt;&amp;quot;&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="nx"&gt;kubeconfig&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+        &lt;span class="k"&gt;if&lt;/span&gt; &lt;span class="nx"&gt;err&lt;/span&gt; &lt;span class="o"&gt;!=&lt;/span&gt; &lt;span class="kc"&gt;nil&lt;/span&gt; &lt;span class="p"&gt;{&lt;/span&gt;
+                &lt;span class="nb"&gt;panic&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="nx"&gt;err&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+        &lt;span class="p"&gt;}&lt;/span&gt;
+
+        &lt;span class="nx"&gt;client&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="nx"&gt;err&lt;/span&gt; &lt;span class="o"&gt;:=&lt;/span&gt; &lt;span class="nx"&gt;dynamic&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;NewForConfig&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="nx"&gt;config&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+        &lt;span class="k"&gt;if&lt;/span&gt; &lt;span class="nx"&gt;err&lt;/span&gt; &lt;span class="o"&gt;!=&lt;/span&gt; &lt;span class="kc"&gt;nil&lt;/span&gt; &lt;span class="p"&gt;{&lt;/span&gt;
+                &lt;span class="nb"&gt;panic&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="nx"&gt;err&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+        &lt;span class="p"&gt;}&lt;/span&gt;
+        &lt;span class="nx"&gt;list&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="nx"&gt;err&lt;/span&gt; &lt;span class="o"&gt;:=&lt;/span&gt; &lt;span class="nx"&gt;listCrontabs&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="nx"&gt;client&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="s"&gt;&amp;quot;default&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+        &lt;span class="k"&gt;if&lt;/span&gt; &lt;span class="nx"&gt;err&lt;/span&gt; &lt;span class="o"&gt;!=&lt;/span&gt; &lt;span class="kc"&gt;nil&lt;/span&gt; &lt;span class="p"&gt;{&lt;/span&gt;
+                &lt;span class="nb"&gt;panic&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="nx"&gt;err&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+        &lt;span class="p"&gt;}&lt;/span&gt;
+        &lt;span class="k"&gt;for&lt;/span&gt; &lt;span class="nx"&gt;_&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="nx"&gt;t&lt;/span&gt; &lt;span class="o"&gt;:=&lt;/span&gt; &lt;span class="k"&gt;range&lt;/span&gt; &lt;span class="nx"&gt;list&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Items&lt;/span&gt; &lt;span class="p"&gt;{&lt;/span&gt;
+                &lt;span class="nx"&gt;fmt&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Printf&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="s"&gt;&amp;quot;%s %s %s %s\n&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="nx"&gt;t&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Namespace&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="nx"&gt;t&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Name&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="nx"&gt;t&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Spec&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;CronSpec&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="nx"&gt;t&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Spec&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Image&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+        &lt;span class="p"&gt;}&lt;/span&gt;
+&lt;span class="p"&gt;}&lt;/span&gt;
+&lt;/pre&gt;&lt;/div&gt;
+&lt;p&gt;执行结果如下:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+$ go run main.go
+default cron-1 * * * * */5 my-awesome-cron-image-1
+default cron-2 * * * * */8 my-awesome-cron-image-2
+default cron-3 * * * * */10 my-awesome-cron-image-3
+&lt;/pre&gt;
+&lt;p&gt;代码相对来说比较简单，有一个要注意的地方就是 gvr 里各个字段的值来自 crd 定义的 yaml 文件:&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="l l-Scalar l-Scalar-Plain"&gt;spec&lt;/span&gt;&lt;span class="p p-Indicator"&gt;:&lt;/span&gt;
+  &lt;span class="c1"&gt;# group name to use for REST API: /apis/&amp;lt;group&amp;gt;/&amp;lt;version&amp;gt;&lt;/span&gt;
+  &lt;span class="c1"&gt;# 对应 Group 字段的值&lt;/span&gt;
+  &lt;span class="l l-Scalar l-Scalar-Plain"&gt;group&lt;/span&gt;&lt;span class="p p-Indicator"&gt;:&lt;/span&gt; &lt;span class="l l-Scalar l-Scalar-Plain"&gt;stable.example.com&lt;/span&gt;
+  &lt;span class="c1"&gt;# list of versions supported by this CustomResourceDefinition&lt;/span&gt;
+  &lt;span class="l l-Scalar l-Scalar-Plain"&gt;versions&lt;/span&gt;&lt;span class="p p-Indicator"&gt;:&lt;/span&gt;
+    &lt;span class="p p-Indicator"&gt;-&lt;/span&gt; &lt;span class="l l-Scalar l-Scalar-Plain"&gt;name&lt;/span&gt;&lt;span class="p p-Indicator"&gt;:&lt;/span&gt; &lt;span class="l l-Scalar l-Scalar-Plain"&gt;v1&lt;/span&gt;   &lt;span class="c1"&gt;# 对应 Version 字段的可选值&lt;/span&gt;
+  &lt;span class="c1"&gt;# ...&lt;/span&gt;
+&lt;span class="l l-Scalar l-Scalar-Plain"&gt;names&lt;/span&gt;&lt;span class="p p-Indicator"&gt;:&lt;/span&gt;
+  &lt;span class="c1"&gt;# plural name to be used in the URL: /apis/&amp;lt;group&amp;gt;/&amp;lt;version&amp;gt;/&amp;lt;plural&amp;gt;&lt;/span&gt;
+  &lt;span class="c1"&gt;# 对应 Resource 字段的值&lt;/span&gt;
+  &lt;span class="l l-Scalar l-Scalar-Plain"&gt;plural&lt;/span&gt;&lt;span class="p p-Indicator"&gt;:&lt;/span&gt; &lt;span class="l l-Scalar l-Scalar-Plain"&gt;crontabs&lt;/span&gt;
+&lt;/pre&gt;&lt;/div&gt;
+&lt;p&gt;注意：因为这个 crd 定义的是 namespace 资源，如果是非 namespace 资源的话，应当改为使用不指定 namespace 的方法:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+client.Resource(gvr).List(metav1.ListOptions{})
+&lt;/pre&gt;
+&lt;/div&gt;
+&lt;div class="section" id="get"&gt;
+&lt;h2 id="hidget"&gt;get 资源&lt;a class="headerlink" href="#hidget" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;get 资源的方法也是通过 &lt;tt class="docutils literal"&gt;dynamic.Interface&lt;/tt&gt; 来实现，关键是怎么把结果转换为上面定义的结构体， 关键代码示例如下:&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="kd"&gt;func&lt;/span&gt; &lt;span class="nx"&gt;getCrontab&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="nx"&gt;client&lt;/span&gt; &lt;span class="nx"&gt;dynamic&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Interface&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="nx"&gt;namespace&lt;/span&gt; &lt;span class="kt"&gt;string&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="nx"&gt;name&lt;/span&gt; &lt;span class="kt"&gt;string&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt; &lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="o"&gt;*&lt;/span&gt;&lt;span class="nx"&gt;Crontab&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="kt"&gt;error&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt; &lt;span class="p"&gt;{&lt;/span&gt;
+        &lt;span class="nx"&gt;utd&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="nx"&gt;err&lt;/span&gt; &lt;span class="o"&gt;:=&lt;/span&gt; &lt;span class="nx"&gt;client&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Resource&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="nx"&gt;gvr&lt;/span&gt;&lt;span class="p"&gt;).&lt;/span&gt;&lt;span class="nx"&gt;Namespace&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="nx"&gt;namespace&lt;/span&gt;&lt;span class="p"&gt;).&lt;/span&gt;&lt;span class="nx"&gt;Get&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="nx"&gt;name&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="nx"&gt;metav1&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;GetOptions&lt;/span&gt;&lt;span class="p"&gt;{})&lt;/span&gt;
+        &lt;span class="k"&gt;if&lt;/span&gt; &lt;span class="nx"&gt;err&lt;/span&gt; &lt;span class="o"&gt;!=&lt;/span&gt; &lt;span class="kc"&gt;nil&lt;/span&gt; &lt;span class="p"&gt;{&lt;/span&gt;
+                &lt;span class="k"&gt;return&lt;/span&gt; &lt;span class="kc"&gt;nil&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="nx"&gt;err&lt;/span&gt;
+        &lt;span class="p"&gt;}&lt;/span&gt;
+        &lt;span class="nx"&gt;data&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="nx"&gt;err&lt;/span&gt; &lt;span class="o"&gt;:=&lt;/span&gt; &lt;span class="nx"&gt;utd&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;MarshalJSON&lt;/span&gt;&lt;span class="p"&gt;()&lt;/span&gt;
+        &lt;span class="k"&gt;if&lt;/span&gt; &lt;span class="nx"&gt;err&lt;/span&gt; &lt;span class="o"&gt;!=&lt;/span&gt; &lt;span class="kc"&gt;nil&lt;/span&gt; &lt;span class="p"&gt;{&lt;/span&gt;
+                &lt;span class="k"&gt;return&lt;/span&gt; &lt;span class="kc"&gt;nil&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="nx"&gt;err&lt;/span&gt;
+        &lt;span class="p"&gt;}&lt;/span&gt;
+        &lt;span class="kd"&gt;var&lt;/span&gt; &lt;span class="nx"&gt;ct&lt;/span&gt; &lt;span class="nx"&gt;Crontab&lt;/span&gt;
+        &lt;span class="k"&gt;if&lt;/span&gt; &lt;span class="nx"&gt;err&lt;/span&gt; &lt;span class="o"&gt;:=&lt;/span&gt; &lt;span class="nx"&gt;json&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Unmarshal&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="nx"&gt;data&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="o"&gt;&amp;amp;&lt;/span&gt;&lt;span class="nx"&gt;ct&lt;/span&gt;&lt;span class="p"&gt;);&lt;/span&gt; &lt;span class="nx"&gt;err&lt;/span&gt; &lt;span class="o"&gt;!=&lt;/span&gt; &lt;span class="kc"&gt;nil&lt;/span&gt; &lt;span class="p"&gt;{&lt;/span&gt;
+                &lt;span class="k"&gt;return&lt;/span&gt; &lt;span class="kc"&gt;nil&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="nx"&gt;err&lt;/span&gt;
+        &lt;span class="p"&gt;}&lt;/span&gt;
+        &lt;span class="k"&gt;return&lt;/span&gt; &lt;span class="o"&gt;&amp;amp;&lt;/span&gt;&lt;span class="nx"&gt;ct&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="kc"&gt;nil&lt;/span&gt;
+&lt;span class="p"&gt;}&lt;/span&gt;
+
+&lt;span class="kd"&gt;func&lt;/span&gt; &lt;span class="nx"&gt;main&lt;/span&gt;&lt;span class="p"&gt;()&lt;/span&gt; &lt;span class="p"&gt;{&lt;/span&gt;
+        &lt;span class="c1"&gt;// ...&lt;/span&gt;
+        &lt;span class="nx"&gt;ct&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="nx"&gt;err&lt;/span&gt; &lt;span class="o"&gt;:=&lt;/span&gt; &lt;span class="nx"&gt;getCrontab&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="nx"&gt;client&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="s"&gt;&amp;quot;default&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="s"&gt;&amp;quot;cron-1&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+        &lt;span class="k"&gt;if&lt;/span&gt; &lt;span class="nx"&gt;err&lt;/span&gt; &lt;span class="o"&gt;!=&lt;/span&gt; &lt;span class="kc"&gt;nil&lt;/span&gt; &lt;span class="p"&gt;{&lt;/span&gt;
+                &lt;span class="nb"&gt;panic&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="nx"&gt;err&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+        &lt;span class="p"&gt;}&lt;/span&gt;
+        &lt;span class="nx"&gt;fmt&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Printf&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="s"&gt;&amp;quot;%s %s %s %s\n&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="nx"&gt;ct&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Namespace&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="nx"&gt;ct&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Name&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="nx"&gt;ct&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Spec&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;CronSpec&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="nx"&gt;ct&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Spec&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Image&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+&lt;span class="p"&gt;}&lt;/span&gt;
+&lt;/pre&gt;&lt;/div&gt;
+&lt;p&gt;执行效果:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+$ go run main.go
+default cron-1 * * * * */5 my-awesome-cron-image-1
+&lt;/pre&gt;
+&lt;/div&gt;
+&lt;div class="section" id="create"&gt;
+&lt;h2 id="hidcreate"&gt;create 资源&lt;a class="headerlink" href="#hidcreate" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;create 资源的方法也是通过 &lt;tt class="docutils literal"&gt;dynamic.Interface&lt;/tt&gt; 来实现 ，这里主要记录一下怎么基于 yaml 文本的内容来创建资源。&lt;/p&gt;
+&lt;p&gt;关键代码示例如下:&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="kd"&gt;func&lt;/span&gt; &lt;span class="nx"&gt;createCrontabWithYaml&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="nx"&gt;client&lt;/span&gt; &lt;span class="nx"&gt;dynamic&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Interface&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="nx"&gt;namespace&lt;/span&gt; &lt;span class="kt"&gt;string&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="nx"&gt;yamlData&lt;/span&gt; &lt;span class="kt"&gt;string&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt; &lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="o"&gt;*&lt;/span&gt;&lt;span class="nx"&gt;Crontab&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="kt"&gt;error&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt; &lt;span class="p"&gt;{&lt;/span&gt;
+        &lt;span class="nx"&gt;decoder&lt;/span&gt; &lt;span class="o"&gt;:=&lt;/span&gt; &lt;span class="nx"&gt;yaml&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;NewDecodingSerializer&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="nx"&gt;unstructured&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;UnstructuredJSONScheme&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+        &lt;span class="nx"&gt;obj&lt;/span&gt; &lt;span class="o"&gt;:=&lt;/span&gt; &lt;span class="o"&gt;&amp;amp;&lt;/span&gt;&lt;span class="nx"&gt;unstructured&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Unstructured&lt;/span&gt;&lt;span class="p"&gt;{}&lt;/span&gt;
+        &lt;span class="k"&gt;if&lt;/span&gt; &lt;span class="nx"&gt;_&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="nx"&gt;_&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="nx"&gt;err&lt;/span&gt; &lt;span class="o"&gt;:=&lt;/span&gt; &lt;span class="nx"&gt;decoder&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Decode&lt;/span&gt;&lt;span class="p"&gt;([]&lt;/span&gt;&lt;span class="nb"&gt;byte&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="nx"&gt;yamlData&lt;/span&gt;&lt;span class="p"&gt;),&lt;/span&gt; &lt;span class="o"&gt;&amp;amp;&lt;/span&gt;&lt;span class="nx"&gt;gvk&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="nx"&gt;obj&lt;/span&gt;&lt;span class="p"&gt;);&lt;/span&gt; &lt;span class="nx"&gt;err&lt;/span&gt; &lt;span class="o"&gt;!=&lt;/span&gt; &lt;span class="kc"&gt;nil&lt;/span&gt; &lt;span class="p"&gt;{&lt;/span&gt;
+                &lt;span class="k"&gt;return&lt;/span&gt; &lt;span class="kc"&gt;nil&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="nx"&gt;err&lt;/span&gt;
+        &lt;span class="p"&gt;}&lt;/span&gt;
+
+        &lt;span class="nx"&gt;utd&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="nx"&gt;err&lt;/span&gt; &lt;span class="o"&gt;:=&lt;/span&gt; &lt;span class="nx"&gt;client&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Resource&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="nx"&gt;gvr&lt;/span&gt;&lt;span class="p"&gt;).&lt;/span&gt;&lt;span class="nx"&gt;Namespace&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="nx"&gt;namespace&lt;/span&gt;&lt;span class="p"&gt;).&lt;/span&gt;&lt;span class="nx"&gt;Create&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="nx"&gt;obj&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="nx"&gt;metav1&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;CreateOptions&lt;/span&gt;&lt;span class="p"&gt;{})&lt;/span&gt;
+        &lt;span class="k"&gt;if&lt;/span&gt; &lt;span class="nx"&gt;err&lt;/span&gt; &lt;span class="o"&gt;!=&lt;/span&gt; &lt;span class="kc"&gt;nil&lt;/span&gt; &lt;span class="p"&gt;{&lt;/span&gt;
+                &lt;span class="k"&gt;return&lt;/span&gt; &lt;span class="kc"&gt;nil&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="nx"&gt;err&lt;/span&gt;
+        &lt;span class="p"&gt;}&lt;/span&gt;
+        &lt;span class="nx"&gt;data&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="nx"&gt;err&lt;/span&gt; &lt;span class="o"&gt;:=&lt;/span&gt; &lt;span class="nx"&gt;utd&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;MarshalJSON&lt;/span&gt;&lt;span class="p"&gt;()&lt;/span&gt;
+        &lt;span class="k"&gt;if&lt;/span&gt; &lt;span class="nx"&gt;err&lt;/span&gt; &lt;span class="o"&gt;!=&lt;/span&gt; &lt;span class="kc"&gt;nil&lt;/span&gt; &lt;span class="p"&gt;{&lt;/span&gt;
+                &lt;span class="k"&gt;return&lt;/span&gt; &lt;span class="kc"&gt;nil&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="nx"&gt;err&lt;/span&gt;
+        &lt;span class="p"&gt;}&lt;/span&gt;
+        &lt;span class="kd"&gt;var&lt;/span&gt; &lt;span class="nx"&gt;ct&lt;/span&gt; &lt;span class="nx"&gt;Crontab&lt;/span&gt;
+        &lt;span class="k"&gt;if&lt;/span&gt; &lt;span class="nx"&gt;err&lt;/span&gt; &lt;span class="o"&gt;:=&lt;/span&gt; &lt;span class="nx"&gt;json&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Unmarshal&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="nx"&gt;data&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="o"&gt;&amp;amp;&lt;/span&gt;&lt;span class="nx"&gt;ct&lt;/span&gt;&lt;span class="p"&gt;);&lt;/span&gt; &lt;span class="nx"&gt;err&lt;/span&gt; &lt;span class="o"&gt;!=&lt;/span&gt; &lt;span class="kc"&gt;nil&lt;/span&gt; &lt;span class="p"&gt;{&lt;/span&gt;
+                &lt;span class="k"&gt;return&lt;/span&gt; &lt;span class="kc"&gt;nil&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="nx"&gt;err&lt;/span&gt;
+        &lt;span class="p"&gt;}&lt;/span&gt;
+        &lt;span class="k"&gt;return&lt;/span&gt; &lt;span class="o"&gt;&amp;amp;&lt;/span&gt;&lt;span class="nx"&gt;ct&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="kc"&gt;nil&lt;/span&gt;
+&lt;span class="p"&gt;}&lt;/span&gt;
+
+&lt;span class="kd"&gt;func&lt;/span&gt; &lt;span class="nx"&gt;main&lt;/span&gt;&lt;span class="p"&gt;()&lt;/span&gt; &lt;span class="p"&gt;{&lt;/span&gt;
+        &lt;span class="c1"&gt;// ...&lt;/span&gt;
+        &lt;span class="nx"&gt;createData&lt;/span&gt; &lt;span class="o"&gt;:=&lt;/span&gt; &lt;span class="s"&gt;`&lt;/span&gt;
+&lt;span class="s"&gt;apiVersion: &amp;quot;stable.example.com/v1&amp;quot;&lt;/span&gt;
+&lt;span class="s"&gt;kind: CronTab&lt;/span&gt;
+&lt;span class="s"&gt;metadata:&lt;/span&gt;
+&lt;span class="s"&gt;  name: cron-4&lt;/span&gt;
+&lt;span class="s"&gt;spec:&lt;/span&gt;
+&lt;span class="s"&gt;  cronSpec: &amp;quot;* * * * */15&amp;quot;&lt;/span&gt;
+&lt;span class="s"&gt;  image: my-awesome-cron-image-4&lt;/span&gt;
+&lt;span class="s"&gt;`&lt;/span&gt;
+        &lt;span class="nx"&gt;ct&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="nx"&gt;err&lt;/span&gt; &lt;span class="o"&gt;:=&lt;/span&gt; &lt;span class="nx"&gt;createCrontabWithYaml&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="nx"&gt;client&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="s"&gt;&amp;quot;default&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="nx"&gt;createData&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+        &lt;span class="k"&gt;if&lt;/span&gt; &lt;span class="nx"&gt;err&lt;/span&gt; &lt;span class="o"&gt;!=&lt;/span&gt; &lt;span class="kc"&gt;nil&lt;/span&gt; &lt;span class="p"&gt;{&lt;/span&gt;
+                &lt;span class="nb"&gt;panic&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="nx"&gt;err&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+        &lt;span class="p"&gt;}&lt;/span&gt;
+        &lt;span class="nx"&gt;fmt&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Printf&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="s"&gt;&amp;quot;%s %s %s %s\n&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="nx"&gt;ct&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Namespace&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="nx"&gt;ct&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Name&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="nx"&gt;ct&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Spec&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;CronSpec&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="nx"&gt;ct&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Spec&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Image&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+&lt;span class="p"&gt;}&lt;/span&gt;
+&lt;/pre&gt;&lt;/div&gt;
+&lt;p&gt;执行效果:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+$ go run main.go
+default cron-4 * * * * */15 my-awesome-cron-image-4
+
+$ kubectl get crontab.stable.example.com cron-4
+NAME     AGE
+cron-4   5m33s
+&lt;/pre&gt;
+&lt;/div&gt;
+&lt;div class="section" id="update"&gt;
+&lt;h2 id="hidupdate"&gt;update 资源&lt;a class="headerlink" href="#hidupdate" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;update 资源的方法也是通过 &lt;tt class="docutils literal"&gt;dynamic.Interface&lt;/tt&gt; 来实现 ，这里主要记录一下怎么基于 yaml 文本的内容来更新资源。&lt;/p&gt;
+&lt;p&gt;关键代码示例如下:&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="kd"&gt;func&lt;/span&gt; &lt;span class="nx"&gt;updateCrontabWithYaml&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="nx"&gt;client&lt;/span&gt; &lt;span class="nx"&gt;dynamic&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Interface&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="nx"&gt;namespace&lt;/span&gt; &lt;span class="kt"&gt;string&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="nx"&gt;yamlData&lt;/span&gt; &lt;span class="kt"&gt;string&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt; &lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="o"&gt;*&lt;/span&gt;&lt;span class="nx"&gt;Crontab&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="kt"&gt;error&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt; &lt;span class="p"&gt;{&lt;/span&gt;
+        &lt;span class="nx"&gt;decoder&lt;/span&gt; &lt;span class="o"&gt;:=&lt;/span&gt; &lt;span class="nx"&gt;yaml&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;NewDecodingSerializer&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="nx"&gt;unstructured&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;UnstructuredJSONScheme&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+        &lt;span class="nx"&gt;obj&lt;/span&gt; &lt;span class="o"&gt;:=&lt;/span&gt; &lt;span class="o"&gt;&amp;amp;&lt;/span&gt;&lt;span class="nx"&gt;unstructured&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Unstructured&lt;/span&gt;&lt;span class="p"&gt;{}&lt;/span&gt;
+        &lt;span class="k"&gt;if&lt;/span&gt; &lt;span class="nx"&gt;_&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="nx"&gt;_&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="nx"&gt;err&lt;/span&gt; &lt;span class="o"&gt;:=&lt;/span&gt; &lt;span class="nx"&gt;decoder&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Decode&lt;/span&gt;&lt;span class="p"&gt;([]&lt;/span&gt;&lt;span class="nb"&gt;byte&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="nx"&gt;yamlData&lt;/span&gt;&lt;span class="p"&gt;),&lt;/span&gt; &lt;span class="o"&gt;&amp;amp;&lt;/span&gt;&lt;span class="nx"&gt;gvk&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="nx"&gt;obj&lt;/span&gt;&lt;span class="p"&gt;);&lt;/span&gt; &lt;span class="nx"&gt;err&lt;/span&gt; &lt;span class="o"&gt;!=&lt;/span&gt; &lt;span class="kc"&gt;nil&lt;/span&gt; &lt;span class="p"&gt;{&lt;/span&gt;
+                &lt;span class="k"&gt;return&lt;/span&gt; &lt;span class="kc"&gt;nil&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="nx"&gt;err&lt;/span&gt;
+        &lt;span class="p"&gt;}&lt;/span&gt;
+
+        &lt;span class="nx"&gt;utd&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="nx"&gt;err&lt;/span&gt; &lt;span class="o"&gt;:=&lt;/span&gt; &lt;span class="nx"&gt;client&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Resource&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="nx"&gt;gvr&lt;/span&gt;&lt;span class="p"&gt;).&lt;/span&gt;&lt;span class="nx"&gt;Namespace&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="nx"&gt;namespace&lt;/span&gt;&lt;span class="p"&gt;).&lt;/span&gt;&lt;span class="nx"&gt;Get&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="nx"&gt;obj&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;GetName&lt;/span&gt;&lt;span class="p"&gt;(),&lt;/span&gt; &lt;span class="nx"&gt;metav1&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;GetOptions&lt;/span&gt;&lt;span class="p"&gt;{})&lt;/span&gt;
+        &lt;span class="k"&gt;if&lt;/span&gt; &lt;span class="nx"&gt;err&lt;/span&gt; &lt;span class="o"&gt;!=&lt;/span&gt; &lt;span class="kc"&gt;nil&lt;/span&gt; &lt;span class="p"&gt;{&lt;/span&gt;
+                &lt;span class="k"&gt;return&lt;/span&gt; &lt;span class="kc"&gt;nil&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="nx"&gt;err&lt;/span&gt;
+        &lt;span class="p"&gt;}&lt;/span&gt;
+        &lt;span class="nx"&gt;obj&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;SetResourceVersion&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="nx"&gt;utd&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;GetResourceVersion&lt;/span&gt;&lt;span class="p"&gt;())&lt;/span&gt;
+        &lt;span class="nx"&gt;utd&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="nx"&gt;err&lt;/span&gt; &lt;span class="p"&gt;=&lt;/span&gt; &lt;span class="nx"&gt;client&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Resource&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="nx"&gt;gvr&lt;/span&gt;&lt;span class="p"&gt;).&lt;/span&gt;&lt;span class="nx"&gt;Namespace&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="nx"&gt;namespace&lt;/span&gt;&lt;span class="p"&gt;).&lt;/span&gt;&lt;span class="nx"&gt;Update&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="nx"&gt;obj&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="nx"&gt;metav1&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;UpdateOptions&lt;/span&gt;&lt;span class="p"&gt;{})&lt;/span&gt;
+        &lt;span class="k"&gt;if&lt;/span&gt; &lt;span class="nx"&gt;err&lt;/span&gt; &lt;span class="o"&gt;!=&lt;/span&gt; &lt;span class="kc"&gt;nil&lt;/span&gt; &lt;span class="p"&gt;{&lt;/span&gt;
+                &lt;span class="k"&gt;return&lt;/span&gt; &lt;span class="kc"&gt;nil&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="nx"&gt;err&lt;/span&gt;
+        &lt;span class="p"&gt;}&lt;/span&gt;
+
+        &lt;span class="nx"&gt;data&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="nx"&gt;err&lt;/span&gt; &lt;span class="o"&gt;:=&lt;/span&gt; &lt;span class="nx"&gt;utd&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;MarshalJSON&lt;/span&gt;&lt;span class="p"&gt;()&lt;/span&gt;
+        &lt;span class="k"&gt;if&lt;/span&gt; &lt;span class="nx"&gt;err&lt;/span&gt; &lt;span class="o"&gt;!=&lt;/span&gt; &lt;span class="kc"&gt;nil&lt;/span&gt; &lt;span class="p"&gt;{&lt;/span&gt;
+                &lt;span class="k"&gt;return&lt;/span&gt; &lt;span class="kc"&gt;nil&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="nx"&gt;err&lt;/span&gt;
+        &lt;span class="p"&gt;}&lt;/span&gt;
+        &lt;span class="kd"&gt;var&lt;/span&gt; &lt;span class="nx"&gt;ct&lt;/span&gt; &lt;span class="nx"&gt;Crontab&lt;/span&gt;
+        &lt;span class="k"&gt;if&lt;/span&gt; &lt;span class="nx"&gt;err&lt;/span&gt; &lt;span class="o"&gt;:=&lt;/span&gt; &lt;span class="nx"&gt;json&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Unmarshal&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="nx"&gt;data&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="o"&gt;&amp;amp;&lt;/span&gt;&lt;span class="nx"&gt;ct&lt;/span&gt;&lt;span class="p"&gt;);&lt;/span&gt; &lt;span class="nx"&gt;err&lt;/span&gt; &lt;span class="o"&gt;!=&lt;/span&gt; &lt;span class="kc"&gt;nil&lt;/span&gt; &lt;span class="p"&gt;{&lt;/span&gt;
+                &lt;span class="k"&gt;return&lt;/span&gt; &lt;span class="kc"&gt;nil&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="nx"&gt;err&lt;/span&gt;
+        &lt;span class="p"&gt;}&lt;/span&gt;
+        &lt;span class="k"&gt;return&lt;/span&gt; &lt;span class="o"&gt;&amp;amp;&lt;/span&gt;&lt;span class="nx"&gt;ct&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="kc"&gt;nil&lt;/span&gt;
+&lt;span class="p"&gt;}&lt;/span&gt;
+
+&lt;span class="kd"&gt;func&lt;/span&gt; &lt;span class="nx"&gt;main&lt;/span&gt;&lt;span class="p"&gt;()&lt;/span&gt; &lt;span class="p"&gt;{&lt;/span&gt;
+        &lt;span class="c1"&gt;// ...&lt;/span&gt;
+        &lt;span class="nx"&gt;updateData&lt;/span&gt; &lt;span class="o"&gt;:=&lt;/span&gt; &lt;span class="s"&gt;`&lt;/span&gt;
+&lt;span class="s"&gt;apiVersion: &amp;quot;stable.example.com/v1&amp;quot;&lt;/span&gt;
+&lt;span class="s"&gt;kind: CronTab&lt;/span&gt;
+&lt;span class="s"&gt;metadata:&lt;/span&gt;
+&lt;span class="s"&gt;  name: cron-2&lt;/span&gt;
+&lt;span class="s"&gt;spec:&lt;/span&gt;
+&lt;span class="s"&gt;  cronSpec: &amp;quot;* * * * */15&amp;quot;&lt;/span&gt;
+&lt;span class="s"&gt;  image: my-awesome-cron-image-2-update&lt;/span&gt;
+&lt;span class="s"&gt;`&lt;/span&gt;
+        &lt;span class="nx"&gt;ct&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="nx"&gt;err&lt;/span&gt; &lt;span class="o"&gt;:=&lt;/span&gt; &lt;span class="nx"&gt;updateCrontabWithYaml&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="nx"&gt;client&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="s"&gt;&amp;quot;default&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="nx"&gt;updateData&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+        &lt;span class="k"&gt;if&lt;/span&gt; &lt;span class="nx"&gt;err&lt;/span&gt; &lt;span class="o"&gt;!=&lt;/span&gt; &lt;span class="kc"&gt;nil&lt;/span&gt; &lt;span class="p"&gt;{&lt;/span&gt;
+                &lt;span class="nb"&gt;panic&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="nx"&gt;err&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+        &lt;span class="p"&gt;}&lt;/span&gt;
+        &lt;span class="nx"&gt;fmt&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Printf&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="s"&gt;&amp;quot;%s %s %s %s\n&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="nx"&gt;ct&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Namespace&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="nx"&gt;ct&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Name&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="nx"&gt;ct&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Spec&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;CronSpec&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="nx"&gt;ct&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Spec&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Image&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+
+&lt;span class="p"&gt;}&lt;/span&gt;
+&lt;/pre&gt;&lt;/div&gt;
+&lt;p&gt;执行效果:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+ $ kubectl get crontab.stable.example.com cron-2 -o jsonpath='{.spec}'
+map[cronSpec:* * * * */8 image:my-awesome-cron-image-2]
+
+$ go run main.go
+default cron-2 * * * * */15 my-awesome-cron-image-2-update
+
+$ kubectl get crontab.stable.example.com cron-2 -o jsonpath='{.spec}'
+map[cronSpec:* * * * */15 image:my-awesome-cron-image-2-update]
+&lt;/pre&gt;
+&lt;/div&gt;
+&lt;div class="section" id="patch"&gt;
+&lt;h2 id="hidpatch"&gt;patch 资源&lt;a class="headerlink" href="#hidpatch" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;patch 资源的方法跟 patch pod 之类的代码类似，关键代码示例如下:&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="kd"&gt;func&lt;/span&gt; &lt;span class="nx"&gt;patchCrontab&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="nx"&gt;client&lt;/span&gt; &lt;span class="nx"&gt;dynamic&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Interface&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="nx"&gt;namespace&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="nx"&gt;name&lt;/span&gt; &lt;span class="kt"&gt;string&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="nx"&gt;pt&lt;/span&gt; &lt;span class="nx"&gt;types&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;PatchType&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="nx"&gt;data&lt;/span&gt; &lt;span class="p"&gt;[]&lt;/span&gt;&lt;span class="kt"&gt;byte&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt; &lt;span class="kt"&gt;error&lt;/span&gt; &lt;span class="p"&gt;{&lt;/span&gt;
+        &lt;span class="nx"&gt;_&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="nx"&gt;err&lt;/span&gt; &lt;span class="o"&gt;:=&lt;/span&gt; &lt;span class="nx"&gt;client&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Resource&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="nx"&gt;gvr&lt;/span&gt;&lt;span class="p"&gt;).&lt;/span&gt;&lt;span class="nx"&gt;Namespace&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="nx"&gt;namespace&lt;/span&gt;&lt;span class="p"&gt;).&lt;/span&gt;&lt;span class="nx"&gt;Patch&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="nx"&gt;name&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="nx"&gt;pt&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="nx"&gt;data&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="nx"&gt;metav1&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;PatchOptions&lt;/span&gt;&lt;span class="p"&gt;{})&lt;/span&gt;
+        &lt;span class="k"&gt;return&lt;/span&gt; &lt;span class="nx"&gt;err&lt;/span&gt;
+&lt;span class="p"&gt;}&lt;/span&gt;
+
+&lt;span class="kd"&gt;func&lt;/span&gt; &lt;span class="nx"&gt;main&lt;/span&gt;&lt;span class="p"&gt;()&lt;/span&gt; &lt;span class="p"&gt;{&lt;/span&gt;
+&lt;span class="c1"&gt;// ...&lt;/span&gt;
+&lt;span class="nx"&gt;patchData&lt;/span&gt; &lt;span class="o"&gt;:=&lt;/span&gt; &lt;span class="p"&gt;[]&lt;/span&gt;&lt;span class="nb"&gt;byte&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="s"&gt;`{&amp;quot;spec&amp;quot;: {&amp;quot;image&amp;quot;: &amp;quot;my-awesome-cron-image-1-patch&amp;quot;}}`&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+&lt;span class="k"&gt;if&lt;/span&gt; &lt;span class="nx"&gt;err&lt;/span&gt; &lt;span class="o"&gt;:=&lt;/span&gt; &lt;span class="nx"&gt;patchCrontab&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="nx"&gt;client&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="s"&gt;&amp;quot;default&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="s"&gt;&amp;quot;cron-1&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="nx"&gt;types&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;MergePatchType&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="nx"&gt;patchData&lt;/span&gt;&lt;span class="p"&gt;);&lt;/span&gt; &lt;span class="nx"&gt;err&lt;/span&gt; &lt;span class="o"&gt;!=&lt;/span&gt; &lt;span class="kc"&gt;nil&lt;/span&gt; &lt;span class="p"&gt;{&lt;/span&gt;
+        &lt;span class="nb"&gt;panic&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="nx"&gt;err&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+&lt;span class="p"&gt;}&lt;/span&gt;
+&lt;span class="p"&gt;}&lt;/span&gt;
+&lt;/pre&gt;&lt;/div&gt;
+&lt;p&gt;执行效果:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+$ kubectl get crontab.stable.example.com cron-1 -o jsonpath='{.spec.image}'
+my-awesome-cron-image-1
+
+$ go run main.go
+
+$ kubectl get crontab.stable.example.com cron-1 -o jsonpath='{.spec.image}'
+my-awesome-cron-image-1-patch
+&lt;/pre&gt;
+&lt;/div&gt;
+&lt;div class="section" id="delete"&gt;
+&lt;h2 id="hiddelete"&gt;delete 资源&lt;a class="headerlink" href="#hiddelete" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;delete 资源相对来说简单很多，关键代码示例如下:&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="kd"&gt;func&lt;/span&gt; &lt;span class="nx"&gt;deleteCrontab&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="nx"&gt;client&lt;/span&gt; &lt;span class="nx"&gt;dynamic&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Interface&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="nx"&gt;namespace&lt;/span&gt; &lt;span class="kt"&gt;string&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="nx"&gt;name&lt;/span&gt; &lt;span class="kt"&gt;string&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt; &lt;span class="kt"&gt;error&lt;/span&gt; &lt;span class="p"&gt;{&lt;/span&gt;
+        &lt;span class="k"&gt;return&lt;/span&gt; &lt;span class="nx"&gt;client&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Resource&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="nx"&gt;gvr&lt;/span&gt;&lt;span class="p"&gt;).&lt;/span&gt;&lt;span class="nx"&gt;Namespace&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="nx"&gt;namespace&lt;/span&gt;&lt;span class="p"&gt;).&lt;/span&gt;&lt;span class="nx"&gt;Delete&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="nx"&gt;name&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="kc"&gt;nil&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+&lt;span class="p"&gt;}&lt;/span&gt;
+
+&lt;span class="kd"&gt;func&lt;/span&gt; &lt;span class="nx"&gt;main&lt;/span&gt;&lt;span class="p"&gt;()&lt;/span&gt; &lt;span class="p"&gt;{&lt;/span&gt;
+        &lt;span class="c1"&gt;// ...&lt;/span&gt;
+        &lt;span class="k"&gt;if&lt;/span&gt; &lt;span class="nx"&gt;err&lt;/span&gt; &lt;span class="o"&gt;:=&lt;/span&gt; &lt;span class="nx"&gt;deleteCrontab&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="nx"&gt;client&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="s"&gt;&amp;quot;default&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="s"&gt;&amp;quot;cron-3&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;);&lt;/span&gt; &lt;span class="nx"&gt;err&lt;/span&gt; &lt;span class="o"&gt;!=&lt;/span&gt; &lt;span class="kc"&gt;nil&lt;/span&gt; &lt;span class="p"&gt;{&lt;/span&gt;
+                &lt;span class="nb"&gt;panic&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="nx"&gt;err&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+        &lt;span class="p"&gt;}&lt;/span&gt;
+&lt;span class="p"&gt;}&lt;/span&gt;
+&lt;/pre&gt;&lt;/div&gt;
+&lt;p&gt;结果:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+$ go run main.go
+$ kubectl get crontab.stable.example.com
+NAME     AGE
+cron-1   4h5m
+cron-2   4h5m
+&lt;/pre&gt;
+&lt;/div&gt;
+&lt;div class="section" id="id2"&gt;
+&lt;h2 id="hidid2"&gt;总结&lt;a class="headerlink" href="#hidid2" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;简单记录了一下 list、get、create、update、patch、delete crd 资源的方法，其他方法大同小异就没记录了。 简单来说就是可以通过 &lt;tt class="docutils literal"&gt;dynamic.Interface&lt;/tt&gt; 在不生成特定的 client 代码的情况下操作 crd 资源。&lt;/p&gt;
+&lt;p&gt;BTW, 另外一个非常规的操作 crd 资源的办法就是直接请求 api server 的 rest api 而不是借助封装好的方法，后面有时间的时候再记录一下这个方法。&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class="section" id="id3"&gt;
+&lt;h2 id="hidid3"&gt;参考资料&lt;a class="headerlink" href="#hidid3" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;ul class="simple"&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://github.com/kubernetes/client-go/"&gt;kubernetes/client-go: Go client for Kubernetes.&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://github.com/kubernetes/code-generator"&gt;kubernetes/code-generator: Generators for kube-like API types&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://kubernetes.io/docs/tasks/extend-kubernetes/custom-resources/custom-resource-definitions/"&gt;Extend the Kubernetes API with CustomResourceDefinitions | Kubernetes&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://kubernetes.io/docs/tasks/administer-cluster/access-cluster-api/"&gt;Access Clusters Using the Kubernetes API | Kubernetes&lt;/a&gt;&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/div&gt;
+</summary><category term="k8s"></category><category term="kubernetes"></category><category term="crd"></category><category term="client-go"></category></entry><entry><title>kubernetes 用户扮演 API</title><link href="https://mozillazg.com/2020/06/k8s-kubernetes-kubectl-syntax-of-impersonate-as-user-or-serviceaccount-or-group.html" rel="alternate"></link><updated>2020-06-07T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2020-06-07:2020/06/k8s-kubernetes-kubectl-syntax-of-impersonate-as-user-or-serviceaccount-or-group.html</id><summary type="html">&lt;div class="section" id="id1"&gt;
 &lt;h2 id="hidid1"&gt;前言&lt;a class="headerlink" href="#hidid1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;p&gt;记录一下 kubernetes 中扮演另一个用户的 API 和用法（信息主要来自官方文档和源码）。&lt;/p&gt;
 &lt;/div&gt;
@@ -537,10 +952,13 @@ Connection: close
 &lt;div class="section" id="id2"&gt;
 &lt;h2 id="hidid2"&gt;常用参数&lt;a class="headerlink" href="#hidid2" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;p&gt;最常用的参数组合是:&lt;/p&gt;
-&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;nsenter -m -u -i -n -p -t &amp;lt;pid&amp;gt; &amp;lt;command&amp;gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="c1"&gt;# 有的版本不一定有 -a 这个参数&lt;/span&gt;
+nsenter -a -t &amp;lt;pid&amp;gt; &amp;lt;command&amp;gt;
+nsenter -m -u -i -n -p -t &amp;lt;pid&amp;gt; &amp;lt;command&amp;gt;
 &lt;/pre&gt;&lt;/div&gt;
 &lt;p&gt;参数的含义如下:&lt;/p&gt;
 &lt;ul class="simple"&gt;
+&lt;li&gt;&lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;-a,&lt;/span&gt; &lt;span class="pre"&gt;--all&lt;/span&gt;&lt;/tt&gt;             enter all namespaces of the target process by the default /proc/[pid]/ns/* namespace paths.&lt;/li&gt;
 &lt;li&gt;&lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;-m,&lt;/span&gt; &lt;span class="pre"&gt;--mount[=&amp;lt;file&amp;gt;]&lt;/span&gt;&lt;/tt&gt;   enter mount namespace&lt;/li&gt;
 &lt;li&gt;&lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;-u,&lt;/span&gt; &lt;span class="pre"&gt;--uts[=&amp;lt;file&amp;gt;]&lt;/span&gt;&lt;/tt&gt;     enter UTS namespace (hostname etc)&lt;/li&gt;
 &lt;li&gt;&lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;-i,&lt;/span&gt; &lt;span class="pre"&gt;--ipc[=&amp;lt;file&amp;gt;]&lt;/span&gt;&lt;/tt&gt;     enter System V IPC namespace&lt;/li&gt;
@@ -579,6 +997,8 @@ $ nsenter -m -u -i -n -p -t $PID hostname
 &lt;ul class="simple"&gt;
 &lt;li&gt;&lt;a class="reference external" href="http://man7.org/linux/man-pages/man1/nsenter.1.html"&gt;nsenter(1) - Linux manual page&lt;/a&gt;&lt;/li&gt;
 &lt;li&gt;&lt;a class="reference external" href="https://docs.docker.com/engine/reference/commandline/inspect/"&gt;docker inspect | Docker Documentation&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://github.com/alexei-led/nsenter"&gt;alexei-led/nsenter: Slim nsenter Docker image - enter into Docker container/host namespaces&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://alexei-led.github.io/post/k8s_node_shell/"&gt;Terra Nullius&lt;/a&gt;&lt;/li&gt;
 &lt;/ul&gt;
 &lt;/div&gt;
 </summary><category term="nsenter"></category><category term="debug"></category><category term="tools"></category><category term="docker"></category></entry><entry><title>使用 Alpine 作为基础镜像时可能会遇到的常见问题的解决方法</title><link href="https://mozillazg.com/2020/03/use-alpine-image-common-issues.rst.html" rel="alternate"></link><updated>2020-03-31T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2020-03-31:2020/03/use-alpine-image-common-issues.rst.html</id><summary type="html">&lt;div class="section" id="id1"&gt;
@@ -4662,6 +5082,9 @@ reduced temporarily on peer failures.&lt;/p&gt;
 &lt;/div&gt;
 &lt;div class="section" id="id2"&gt;
 &lt;h2 id="hidid2"&gt;数组&lt;a class="headerlink" href="#hidid2" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;div class="section" id="id3"&gt;
+&lt;h3 id="hidid3"&gt;定义一个数组变量&lt;a class="headerlink" href="#hidid3" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
+&lt;/div&gt;
 &lt;div class="section" id="range"&gt;
 &lt;h3 id="hidrange"&gt;range&lt;a class="headerlink" href="#hidrange" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
 &lt;p&gt;语法:&lt;/p&gt;
@@ -4706,8 +5129,8 @@ reduced temporarily on peer failures.&lt;/p&gt;
     &lt;span class="nb"&gt;echo&lt;/span&gt; &lt;span class="s2"&gt;&amp;quot;you are &lt;/span&gt;&lt;span class="nv"&gt;$age&lt;/span&gt;&lt;span class="s2"&gt; &amp;lt; 18&amp;quot;&lt;/span&gt;
 &lt;span class="k"&gt;fi&lt;/span&gt;
 &lt;/pre&gt;&lt;/div&gt;
-&lt;div class="section" id="id3"&gt;
-&lt;h3 id="hidid3"&gt;常用的条件判断&lt;a class="headerlink" href="#hidid3" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
+&lt;div class="section" id="id4"&gt;
+&lt;h3 id="hidid4"&gt;常用的条件判断&lt;a class="headerlink" href="#hidid4" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
 &lt;table border="1" class="docutils"&gt;
 &lt;colgroup&gt;
 &lt;col width="38%" /&gt;
@@ -4896,8 +5319,8 @@ select 的功能类似 while + case，比较适合反复询问用户选择项直
 &lt;span class="k"&gt;done&lt;/span&gt;
 &lt;/pre&gt;&lt;/div&gt;
 &lt;/div&gt;
-&lt;div class="section" id="id4"&gt;
-&lt;h2 id="hidid4"&gt;函数&lt;a class="headerlink" href="#hidid4" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;div class="section" id="id5"&gt;
+&lt;h2 id="hidid5"&gt;函数&lt;a class="headerlink" href="#hidid5" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;p&gt;语法:&lt;/p&gt;
 &lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;function_name &lt;span class="o"&gt;()&lt;/span&gt; &lt;span class="o"&gt;{&lt;/span&gt;
     &amp;lt;commands&amp;gt;
@@ -4909,12 +5332,12 @@ select 的功能类似 while + case，比较适合反复询问用户选择项直
     &amp;lt;commands&amp;gt;
 &lt;span class="o"&gt;}&lt;/span&gt;
 &lt;/pre&gt;&lt;/div&gt;
-&lt;div class="section" id="id5"&gt;
-&lt;h3 id="hidid5"&gt;参数&lt;a class="headerlink" href="#hidid5" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
+&lt;div class="section" id="id6"&gt;
+&lt;h3 id="hidid6"&gt;参数&lt;a class="headerlink" href="#hidid6" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
 &lt;p&gt;在函数体内可以通过 $1, $2, $3, ... 获取调用时传入的位置参数&lt;/p&gt;
 &lt;/div&gt;
-&lt;div class="section" id="id6"&gt;
-&lt;h3 id="hidid6"&gt;返回值&lt;a class="headerlink" href="#hidid6" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
+&lt;div class="section" id="id7"&gt;
+&lt;h3 id="hidid7"&gt;返回值&lt;a class="headerlink" href="#hidid7" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
 &lt;p&gt;不支持返回值功能，不过可以用 return x 指定一个状态吗:&lt;/p&gt;
 &lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="k"&gt;function&lt;/span&gt; &lt;span class="nb"&gt;test&lt;/span&gt; &lt;span class="o"&gt;{&lt;/span&gt;
     &lt;span class="nb"&gt;echo&lt;/span&gt; &lt;span class="s2"&gt;&amp;quot;test&amp;quot;&lt;/span&gt;
@@ -4925,8 +5348,8 @@ select 的功能类似 while + case，比较适合反复询问用户选择项直
 &lt;span class="nb"&gt;echo&lt;/span&gt; &lt;span class="nv"&gt;$?&lt;/span&gt;   &lt;span class="c1"&gt;# 3&lt;/span&gt;
 &lt;/pre&gt;&lt;/div&gt;
 &lt;/div&gt;
-&lt;div class="section" id="id7"&gt;
-&lt;h3 id="hidid7"&gt;变量作用域&lt;a class="headerlink" href="#hidid7" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
+&lt;div class="section" id="id8"&gt;
+&lt;h3 id="hidid8"&gt;变量作用域&lt;a class="headerlink" href="#hidid8" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
 &lt;p&gt;默认函数类的变量是全局变量，可以通过 local 定义局部变量：&lt;/p&gt;
 &lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="k"&gt;function&lt;/span&gt; &lt;span class="nb"&gt;test&lt;/span&gt; &lt;span class="o"&gt;{&lt;/span&gt;
     &lt;span class="nb"&gt;local&lt;/span&gt; &lt;span class="nv"&gt;a&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;local&amp;#39;&lt;/span&gt;
@@ -4944,8 +5367,8 @@ select 的功能类似 while + case，比较适合反复询问用户选择项直
 &lt;span class="nb"&gt;echo&lt;/span&gt; &lt;span class="nv"&gt;$a&lt;/span&gt;
 &lt;/pre&gt;&lt;/div&gt;
 &lt;/div&gt;
-&lt;div class="section" id="id8"&gt;
-&lt;h3 id="hidid8"&gt;创建跟外部命令同名的函数&lt;a class="headerlink" href="#hidid8" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
+&lt;div class="section" id="id9"&gt;
+&lt;h3 id="hidid9"&gt;创建跟外部命令同名的函数&lt;a class="headerlink" href="#hidid9" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
 &lt;p&gt;例子：&lt;/p&gt;
 &lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="k"&gt;function&lt;/span&gt; ls &lt;span class="o"&gt;{&lt;/span&gt;
     &lt;span class="nb"&gt;command&lt;/span&gt; ls -lh
@@ -4956,12 +5379,12 @@ ls
 &lt;p&gt;主要是不要忘了加 command，不加的话，上面的 ls 会无限递归不会按预期的调用 ls 命令。&lt;/p&gt;
 &lt;/div&gt;
 &lt;/div&gt;
-&lt;div class="section" id="id9"&gt;
-&lt;h2 id="hidid9"&gt;字符串操作&lt;a class="headerlink" href="#hidid9" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;div class="section" id="id10"&gt;
-&lt;h3 id="hidid10"&gt;字符串替换&lt;a class="headerlink" href="#hidid10" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
+&lt;h2 id="hidid10"&gt;字符串操作&lt;a class="headerlink" href="#hidid10" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;div class="section" id="id11"&gt;
-&lt;h4 id="hidid11"&gt;替换子串&lt;a class="headerlink" href="#hidid11" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h4&gt;
+&lt;h3 id="hidid11"&gt;字符串替换&lt;a class="headerlink" href="#hidid11" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
+&lt;div class="section" id="id12"&gt;
+&lt;h4 id="hidid12"&gt;替换子串&lt;a class="headerlink" href="#hidid12" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h4&gt;
 &lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;$ &lt;span class="nv"&gt;test&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="s2"&gt;&amp;quot;hello_world&amp;quot;&lt;/span&gt;
 $ &lt;span class="nb"&gt;echo&lt;/span&gt; &lt;span class="s2"&gt;&amp;quot;&lt;/span&gt;&lt;span class="si"&gt;${&lt;/span&gt;&lt;span class="nv"&gt;test&lt;/span&gt;&lt;span class="p"&gt;/_/-&lt;/span&gt;&lt;span class="si"&gt;}&lt;/span&gt;&lt;span class="s2"&gt;&amp;quot;&lt;/span&gt;
 hello-world
@@ -4969,8 +5392,8 @@ $ &lt;span class="nb"&gt;echo&lt;/span&gt; &lt;span class="s2"&gt;&amp;quot;&lt;
 hello_bar
 &lt;/pre&gt;&lt;/div&gt;
 &lt;/div&gt;
-&lt;div class="section" id="id12"&gt;
-&lt;h4 id="hidid12"&gt;删除前缀&lt;a class="headerlink" href="#hidid12" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h4&gt;
+&lt;div class="section" id="id13"&gt;
+&lt;h4 id="hidid13"&gt;删除前缀&lt;a class="headerlink" href="#hidid13" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h4&gt;
 &lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;$ &lt;span class="nv"&gt;test&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="s2"&gt;&amp;quot;foofoo_bar_foofoo&amp;quot;&lt;/span&gt;
 $ &lt;span class="nb"&gt;echo&lt;/span&gt; &lt;span class="s2"&gt;&amp;quot;&lt;/span&gt;&lt;span class="si"&gt;${&lt;/span&gt;&lt;span class="nv"&gt;test&lt;/span&gt;&lt;span class="p"&gt;#foo&lt;/span&gt;&lt;span class="si"&gt;}&lt;/span&gt;&lt;span class="s2"&gt;&amp;quot;&lt;/span&gt;
 foo_bar_foofoo
@@ -4979,8 +5402,8 @@ $ &lt;span class="nb"&gt;echo&lt;/span&gt; &lt;span class="s2"&gt;&amp;quot;&lt;
 foo_bar_foofoo
 &lt;/pre&gt;&lt;/div&gt;
 &lt;/div&gt;
-&lt;div class="section" id="id13"&gt;
-&lt;h4 id="hidid13"&gt;删除后缀&lt;a class="headerlink" href="#hidid13" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h4&gt;
+&lt;div class="section" id="id14"&gt;
+&lt;h4 id="hidid14"&gt;删除后缀&lt;a class="headerlink" href="#hidid14" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h4&gt;
 &lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;$ &lt;span class="nv"&gt;test&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="s2"&gt;&amp;quot;foofoo_bar_foofoo&amp;quot;&lt;/span&gt;
 $ &lt;span class="nb"&gt;echo&lt;/span&gt; &lt;span class="s2"&gt;&amp;quot;&lt;/span&gt;&lt;span class="si"&gt;${&lt;/span&gt;&lt;span class="nv"&gt;test&lt;/span&gt;&lt;span class="p"&gt;%foo&lt;/span&gt;&lt;span class="si"&gt;}&lt;/span&gt;&lt;span class="s2"&gt;&amp;quot;&lt;/span&gt;
 foofoo_bar_foo
@@ -4990,8 +5413,8 @@ foofoo_bar_foo
 &lt;/pre&gt;&lt;/div&gt;
 &lt;/div&gt;
 &lt;/div&gt;
-&lt;div class="section" id="id14"&gt;
-&lt;h3 id="hidid14"&gt;打印字符串&lt;a class="headerlink" href="#hidid14" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
+&lt;div class="section" id="id15"&gt;
+&lt;h3 id="hidid15"&gt;打印字符串&lt;a class="headerlink" href="#hidid15" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
 &lt;p&gt;推荐使用 &lt;tt class="docutils literal"&gt;printf&lt;/tt&gt;:&lt;/p&gt;
 &lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="nb"&gt;printf&lt;/span&gt; &lt;span class="s2"&gt;&amp;quot;hello world\\n&amp;quot;&lt;/span&gt;
 &lt;span class="nb"&gt;printf&lt;/span&gt; &lt;span class="s2"&gt;&amp;quot;hello %s\\n&amp;quot;&lt;/span&gt; &lt;span class="s2"&gt;&amp;quot;world&amp;quot;&lt;/span&gt;
@@ -5001,10 +5424,10 @@ foofoo_bar_foo
 &lt;/pre&gt;&lt;/div&gt;
 &lt;/div&gt;
 &lt;/div&gt;
-&lt;div class="section" id="id15"&gt;
-&lt;h2 id="hidid15"&gt;文件操作&lt;a class="headerlink" href="#hidid15" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;div class="section" id="id16"&gt;
-&lt;h3 id="hidid16"&gt;保存大段文本&lt;a class="headerlink" href="#hidid16" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
+&lt;h2 id="hidid16"&gt;文件操作&lt;a class="headerlink" href="#hidid16" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;div class="section" id="id17"&gt;
+&lt;h3 id="hidid17"&gt;保存大段文本&lt;a class="headerlink" href="#hidid17" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
 &lt;p&gt;可以使用 &lt;tt class="docutils literal"&gt;tee&lt;/tt&gt; 和 &lt;tt class="docutils literal"&gt;EOF&lt;/tt&gt;:&lt;/p&gt;
 &lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;tee test.text &lt;span class="s"&gt;&amp;lt;&amp;lt;EOF&lt;/span&gt;
 &lt;span class="s"&gt;hello&lt;/span&gt;
@@ -5045,8 +5468,8 @@ $ cat b.text
 &lt;p&gt;append 更新可以使用 &lt;tt class="docutils literal"&gt;tee &lt;span class="pre"&gt;-a&lt;/span&gt;&lt;/tt&gt;&lt;/p&gt;
 &lt;/div&gt;
 &lt;/div&gt;
-&lt;div class="section" id="id17"&gt;
-&lt;h2 id="hidid17"&gt;其他实用功能&lt;a class="headerlink" href="#hidid17" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;div class="section" id="id18"&gt;
+&lt;h2 id="hidid18"&gt;其他实用功能&lt;a class="headerlink" href="#hidid18" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;div class="section" id="cd"&gt;
 &lt;h3&gt;隔离 &lt;tt class="docutils literal"&gt;cd&lt;/tt&gt; 命令的干扰&lt;/h3&gt;
 &lt;p&gt;可以用括号来隔离:&lt;/p&gt;
@@ -5058,8 +5481,8 @@ $ cat b.text
 &lt;span class="c1"&gt;# pwd=/tmp&lt;/span&gt;
 &lt;/pre&gt;&lt;/div&gt;
 &lt;/div&gt;
-&lt;div class="section" id="id18"&gt;
-&lt;h3 id="hidid18"&gt;设置功能标志&lt;a class="headerlink" href="#hidid18" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
+&lt;div class="section" id="id19"&gt;
+&lt;h3 id="hidid19"&gt;设置功能标志&lt;a class="headerlink" href="#hidid19" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
 &lt;p&gt;一般会在脚本中设置如下标志：&lt;/p&gt;
 &lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="nb"&gt;set&lt;/span&gt; -euo pipefail
 &lt;span class="nv"&gt;IFS&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="s1"&gt;$&amp;#39;\n\t&amp;#39;&lt;/span&gt;
@@ -5188,13 +5611,27 @@ foobar tom
 &lt;p&gt;更多的 set 支持的标志可以查看 &lt;a class="reference external" href="https://www.gnu.org/software/bash/manual/bashref.html#The-Set-Builtin"&gt;Bash Reference Manual&lt;/a&gt;&lt;/p&gt;
 &lt;/div&gt;
 &lt;/div&gt;
-&lt;div class="section" id="id19"&gt;
-&lt;h2 id="hidid19"&gt;参考资料&lt;a class="headerlink" href="#hidid19" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;div class="section" id="id20"&gt;
+&lt;h2 id="hidid20"&gt;数学运算&lt;a class="headerlink" href="#hidid20" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;可以通过 &lt;tt class="docutils literal"&gt;$(( &amp;lt;expression&amp;gt; ))&lt;/tt&gt; 执行数学运算，比如：&lt;/p&gt;
+&lt;ul class="simple"&gt;
+&lt;li&gt;&lt;tt class="docutils literal"&gt;+&lt;/tt&gt;: &lt;tt class="docutils literal"&gt;$(( 1 + 2 ))&lt;/tt&gt;&lt;/li&gt;
+&lt;li&gt;&lt;tt class="docutils literal"&gt;-&lt;/tt&gt;: &lt;tt class="docutils literal"&gt;$(( 1 - 2 ))&lt;/tt&gt;&lt;/li&gt;
+&lt;li&gt;&lt;tt class="docutils literal"&gt;*&lt;/tt&gt;: &lt;tt class="docutils literal"&gt;$(( 1 * 2 ))&lt;/tt&gt;&lt;/li&gt;
+&lt;li&gt;&lt;tt class="docutils literal"&gt;/&lt;/tt&gt;: &lt;tt class="docutils literal"&gt;$(( 1 / 2 ))&lt;/tt&gt;&lt;/li&gt;
+&lt;li&gt;&lt;tt class="docutils literal"&gt;%&lt;/tt&gt;: &lt;tt class="docutils literal"&gt;$(( 1 % 2 ))&lt;/tt&gt;&lt;/li&gt;
+&lt;/ul&gt;
+&lt;p&gt;支持变量做运算符，比如: &lt;tt class="docutils literal"&gt;$(( a + b ))&lt;/tt&gt; （推荐） 或 &lt;tt class="docutils literal"&gt;$(( $a + $b ))&lt;/tt&gt; （不推荐, 详见 &lt;a class="reference external" href="https://github.com/koalaman/shellcheck/wiki/SC2004"&gt;SC2004 - shellcheck&lt;/a&gt; ）&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class="section" id="id21"&gt;
+&lt;h2 id="hidid21"&gt;参考资料&lt;a class="headerlink" href="#hidid21" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;ul class="simple"&gt;
 &lt;li&gt;&lt;a class="reference external" href="https://ryanstutorials.net/bash-scripting-tutorial/bash-if-statements.php"&gt;If Statements - Bash Scripting Tutorial&lt;/a&gt;&lt;/li&gt;
 &lt;li&gt;&lt;a class="reference external" href="https://ryanstutorials.net/bash-scripting-tutorial/bash-loops.php"&gt;Loops - Bash Scripting Tutorial&lt;/a&gt;&lt;/li&gt;
 &lt;li&gt;&lt;a class="reference external" href="https://www.gnu.org/software/bash/manual/bashref.html#The-Set-Builtin"&gt;Bash Reference Manual&lt;/a&gt;&lt;/li&gt;
 &lt;li&gt;&lt;a class="reference external" href="http://redsymbol.net/articles/unofficial-bash-strict-mode/"&gt;Use the Unofficial Bash Strict Mode (Unless You Looove Debugging)&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://pubs.opengroup.org/onlinepubs/9699919799/utilities/V3_chap02.html#tag_18_06_04"&gt;Shell Command Language&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://github.com/koalaman/shellcheck"&gt;shellcheck&lt;/a&gt;&lt;/li&gt;
 &lt;/ul&gt;
 &lt;/div&gt;
 </summary><category term="bash"></category><category term="shell"></category></entry><entry><title>Python: 调试运行中进程的几种方法（总结）</title><link href="https://mozillazg.com/2018/07/python-some-ways-to-debug-running-process.html" rel="alternate"></link><updated>2018-07-15T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2018-07-15:2018/07/python-some-ways-to-debug-running-process.html</id><summary type="html">&lt;div class="section" id="id1"&gt;
@@ -19261,7 +19698,7 @@ else:  # parent
     client_connection.close()  # close parent copy and loop over
 &lt;/pre&gt;
 &lt;p&gt;如果父进程已经关掉了这个 socket 那么子进程是怎么做仍然可以从客户端 socet 中读取到数据呢？
-答案就在上图总。内核使用描述符引用计数来决定是否需要关闭一个 socket。
+答案就在上图中。内核使用描述符引用计数来决定是否需要关闭一个 socket。
 只有当某个 socket 的描述符引用计数变成 0 的时候才会关闭这个 socket。
 当你的服务器创建一个子进程的时候，子进程获得了父进程的文件描述符拷贝，内核将这些描述符的引用计数也相应的增加了。
 在有一个父进程和一个子进程的情况下，关联者客户端 socket 的描述符引用计数就会是 2，

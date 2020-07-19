@@ -1,0 +1,764 @@
+<!DOCTYPE html>
+<html lang="zh-hans" prefix="og: http://ogp.me/ns# fb: https://www.facebook.com/2008/fbml" class="han-init">
+<head>
+    <title>在不生成 crd client 代码的情况下通过 client-go 增删改查 k8s crd 资源 - Huang Huang 的博客</title>
+    <!-- Using the latest rendering mode for IE -->
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <!-- share.css -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/social-share.js/1.0.16/css/share.min.css">
+    <!-- share.js -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/social-share.js/1.0.16/js/social-share.min.js"></script>
+
+
+    <link href="https://mozillazg.com/favicon.ico" rel="icon">
+
+<link rel="canonical" href="https://mozillazg.com/2020/07/k8s-kubernetes-client-go-list-get-create-update-patch-delete-crd-resource-without-generate-client-code-update-or-create-via-yaml.html">
+
+        <meta name="author" content="mozillazg" />
+        <meta name="keywords" content="k8s,kubernetes,crd,client-go" />
+    <meta name="description" content="前言¶ 一般情况下管理 crd 资源都是通过由 code-generator 生成的 crd client 来操作，但是有时也会有只想简单的操作一下资源不想去导入或生成 crd client 相关代码的需求，这里简单的记录一下在不生成 crd client 代码的情况下通过 client-go 增删改查 k8s crd 资源的方法。 示例 CRD¶ 先来定义一个测试用的 CRD （其实已有的 Pod 之类的也是可以的，没啥特别的不一定要自定义 CRD，这里只是展示这个能力，因为一般如果是内置的资源的话，直接用内置的 client 和内置的资源 struct 就可以了）（这个 crd 来自 官方文档 ）： apiVersion: apiextensions.k8s.io/v1 kind: CustomResourceDefinition metadata: # name must match the spec fields below, and be in the form: &lt;plural&gt;.&lt;group&gt; name: crontabs.stable.example.com spec: # group name to use for REST API: /apis/&lt;group&gt;/&lt;version&gt; group: stable.example.com # list of versions supported by this CustomResourceDefinition versions: - name: v1 # Each version can be enabled/disabled by Served flag. served: true # One and only one version must be marked as the storage version. storage: true schema: openAPIV3Schema: type: object properties: spec: type: object properties: cronSpec: type: string image: type: string replicas: type: integer # either Namespaced or Cluster scope: Namespaced names: # plural name to be used in the URL: /apis/&lt;group&gt;/&lt;version&gt;/&lt;plural&gt; plural: crontabs # singular name to be used as an alias on the CLI and for display singular: crontab # kind is normally the CamelCased singular type. Your resource manifests use this. kind: CronTab # shortNames allow shorter string to match your resource on the CLI shortNames: - ct 然后通过 kubectl 创建一下这个 crd ，然后再创建几个 crd 对象 $ kubectl apply -f crd.yaml customresourcedefinition.apiextensions.k8s.io/crontabs.stable.example.com created $ cat c.yaml --- apiVersion: &#34;stable.example.com/v1&#34; kind: CronTab metadata: name: cron-1 spec: cronSpec: &#34;* * * * */5&#34; image: my-awesome-cron-image-1 --- apiVersion: &#34;stable.example.com/v1&#34; kind: CronTab metadata: name: cron-2 spec: cronSpec: &#34;* * * * */8&#34; image: my-awesome-cron-image-2 --- apiVersion: &#34;stable.example.com/v1&#34; kind: CronTab metadata: name: cron-3 spec: cronSpec: &#34;* * * * */10&#34; image: my-awesome-cron-image-3 $ kubectl apply -f c.yaml crontab.stable.example.com/cron-1 created crontab.stable.example.com/cron-2 created crontab.stable.example.com/cron-3 created $ kubectl get crontab.stable.example.com NAME AGE cron-1 9s cron-2 9s cron-3 9s list 资源¶ 首先是如何 list 前面创建的3个资源，类似 kubectl get crontab.stable.example.com 的效果。 简单来说就是通过 k8s.io/client-go/dynamic 里的 Interface 提供的方法来操作 crd 资源。 关键是怎么拿到 NamespaceableResourceInterface 实例以及把结果转换为自定义的结构体。 完整的 list 资源的代码如下: package main import ( &#34;encoding/json&#34; &#34;fmt&#34; &#34;os&#34; &#34;path/filepath&#34; metav1 &#34;k8s.io/apimachinery/pkg/apis/meta/v1&#34; &#34;k8s.io/apimachinery/pkg/runtime/schema&#34; &#34;k8s.io/client-go/dynamic&#34; &#34;k8s.io/client-go/tools/clientcmd&#34; ) var gvr = schema.GroupVersionResource{ Group: &#34;stable.example.com&#34;, Version: &#34;v1&#34;, Resource: &#34;crontabs&#34;, } type CrontabSpec struct { CronSpec string `json:&#34;cronSpec&#34;` Image string `json:&#34;image&#34;` } type Crontab struct { metav1.TypeMeta `json:&#34;,inline&#34;` metav1.ObjectMeta `json:&#34;metadata,omitempty&#34;` Spec CrontabSpec `json:&#34;spec,omitempty&#34;` } type CrontabList struct { metav1.TypeMeta `json:&#34;,inline&#34;` metav1.ListMeta `json:&#34;metadata,omitempty&#34;` Items []Crontab `json:&#34;items&#34;` } func listCrontabs(client dynamic.Interface, namespace string) (*CrontabList, error) { list, err := client.Resource(gvr).Namespace(namespace).List(metav1.ListOptions{}) if err != nil { return nil, err } data, err := list.MarshalJSON() if err != nil { return nil, err } var ctList CrontabList if err := json.Unmarshal(data, &amp;ctList); err != nil { return nil, err } return &amp;ctList, nil } func main() { kubeconfig := filepath.Join(os.Getenv(&#34;HOME&#34;), &#34;.kube&#34;, &#34;config&#34;) config, err := clientcmd.BuildConfigFromFlags(&#34;&#34;, kubeconfig) if err != nil { panic(err) } client, err := dynamic.NewForConfig(config) if err != nil { panic(err) } list, err := listCrontabs(client, &#34;default&#34;) if err != nil { panic(err) } for _, t := range list.Items { fmt.Printf(&#34;%s %s %s %s\n&#34;, t.Namespace, t.Name, t.Spec.CronSpec, t.Spec.Image) } } 执行结果如下: $ go run main.go default cron-1 * * * * */5 my-awesome-cron-image-1 default cron-2 * * * * */8 my-awesome-cron-image-2 default cron-3 * * * * */10 my-awesome-cron-image-3 代码相对来说比较简单，有一个要注意的地方就是 gvr 里各个字段的值来自 crd 定义的 yaml 文件: spec: # group name to use for REST API: /apis/&lt;group&gt;/&lt;version&gt; # 对应 Group 字段的值 group: stable.example.com # list of versions supported by this CustomResourceDefinition versions: - name: v1 # 对应 Version 字段的可选值 # ... names: # plural name to be used in the URL: /apis/&lt;group&gt;/&lt;version&gt;/&lt;plural&gt; # 对应 Resource 字段的值 plural: crontabs 注意：因为这个 crd 定义的是 namespace 资源，如果是非 namespace 资源的话，应当改为使用不指定 namespace 的方法: client.Resource(gvr).List(metav1.ListOptions{}) get 资源¶ get 资源的方法也是通过 dynamic.Interface 来实现，关键是怎么把结果转换为上面定义的结构体， 关键代码示例如下: func getCrontab(client dynamic.Interface, namespace string, name string) (*Crontab, error) { utd, err := client.Resource(gvr).Namespace(namespace).Get(name, metav1.GetOptions{}) if err != nil { return nil, err } data, err := utd.MarshalJSON() if err != nil { return nil, err } var ct Crontab if err := json.Unmarshal(data, &amp;ct); err != nil { return nil, err } return &amp;ct, nil } func main() { // ... ct, err := getCrontab(client, &#34;default&#34;, &#34;cron-1&#34;) if err != nil { panic(err) } fmt.Printf(&#34;%s %s %s %s\n&#34;, ct.Namespace, ct.Name, ct.Spec.CronSpec, ct.Spec.Image) } 执行效果: $ go run main.go default cron-1 * * * * */5 my-awesome-cron-image-1 create 资源¶ create 资源的方法也是通过 dynamic.Interface 来实现 ，这里主要记录一下怎么基于 yaml 文本的内容来创建资源。 关键代码示例如下: func createCrontabWithYaml(client dynamic.Interface, namespace string, yamlData string) (*Crontab, error) { decoder := yaml.NewDecodingSerializer(unstructured.UnstructuredJSONScheme) obj := &amp;unstructured.Unstructured{} if _, _, err := decoder.Decode([]byte(yamlData), &amp;gvk, obj); err != nil { return nil, err } utd, err := client.Resource(gvr).Namespace(namespace).Create(obj, metav1.CreateOptions{}) if err != nil { return nil, err } data, err := utd.MarshalJSON() if err != nil { return nil, err } var ct Crontab if err := json.Unmarshal(data, &amp;ct); err != nil { return nil, err } return &amp;ct, nil } func main() { // ... createData := ` apiVersion: &#34;stable.example.com/v1&#34; kind: CronTab metadata: name: cron-4 spec: cronSpec: &#34;* * * * */15&#34; image: my-awesome-cron-image-4 ` ct, err := createCrontabWithYaml(client, &#34;default&#34;, createData) if err != nil { panic(err) } fmt.Printf(&#34;%s %s %s %s\n&#34;, ct.Namespace, ct.Name, ct.Spec.CronSpec, ct.Spec.Image) } 执行效果: $ go run main.go default cron-4 * * * * */15 my-awesome-cron-image-4 $ kubectl get crontab.stable.example.com cron-4 NAME AGE cron-4 5m33s update 资源¶ update 资源的方法也是通过 dynamic.Interface 来实现 ，这里主要记录一下怎么基于 yaml 文本的内容来更新资源。 关键代码示例如下: func updateCrontabWithYaml(client dynamic.Interface, namespace string, yamlData string) (*Crontab, error) { decoder := yaml.NewDecodingSerializer(unstructured.UnstructuredJSONScheme) obj := &amp;unstructured.Unstructured{} if _, _, err := decoder.Decode([]byte(yamlData), &amp;gvk, obj); err != nil { return nil, err } utd, err := client.Resource(gvr).Namespace(namespace).Get(obj.GetName(), metav1.GetOptions{}) if err != nil { return nil, err } obj.SetResourceVersion(utd.GetResourceVersion()) utd, err = client.Resource(gvr).Namespace(namespace).Update(obj, metav1.UpdateOptions{}) if err != nil { return nil, err } data, err := utd.MarshalJSON() if err != nil { return nil, err } var ct Crontab if err := json.Unmarshal(data, &amp;ct); err != nil { return nil, err } return &amp;ct, nil } func main() { // ... updateData := ` apiVersion: &#34;stable.example.com/v1&#34; kind: CronTab metadata: name: cron-2 spec: cronSpec: &#34;* * * * */15&#34; image: my-awesome-cron-image-2-update ` ct, err := updateCrontabWithYaml(client, &#34;default&#34;, updateData) if err != nil { panic(err) } fmt.Printf(&#34;%s %s %s %s\n&#34;, ct.Namespace, ct.Name, ct.Spec.CronSpec, ct.Spec.Image) } 执行效果: $ kubectl get crontab.stable.example.com cron-2 -o jsonpath=&#39;{.spec}&#39; map[cronSpec:* * * * */8 image:my-awesome-cron-image-2] $ go run main.go default cron-2 * * * * */15 my-awesome-cron-image-2-update $ kubectl get crontab.stable.example.com cron-2 -o jsonpath=&#39;{.spec}&#39; map[cronSpec:* * * * */15 image:my-awesome-cron-image-2-update] patch 资源¶ patch 资源的方法跟 patch pod 之类的代码类似，关键代码示例如下: func patchCrontab(client dynamic.Interface, namespace, name string, pt types.PatchType, data []byte) error { _, err := client.Resource(gvr).Namespace(namespace).Patch(name, pt, data, metav1.PatchOptions{}) return err } func main() { // ... patchData := []byte(`{&#34;spec&#34;: {&#34;image&#34;: &#34;my-awesome-cron-image-1-patch&#34;}}`) if err := patchCrontab(client, &#34;default&#34;, &#34;cron-1&#34;, types.MergePatchType, patchData); err != nil { panic(err) } } 执行效果: $ kubectl get crontab.stable.example.com cron-1 -o jsonpath=&#39;{.spec.image}&#39; my-awesome-cron-image-1 $ go run main.go $ kubectl get crontab.stable.example.com cron-1 -o jsonpath=&#39;{.spec.image}&#39; my-awesome-cron-image-1-patch delete 资源¶ delete 资源相对来说简单很多，关键代码示例如下: func deleteCrontab(client dynamic.Interface, namespace string, name string) error { return client.Resource(gvr).Namespace(namespace).Delete(name, nil) } func main() { // ... if err := deleteCrontab(client, &#34;default&#34;, &#34;cron-3&#34;); err != nil { panic(err) } } 结果: $ go run main.go $ kubectl get crontab.stable.example.com NAME AGE cron-1 4h5m cron-2 4h5m 总结¶ 简单记录了一下 list、get、create、update、patch、delete crd 资源的方法，其他方法大同小异就没记录了。 简单来说就是可以通过 dynamic.Interface 在不生成特定的 client 代码的情况下操作 crd 资源。 BTW, 另外一个非常规的操作 crd 资源的办法就是直接请求 api server 的 rest api 而不是借助封装好的方法，后面有时间的时候再记录一下这个方法。 参考资料¶ kubernetes/client-go: Go client for Kubernetes. kubernetes/code-generator: Generators for kube-like API types Extend the Kubernetes API with CustomResourceDefinitions | Kubernetes Access Clusters Using the Kubernetes API | Kubernetes" />
+
+    <style>
+      .js-toc {
+        margin-bottom: 20px;
+      }
+      .donate-modal {
+        text-align: center;
+      }
+      #donate-modal-container .donate-image {
+        max-height: 300px !important;
+        min-height: inherit !important;
+      }
+    </style>
+
+        <meta property="og:site_name" content="Huang Huang 的博客" />
+        <meta property="og:type" content="article"/>
+        <meta property="og:title" content="在不生成 crd client 代码的情况下通过 client-go 增删改查 k8s crd 资源"/>
+        <meta property="og:url" content="https://mozillazg.com/2020/07/k8s-kubernetes-client-go-list-get-create-update-patch-delete-crd-resource-without-generate-client-code-update-or-create-via-yaml.html"/>
+        <meta property="og:description" content="前言¶ 一般情况下管理 crd 资源都是通过由 code-generator 生成的 crd client 来操作，但是有时也会有只想简单的操作一下资源不想去导入或生成 crd client 相关代码的需求，这里简单的记录一下在不生成 crd client 代码的情况下通过 client-go 增删改查 k8s crd 资源的方法。 示例 CRD¶ 先来定义一个测试用的 CRD （其实已有的 Pod 之类的也是可以的，没啥特别的不一定要自定义 CRD，这里只是展示这个能力，因为一般如果是内置的资源的话，直接用内置的 client 和内置的资源 struct 就可以了）（这个 crd 来自 官方文档 ）： apiVersion: apiextensions.k8s.io/v1 kind: CustomResourceDefinition metadata: # name must match the spec fields below, and be in the form: &lt;plural&gt;.&lt;group&gt; name: crontabs.stable.example.com spec: # group name to use for REST API: /apis/&lt;group&gt;/&lt;version&gt; group: stable.example.com # list of versions supported by this CustomResourceDefinition versions: - name: v1 # Each version can be enabled/disabled by Served flag. served: true # One and only one version must be marked as the storage version. storage: true schema: openAPIV3Schema: type: object properties: spec: type: object properties: cronSpec: type: string image: type: string replicas: type: integer # either Namespaced or Cluster scope: Namespaced names: # plural name to be used in the URL: /apis/&lt;group&gt;/&lt;version&gt;/&lt;plural&gt; plural: crontabs # singular name to be used as an alias on the CLI and for display singular: crontab # kind is normally the CamelCased singular type. Your resource manifests use this. kind: CronTab # shortNames allow shorter string to match your resource on the CLI shortNames: - ct 然后通过 kubectl 创建一下这个 crd ，然后再创建几个 crd 对象 $ kubectl apply -f crd.yaml customresourcedefinition.apiextensions.k8s.io/crontabs.stable.example.com created $ cat c.yaml --- apiVersion: &#34;stable.example.com/v1&#34; kind: CronTab metadata: name: cron-1 spec: cronSpec: &#34;* * * * */5&#34; image: my-awesome-cron-image-1 --- apiVersion: &#34;stable.example.com/v1&#34; kind: CronTab metadata: name: cron-2 spec: cronSpec: &#34;* * * * */8&#34; image: my-awesome-cron-image-2 --- apiVersion: &#34;stable.example.com/v1&#34; kind: CronTab metadata: name: cron-3 spec: cronSpec: &#34;* * * * */10&#34; image: my-awesome-cron-image-3 $ kubectl apply -f c.yaml crontab.stable.example.com/cron-1 created crontab.stable.example.com/cron-2 created crontab.stable.example.com/cron-3 created $ kubectl get crontab.stable.example.com NAME AGE cron-1 9s cron-2 9s cron-3 9s list 资源¶ 首先是如何 list 前面创建的3个资源，类似 kubectl get crontab.stable.example.com 的效果。 简单来说就是通过 k8s.io/client-go/dynamic 里的 Interface 提供的方法来操作 crd 资源。 关键是怎么拿到 NamespaceableResourceInterface 实例以及把结果转换为自定义的结构体。 完整的 list 资源的代码如下: package main import ( &#34;encoding/json&#34; &#34;fmt&#34; &#34;os&#34; &#34;path/filepath&#34; metav1 &#34;k8s.io/apimachinery/pkg/apis/meta/v1&#34; &#34;k8s.io/apimachinery/pkg/runtime/schema&#34; &#34;k8s.io/client-go/dynamic&#34; &#34;k8s.io/client-go/tools/clientcmd&#34; ) var gvr = schema.GroupVersionResource{ Group: &#34;stable.example.com&#34;, Version: &#34;v1&#34;, Resource: &#34;crontabs&#34;, } type CrontabSpec struct { CronSpec string `json:&#34;cronSpec&#34;` Image string `json:&#34;image&#34;` } type Crontab struct { metav1.TypeMeta `json:&#34;,inline&#34;` metav1.ObjectMeta `json:&#34;metadata,omitempty&#34;` Spec CrontabSpec `json:&#34;spec,omitempty&#34;` } type CrontabList struct { metav1.TypeMeta `json:&#34;,inline&#34;` metav1.ListMeta `json:&#34;metadata,omitempty&#34;` Items []Crontab `json:&#34;items&#34;` } func listCrontabs(client dynamic.Interface, namespace string) (*CrontabList, error) { list, err := client.Resource(gvr).Namespace(namespace).List(metav1.ListOptions{}) if err != nil { return nil, err } data, err := list.MarshalJSON() if err != nil { return nil, err } var ctList CrontabList if err := json.Unmarshal(data, &amp;ctList); err != nil { return nil, err } return &amp;ctList, nil } func main() { kubeconfig := filepath.Join(os.Getenv(&#34;HOME&#34;), &#34;.kube&#34;, &#34;config&#34;) config, err := clientcmd.BuildConfigFromFlags(&#34;&#34;, kubeconfig) if err != nil { panic(err) } client, err := dynamic.NewForConfig(config) if err != nil { panic(err) } list, err := listCrontabs(client, &#34;default&#34;) if err != nil { panic(err) } for _, t := range list.Items { fmt.Printf(&#34;%s %s %s %s\n&#34;, t.Namespace, t.Name, t.Spec.CronSpec, t.Spec.Image) } } 执行结果如下: $ go run main.go default cron-1 * * * * */5 my-awesome-cron-image-1 default cron-2 * * * * */8 my-awesome-cron-image-2 default cron-3 * * * * */10 my-awesome-cron-image-3 代码相对来说比较简单，有一个要注意的地方就是 gvr 里各个字段的值来自 crd 定义的 yaml 文件: spec: # group name to use for REST API: /apis/&lt;group&gt;/&lt;version&gt; # 对应 Group 字段的值 group: stable.example.com # list of versions supported by this CustomResourceDefinition versions: - name: v1 # 对应 Version 字段的可选值 # ... names: # plural name to be used in the URL: /apis/&lt;group&gt;/&lt;version&gt;/&lt;plural&gt; # 对应 Resource 字段的值 plural: crontabs 注意：因为这个 crd 定义的是 namespace 资源，如果是非 namespace 资源的话，应当改为使用不指定 namespace 的方法: client.Resource(gvr).List(metav1.ListOptions{}) get 资源¶ get 资源的方法也是通过 dynamic.Interface 来实现，关键是怎么把结果转换为上面定义的结构体， 关键代码示例如下: func getCrontab(client dynamic.Interface, namespace string, name string) (*Crontab, error) { utd, err := client.Resource(gvr).Namespace(namespace).Get(name, metav1.GetOptions{}) if err != nil { return nil, err } data, err := utd.MarshalJSON() if err != nil { return nil, err } var ct Crontab if err := json.Unmarshal(data, &amp;ct); err != nil { return nil, err } return &amp;ct, nil } func main() { // ... ct, err := getCrontab(client, &#34;default&#34;, &#34;cron-1&#34;) if err != nil { panic(err) } fmt.Printf(&#34;%s %s %s %s\n&#34;, ct.Namespace, ct.Name, ct.Spec.CronSpec, ct.Spec.Image) } 执行效果: $ go run main.go default cron-1 * * * * */5 my-awesome-cron-image-1 create 资源¶ create 资源的方法也是通过 dynamic.Interface 来实现 ，这里主要记录一下怎么基于 yaml 文本的内容来创建资源。 关键代码示例如下: func createCrontabWithYaml(client dynamic.Interface, namespace string, yamlData string) (*Crontab, error) { decoder := yaml.NewDecodingSerializer(unstructured.UnstructuredJSONScheme) obj := &amp;unstructured.Unstructured{} if _, _, err := decoder.Decode([]byte(yamlData), &amp;gvk, obj); err != nil { return nil, err } utd, err := client.Resource(gvr).Namespace(namespace).Create(obj, metav1.CreateOptions{}) if err != nil { return nil, err } data, err := utd.MarshalJSON() if err != nil { return nil, err } var ct Crontab if err := json.Unmarshal(data, &amp;ct); err != nil { return nil, err } return &amp;ct, nil } func main() { // ... createData := ` apiVersion: &#34;stable.example.com/v1&#34; kind: CronTab metadata: name: cron-4 spec: cronSpec: &#34;* * * * */15&#34; image: my-awesome-cron-image-4 ` ct, err := createCrontabWithYaml(client, &#34;default&#34;, createData) if err != nil { panic(err) } fmt.Printf(&#34;%s %s %s %s\n&#34;, ct.Namespace, ct.Name, ct.Spec.CronSpec, ct.Spec.Image) } 执行效果: $ go run main.go default cron-4 * * * * */15 my-awesome-cron-image-4 $ kubectl get crontab.stable.example.com cron-4 NAME AGE cron-4 5m33s update 资源¶ update 资源的方法也是通过 dynamic.Interface 来实现 ，这里主要记录一下怎么基于 yaml 文本的内容来更新资源。 关键代码示例如下: func updateCrontabWithYaml(client dynamic.Interface, namespace string, yamlData string) (*Crontab, error) { decoder := yaml.NewDecodingSerializer(unstructured.UnstructuredJSONScheme) obj := &amp;unstructured.Unstructured{} if _, _, err := decoder.Decode([]byte(yamlData), &amp;gvk, obj); err != nil { return nil, err } utd, err := client.Resource(gvr).Namespace(namespace).Get(obj.GetName(), metav1.GetOptions{}) if err != nil { return nil, err } obj.SetResourceVersion(utd.GetResourceVersion()) utd, err = client.Resource(gvr).Namespace(namespace).Update(obj, metav1.UpdateOptions{}) if err != nil { return nil, err } data, err := utd.MarshalJSON() if err != nil { return nil, err } var ct Crontab if err := json.Unmarshal(data, &amp;ct); err != nil { return nil, err } return &amp;ct, nil } func main() { // ... updateData := ` apiVersion: &#34;stable.example.com/v1&#34; kind: CronTab metadata: name: cron-2 spec: cronSpec: &#34;* * * * */15&#34; image: my-awesome-cron-image-2-update ` ct, err := updateCrontabWithYaml(client, &#34;default&#34;, updateData) if err != nil { panic(err) } fmt.Printf(&#34;%s %s %s %s\n&#34;, ct.Namespace, ct.Name, ct.Spec.CronSpec, ct.Spec.Image) } 执行效果: $ kubectl get crontab.stable.example.com cron-2 -o jsonpath=&#39;{.spec}&#39; map[cronSpec:* * * * */8 image:my-awesome-cron-image-2] $ go run main.go default cron-2 * * * * */15 my-awesome-cron-image-2-update $ kubectl get crontab.stable.example.com cron-2 -o jsonpath=&#39;{.spec}&#39; map[cronSpec:* * * * */15 image:my-awesome-cron-image-2-update] patch 资源¶ patch 资源的方法跟 patch pod 之类的代码类似，关键代码示例如下: func patchCrontab(client dynamic.Interface, namespace, name string, pt types.PatchType, data []byte) error { _, err := client.Resource(gvr).Namespace(namespace).Patch(name, pt, data, metav1.PatchOptions{}) return err } func main() { // ... patchData := []byte(`{&#34;spec&#34;: {&#34;image&#34;: &#34;my-awesome-cron-image-1-patch&#34;}}`) if err := patchCrontab(client, &#34;default&#34;, &#34;cron-1&#34;, types.MergePatchType, patchData); err != nil { panic(err) } } 执行效果: $ kubectl get crontab.stable.example.com cron-1 -o jsonpath=&#39;{.spec.image}&#39; my-awesome-cron-image-1 $ go run main.go $ kubectl get crontab.stable.example.com cron-1 -o jsonpath=&#39;{.spec.image}&#39; my-awesome-cron-image-1-patch delete 资源¶ delete 资源相对来说简单很多，关键代码示例如下: func deleteCrontab(client dynamic.Interface, namespace string, name string) error { return client.Resource(gvr).Namespace(namespace).Delete(name, nil) } func main() { // ... if err := deleteCrontab(client, &#34;default&#34;, &#34;cron-3&#34;); err != nil { panic(err) } } 结果: $ go run main.go $ kubectl get crontab.stable.example.com NAME AGE cron-1 4h5m cron-2 4h5m 总结¶ 简单记录了一下 list、get、create、update、patch、delete crd 资源的方法，其他方法大同小异就没记录了。 简单来说就是可以通过 dynamic.Interface 在不生成特定的 client 代码的情况下操作 crd 资源。 BTW, 另外一个非常规的操作 crd 资源的办法就是直接请求 api server 的 rest api 而不是借助封装好的方法，后面有时间的时候再记录一下这个方法。 参考资料¶ kubernetes/client-go: Go client for Kubernetes. kubernetes/code-generator: Generators for kube-like API types Extend the Kubernetes API with CustomResourceDefinitions | Kubernetes Access Clusters Using the Kubernetes API | Kubernetes"/>
+        <meta property="article:published_time" content="2020-07-19" />
+            <meta property="article:section" content="k8s" />
+            <meta property="article:tag" content="k8s" />
+            <meta property="article:tag" content="kubernetes" />
+            <meta property="article:tag" content="crd" />
+            <meta property="article:tag" content="client-go" />
+            <meta property="article:author" content="mozillazg" />
+            <meta property="og:image"
+                  content="https://mozillazg.com/static/avatar.jpeg"/>
+
+
+    <meta name="twitter:card" content="summary">
+        <meta name="twitter:site" content="@mozillazg">
+        <meta name="twitter:creator" content="@mozillazg">
+    <meta name="twitter:domain" content="https://mozillazg.com">
+            <meta property="twitter:image"
+                  content="https://mozillazg.com/static/avatar.jpeg"/>
+
+    <!-- Bootstrap -->
+        <link rel="stylesheet" href="https://mozillazg.com/theme/css/bootstrap.min.css" type="text/css"/>
+    <link href="https://mozillazg.com/theme/css/font-awesome.min.css" rel="stylesheet">
+
+    <link href="https://mozillazg.com/theme/css/pygments/github.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://mozillazg.com/theme/css/style.css" type="text/css"/>
+            <link href="https://mozillazg.com/static/custom.css" rel="stylesheet">
+
+        <link href="https://mozillazg.com/feeds/all.atom.xml" type="application/atom+xml" rel="alternate"
+              title="Huang Huang 的博客 ATOM Feed"/>
+
+        <link href="https://mozillazg.com/feeds/all.rss.xml" type="application/rss+xml" rel="alternate"
+              title="Huang Huang 的博客 RSS Feed"/>
+
+
+        <link href="https://mozillazg.com/feeds/k8s.atom.xml" type="application/atom+xml" rel="alternate"
+              title="Huang Huang 的博客 k8s ATOM Feed"/>
+
+
+    <script type="application/ld+json">
+    {
+        "@context": "https://schema.org",
+        "@type": "Website",
+        "publisher": {
+            "@type": "Person",
+            "name": "mozillazg",
+            "logo": "https://mozillazg.com/static/avatar.jpeg"
+        },
+        "author": {
+            "@type": "Person",
+            "name": "mozillazg",
+            "image": "https://mozillazg.com/static/avatar.jpeg",
+            "url": "https://mozillazg.com",
+            "sameAs": []
+        },
+        // "headline": "",
+        "url": "https://mozillazg.com/2020/07/k8s-kubernetes-client-go-list-get-create-update-patch-delete-crd-resource-without-generate-client-code-update-or-create-via-yaml.html",
+        "datePublished": "2020-07-19",
+        // "dateModified": "",
+        "image": "https://mozillazg.com/static/avatar.jpeg",
+        "keywords": "k8s, kubernetes, crd, client-go",
+        "description": "前言¶ 一般情况下管理 crd 资源都是通过由 code-generator 生成的 crd client 来操作，但是有时也会有只想简单的操作一下资源不想去导入或生成 crd client 相关代码的需求，这里简单的记录一下在不生成 crd client 代码的情况下通过 client-go 增删改查 k8s crd 资源的方法。 示例 CRD¶ 先来定义一个测试用的 CRD （其实已有的 Pod 之类的也是可以的，没啥特别的不一定要自定义 CRD，这里只是展示这个能力，因为一般如果是内置的资源的话，直接用内置的 client 和内置的资源 struct 就可以了）（这个 crd 来自 官方文档 ）： apiVersion: apiextensions.k8s.io/v1 kind: CustomResourceDefinition metadata: # name must match the spec fields below, and be in the form: &lt;plural&gt;.&lt;group&gt; name: crontabs.stable.example.com spec: # group name to use for REST API: /apis/&lt;group&gt;/&lt;version&gt; group: stable.example.com # list of versions supported by this CustomResourceDefinition versions: - name: v1 # Each version can be enabled/disabled by Served flag. served: true # One and only one version must be marked as the storage version. storage: true schema: openAPIV3Schema: type: object properties: spec: type: object properties: cronSpec: type: string image: type: string replicas: type: integer # either Namespaced or Cluster scope: Namespaced names: # plural name to be used in the URL: /apis/&lt;group&gt;/&lt;version&gt;/&lt;plural&gt; plural: crontabs # singular name to be used as an alias on the CLI and for display singular: crontab # kind is normally the CamelCased singular type. Your resource manifests use this. kind: CronTab # shortNames allow shorter string to match your resource on the CLI shortNames: - ct 然后通过 kubectl 创建一下这个 crd ，然后再创建几个 crd 对象 $ kubectl apply -f crd.yaml customresourcedefinition.apiextensions.k8s.io/crontabs.stable.example.com created $ cat c.yaml --- apiVersion: &#34;stable.example.com/v1&#34; kind: CronTab metadata: name: cron-1 spec: cronSpec: &#34;* * * * */5&#34; image: my-awesome-cron-image-1 --- apiVersion: &#34;stable.example.com/v1&#34; kind: CronTab metadata: name: cron-2 spec: cronSpec: &#34;* * * * */8&#34; image: my-awesome-cron-image-2 --- apiVersion: &#34;stable.example.com/v1&#34; kind: CronTab metadata: name: cron-3 spec: cronSpec: &#34;* * * * */10&#34; image: my-awesome-cron-image-3 $ kubectl apply -f c.yaml crontab.stable.example.com/cron-1 created crontab.stable.example.com/cron-2 created crontab.stable.example.com/cron-3 created $ kubectl get crontab.stable.example.com NAME AGE cron-1 9s cron-2 9s cron-3 9s list 资源¶ 首先是如何 list 前面创建的3个资源，类似 kubectl get crontab.stable.example.com 的效果。 简单来说就是通过 k8s.io/client-go/dynamic 里的 Interface 提供的方法来操作 crd 资源。 关键是怎么拿到 NamespaceableResourceInterface 实例以及把结果转换为自定义的结构体。 完整的 list 资源的代码如下: package main import ( &#34;encoding/json&#34; &#34;fmt&#34; &#34;os&#34; &#34;path/filepath&#34; metav1 &#34;k8s.io/apimachinery/pkg/apis/meta/v1&#34; &#34;k8s.io/apimachinery/pkg/runtime/schema&#34; &#34;k8s.io/client-go/dynamic&#34; &#34;k8s.io/client-go/tools/clientcmd&#34; ) var gvr = schema.GroupVersionResource{ Group: &#34;stable.example.com&#34;, Version: &#34;v1&#34;, Resource: &#34;crontabs&#34;, } type CrontabSpec struct { CronSpec string `json:&#34;cronSpec&#34;` Image string `json:&#34;image&#34;` } type Crontab struct { metav1.TypeMeta `json:&#34;,inline&#34;` metav1.ObjectMeta `json:&#34;metadata,omitempty&#34;` Spec CrontabSpec `json:&#34;spec,omitempty&#34;` } type CrontabList struct { metav1.TypeMeta `json:&#34;,inline&#34;` metav1.ListMeta `json:&#34;metadata,omitempty&#34;` Items []Crontab `json:&#34;items&#34;` } func listCrontabs(client dynamic.Interface, namespace string) (*CrontabList, error) { list, err := client.Resource(gvr).Namespace(namespace).List(metav1.ListOptions{}) if err != nil { return nil, err } data, err := list.MarshalJSON() if err != nil { return nil, err } var ctList CrontabList if err := json.Unmarshal(data, &amp;ctList); err != nil { return nil, err } return &amp;ctList, nil } func main() { kubeconfig := filepath.Join(os.Getenv(&#34;HOME&#34;), &#34;.kube&#34;, &#34;config&#34;) config, err := clientcmd.BuildConfigFromFlags(&#34;&#34;, kubeconfig) if err != nil { panic(err) } client, err := dynamic.NewForConfig(config) if err != nil { panic(err) } list, err := listCrontabs(client, &#34;default&#34;) if err != nil { panic(err) } for _, t := range list.Items { fmt.Printf(&#34;%s %s %s %s\n&#34;, t.Namespace, t.Name, t.Spec.CronSpec, t.Spec.Image) } } 执行结果如下: $ go run main.go default cron-1 * * * * */5 my-awesome-cron-image-1 default cron-2 * * * * */8 my-awesome-cron-image-2 default cron-3 * * * * */10 my-awesome-cron-image-3 代码相对来说比较简单，有一个要注意的地方就是 gvr 里各个字段的值来自 crd 定义的 yaml 文件: spec: # group name to use for REST API: /apis/&lt;group&gt;/&lt;version&gt; # 对应 Group 字段的值 group: stable.example.com # list of versions supported by this CustomResourceDefinition versions: - name: v1 # 对应 Version 字段的可选值 # ... names: # plural name to be used in the URL: /apis/&lt;group&gt;/&lt;version&gt;/&lt;plural&gt; # 对应 Resource 字段的值 plural: crontabs 注意：因为这个 crd 定义的是 namespace 资源，如果是非 namespace 资源的话，应当改为使用不指定 namespace 的方法: client.Resource(gvr).List(metav1.ListOptions{}) get 资源¶ get 资源的方法也是通过 dynamic.Interface 来实现，关键是怎么把结果转换为上面定义的结构体， 关键代码示例如下: func getCrontab(client dynamic.Interface, namespace string, name string) (*Crontab, error) { utd, err := client.Resource(gvr).Namespace(namespace).Get(name, metav1.GetOptions{}) if err != nil { return nil, err } data, err := utd.MarshalJSON() if err != nil { return nil, err } var ct Crontab if err := json.Unmarshal(data, &amp;ct); err != nil { return nil, err } return &amp;ct, nil } func main() { // ... ct, err := getCrontab(client, &#34;default&#34;, &#34;cron-1&#34;) if err != nil { panic(err) } fmt.Printf(&#34;%s %s %s %s\n&#34;, ct.Namespace, ct.Name, ct.Spec.CronSpec, ct.Spec.Image) } 执行效果: $ go run main.go default cron-1 * * * * */5 my-awesome-cron-image-1 create 资源¶ create 资源的方法也是通过 dynamic.Interface 来实现 ，这里主要记录一下怎么基于 yaml 文本的内容来创建资源。 关键代码示例如下: func createCrontabWithYaml(client dynamic.Interface, namespace string, yamlData string) (*Crontab, error) { decoder := yaml.NewDecodingSerializer(unstructured.UnstructuredJSONScheme) obj := &amp;unstructured.Unstructured{} if _, _, err := decoder.Decode([]byte(yamlData), &amp;gvk, obj); err != nil { return nil, err } utd, err := client.Resource(gvr).Namespace(namespace).Create(obj, metav1.CreateOptions{}) if err != nil { return nil, err } data, err := utd.MarshalJSON() if err != nil { return nil, err } var ct Crontab if err := json.Unmarshal(data, &amp;ct); err != nil { return nil, err } return &amp;ct, nil } func main() { // ... createData := ` apiVersion: &#34;stable.example.com/v1&#34; kind: CronTab metadata: name: cron-4 spec: cronSpec: &#34;* * * * */15&#34; image: my-awesome-cron-image-4 ` ct, err := createCrontabWithYaml(client, &#34;default&#34;, createData) if err != nil { panic(err) } fmt.Printf(&#34;%s %s %s %s\n&#34;, ct.Namespace, ct.Name, ct.Spec.CronSpec, ct.Spec.Image) } 执行效果: $ go run main.go default cron-4 * * * * */15 my-awesome-cron-image-4 $ kubectl get crontab.stable.example.com cron-4 NAME AGE cron-4 5m33s update 资源¶ update 资源的方法也是通过 dynamic.Interface 来实现 ，这里主要记录一下怎么基于 yaml 文本的内容来更新资源。 关键代码示例如下: func updateCrontabWithYaml(client dynamic.Interface, namespace string, yamlData string) (*Crontab, error) { decoder := yaml.NewDecodingSerializer(unstructured.UnstructuredJSONScheme) obj := &amp;unstructured.Unstructured{} if _, _, err := decoder.Decode([]byte(yamlData), &amp;gvk, obj); err != nil { return nil, err } utd, err := client.Resource(gvr).Namespace(namespace).Get(obj.GetName(), metav1.GetOptions{}) if err != nil { return nil, err } obj.SetResourceVersion(utd.GetResourceVersion()) utd, err = client.Resource(gvr).Namespace(namespace).Update(obj, metav1.UpdateOptions{}) if err != nil { return nil, err } data, err := utd.MarshalJSON() if err != nil { return nil, err } var ct Crontab if err := json.Unmarshal(data, &amp;ct); err != nil { return nil, err } return &amp;ct, nil } func main() { // ... updateData := ` apiVersion: &#34;stable.example.com/v1&#34; kind: CronTab metadata: name: cron-2 spec: cronSpec: &#34;* * * * */15&#34; image: my-awesome-cron-image-2-update ` ct, err := updateCrontabWithYaml(client, &#34;default&#34;, updateData) if err != nil { panic(err) } fmt.Printf(&#34;%s %s %s %s\n&#34;, ct.Namespace, ct.Name, ct.Spec.CronSpec, ct.Spec.Image) } 执行效果: $ kubectl get crontab.stable.example.com cron-2 -o jsonpath=&#39;{.spec}&#39; map[cronSpec:* * * * */8 image:my-awesome-cron-image-2] $ go run main.go default cron-2 * * * * */15 my-awesome-cron-image-2-update $ kubectl get crontab.stable.example.com cron-2 -o jsonpath=&#39;{.spec}&#39; map[cronSpec:* * * * */15 image:my-awesome-cron-image-2-update] patch 资源¶ patch 资源的方法跟 patch pod 之类的代码类似，关键代码示例如下: func patchCrontab(client dynamic.Interface, namespace, name string, pt types.PatchType, data []byte) error { _, err := client.Resource(gvr).Namespace(namespace).Patch(name, pt, data, metav1.PatchOptions{}) return err } func main() { // ... patchData := []byte(`{&#34;spec&#34;: {&#34;image&#34;: &#34;my-awesome-cron-image-1-patch&#34;}}`) if err := patchCrontab(client, &#34;default&#34;, &#34;cron-1&#34;, types.MergePatchType, patchData); err != nil { panic(err) } } 执行效果: $ kubectl get crontab.stable.example.com cron-1 -o jsonpath=&#39;{.spec.image}&#39; my-awesome-cron-image-1 $ go run main.go $ kubectl get crontab.stable.example.com cron-1 -o jsonpath=&#39;{.spec.image}&#39; my-awesome-cron-image-1-patch delete 资源¶ delete 资源相对来说简单很多，关键代码示例如下: func deleteCrontab(client dynamic.Interface, namespace string, name string) error { return client.Resource(gvr).Namespace(namespace).Delete(name, nil) } func main() { // ... if err := deleteCrontab(client, &#34;default&#34;, &#34;cron-3&#34;); err != nil { panic(err) } } 结果: $ go run main.go $ kubectl get crontab.stable.example.com NAME AGE cron-1 4h5m cron-2 4h5m 总结¶ 简单记录了一下 list、get、create、update、patch、delete crd 资源的方法，其他方法大同小异就没记录了。 简单来说就是可以通过 dynamic.Interface 在不生成特定的 client 代码的情况下操作 crd 资源。 BTW, 另外一个非常规的操作 crd 资源的办法就是直接请求 api server 的 rest api 而不是借助封装好的方法，后面有时间的时候再记录一下这个方法。 参考资料¶ kubernetes/client-go: Go client for Kubernetes. kubernetes/code-generator: Generators for kube-like API types Extend the Kubernetes API with CustomResourceDefinitions | Kubernetes Access Clusters Using the Kubernetes API | Kubernetes",
+        "mainEntityOfPage": {
+            "@type": "WebPage",
+            "@id": "https://mozillazg.com"
+        }
+    }
+    </script>
+
+</head>
+<body>
+
+<div class="navbar" role="navigation">
+	<div class="container">
+        <div class="navbar-header">
+            <button type="button" class="navbar-toggle" data-toggle="collapse" data-target=".navbar-ex1-collapse">
+                <span class="sr-only">Toggle navigation</span>
+                <span class="icon-bar"></span>
+                <span class="icon-bar"></span>
+                <span class="icon-bar"></span>
+            </button>
+            <a href="https://mozillazg.com/" class="navbar-brand">
+Huang Huang 的博客            </a>
+        </div>
+        <div class="collapse navbar-collapse navbar-ex1-collapse">
+            <ul class="nav navbar-nav">
+                    <li><a href="https://mozillazg.com/feeds/all.atom.xml">Feed</a></li>
+                    <li><a href="/2014/10/pages/about-me.html">About</a></li>
+            </ul>
+            <ul class="nav navbar-nav navbar-right">
+              <li><a href="https://mozillazg.com/archives.html"><i class="fa fa-th-list"></i><span class="icon-label">Archives</span></a></li>
+            </ul>
+        </div>
+        <!-- /.navbar-collapse -->
+    </div>
+</div> <!-- /.navbar -->
+<!-- Banner -->
+<!-- End Banner -->
+<div class="container">
+    <div class="row">
+        <div class="col-lg-12">
+    <section id="content" class="yue">
+        <article>
+            <header class="text-center">
+                <h1>
+                    <a href="https://mozillazg.com/2020/07/k8s-kubernetes-client-go-list-get-create-update-patch-delete-crd-resource-without-generate-client-code-update-or-create-via-yaml.html"
+                       rel="bookmark"
+                       title="Permalink to 在不生成 crd client 代码的情况下通过 client-go 增删改查 k8s crd 资源">
+                        在不生成 crd client 代码的情况下通过 client-go 增删改查 k8s crd 资源
+                    </a>
+                </h1>
+                <p class="published">
+                    <time datetime="2020-07-19T00:00:00+00:00">
+                    2020-07-19
+                    </time>
+                </p>
+            </header>
+            <div class="entry-content">
+                <div class="well-sm article-info">
+<footer class="post-info">
+        <a href="https://mozillazg.com/category/k8s.html">k8s</a>
+
+
+<span class="label label-default hide">Tags</span>
+	<a href="https://mozillazg.com/tag/k8s.html">k8s</a>
+        /
+	<a href="https://mozillazg.com/tag/kubernetes.html">kubernetes</a>
+        /
+	<a href="https://mozillazg.com/tag/crd.html">crd</a>
+        /
+	<a href="https://mozillazg.com/tag/client-go.html">client-go</a>
+    
+</footer><!-- /.post-info -->                </div>
+                <div class="js-toc"></div>
+                <div>
+                <div class="section" id="id1">
+<h2 id="hidid1">前言<a class="headerlink" href="#hidid1" title="Permalink to this headline">¶</a></h2>
+<p>一般情况下管理 crd 资源都是通过由 <a class="reference external" href="https://github.com/kubernetes/code-generator">code-generator</a> 生成的 crd client 来操作，但是有时也会有只想简单的操作一下资源不想去导入或生成 crd client 相关代码的需求，这里简单的记录一下在不生成 crd client 代码的情况下通过 client-go 增删改查 k8s crd 资源的方法。</p>
+</div>
+<div class="section" id="crd">
+<h2 id="hidcrd">示例 CRD<a class="headerlink" href="#hidcrd" title="Permalink to this headline">¶</a></h2>
+<p>先来定义一个测试用的 CRD （其实已有的 Pod 之类的也是可以的，没啥特别的不一定要自定义 CRD，这里只是展示这个能力，因为一般如果是内置的资源的话，直接用内置的 client 和内置的资源 struct 就可以了）（这个 crd 来自 <a class="reference external" href="https://kubernetes.io/docs/tasks/extend-kubernetes/custom-resources/custom-resource-definitions/">官方文档</a> ）：</p>
+<div class="highlight"><pre><span></span><span class="l l-Scalar l-Scalar-Plain">apiVersion</span><span class="p p-Indicator">:</span> <span class="l l-Scalar l-Scalar-Plain">apiextensions.k8s.io/v1</span>
+<span class="l l-Scalar l-Scalar-Plain">kind</span><span class="p p-Indicator">:</span> <span class="l l-Scalar l-Scalar-Plain">CustomResourceDefinition</span>
+<span class="l l-Scalar l-Scalar-Plain">metadata</span><span class="p p-Indicator">:</span>
+  <span class="c1"># name must match the spec fields below, and be in the form: &lt;plural&gt;.&lt;group&gt;</span>
+  <span class="l l-Scalar l-Scalar-Plain">name</span><span class="p p-Indicator">:</span> <span class="l l-Scalar l-Scalar-Plain">crontabs.stable.example.com</span>
+<span class="l l-Scalar l-Scalar-Plain">spec</span><span class="p p-Indicator">:</span>
+  <span class="c1"># group name to use for REST API: /apis/&lt;group&gt;/&lt;version&gt;</span>
+  <span class="l l-Scalar l-Scalar-Plain">group</span><span class="p p-Indicator">:</span> <span class="l l-Scalar l-Scalar-Plain">stable.example.com</span>
+  <span class="c1"># list of versions supported by this CustomResourceDefinition</span>
+  <span class="l l-Scalar l-Scalar-Plain">versions</span><span class="p p-Indicator">:</span>
+    <span class="p p-Indicator">-</span> <span class="l l-Scalar l-Scalar-Plain">name</span><span class="p p-Indicator">:</span> <span class="l l-Scalar l-Scalar-Plain">v1</span>
+      <span class="c1"># Each version can be enabled/disabled by Served flag.</span>
+      <span class="l l-Scalar l-Scalar-Plain">served</span><span class="p p-Indicator">:</span> <span class="l l-Scalar l-Scalar-Plain">true</span>
+      <span class="c1"># One and only one version must be marked as the storage version.</span>
+      <span class="l l-Scalar l-Scalar-Plain">storage</span><span class="p p-Indicator">:</span> <span class="l l-Scalar l-Scalar-Plain">true</span>
+      <span class="l l-Scalar l-Scalar-Plain">schema</span><span class="p p-Indicator">:</span>
+        <span class="l l-Scalar l-Scalar-Plain">openAPIV3Schema</span><span class="p p-Indicator">:</span>
+          <span class="l l-Scalar l-Scalar-Plain">type</span><span class="p p-Indicator">:</span> <span class="l l-Scalar l-Scalar-Plain">object</span>
+          <span class="l l-Scalar l-Scalar-Plain">properties</span><span class="p p-Indicator">:</span>
+            <span class="l l-Scalar l-Scalar-Plain">spec</span><span class="p p-Indicator">:</span>
+              <span class="l l-Scalar l-Scalar-Plain">type</span><span class="p p-Indicator">:</span> <span class="l l-Scalar l-Scalar-Plain">object</span>
+              <span class="l l-Scalar l-Scalar-Plain">properties</span><span class="p p-Indicator">:</span>
+                <span class="l l-Scalar l-Scalar-Plain">cronSpec</span><span class="p p-Indicator">:</span>
+                  <span class="l l-Scalar l-Scalar-Plain">type</span><span class="p p-Indicator">:</span> <span class="l l-Scalar l-Scalar-Plain">string</span>
+                <span class="l l-Scalar l-Scalar-Plain">image</span><span class="p p-Indicator">:</span>
+                  <span class="l l-Scalar l-Scalar-Plain">type</span><span class="p p-Indicator">:</span> <span class="l l-Scalar l-Scalar-Plain">string</span>
+                <span class="l l-Scalar l-Scalar-Plain">replicas</span><span class="p p-Indicator">:</span>
+                  <span class="l l-Scalar l-Scalar-Plain">type</span><span class="p p-Indicator">:</span> <span class="l l-Scalar l-Scalar-Plain">integer</span>
+  <span class="c1"># either Namespaced or Cluster</span>
+  <span class="l l-Scalar l-Scalar-Plain">scope</span><span class="p p-Indicator">:</span> <span class="l l-Scalar l-Scalar-Plain">Namespaced</span>
+  <span class="l l-Scalar l-Scalar-Plain">names</span><span class="p p-Indicator">:</span>
+    <span class="c1"># plural name to be used in the URL: /apis/&lt;group&gt;/&lt;version&gt;/&lt;plural&gt;</span>
+    <span class="l l-Scalar l-Scalar-Plain">plural</span><span class="p p-Indicator">:</span> <span class="l l-Scalar l-Scalar-Plain">crontabs</span>
+    <span class="c1"># singular name to be used as an alias on the CLI and for display</span>
+    <span class="l l-Scalar l-Scalar-Plain">singular</span><span class="p p-Indicator">:</span> <span class="l l-Scalar l-Scalar-Plain">crontab</span>
+    <span class="c1"># kind is normally the CamelCased singular type. Your resource manifests use this.</span>
+    <span class="l l-Scalar l-Scalar-Plain">kind</span><span class="p p-Indicator">:</span> <span class="l l-Scalar l-Scalar-Plain">CronTab</span>
+    <span class="c1"># shortNames allow shorter string to match your resource on the CLI</span>
+    <span class="l l-Scalar l-Scalar-Plain">shortNames</span><span class="p p-Indicator">:</span>
+    <span class="p p-Indicator">-</span> <span class="l l-Scalar l-Scalar-Plain">ct</span>
+</pre></div>
+<p>然后通过 kubectl 创建一下这个 crd ，然后再创建几个 crd 对象</p>
+<pre class="literal-block">
+$ kubectl apply -f crd.yaml
+customresourcedefinition.apiextensions.k8s.io/crontabs.stable.example.com created
+
+$ cat c.yaml
+---
+apiVersion: &quot;stable.example.com/v1&quot;
+kind: CronTab
+metadata:
+  name: cron-1
+spec:
+  cronSpec: &quot;* * * * */5&quot;
+  image: my-awesome-cron-image-1
+
+---
+apiVersion: &quot;stable.example.com/v1&quot;
+kind: CronTab
+metadata:
+  name: cron-2
+spec:
+  cronSpec: &quot;* * * * */8&quot;
+  image: my-awesome-cron-image-2
+
+---
+apiVersion: &quot;stable.example.com/v1&quot;
+kind: CronTab
+metadata:
+  name: cron-3
+spec:
+  cronSpec: &quot;* * * * */10&quot;
+  image: my-awesome-cron-image-3
+
+$ kubectl apply -f c.yaml
+crontab.stable.example.com/cron-1 created
+crontab.stable.example.com/cron-2 created
+crontab.stable.example.com/cron-3 created
+
+$ kubectl get crontab.stable.example.com
+NAME     AGE
+cron-1   9s
+cron-2   9s
+cron-3   9s
+</pre>
+</div>
+<div class="section" id="list">
+<h2 id="hidlist">list 资源<a class="headerlink" href="#hidlist" title="Permalink to this headline">¶</a></h2>
+<p>首先是如何 list 前面创建的3个资源，类似 <tt class="docutils literal">kubectl get crontab.stable.example.com</tt> 的效果。</p>
+<p>简单来说就是通过 <tt class="docutils literal"><span class="pre">k8s.io/client-go/dynamic</span></tt> 里的 <tt class="docutils literal">Interface</tt> 提供的方法来操作 crd 资源。
+关键是怎么拿到 <tt class="docutils literal">NamespaceableResourceInterface</tt> 实例以及把结果转换为自定义的结构体。</p>
+<p>完整的 list 资源的代码如下:</p>
+<div class="highlight"><pre><span></span><span class="kn">package</span> <span class="nx">main</span>
+
+<span class="kn">import</span> <span class="p">(</span>
+        <span class="s">&quot;encoding/json&quot;</span>
+        <span class="s">&quot;fmt&quot;</span>
+        <span class="s">&quot;os&quot;</span>
+        <span class="s">&quot;path/filepath&quot;</span>
+
+        <span class="nx">metav1</span> <span class="s">&quot;k8s.io/apimachinery/pkg/apis/meta/v1&quot;</span>
+        <span class="s">&quot;k8s.io/apimachinery/pkg/runtime/schema&quot;</span>
+        <span class="s">&quot;k8s.io/client-go/dynamic&quot;</span>
+        <span class="s">&quot;k8s.io/client-go/tools/clientcmd&quot;</span>
+<span class="p">)</span>
+
+<span class="kd">var</span> <span class="nx">gvr</span> <span class="p">=</span> <span class="nx">schema</span><span class="p">.</span><span class="nx">GroupVersionResource</span><span class="p">{</span>
+        <span class="nx">Group</span><span class="p">:</span>    <span class="s">&quot;stable.example.com&quot;</span><span class="p">,</span>
+        <span class="nx">Version</span><span class="p">:</span>  <span class="s">&quot;v1&quot;</span><span class="p">,</span>
+        <span class="nx">Resource</span><span class="p">:</span> <span class="s">&quot;crontabs&quot;</span><span class="p">,</span>
+<span class="p">}</span>
+
+<span class="kd">type</span> <span class="nx">CrontabSpec</span> <span class="kd">struct</span> <span class="p">{</span>
+        <span class="nx">CronSpec</span> <span class="kt">string</span> <span class="s">`json:&quot;cronSpec&quot;`</span>
+        <span class="nx">Image</span>    <span class="kt">string</span> <span class="s">`json:&quot;image&quot;`</span>
+<span class="p">}</span>
+
+<span class="kd">type</span> <span class="nx">Crontab</span> <span class="kd">struct</span> <span class="p">{</span>
+        <span class="nx">metav1</span><span class="p">.</span><span class="nx">TypeMeta</span>   <span class="s">`json:&quot;,inline&quot;`</span>
+        <span class="nx">metav1</span><span class="p">.</span><span class="nx">ObjectMeta</span> <span class="s">`json:&quot;metadata,omitempty&quot;`</span>
+
+        <span class="nx">Spec</span> <span class="nx">CrontabSpec</span> <span class="s">`json:&quot;spec,omitempty&quot;`</span>
+<span class="p">}</span>
+
+<span class="kd">type</span> <span class="nx">CrontabList</span> <span class="kd">struct</span> <span class="p">{</span>
+        <span class="nx">metav1</span><span class="p">.</span><span class="nx">TypeMeta</span> <span class="s">`json:&quot;,inline&quot;`</span>
+        <span class="nx">metav1</span><span class="p">.</span><span class="nx">ListMeta</span> <span class="s">`json:&quot;metadata,omitempty&quot;`</span>
+
+        <span class="nx">Items</span> <span class="p">[]</span><span class="nx">Crontab</span> <span class="s">`json:&quot;items&quot;`</span>
+<span class="p">}</span>
+
+<span class="kd">func</span> <span class="nx">listCrontabs</span><span class="p">(</span><span class="nx">client</span> <span class="nx">dynamic</span><span class="p">.</span><span class="nx">Interface</span><span class="p">,</span> <span class="nx">namespace</span> <span class="kt">string</span><span class="p">)</span> <span class="p">(</span><span class="o">*</span><span class="nx">CrontabList</span><span class="p">,</span> <span class="kt">error</span><span class="p">)</span> <span class="p">{</span>
+        <span class="nx">list</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">client</span><span class="p">.</span><span class="nx">Resource</span><span class="p">(</span><span class="nx">gvr</span><span class="p">).</span><span class="nx">Namespace</span><span class="p">(</span><span class="nx">namespace</span><span class="p">).</span><span class="nx">List</span><span class="p">(</span><span class="nx">metav1</span><span class="p">.</span><span class="nx">ListOptions</span><span class="p">{})</span>
+        <span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+                <span class="k">return</span> <span class="kc">nil</span><span class="p">,</span> <span class="nx">err</span>
+        <span class="p">}</span>
+        <span class="nx">data</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">list</span><span class="p">.</span><span class="nx">MarshalJSON</span><span class="p">()</span>
+        <span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+                <span class="k">return</span> <span class="kc">nil</span><span class="p">,</span> <span class="nx">err</span>
+        <span class="p">}</span>
+        <span class="kd">var</span> <span class="nx">ctList</span> <span class="nx">CrontabList</span>
+        <span class="k">if</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">json</span><span class="p">.</span><span class="nx">Unmarshal</span><span class="p">(</span><span class="nx">data</span><span class="p">,</span> <span class="o">&amp;</span><span class="nx">ctList</span><span class="p">);</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+                <span class="k">return</span> <span class="kc">nil</span><span class="p">,</span> <span class="nx">err</span>
+        <span class="p">}</span>
+        <span class="k">return</span> <span class="o">&amp;</span><span class="nx">ctList</span><span class="p">,</span> <span class="kc">nil</span>
+<span class="p">}</span>
+
+<span class="kd">func</span> <span class="nx">main</span><span class="p">()</span> <span class="p">{</span>
+        <span class="nx">kubeconfig</span> <span class="o">:=</span> <span class="nx">filepath</span><span class="p">.</span><span class="nx">Join</span><span class="p">(</span><span class="nx">os</span><span class="p">.</span><span class="nx">Getenv</span><span class="p">(</span><span class="s">&quot;HOME&quot;</span><span class="p">),</span> <span class="s">&quot;.kube&quot;</span><span class="p">,</span> <span class="s">&quot;config&quot;</span><span class="p">)</span>
+        <span class="nx">config</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">clientcmd</span><span class="p">.</span><span class="nx">BuildConfigFromFlags</span><span class="p">(</span><span class="s">&quot;&quot;</span><span class="p">,</span> <span class="nx">kubeconfig</span><span class="p">)</span>
+        <span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+                <span class="nb">panic</span><span class="p">(</span><span class="nx">err</span><span class="p">)</span>
+        <span class="p">}</span>
+
+        <span class="nx">client</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">dynamic</span><span class="p">.</span><span class="nx">NewForConfig</span><span class="p">(</span><span class="nx">config</span><span class="p">)</span>
+        <span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+                <span class="nb">panic</span><span class="p">(</span><span class="nx">err</span><span class="p">)</span>
+        <span class="p">}</span>
+        <span class="nx">list</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">listCrontabs</span><span class="p">(</span><span class="nx">client</span><span class="p">,</span> <span class="s">&quot;default&quot;</span><span class="p">)</span>
+        <span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+                <span class="nb">panic</span><span class="p">(</span><span class="nx">err</span><span class="p">)</span>
+        <span class="p">}</span>
+        <span class="k">for</span> <span class="nx">_</span><span class="p">,</span> <span class="nx">t</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">list</span><span class="p">.</span><span class="nx">Items</span> <span class="p">{</span>
+                <span class="nx">fmt</span><span class="p">.</span><span class="nx">Printf</span><span class="p">(</span><span class="s">&quot;%s %s %s %s\n&quot;</span><span class="p">,</span> <span class="nx">t</span><span class="p">.</span><span class="nx">Namespace</span><span class="p">,</span> <span class="nx">t</span><span class="p">.</span><span class="nx">Name</span><span class="p">,</span> <span class="nx">t</span><span class="p">.</span><span class="nx">Spec</span><span class="p">.</span><span class="nx">CronSpec</span><span class="p">,</span> <span class="nx">t</span><span class="p">.</span><span class="nx">Spec</span><span class="p">.</span><span class="nx">Image</span><span class="p">)</span>
+        <span class="p">}</span>
+<span class="p">}</span>
+</pre></div>
+<p>执行结果如下:</p>
+<pre class="literal-block">
+$ go run main.go
+default cron-1 * * * * */5 my-awesome-cron-image-1
+default cron-2 * * * * */8 my-awesome-cron-image-2
+default cron-3 * * * * */10 my-awesome-cron-image-3
+</pre>
+<p>代码相对来说比较简单，有一个要注意的地方就是 gvr 里各个字段的值来自 crd 定义的 yaml 文件:</p>
+<div class="highlight"><pre><span></span><span class="l l-Scalar l-Scalar-Plain">spec</span><span class="p p-Indicator">:</span>
+  <span class="c1"># group name to use for REST API: /apis/&lt;group&gt;/&lt;version&gt;</span>
+  <span class="c1"># 对应 Group 字段的值</span>
+  <span class="l l-Scalar l-Scalar-Plain">group</span><span class="p p-Indicator">:</span> <span class="l l-Scalar l-Scalar-Plain">stable.example.com</span>
+  <span class="c1"># list of versions supported by this CustomResourceDefinition</span>
+  <span class="l l-Scalar l-Scalar-Plain">versions</span><span class="p p-Indicator">:</span>
+    <span class="p p-Indicator">-</span> <span class="l l-Scalar l-Scalar-Plain">name</span><span class="p p-Indicator">:</span> <span class="l l-Scalar l-Scalar-Plain">v1</span>   <span class="c1"># 对应 Version 字段的可选值</span>
+  <span class="c1"># ...</span>
+<span class="l l-Scalar l-Scalar-Plain">names</span><span class="p p-Indicator">:</span>
+  <span class="c1"># plural name to be used in the URL: /apis/&lt;group&gt;/&lt;version&gt;/&lt;plural&gt;</span>
+  <span class="c1"># 对应 Resource 字段的值</span>
+  <span class="l l-Scalar l-Scalar-Plain">plural</span><span class="p p-Indicator">:</span> <span class="l l-Scalar l-Scalar-Plain">crontabs</span>
+</pre></div>
+<p>注意：因为这个 crd 定义的是 namespace 资源，如果是非 namespace 资源的话，应当改为使用不指定 namespace 的方法:</p>
+<pre class="literal-block">
+client.Resource(gvr).List(metav1.ListOptions{})
+</pre>
+</div>
+<div class="section" id="get">
+<h2 id="hidget">get 资源<a class="headerlink" href="#hidget" title="Permalink to this headline">¶</a></h2>
+<p>get 资源的方法也是通过 <tt class="docutils literal">dynamic.Interface</tt> 来实现，关键是怎么把结果转换为上面定义的结构体， 关键代码示例如下:</p>
+<div class="highlight"><pre><span></span><span class="kd">func</span> <span class="nx">getCrontab</span><span class="p">(</span><span class="nx">client</span> <span class="nx">dynamic</span><span class="p">.</span><span class="nx">Interface</span><span class="p">,</span> <span class="nx">namespace</span> <span class="kt">string</span><span class="p">,</span> <span class="nx">name</span> <span class="kt">string</span><span class="p">)</span> <span class="p">(</span><span class="o">*</span><span class="nx">Crontab</span><span class="p">,</span> <span class="kt">error</span><span class="p">)</span> <span class="p">{</span>
+        <span class="nx">utd</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">client</span><span class="p">.</span><span class="nx">Resource</span><span class="p">(</span><span class="nx">gvr</span><span class="p">).</span><span class="nx">Namespace</span><span class="p">(</span><span class="nx">namespace</span><span class="p">).</span><span class="nx">Get</span><span class="p">(</span><span class="nx">name</span><span class="p">,</span> <span class="nx">metav1</span><span class="p">.</span><span class="nx">GetOptions</span><span class="p">{})</span>
+        <span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+                <span class="k">return</span> <span class="kc">nil</span><span class="p">,</span> <span class="nx">err</span>
+        <span class="p">}</span>
+        <span class="nx">data</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">utd</span><span class="p">.</span><span class="nx">MarshalJSON</span><span class="p">()</span>
+        <span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+                <span class="k">return</span> <span class="kc">nil</span><span class="p">,</span> <span class="nx">err</span>
+        <span class="p">}</span>
+        <span class="kd">var</span> <span class="nx">ct</span> <span class="nx">Crontab</span>
+        <span class="k">if</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">json</span><span class="p">.</span><span class="nx">Unmarshal</span><span class="p">(</span><span class="nx">data</span><span class="p">,</span> <span class="o">&amp;</span><span class="nx">ct</span><span class="p">);</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+                <span class="k">return</span> <span class="kc">nil</span><span class="p">,</span> <span class="nx">err</span>
+        <span class="p">}</span>
+        <span class="k">return</span> <span class="o">&amp;</span><span class="nx">ct</span><span class="p">,</span> <span class="kc">nil</span>
+<span class="p">}</span>
+
+<span class="kd">func</span> <span class="nx">main</span><span class="p">()</span> <span class="p">{</span>
+        <span class="c1">// ...</span>
+        <span class="nx">ct</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">getCrontab</span><span class="p">(</span><span class="nx">client</span><span class="p">,</span> <span class="s">&quot;default&quot;</span><span class="p">,</span> <span class="s">&quot;cron-1&quot;</span><span class="p">)</span>
+        <span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+                <span class="nb">panic</span><span class="p">(</span><span class="nx">err</span><span class="p">)</span>
+        <span class="p">}</span>
+        <span class="nx">fmt</span><span class="p">.</span><span class="nx">Printf</span><span class="p">(</span><span class="s">&quot;%s %s %s %s\n&quot;</span><span class="p">,</span> <span class="nx">ct</span><span class="p">.</span><span class="nx">Namespace</span><span class="p">,</span> <span class="nx">ct</span><span class="p">.</span><span class="nx">Name</span><span class="p">,</span> <span class="nx">ct</span><span class="p">.</span><span class="nx">Spec</span><span class="p">.</span><span class="nx">CronSpec</span><span class="p">,</span> <span class="nx">ct</span><span class="p">.</span><span class="nx">Spec</span><span class="p">.</span><span class="nx">Image</span><span class="p">)</span>
+<span class="p">}</span>
+</pre></div>
+<p>执行效果:</p>
+<pre class="literal-block">
+$ go run main.go
+default cron-1 * * * * */5 my-awesome-cron-image-1
+</pre>
+</div>
+<div class="section" id="create">
+<h2 id="hidcreate">create 资源<a class="headerlink" href="#hidcreate" title="Permalink to this headline">¶</a></h2>
+<p>create 资源的方法也是通过 <tt class="docutils literal">dynamic.Interface</tt> 来实现 ，这里主要记录一下怎么基于 yaml 文本的内容来创建资源。</p>
+<p>关键代码示例如下:</p>
+<div class="highlight"><pre><span></span><span class="kd">func</span> <span class="nx">createCrontabWithYaml</span><span class="p">(</span><span class="nx">client</span> <span class="nx">dynamic</span><span class="p">.</span><span class="nx">Interface</span><span class="p">,</span> <span class="nx">namespace</span> <span class="kt">string</span><span class="p">,</span> <span class="nx">yamlData</span> <span class="kt">string</span><span class="p">)</span> <span class="p">(</span><span class="o">*</span><span class="nx">Crontab</span><span class="p">,</span> <span class="kt">error</span><span class="p">)</span> <span class="p">{</span>
+        <span class="nx">decoder</span> <span class="o">:=</span> <span class="nx">yaml</span><span class="p">.</span><span class="nx">NewDecodingSerializer</span><span class="p">(</span><span class="nx">unstructured</span><span class="p">.</span><span class="nx">UnstructuredJSONScheme</span><span class="p">)</span>
+        <span class="nx">obj</span> <span class="o">:=</span> <span class="o">&amp;</span><span class="nx">unstructured</span><span class="p">.</span><span class="nx">Unstructured</span><span class="p">{}</span>
+        <span class="k">if</span> <span class="nx">_</span><span class="p">,</span> <span class="nx">_</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">decoder</span><span class="p">.</span><span class="nx">Decode</span><span class="p">([]</span><span class="nb">byte</span><span class="p">(</span><span class="nx">yamlData</span><span class="p">),</span> <span class="o">&amp;</span><span class="nx">gvk</span><span class="p">,</span> <span class="nx">obj</span><span class="p">);</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+                <span class="k">return</span> <span class="kc">nil</span><span class="p">,</span> <span class="nx">err</span>
+        <span class="p">}</span>
+
+        <span class="nx">utd</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">client</span><span class="p">.</span><span class="nx">Resource</span><span class="p">(</span><span class="nx">gvr</span><span class="p">).</span><span class="nx">Namespace</span><span class="p">(</span><span class="nx">namespace</span><span class="p">).</span><span class="nx">Create</span><span class="p">(</span><span class="nx">obj</span><span class="p">,</span> <span class="nx">metav1</span><span class="p">.</span><span class="nx">CreateOptions</span><span class="p">{})</span>
+        <span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+                <span class="k">return</span> <span class="kc">nil</span><span class="p">,</span> <span class="nx">err</span>
+        <span class="p">}</span>
+        <span class="nx">data</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">utd</span><span class="p">.</span><span class="nx">MarshalJSON</span><span class="p">()</span>
+        <span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+                <span class="k">return</span> <span class="kc">nil</span><span class="p">,</span> <span class="nx">err</span>
+        <span class="p">}</span>
+        <span class="kd">var</span> <span class="nx">ct</span> <span class="nx">Crontab</span>
+        <span class="k">if</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">json</span><span class="p">.</span><span class="nx">Unmarshal</span><span class="p">(</span><span class="nx">data</span><span class="p">,</span> <span class="o">&amp;</span><span class="nx">ct</span><span class="p">);</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+                <span class="k">return</span> <span class="kc">nil</span><span class="p">,</span> <span class="nx">err</span>
+        <span class="p">}</span>
+        <span class="k">return</span> <span class="o">&amp;</span><span class="nx">ct</span><span class="p">,</span> <span class="kc">nil</span>
+<span class="p">}</span>
+
+<span class="kd">func</span> <span class="nx">main</span><span class="p">()</span> <span class="p">{</span>
+        <span class="c1">// ...</span>
+        <span class="nx">createData</span> <span class="o">:=</span> <span class="s">`</span>
+<span class="s">apiVersion: &quot;stable.example.com/v1&quot;</span>
+<span class="s">kind: CronTab</span>
+<span class="s">metadata:</span>
+<span class="s">  name: cron-4</span>
+<span class="s">spec:</span>
+<span class="s">  cronSpec: &quot;* * * * */15&quot;</span>
+<span class="s">  image: my-awesome-cron-image-4</span>
+<span class="s">`</span>
+        <span class="nx">ct</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">createCrontabWithYaml</span><span class="p">(</span><span class="nx">client</span><span class="p">,</span> <span class="s">&quot;default&quot;</span><span class="p">,</span> <span class="nx">createData</span><span class="p">)</span>
+        <span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+                <span class="nb">panic</span><span class="p">(</span><span class="nx">err</span><span class="p">)</span>
+        <span class="p">}</span>
+        <span class="nx">fmt</span><span class="p">.</span><span class="nx">Printf</span><span class="p">(</span><span class="s">&quot;%s %s %s %s\n&quot;</span><span class="p">,</span> <span class="nx">ct</span><span class="p">.</span><span class="nx">Namespace</span><span class="p">,</span> <span class="nx">ct</span><span class="p">.</span><span class="nx">Name</span><span class="p">,</span> <span class="nx">ct</span><span class="p">.</span><span class="nx">Spec</span><span class="p">.</span><span class="nx">CronSpec</span><span class="p">,</span> <span class="nx">ct</span><span class="p">.</span><span class="nx">Spec</span><span class="p">.</span><span class="nx">Image</span><span class="p">)</span>
+<span class="p">}</span>
+</pre></div>
+<p>执行效果:</p>
+<pre class="literal-block">
+$ go run main.go
+default cron-4 * * * * */15 my-awesome-cron-image-4
+
+$ kubectl get crontab.stable.example.com cron-4
+NAME     AGE
+cron-4   5m33s
+</pre>
+</div>
+<div class="section" id="update">
+<h2 id="hidupdate">update 资源<a class="headerlink" href="#hidupdate" title="Permalink to this headline">¶</a></h2>
+<p>update 资源的方法也是通过 <tt class="docutils literal">dynamic.Interface</tt> 来实现 ，这里主要记录一下怎么基于 yaml 文本的内容来更新资源。</p>
+<p>关键代码示例如下:</p>
+<div class="highlight"><pre><span></span><span class="kd">func</span> <span class="nx">updateCrontabWithYaml</span><span class="p">(</span><span class="nx">client</span> <span class="nx">dynamic</span><span class="p">.</span><span class="nx">Interface</span><span class="p">,</span> <span class="nx">namespace</span> <span class="kt">string</span><span class="p">,</span> <span class="nx">yamlData</span> <span class="kt">string</span><span class="p">)</span> <span class="p">(</span><span class="o">*</span><span class="nx">Crontab</span><span class="p">,</span> <span class="kt">error</span><span class="p">)</span> <span class="p">{</span>
+        <span class="nx">decoder</span> <span class="o">:=</span> <span class="nx">yaml</span><span class="p">.</span><span class="nx">NewDecodingSerializer</span><span class="p">(</span><span class="nx">unstructured</span><span class="p">.</span><span class="nx">UnstructuredJSONScheme</span><span class="p">)</span>
+        <span class="nx">obj</span> <span class="o">:=</span> <span class="o">&amp;</span><span class="nx">unstructured</span><span class="p">.</span><span class="nx">Unstructured</span><span class="p">{}</span>
+        <span class="k">if</span> <span class="nx">_</span><span class="p">,</span> <span class="nx">_</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">decoder</span><span class="p">.</span><span class="nx">Decode</span><span class="p">([]</span><span class="nb">byte</span><span class="p">(</span><span class="nx">yamlData</span><span class="p">),</span> <span class="o">&amp;</span><span class="nx">gvk</span><span class="p">,</span> <span class="nx">obj</span><span class="p">);</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+                <span class="k">return</span> <span class="kc">nil</span><span class="p">,</span> <span class="nx">err</span>
+        <span class="p">}</span>
+
+        <span class="nx">utd</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">client</span><span class="p">.</span><span class="nx">Resource</span><span class="p">(</span><span class="nx">gvr</span><span class="p">).</span><span class="nx">Namespace</span><span class="p">(</span><span class="nx">namespace</span><span class="p">).</span><span class="nx">Get</span><span class="p">(</span><span class="nx">obj</span><span class="p">.</span><span class="nx">GetName</span><span class="p">(),</span> <span class="nx">metav1</span><span class="p">.</span><span class="nx">GetOptions</span><span class="p">{})</span>
+        <span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+                <span class="k">return</span> <span class="kc">nil</span><span class="p">,</span> <span class="nx">err</span>
+        <span class="p">}</span>
+        <span class="nx">obj</span><span class="p">.</span><span class="nx">SetResourceVersion</span><span class="p">(</span><span class="nx">utd</span><span class="p">.</span><span class="nx">GetResourceVersion</span><span class="p">())</span>
+        <span class="nx">utd</span><span class="p">,</span> <span class="nx">err</span> <span class="p">=</span> <span class="nx">client</span><span class="p">.</span><span class="nx">Resource</span><span class="p">(</span><span class="nx">gvr</span><span class="p">).</span><span class="nx">Namespace</span><span class="p">(</span><span class="nx">namespace</span><span class="p">).</span><span class="nx">Update</span><span class="p">(</span><span class="nx">obj</span><span class="p">,</span> <span class="nx">metav1</span><span class="p">.</span><span class="nx">UpdateOptions</span><span class="p">{})</span>
+        <span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+                <span class="k">return</span> <span class="kc">nil</span><span class="p">,</span> <span class="nx">err</span>
+        <span class="p">}</span>
+
+        <span class="nx">data</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">utd</span><span class="p">.</span><span class="nx">MarshalJSON</span><span class="p">()</span>
+        <span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+                <span class="k">return</span> <span class="kc">nil</span><span class="p">,</span> <span class="nx">err</span>
+        <span class="p">}</span>
+        <span class="kd">var</span> <span class="nx">ct</span> <span class="nx">Crontab</span>
+        <span class="k">if</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">json</span><span class="p">.</span><span class="nx">Unmarshal</span><span class="p">(</span><span class="nx">data</span><span class="p">,</span> <span class="o">&amp;</span><span class="nx">ct</span><span class="p">);</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+                <span class="k">return</span> <span class="kc">nil</span><span class="p">,</span> <span class="nx">err</span>
+        <span class="p">}</span>
+        <span class="k">return</span> <span class="o">&amp;</span><span class="nx">ct</span><span class="p">,</span> <span class="kc">nil</span>
+<span class="p">}</span>
+
+<span class="kd">func</span> <span class="nx">main</span><span class="p">()</span> <span class="p">{</span>
+        <span class="c1">// ...</span>
+        <span class="nx">updateData</span> <span class="o">:=</span> <span class="s">`</span>
+<span class="s">apiVersion: &quot;stable.example.com/v1&quot;</span>
+<span class="s">kind: CronTab</span>
+<span class="s">metadata:</span>
+<span class="s">  name: cron-2</span>
+<span class="s">spec:</span>
+<span class="s">  cronSpec: &quot;* * * * */15&quot;</span>
+<span class="s">  image: my-awesome-cron-image-2-update</span>
+<span class="s">`</span>
+        <span class="nx">ct</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">updateCrontabWithYaml</span><span class="p">(</span><span class="nx">client</span><span class="p">,</span> <span class="s">&quot;default&quot;</span><span class="p">,</span> <span class="nx">updateData</span><span class="p">)</span>
+        <span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+                <span class="nb">panic</span><span class="p">(</span><span class="nx">err</span><span class="p">)</span>
+        <span class="p">}</span>
+        <span class="nx">fmt</span><span class="p">.</span><span class="nx">Printf</span><span class="p">(</span><span class="s">&quot;%s %s %s %s\n&quot;</span><span class="p">,</span> <span class="nx">ct</span><span class="p">.</span><span class="nx">Namespace</span><span class="p">,</span> <span class="nx">ct</span><span class="p">.</span><span class="nx">Name</span><span class="p">,</span> <span class="nx">ct</span><span class="p">.</span><span class="nx">Spec</span><span class="p">.</span><span class="nx">CronSpec</span><span class="p">,</span> <span class="nx">ct</span><span class="p">.</span><span class="nx">Spec</span><span class="p">.</span><span class="nx">Image</span><span class="p">)</span>
+
+<span class="p">}</span>
+</pre></div>
+<p>执行效果:</p>
+<pre class="literal-block">
+ $ kubectl get crontab.stable.example.com cron-2 -o jsonpath='{.spec}'
+map[cronSpec:* * * * */8 image:my-awesome-cron-image-2]
+
+$ go run main.go
+default cron-2 * * * * */15 my-awesome-cron-image-2-update
+
+$ kubectl get crontab.stable.example.com cron-2 -o jsonpath='{.spec}'
+map[cronSpec:* * * * */15 image:my-awesome-cron-image-2-update]
+</pre>
+</div>
+<div class="section" id="patch">
+<h2 id="hidpatch">patch 资源<a class="headerlink" href="#hidpatch" title="Permalink to this headline">¶</a></h2>
+<p>patch 资源的方法跟 patch pod 之类的代码类似，关键代码示例如下:</p>
+<div class="highlight"><pre><span></span><span class="kd">func</span> <span class="nx">patchCrontab</span><span class="p">(</span><span class="nx">client</span> <span class="nx">dynamic</span><span class="p">.</span><span class="nx">Interface</span><span class="p">,</span> <span class="nx">namespace</span><span class="p">,</span> <span class="nx">name</span> <span class="kt">string</span><span class="p">,</span> <span class="nx">pt</span> <span class="nx">types</span><span class="p">.</span><span class="nx">PatchType</span><span class="p">,</span> <span class="nx">data</span> <span class="p">[]</span><span class="kt">byte</span><span class="p">)</span> <span class="kt">error</span> <span class="p">{</span>
+        <span class="nx">_</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">client</span><span class="p">.</span><span class="nx">Resource</span><span class="p">(</span><span class="nx">gvr</span><span class="p">).</span><span class="nx">Namespace</span><span class="p">(</span><span class="nx">namespace</span><span class="p">).</span><span class="nx">Patch</span><span class="p">(</span><span class="nx">name</span><span class="p">,</span> <span class="nx">pt</span><span class="p">,</span> <span class="nx">data</span><span class="p">,</span> <span class="nx">metav1</span><span class="p">.</span><span class="nx">PatchOptions</span><span class="p">{})</span>
+        <span class="k">return</span> <span class="nx">err</span>
+<span class="p">}</span>
+
+<span class="kd">func</span> <span class="nx">main</span><span class="p">()</span> <span class="p">{</span>
+<span class="c1">// ...</span>
+<span class="nx">patchData</span> <span class="o">:=</span> <span class="p">[]</span><span class="nb">byte</span><span class="p">(</span><span class="s">`{&quot;spec&quot;: {&quot;image&quot;: &quot;my-awesome-cron-image-1-patch&quot;}}`</span><span class="p">)</span>
+<span class="k">if</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">patchCrontab</span><span class="p">(</span><span class="nx">client</span><span class="p">,</span> <span class="s">&quot;default&quot;</span><span class="p">,</span> <span class="s">&quot;cron-1&quot;</span><span class="p">,</span> <span class="nx">types</span><span class="p">.</span><span class="nx">MergePatchType</span><span class="p">,</span> <span class="nx">patchData</span><span class="p">);</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+        <span class="nb">panic</span><span class="p">(</span><span class="nx">err</span><span class="p">)</span>
+<span class="p">}</span>
+<span class="p">}</span>
+</pre></div>
+<p>执行效果:</p>
+<pre class="literal-block">
+$ kubectl get crontab.stable.example.com cron-1 -o jsonpath='{.spec.image}'
+my-awesome-cron-image-1
+
+$ go run main.go
+
+$ kubectl get crontab.stable.example.com cron-1 -o jsonpath='{.spec.image}'
+my-awesome-cron-image-1-patch
+</pre>
+</div>
+<div class="section" id="delete">
+<h2 id="hiddelete">delete 资源<a class="headerlink" href="#hiddelete" title="Permalink to this headline">¶</a></h2>
+<p>delete 资源相对来说简单很多，关键代码示例如下:</p>
+<div class="highlight"><pre><span></span><span class="kd">func</span> <span class="nx">deleteCrontab</span><span class="p">(</span><span class="nx">client</span> <span class="nx">dynamic</span><span class="p">.</span><span class="nx">Interface</span><span class="p">,</span> <span class="nx">namespace</span> <span class="kt">string</span><span class="p">,</span> <span class="nx">name</span> <span class="kt">string</span><span class="p">)</span> <span class="kt">error</span> <span class="p">{</span>
+        <span class="k">return</span> <span class="nx">client</span><span class="p">.</span><span class="nx">Resource</span><span class="p">(</span><span class="nx">gvr</span><span class="p">).</span><span class="nx">Namespace</span><span class="p">(</span><span class="nx">namespace</span><span class="p">).</span><span class="nx">Delete</span><span class="p">(</span><span class="nx">name</span><span class="p">,</span> <span class="kc">nil</span><span class="p">)</span>
+<span class="p">}</span>
+
+<span class="kd">func</span> <span class="nx">main</span><span class="p">()</span> <span class="p">{</span>
+        <span class="c1">// ...</span>
+        <span class="k">if</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">deleteCrontab</span><span class="p">(</span><span class="nx">client</span><span class="p">,</span> <span class="s">&quot;default&quot;</span><span class="p">,</span> <span class="s">&quot;cron-3&quot;</span><span class="p">);</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+                <span class="nb">panic</span><span class="p">(</span><span class="nx">err</span><span class="p">)</span>
+        <span class="p">}</span>
+<span class="p">}</span>
+</pre></div>
+<p>结果:</p>
+<pre class="literal-block">
+$ go run main.go
+$ kubectl get crontab.stable.example.com
+NAME     AGE
+cron-1   4h5m
+cron-2   4h5m
+</pre>
+</div>
+<div class="section" id="id2">
+<h2 id="hidid2">总结<a class="headerlink" href="#hidid2" title="Permalink to this headline">¶</a></h2>
+<p>简单记录了一下 list、get、create、update、patch、delete crd 资源的方法，其他方法大同小异就没记录了。 简单来说就是可以通过 <tt class="docutils literal">dynamic.Interface</tt> 在不生成特定的 client 代码的情况下操作 crd 资源。</p>
+<p>BTW, 另外一个非常规的操作 crd 资源的办法就是直接请求 api server 的 rest api 而不是借助封装好的方法，后面有时间的时候再记录一下这个方法。</p>
+</div>
+<div class="section" id="id3">
+<h2 id="hidid3">参考资料<a class="headerlink" href="#hidid3" title="Permalink to this headline">¶</a></h2>
+<ul class="simple">
+<li><a class="reference external" href="https://github.com/kubernetes/client-go/">kubernetes/client-go: Go client for Kubernetes.</a></li>
+<li><a class="reference external" href="https://github.com/kubernetes/code-generator">kubernetes/code-generator: Generators for kube-like API types</a></li>
+<li><a class="reference external" href="https://kubernetes.io/docs/tasks/extend-kubernetes/custom-resources/custom-resource-definitions/">Extend the Kubernetes API with CustomResourceDefinitions | Kubernetes</a></li>
+<li><a class="reference external" href="https://kubernetes.io/docs/tasks/administer-cluster/access-cluster-api/">Access Clusters Using the Kubernetes API | Kubernetes</a></li>
+</ul>
+</div>
+
+                </div>
+            </div>
+            <!-- /.entry-content -->
+<section class="text-center">
+  
+<div id="donate"></div>
+
+<div class="social-share"></div>
+<div class="social-comment-note">
+<p>有任何建议和想法欢迎在下方评论区留言或者加我<a href="/static/wechat.png">微信</a>交流</p>
+</div>
+
+</section>
+<section class="well" id="related-posts">
+    <p>Related Posts:</p>
+    <ul>
+        <li><a href="https://mozillazg.com/2020/06/kubernetes-k8s-too-many-service-environment-variables-cause-pod-container-start-bash-too-slow.html">太多的 service 信息环境变量可能会导致容器中执行 bash 命令特别的慢</a></li>
+        <li><a href="https://mozillazg.com/2020/06/k8s-kubernetes-kubectl-syntax-of-impersonate-as-user-or-serviceaccount-or-group.html">kubernetes 用户扮演 API</a></li>
+        <li><a href="https://mozillazg.com/2020/05/k8s-kubernetes-use-which-psp-when-there-are-multiple-pod-security-policies.html">当有多个可用的 Pod Security Policy 时 k8s 的 PSP 选择策略</a></li>
+    </ul>
+</section>
+    <hr/>
+    <section class="comments" id="comments">
+        <h2>Comments</h2>
+
+        <div id="disqus_thread"></div>
+        <script type="text/javascript">
+            /* * * CONFIGURATION VARIABLES: EDIT BEFORE PASTING INTO YOUR WEBPAGE * * */
+            var disqus_shortname = 'my-github-blog'; // required: replace example with your forum shortname
+
+                    var disqus_identifier = 'k8s-kubernetes-client-go-list-get-create-update-patch-delete-crd-resource-without-generate-client-code-update-or-create-via-yaml';
+                var disqus_url = 'https://mozillazg.com/2020/07/k8s-kubernetes-client-go-list-get-create-update-patch-delete-crd-resource-without-generate-client-code-update-or-create-via-yaml.html';
+
+            var disqus_config = function () {
+                this.language = "zh-hans";
+            };
+
+            /* * * DON'T EDIT BELOW THIS LINE * * */
+            (function () {
+                var dsq = document.createElement('script');
+                dsq.type = 'text/javascript';
+                dsq.async = true;
+                dsq.src = '//' + disqus_shortname + '.disqus.com/embed.js';
+                (document.getElementsByTagName('head')[0] || document.getElementsByTagName('body')[0]).appendChild(dsq);
+            })();
+        </script>
+        <noscript>Please enable JavaScript to view the <a href="http://disqus.com/?ref_noscript">comments powered by
+            Disqus.</a></noscript>
+        <a href="http://disqus.com" class="dsq-brlink">comments powered by <span class="logo-disqus">Disqus</span></a>
+
+    </section>
+        </article>
+    </section>
+
+        </div>
+    </div>
+</div>
+<footer>
+   <div class="container">
+      <hr>
+      <div class="row">
+         <div class="col-xs-10">&copy; 2020 mozillazg
+            &middot; Powered by <a href="https://github.com/DandyDev/pelican-bootstrap3" target="_blank">pelican-bootstrap3</a>,
+            <a href="http://docs.getpelican.com/" target="_blank">Pelican</a>,
+            <a href="http://getbootstrap.com" target="_blank">Bootstrap</a>              <p><small>  <a rel="license" href="http://creativecommons.org/licenses/by-sa/4.0/"><img alt="Creative Commons License" style="border-width:0" src="/static/images/by-sa-80x15.png" /></a>
+    &quot;<span xmlns:dct="http://purl.org/dc/terms/" property="dct:title">Huang Huang 的博客</span>&quot; by <a xmlns:cc="http://creativecommons.org/ns#" href="https://mozillazg.com" property="cc:attributionName" rel="cc:attributionURL">mozillazg</a> is
+  licensed under a <a rel="license" href="http://creativecommons.org/licenses/by-sa/4.0/">Creative Commons Attribution-ShareAlike 4.0 International License</a>, except where indicated otherwise.
+</small></p>
+         </div>
+         <div class="col-xs-2"><p class="pull-right"><i class="fa fa-arrow-up"></i> <a href="#">Back to top</a></p></div>
+      </div>
+   </div>
+</footer>
+<script src="https://mozillazg.com/theme/js/jquery.min.js"></script>
+
+<!-- Include all compiled plugins (below), or include individual files as needed -->
+<script src="https://mozillazg.com/theme/js/bootstrap.min.js"></script>
+
+<!-- Enable responsive features in IE8 with Respond.js (https://github.com/scottjehl/Respond) -->
+<script src="https://mozillazg.com/theme/js/respond.min.js"></script>
+
+    <!-- Disqus -->
+    <script type="text/javascript">
+        /* * * CONFIGURATION VARIABLES: EDIT BEFORE PASTING INTO YOUR WEBPAGE * * */
+        var disqus_shortname = 'my-github-blog'; // required: replace example with your forum shortname
+
+        /* * * DON'T EDIT BELOW THIS LINE * * */
+        (function () {
+            var s = document.createElement('script');
+            s.async = true;
+            s.type = 'text/javascript';
+            s.src = '//' + disqus_shortname + '.disqus.com/count.js';
+            (document.getElementsByTagName('HEAD')[0] || document.getElementsByTagName('BODY')[0]).appendChild(s);
+        }());
+    </script>
+    <!-- End Disqus Code -->
+    <!-- Google Analytics Universal -->
+    <script type="text/javascript">
+        (function(i,s,o,g,r,a,m){i['GoogleAnalyticsObject']=r;i[r]=i[r]||function(){
+        (i[r].q=i[r].q||[]).push(arguments)},i[r].l=1*new Date();a=s.createElement(o),
+        m=s.getElementsByTagName(o)[0];a.async=1;a.src=g;m.parentNode.insertBefore(a,m)
+        })(window,document,'script','//www.google-analytics.com/analytics.js','ga');
+
+        ga('create', 'UA-77172981-1', 'auto');
+        ga('send', 'pageview');
+    </script>
+    <!-- End Google Analytics Universal Code -->
+
+
+
+<script src="https://mozillazg.com/theme/js/tocbot.min.js"></script>
+<script>
+$(document).ready(function(){
+  tocbot.init({
+    // Where to render the table of contents.
+    tocSelector: '.js-toc',
+    // Where to grab the headings to build the table of contents.
+    contentSelector: '.entry-content',
+    // Which headings to grab inside of the contentSelector element.
+    headingSelector: 'h2, h3, h4,h5',
+    // Headings that match the ignoreSelector will be skipped.
+    ignoreSelector: '.js-toc-ignore',
+    // Main class to add to links.
+    linkClass: 'toc-link',
+    // Extra classes to add to links.
+    extraLinkClasses: '',
+    // Class to add to active links,
+    // the link corresponding to the top most heading on the page.
+    activeLinkClass: 'is-active-link',
+    // Main class to add to lists.
+    listClass: 'toc-list',
+    // Extra classes to add to lists.
+    extraListClasses: '',
+    // Class that gets added when a list should be collapsed.
+    isCollapsedClass: 'is-collapsed',
+    // Class that gets added when a list should be able
+    // to be collapsed but isn't necessarily collpased.
+    collapsibleClass: 'is-collapsible',
+    // Class to add to list items.
+    listItemClass: 'toc-list-item',
+    // How many heading levels should not be collpased.
+    // For example, number 6 will show everything since
+    // there are only 6 heading levels and number 0 will collpase them all.
+    // The sections that are hidden will open
+    // and close as you scroll to headings within them.
+    collapseDepth: 6,
+    // Smooth scrolling enabled.
+    smoothScroll: true,
+    // Smooth scroll duration.
+    smoothScrollDuration: 420,
+    // Callback for scroll end (requires: smoothScroll).
+    scrollEndCallback: function (e) {},
+    // Headings offset between the headings and the top of the document (this is meant for minor adjustments).
+    headingsOffset: 0,
+    // Timeout between events firing to make sure it's
+    // not too rapid (for performance reasons).
+    throttleTimeout: 50,
+    // Element to add the positionFixedClass to.
+    positionFixedSelector: null,
+    // Fixed position class to add to make sidebar fixed after scrolling
+    // down past the fixedSidebarOffset.
+    positionFixedClass: 'is-position-fixed',
+    // fixedSidebarOffset can be any number but by default is set
+    // to auto which sets the fixedSidebarOffset to the sidebar
+    // element's offsetTop from the top of the document on init.
+    fixedSidebarOffset: 'auto',
+    // includeHtml can be set to true to include the HTML markup from the
+    // heading node instead of just including the textContent.
+    includeHtml: false
+  });
+});
+</script>
+</body>
+</html>
