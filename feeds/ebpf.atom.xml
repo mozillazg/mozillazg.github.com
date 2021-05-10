@@ -1,0 +1,369 @@
+<?xml version="1.0" encoding="utf-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom"><title>Huang Huang 的博客</title><link href="https://mozillazg.com/" rel="alternate"></link><link href="https://mozillazg.com/feeds/ebpf.atom.xml" rel="self"></link><id>https://mozillazg.com/</id><updated>2021-05-10T00:00:00+00:00</updated><entry><title>gobpf 使用示例：如何找到一个系统调用对应的可用于 kprobe SEC 的内核函数</title><link href="https://mozillazg.com/2021/05/ebpf-gobpf-how-to-find-system-call-kernel-function-for-kprobe-elf-section.html" rel="alternate"></link><updated>2021-05-10T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2021-05-10:2021/05/ebpf-gobpf-how-to-find-system-call-kernel-function-for-kprobe-elf-section.html</id><summary type="html">&lt;div class="section" id="id1"&gt;
+&lt;h2 id="hidid1"&gt;前言&lt;a class="headerlink" href="#hidid1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;前面 do_fchmodat 示例中我们是通过 &lt;tt class="docutils literal"&gt;chmod&lt;/tt&gt; 命令来进行演示程序工作结果的，
+那么是如何知道 &lt;tt class="docutils literal"&gt;chmod&lt;/tt&gt; 命令会调用 &lt;tt class="docutils literal"&gt;fchmodat&lt;/tt&gt; 系统调用并且对应的内核函数是
+&lt;tt class="docutils literal"&gt;do_fchmodat&lt;/tt&gt; 呢，本文记录一下查找方法，这个方法也可以用于其他程序的系统调用。&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class="section" id="strace"&gt;
+&lt;h2 id="hidstrace"&gt;通过 strace 找到程序使用的系统调用&lt;a class="headerlink" href="#hidstrace" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;首先是可以通过 strace 命令找到 chmod 所使用的系统调用:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+$ strace chmod +x a.txt
+...
+fchmodat(AT_FDCWD, &amp;quot;a.txt&amp;quot;, 0775)       = 0
+...
+&lt;/pre&gt;
+&lt;p&gt;通过分析 strace 命令的输出，找到了 &lt;tt class="docutils literal"&gt;fchmodat&lt;/tt&gt; 这个关键的系统调用。
+下面要做的就是找出这个系统调用所使用的内核函数。&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class="section" id="proc-kallsyms"&gt;
+&lt;h2 id="hidproc-kallsyms"&gt;通过 /proc/kallsyms 文件查找内核函数&lt;a class="headerlink" href="#hidproc-kallsyms" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;可以通过  /proc/kallsyms 查找 fchmodat 系统调用相关的函数
+（通过 &lt;tt class="docutils literal"&gt;grep T&lt;/tt&gt; 过滤掉不是全局可见的函数)&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+$ cat /proc/kallsyms |grep fchmodat |grep T
+0000000000000000 T do_fchmodat
+0000000000000000 T __x64_sys_fchmodat
+0000000000000000 T __ia32_sys_fchmodat
+&lt;/pre&gt;
+&lt;p&gt;可以看到可选的就是 &lt;tt class="docutils literal"&gt;do_fchmodat&lt;/tt&gt; 和 &lt;tt class="docutils literal"&gt;__x64_sys_fchmodat&lt;/tt&gt; 这两个，
+经过尝试发现实际应当使用 &lt;tt class="docutils literal"&gt;do_fchmodat&lt;/tt&gt; 。&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class="section" id="id2"&gt;
+&lt;h2 id="hidid2"&gt;参考资料&lt;a class="headerlink" href="#hidid2" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;ul class="simple"&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://github.com/iovisor/gobpf"&gt;iovisor/gobpf: Go bindings for creating BPF programs.&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://lwn.net/Articles/804850/"&gt;kallsyms: new /proc/kallmodsyms with builtin modules and symbol sizes [LWN.net]&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://elixir.bootlin.com/linux/v5.4/source/fs/open.c#L591"&gt;open.c - fs/open.c - Linux source code (v5.4) - Bootlin&lt;/a&gt;&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/div&gt;
+</summary><category term="eBPF"></category><category term="gobpf"></category><category term="Go"></category><category term="gobpf 使用示例"></category></entry><entry><title>gobpf 使用示例：从 pt_regs 中获取内核函数的参数的值</title><link href="https://mozillazg.com/2021/05/ebpf-gobpf-get-function-argument-values-from-pt_regs.html" rel="alternate"></link><updated>2021-05-09T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2021-05-09:2021/05/ebpf-gobpf-get-function-argument-values-from-pt_regs.html</id><summary type="html">&lt;div class="section" id="id1"&gt;
+&lt;h2 id="hidid1"&gt;前言&lt;a class="headerlink" href="#hidid1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;前面 pref event 示例中我们是通过 &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;bpf_probe_read(&amp;amp;data.file_name,&lt;/span&gt; sizeof(data.file_name), PT_REGS_PARM2(ctx))&lt;/tt&gt;
+获取的 do_sys_open 函数的 filename 参数的值， 本文简单讲述如何从 &lt;tt class="docutils literal"&gt;struct pt_regs *ctx&lt;/tt&gt; 中获取内核函数的其他参数的值。&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class="section" id="struct-pt-regs-ctx"&gt;
+&lt;h2&gt;从 &lt;tt class="docutils literal"&gt;struct pt_regs *ctx&lt;/tt&gt; 中获取内核函数的参数的值&lt;/h2&gt;
+&lt;p&gt;本次示例将 tracing 内核函数 &lt;tt class="docutils literal"&gt;do_fchmodat&lt;/tt&gt; ，这个函数的函数签名如下：&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="kt"&gt;int&lt;/span&gt; &lt;span class="n"&gt;do_fchmodat&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="kt"&gt;int&lt;/span&gt; &lt;span class="n"&gt;dfd&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="k"&gt;const&lt;/span&gt; &lt;span class="kt"&gt;char&lt;/span&gt; &lt;span class="n"&gt;__user&lt;/span&gt; &lt;span class="o"&gt;*&lt;/span&gt;&lt;span class="n"&gt;filename&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;umode_t&lt;/span&gt; &lt;span class="n"&gt;mode&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+&lt;/pre&gt;&lt;/div&gt;
+&lt;p&gt;下面的代码片段将获取函数的 filename 和 mode 这两个参数的值，即这个函数的第二个参数和第三个参数的值：&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="k"&gt;struct&lt;/span&gt; &lt;span class="n"&gt;data_t&lt;/span&gt; &lt;span class="p"&gt;{&lt;/span&gt;
+    &lt;span class="n"&gt;__u32&lt;/span&gt; &lt;span class="n"&gt;pid&lt;/span&gt;&lt;span class="p"&gt;;&lt;/span&gt;
+    &lt;span class="kt"&gt;char&lt;/span&gt; &lt;span class="n"&gt;file_name&lt;/span&gt;&lt;span class="p"&gt;[&lt;/span&gt;&lt;span class="mi"&gt;256&lt;/span&gt;&lt;span class="p"&gt;];&lt;/span&gt;
+    &lt;span class="n"&gt;__u32&lt;/span&gt; &lt;span class="n"&gt;mode&lt;/span&gt;&lt;span class="p"&gt;;&lt;/span&gt;
+&lt;span class="p"&gt;};&lt;/span&gt;
+
+&lt;span class="n"&gt;SEC&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="s"&gt;&amp;quot;kprobe/do_fchmodat&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+&lt;span class="kt"&gt;int&lt;/span&gt; &lt;span class="n"&gt;kprobe__do_fchmodat&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="k"&gt;struct&lt;/span&gt; &lt;span class="n"&gt;pt_regs&lt;/span&gt; &lt;span class="o"&gt;*&lt;/span&gt;&lt;span class="n"&gt;ctx&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt; &lt;span class="p"&gt;{&lt;/span&gt;
+        &lt;span class="k"&gt;struct&lt;/span&gt; &lt;span class="n"&gt;data_t&lt;/span&gt; &lt;span class="n"&gt;data&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="p"&gt;{&lt;/span&gt;&lt;span class="mi"&gt;0&lt;/span&gt;&lt;span class="p"&gt;};&lt;/span&gt;
+
+        &lt;span class="kt"&gt;char&lt;/span&gt; &lt;span class="o"&gt;*&lt;/span&gt;&lt;span class="n"&gt;filename&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="kt"&gt;char&lt;/span&gt; &lt;span class="o"&gt;*&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;&lt;span class="n"&gt;PT_REGS_PARM2&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;ctx&lt;/span&gt;&lt;span class="p"&gt;);&lt;/span&gt;
+        &lt;span class="kt"&gt;unsigned&lt;/span&gt; &lt;span class="kt"&gt;int&lt;/span&gt; &lt;span class="n"&gt;mode&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;PT_REGS_PARM3&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;ctx&lt;/span&gt;&lt;span class="p"&gt;);&lt;/span&gt;
+
+        &lt;span class="n"&gt;bpf_probe_read&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="o"&gt;&amp;amp;&lt;/span&gt;&lt;span class="n"&gt;data&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="n"&gt;file_name&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="k"&gt;sizeof&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;data&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="n"&gt;file_name&lt;/span&gt;&lt;span class="p"&gt;),&lt;/span&gt; &lt;span class="n"&gt;filename&lt;/span&gt;&lt;span class="p"&gt;);&lt;/span&gt;
+
+        &lt;span class="n"&gt;data&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="n"&gt;mode&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;__u32&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt; &lt;span class="n"&gt;mode&lt;/span&gt;&lt;span class="p"&gt;;&lt;/span&gt;
+
+        &lt;span class="p"&gt;...&lt;/span&gt;
+&lt;span class="p"&gt;}&lt;/span&gt;
+&lt;/pre&gt;&lt;/div&gt;
+&lt;p&gt;上面的代码是通过 &lt;tt class="docutils literal"&gt;PT_REGS_PARM2&lt;/tt&gt; 和 &lt;tt class="docutils literal"&gt;PT_REGS_PARM3&lt;/tt&gt; 这两个宏来分别获取第二个和第三参数的值的，
+从名称就可以推断，第一个参数可以通过 &lt;tt class="docutils literal"&gt;PT_REGS_PARM1&lt;/tt&gt; 来获取。&lt;/p&gt;
+&lt;p&gt;&lt;tt class="docutils literal"&gt;PT_REGS_PARM*&lt;/tt&gt; 是 &lt;tt class="docutils literal"&gt;bpf_helpers.h&lt;/tt&gt; 定义的一些宏，用于快速从 pt_regs 中获取数据，
+包括 &lt;tt class="docutils literal"&gt;PT_REGS_PARM1&lt;/tt&gt; 、 &lt;tt class="docutils literal"&gt;PT_REGS_PARM2&lt;/tt&gt; 、 &lt;tt class="docutils literal"&gt;PT_REGS_PARM3&lt;/tt&gt; 、
+&lt;tt class="docutils literal"&gt;PT_REGS_PARM4&lt;/tt&gt; 、 &lt;tt class="docutils literal"&gt;PT_REGS_PARM5&lt;/tt&gt; 可用于获取第一到第五个参数的值。&lt;/p&gt;
+&lt;p&gt;P.S. 本文的所有代码在 Github 上都有一份完整版： &lt;a class="reference external" href="https://github.com/mozillazg/gobpf-examples"&gt;https://github.com/mozillazg/gobpf-examples&lt;/a&gt;&lt;/p&gt;
+&lt;p&gt;上面的 ebpf 代码完整版运行后的效果如下：&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;$ make
+$ make run
+
+pid &lt;span class="m"&gt;52331&lt;/span&gt; call fchmodat&lt;span class="o"&gt;(&lt;/span&gt;fielname: a.txt, mode: 0775&lt;span class="o"&gt;)&lt;/span&gt;
+
+$ &lt;span class="c1"&gt;# make run 之后在另一个窗口执行&lt;/span&gt;
+$ touch a.txt &lt;span class="o"&gt;&amp;amp;&amp;amp;&lt;/span&gt; strace chmod +x a.txt 2&amp;gt;&lt;span class="p"&gt;&amp;amp;&lt;/span&gt;&lt;span class="m"&gt;1&lt;/span&gt; &lt;span class="p"&gt;|&lt;/span&gt;grep chmod
+execve&lt;span class="o"&gt;(&lt;/span&gt;&lt;span class="s2"&gt;&amp;quot;/usr/bin/chmod&amp;quot;&lt;/span&gt;, &lt;span class="o"&gt;[&lt;/span&gt;&lt;span class="s2"&gt;&amp;quot;chmod&amp;quot;&lt;/span&gt;, &lt;span class="s2"&gt;&amp;quot;+x&amp;quot;&lt;/span&gt;, &lt;span class="s2"&gt;&amp;quot;a.txt&amp;quot;&lt;/span&gt;&lt;span class="o"&gt;]&lt;/span&gt;, 0x7fffd601f570 /* &lt;span class="m"&gt;27&lt;/span&gt; vars */&lt;span class="o"&gt;)&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; 0
+fchmodat&lt;span class="o"&gt;(&lt;/span&gt;AT_FDCWD, &lt;span class="s2"&gt;&amp;quot;a.txt&amp;quot;&lt;/span&gt;, 0775&lt;span class="o"&gt;)&lt;/span&gt;       &lt;span class="o"&gt;=&lt;/span&gt; 0
+&lt;/pre&gt;&lt;/div&gt;
+&lt;p&gt;可以看到获取到的参数的值跟实际的值是一样的，符合预期。&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class="section" id="id2"&gt;
+&lt;h2 id="hidid2"&gt;参考资料&lt;a class="headerlink" href="#hidid2" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;ul class="simple"&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://github.com/iovisor/gobpf"&gt;iovisor/gobpf: Go bindings for creating BPF programs.&lt;/a&gt;&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/div&gt;
+</summary><category term="eBPF"></category><category term="gobpf"></category><category term="Go"></category><category term="gobpf 使用示例"></category></entry><entry><title>gobpf 使用示例：使用 perf event 保存数据</title><link href="https://mozillazg.com/2021/04/ebpf-gobpf-store-and-read-data-use-perf-event.html" rel="alternate"></link><updated>2021-04-17T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2021-04-17:2021/04/ebpf-gobpf-store-and-read-data-use-perf-event.html</id><summary type="html">&lt;div class="section" id="id1"&gt;
+&lt;h2 id="hidid1"&gt;前言&lt;a class="headerlink" href="#hidid1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;前面 hello 示例中我们是通过 &lt;tt class="docutils literal"&gt;sudo cat&amp;nbsp; /sys/kernel/debug/tracing/trace_pipe&lt;/tt&gt; 的方式来查看数据的，
+本文简单讲述如何通过 perf event 来保存 eBPF 数据然后再在 Go 程序中读取 perf event 中保存的数据。&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class="section" id="perf-event"&gt;
+&lt;h2 id="hidperf-event"&gt;使用 perf event 保存数据&lt;a class="headerlink" href="#hidperf-event" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;还是前面的那个 &lt;tt class="docutils literal"&gt;hello.c&lt;/tt&gt; ，不过这次会使用 perf event 来保存 open 的文件名称&lt;/p&gt;
+&lt;p&gt;eBPF C 代码如下（hello.c）:&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="cp"&gt;#include&lt;/span&gt; &lt;span class="cpf"&gt;&amp;lt;linux/bpf.h&amp;gt;&lt;/span&gt;&lt;span class="cp"&gt;&lt;/span&gt;
+&lt;span class="cp"&gt;#include&lt;/span&gt; &lt;span class="cpf"&gt;&amp;lt;linux/ptrace.h&amp;gt;&lt;/span&gt;&lt;span class="cp"&gt;&lt;/span&gt;
+&lt;span class="cp"&gt;#include&lt;/span&gt; &lt;span class="cpf"&gt;&amp;quot;include/bpf_helpers.h&amp;quot;&lt;/span&gt;&lt;span class="cp"&gt;&lt;/span&gt;
+
+&lt;span class="k"&gt;struct&lt;/span&gt; &lt;span class="n"&gt;bpf_map_def&lt;/span&gt; &lt;span class="nf"&gt;SEC&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="s"&gt;&amp;quot;maps/open_event&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt; &lt;span class="n"&gt;open_event&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="p"&gt;{&lt;/span&gt;
+    &lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="n"&gt;type&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;BPF_MAP_TYPE_PERF_EVENT_ARRAY&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;
+    &lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="n"&gt;key_size&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="k"&gt;sizeof&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="kt"&gt;int&lt;/span&gt;&lt;span class="p"&gt;),&lt;/span&gt;
+    &lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="n"&gt;value_size&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="k"&gt;sizeof&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;__u32&lt;/span&gt;&lt;span class="p"&gt;),&lt;/span&gt;
+    &lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="n"&gt;max_entries&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="mi"&gt;128&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;
+    &lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="n"&gt;pinning&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="mi"&gt;0&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;
+    &lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="n"&gt;namespace&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="s"&gt;&amp;quot;&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;
+&lt;span class="p"&gt;};&lt;/span&gt;
+
+&lt;span class="k"&gt;struct&lt;/span&gt; &lt;span class="n"&gt;data_t&lt;/span&gt; &lt;span class="p"&gt;{&lt;/span&gt;
+    &lt;span class="n"&gt;__u32&lt;/span&gt; &lt;span class="n"&gt;pid&lt;/span&gt;&lt;span class="p"&gt;;&lt;/span&gt;
+    &lt;span class="kt"&gt;char&lt;/span&gt; &lt;span class="n"&gt;file_name&lt;/span&gt;&lt;span class="p"&gt;[&lt;/span&gt;&lt;span class="mi"&gt;256&lt;/span&gt;&lt;span class="p"&gt;];&lt;/span&gt;
+&lt;span class="p"&gt;};&lt;/span&gt;
+
+&lt;span class="n"&gt;SEC&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="s"&gt;&amp;quot;kprobe/do_sys_open&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+&lt;span class="kt"&gt;int&lt;/span&gt; &lt;span class="n"&gt;kprobe__do_sys_open&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="k"&gt;struct&lt;/span&gt; &lt;span class="n"&gt;pt_regs&lt;/span&gt; &lt;span class="o"&gt;*&lt;/span&gt;&lt;span class="n"&gt;ctx&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt; &lt;span class="p"&gt;{&lt;/span&gt;
+        &lt;span class="k"&gt;struct&lt;/span&gt; &lt;span class="n"&gt;data_t&lt;/span&gt; &lt;span class="n"&gt;data&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="p"&gt;{};&lt;/span&gt;
+
+        &lt;span class="n"&gt;data&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="n"&gt;pid&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;bpf_get_current_pid_tgid&lt;/span&gt;&lt;span class="p"&gt;()&lt;/span&gt; &lt;span class="o"&gt;&amp;gt;&amp;gt;&lt;/span&gt; &lt;span class="mi"&gt;32&lt;/span&gt;&lt;span class="p"&gt;;&lt;/span&gt;
+        &lt;span class="n"&gt;__u32&lt;/span&gt; &lt;span class="n"&gt;cpu&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;bpf_get_smp_processor_id&lt;/span&gt;&lt;span class="p"&gt;();&lt;/span&gt;
+
+        &lt;span class="n"&gt;bpf_probe_read&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="o"&gt;&amp;amp;&lt;/span&gt;&lt;span class="n"&gt;data&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="n"&gt;file_name&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="k"&gt;sizeof&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;data&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="n"&gt;file_name&lt;/span&gt;&lt;span class="p"&gt;),&lt;/span&gt; &lt;span class="n"&gt;PT_REGS_PARM2&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;ctx&lt;/span&gt;&lt;span class="p"&gt;));&lt;/span&gt;
+
+        &lt;span class="n"&gt;bpf_perf_event_output&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;ctx&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="o"&gt;&amp;amp;&lt;/span&gt;&lt;span class="n"&gt;open_event&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;cpu&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="o"&gt;&amp;amp;&lt;/span&gt;&lt;span class="n"&gt;data&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="k"&gt;sizeof&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;data&lt;/span&gt;&lt;span class="p"&gt;));&lt;/span&gt;
+
+        &lt;span class="k"&gt;return&lt;/span&gt; &lt;span class="mi"&gt;0&lt;/span&gt;&lt;span class="p"&gt;;&lt;/span&gt;
+&lt;span class="p"&gt;}&lt;/span&gt;
+
+&lt;span class="kt"&gt;char&lt;/span&gt; &lt;span class="n"&gt;_license&lt;/span&gt;&lt;span class="p"&gt;[]&lt;/span&gt; &lt;span class="n"&gt;SEC&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="s"&gt;&amp;quot;license&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="s"&gt;&amp;quot;GPL&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;;&lt;/span&gt;
+&lt;/pre&gt;&lt;/div&gt;
+&lt;p&gt;简单来说就是定义一个 type 为 &lt;tt class="docutils literal"&gt;BPF_MAP_TYPE_PERF_EVENT_ARRAY&lt;/tt&gt; 的 &lt;tt class="docutils literal"&gt;bpf_map_def&lt;/tt&gt; 变量 open_event，
+然后通过 &lt;tt class="docutils literal"&gt;bpf_perf_event_output&lt;/tt&gt; 函数将数据写入到定义的 open_event 中。&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class="section" id="go-perf-event"&gt;
+&lt;h2 id="hidgo-perf-event"&gt;在 Go 程序中读取 perf event 数据&lt;a class="headerlink" href="#hidgo-perf-event" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="kn"&gt;package&lt;/span&gt; &lt;span class="nx"&gt;main&lt;/span&gt;
+
+&lt;span class="kn"&gt;import&lt;/span&gt; &lt;span class="p"&gt;(&lt;/span&gt;
+    &lt;span class="s"&gt;&amp;quot;fmt&amp;quot;&lt;/span&gt;
+    &lt;span class="s"&gt;&amp;quot;os&amp;quot;&lt;/span&gt;
+    &lt;span class="s"&gt;&amp;quot;unsafe&amp;quot;&lt;/span&gt;
+
+    &lt;span class="s"&gt;&amp;quot;github.com/iovisor/gobpf/elf&amp;quot;&lt;/span&gt;
+&lt;span class="p"&gt;)&lt;/span&gt;
+
+&lt;span class="cm"&gt;/*&lt;/span&gt;
+&lt;span class="cm"&gt;#include &amp;lt;linux/types.h&amp;gt;&lt;/span&gt;
+&lt;span class="cm"&gt;struct data_t {&lt;/span&gt;
+&lt;span class="cm"&gt;    __u32 pid;&lt;/span&gt;
+&lt;span class="cm"&gt;    char file_name[256];&lt;/span&gt;
+&lt;span class="cm"&gt;};&lt;/span&gt;
+&lt;span class="cm"&gt;*/&lt;/span&gt;
+&lt;span class="kn"&gt;import&lt;/span&gt; &lt;span class="s"&gt;&amp;quot;C&amp;quot;&lt;/span&gt;
+
+&lt;span class="kd"&gt;type&lt;/span&gt; &lt;span class="nx"&gt;Event&lt;/span&gt; &lt;span class="kd"&gt;struct&lt;/span&gt; &lt;span class="p"&gt;{&lt;/span&gt;
+    &lt;span class="nx"&gt;Pid&lt;/span&gt;      &lt;span class="kt"&gt;uint32&lt;/span&gt;
+    &lt;span class="nx"&gt;FileName&lt;/span&gt; &lt;span class="kt"&gt;string&lt;/span&gt;
+&lt;span class="p"&gt;}&lt;/span&gt;
+
+&lt;span class="kd"&gt;func&lt;/span&gt; &lt;span class="nx"&gt;main&lt;/span&gt;&lt;span class="p"&gt;()&lt;/span&gt; &lt;span class="p"&gt;{&lt;/span&gt;
+    &lt;span class="nx"&gt;mod&lt;/span&gt; &lt;span class="o"&gt;:=&lt;/span&gt; &lt;span class="nx"&gt;elf&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;NewModule&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="s"&gt;&amp;quot;hello.o&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+    &lt;span class="nx"&gt;err&lt;/span&gt; &lt;span class="o"&gt;:=&lt;/span&gt; &lt;span class="nx"&gt;mod&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Load&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="kc"&gt;nil&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+    &lt;span class="k"&gt;if&lt;/span&gt; &lt;span class="nx"&gt;err&lt;/span&gt; &lt;span class="o"&gt;!=&lt;/span&gt; &lt;span class="kc"&gt;nil&lt;/span&gt; &lt;span class="p"&gt;{&lt;/span&gt;
+        &lt;span class="nb"&gt;panic&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="nx"&gt;err&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+    &lt;span class="p"&gt;}&lt;/span&gt;
+    &lt;span class="k"&gt;defer&lt;/span&gt; &lt;span class="nx"&gt;mod&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Close&lt;/span&gt;&lt;span class="p"&gt;()&lt;/span&gt;
+    &lt;span class="nx"&gt;err&lt;/span&gt; &lt;span class="p"&gt;=&lt;/span&gt; &lt;span class="nx"&gt;mod&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;EnableKprobes&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="mi"&gt;128&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+    &lt;span class="k"&gt;if&lt;/span&gt; &lt;span class="nx"&gt;err&lt;/span&gt; &lt;span class="o"&gt;!=&lt;/span&gt; &lt;span class="kc"&gt;nil&lt;/span&gt; &lt;span class="p"&gt;{&lt;/span&gt;
+        &lt;span class="nb"&gt;panic&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="nx"&gt;err&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+    &lt;span class="p"&gt;}&lt;/span&gt;
+
+    &lt;span class="nx"&gt;channel&lt;/span&gt; &lt;span class="o"&gt;:=&lt;/span&gt; &lt;span class="nb"&gt;make&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="kd"&gt;chan&lt;/span&gt; &lt;span class="p"&gt;[]&lt;/span&gt;&lt;span class="kt"&gt;byte&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+    &lt;span class="nx"&gt;lost&lt;/span&gt; &lt;span class="o"&gt;:=&lt;/span&gt; &lt;span class="nb"&gt;make&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="kd"&gt;chan&lt;/span&gt; &lt;span class="kt"&gt;uint64&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+
+    &lt;span class="nx"&gt;perfMap&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="nx"&gt;err&lt;/span&gt; &lt;span class="o"&gt;:=&lt;/span&gt; &lt;span class="nx"&gt;elf&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;InitPerfMap&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="nx"&gt;mod&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="s"&gt;&amp;quot;open_event&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="nx"&gt;channel&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="nx"&gt;lost&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+    &lt;span class="k"&gt;if&lt;/span&gt; &lt;span class="nx"&gt;err&lt;/span&gt; &lt;span class="o"&gt;!=&lt;/span&gt; &lt;span class="kc"&gt;nil&lt;/span&gt; &lt;span class="p"&gt;{&lt;/span&gt;
+        &lt;span class="nx"&gt;fmt&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Fprintf&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="nx"&gt;os&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Stderr&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="s"&gt;&amp;quot;Failed to init perf map: %s\n&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="nx"&gt;err&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+        &lt;span class="nx"&gt;os&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Exit&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="mi"&gt;1&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+    &lt;span class="p"&gt;}&lt;/span&gt;
+    &lt;span class="k"&gt;go&lt;/span&gt; &lt;span class="kd"&gt;func&lt;/span&gt;&lt;span class="p"&gt;()&lt;/span&gt; &lt;span class="p"&gt;{&lt;/span&gt;
+        &lt;span class="k"&gt;for&lt;/span&gt; &lt;span class="p"&gt;{&lt;/span&gt;
+            &lt;span class="nx"&gt;l&lt;/span&gt; &lt;span class="o"&gt;:=&lt;/span&gt; &lt;span class="o"&gt;&amp;lt;-&lt;/span&gt;&lt;span class="nx"&gt;lost&lt;/span&gt;
+            &lt;span class="nx"&gt;fmt&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Println&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="nx"&gt;l&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+        &lt;span class="p"&gt;}&lt;/span&gt;
+    &lt;span class="p"&gt;}()&lt;/span&gt;
+    &lt;span class="nx"&gt;perfMap&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;PollStart&lt;/span&gt;&lt;span class="p"&gt;()&lt;/span&gt;
+    &lt;span class="k"&gt;defer&lt;/span&gt; &lt;span class="nx"&gt;perfMap&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;PollStop&lt;/span&gt;&lt;span class="p"&gt;()&lt;/span&gt;
+
+    &lt;span class="k"&gt;for&lt;/span&gt; &lt;span class="p"&gt;{&lt;/span&gt;
+        &lt;span class="kd"&gt;var&lt;/span&gt; &lt;span class="nx"&gt;event&lt;/span&gt; &lt;span class="nx"&gt;Event&lt;/span&gt;
+        &lt;span class="nx"&gt;data&lt;/span&gt; &lt;span class="o"&gt;:=&lt;/span&gt; &lt;span class="o"&gt;&amp;lt;-&lt;/span&gt;&lt;span class="nx"&gt;channel&lt;/span&gt;
+        &lt;span class="nx"&gt;event&lt;/span&gt; &lt;span class="p"&gt;=&lt;/span&gt; &lt;span class="nx"&gt;openEventToGo&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="o"&gt;&amp;amp;&lt;/span&gt;&lt;span class="nx"&gt;data&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+        &lt;span class="nx"&gt;fmt&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Printf&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="s"&gt;&amp;quot;pid %d open file %s\n&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="nx"&gt;event&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Pid&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="nx"&gt;event&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;FileName&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+    &lt;span class="p"&gt;}&lt;/span&gt;
+&lt;span class="p"&gt;}&lt;/span&gt;
+
+&lt;span class="kd"&gt;func&lt;/span&gt; &lt;span class="nx"&gt;openEventToGo&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="nx"&gt;data&lt;/span&gt; &lt;span class="o"&gt;*&lt;/span&gt;&lt;span class="p"&gt;[]&lt;/span&gt;&lt;span class="kt"&gt;byte&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt; &lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="nx"&gt;event&lt;/span&gt; &lt;span class="nx"&gt;Event&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt; &lt;span class="p"&gt;{&lt;/span&gt;
+    &lt;span class="nx"&gt;eventC&lt;/span&gt; &lt;span class="o"&gt;:=&lt;/span&gt; &lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="o"&gt;*&lt;/span&gt;&lt;span class="nx"&gt;C&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;struct_data_t&lt;/span&gt;&lt;span class="p"&gt;)(&lt;/span&gt;&lt;span class="nx"&gt;unsafe&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Pointer&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="o"&gt;&amp;amp;&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="o"&gt;*&lt;/span&gt;&lt;span class="nx"&gt;data&lt;/span&gt;&lt;span class="p"&gt;)[&lt;/span&gt;&lt;span class="mi"&gt;0&lt;/span&gt;&lt;span class="p"&gt;]))&lt;/span&gt;
+
+    &lt;span class="nx"&gt;event&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Pid&lt;/span&gt; &lt;span class="p"&gt;=&lt;/span&gt; &lt;span class="nb"&gt;uint32&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="nx"&gt;eventC&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;pid&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+    &lt;span class="nx"&gt;event&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;FileName&lt;/span&gt; &lt;span class="p"&gt;=&lt;/span&gt; &lt;span class="nx"&gt;C&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;GoString&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="o"&gt;&amp;amp;&lt;/span&gt;&lt;span class="nx"&gt;eventC&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;file_name&lt;/span&gt;&lt;span class="p"&gt;[&lt;/span&gt;&lt;span class="mi"&gt;0&lt;/span&gt;&lt;span class="p"&gt;])&lt;/span&gt;
+
+    &lt;span class="k"&gt;return&lt;/span&gt;
+&lt;span class="p"&gt;}&lt;/span&gt;
+&lt;/pre&gt;&lt;/div&gt;
+&lt;p&gt;通过 &lt;tt class="docutils literal"&gt;elf.InitPerfMap&lt;/tt&gt; 指定要读取的 perf event map 的变量的名称
+（跟 eBPF 程序中定义的 open_event 相对应），然后使用方法的 channel 读取数据。&lt;/p&gt;
+&lt;p&gt;同时会使用 cgo 来将 c 中的数据类型转换为 go 中定义的结构体&lt;/p&gt;
+&lt;p&gt;编译并运行:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+$ make
+$ make run
+...
+pid 364 open file /proc/493/status
+pid 364 open file /proc/493/status
+pid 364 open file /proc/493/comm
+...
+&lt;/pre&gt;
+&lt;p&gt;可以看到已经可以在 go 程序中读取到 eBPF 程序保存的数据了。&lt;/p&gt;
+&lt;p&gt;P.S. 本文的所有代码在 Github 上都有一份完整版： &lt;a class="reference external" href="https://github.com/mozillazg/gobpf-examples/tree/master/2-perf-event"&gt;https://github.com/mozillazg/gobpf-examples/tree/master/2-perf-event&lt;/a&gt;&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class="section" id="id2"&gt;
+&lt;h2 id="hidid2"&gt;参考资料&lt;a class="headerlink" href="#hidid2" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;ul class="simple"&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://github.com/iovisor/gobpf"&gt;iovisor/gobpf: Go bindings for creating BPF programs.&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://github.com/kinvolk/bpf-exercises"&gt;kinvolk/bpf-exercises&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://blogs.oracle.com/linux/notes-on-bpf-3"&gt;BPF In Depth: Communicating with Userspace | Oracle Linux Blog&lt;/a&gt;&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/div&gt;
+</summary><category term="eBPF"></category><category term="gobpf"></category><category term="Go"></category><category term="gobpf 使用示例"></category></entry><entry><title>gobpf 使用示例：开发环境及 Hello World</title><link href="https://mozillazg.com/2021/04/ebpf-gobpf-dev-env-and-hello-first-program.html" rel="alternate"></link><updated>2021-04-11T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2021-04-11:2021/04/ebpf-gobpf-dev-env-and-hello-first-program.html</id><summary type="html">&lt;div class="section" id="id1"&gt;
+&lt;h2 id="hidid1"&gt;前言&lt;a class="headerlink" href="#hidid1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;gobpf 使用示例系列记录使用 &lt;a class="reference external" href="https://github.com/iovisor/gobpf"&gt;gobpf&lt;/a&gt; 编写 eBPF 程序的一些例子。&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class="section" id="id2"&gt;
+&lt;h2 id="hidid2"&gt;搭建开发环境&lt;a class="headerlink" href="#hidid2" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;所有示例程序都基于 Ubuntu 20.04 和 Go 1.6 进行编写，同时所有示例使用的 github.com/iovisor/gobpf 版本为 v0.1.1&lt;/p&gt;
+&lt;ul class="simple"&gt;
+&lt;li&gt;可以通过各种方式安装 Ubuntu 20.04&lt;/li&gt;
+&lt;li&gt;同样可以通过各种方式安装 Go 1.6&lt;/li&gt;
+&lt;/ul&gt;
+&lt;p&gt;安装完 Ubuntu 和 Go 后，还需要安装编译 eBPF 程序所需的编译工具和内核源码：&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;$ sudo apt update
+$ sudo apt install build-essential git make libelf-dev libelf1 &lt;span class="se"&gt;\&lt;/span&gt;
+clang llvm strace tar make bpfcc-tools linux-headers-&lt;span class="k"&gt;$(&lt;/span&gt;uname -r&lt;span class="k"&gt;)&lt;/span&gt; gcc-multilib
+
+$ &lt;span class="nb"&gt;cd&lt;/span&gt; /tmp/ &lt;span class="o"&gt;&amp;amp;&amp;amp;&lt;/span&gt; &lt;span class="se"&gt;\&lt;/span&gt;
+    git clone --depth &lt;span class="m"&gt;1&lt;/span&gt; git://kernel.ubuntu.com/ubuntu/ubuntu-focal.git &lt;span class="o"&gt;&amp;amp;&amp;amp;&lt;/span&gt; &lt;span class="se"&gt;\&lt;/span&gt;
+    sudo mv ubuntu-focal  /kernel-src &lt;span class="o"&gt;&amp;amp;&amp;amp;&lt;/span&gt; &lt;span class="se"&gt;\&lt;/span&gt;
+    &lt;span class="nb"&gt;cd&lt;/span&gt; /kernel-src/tools/lib/bpf &lt;span class="o"&gt;&amp;amp;&amp;amp;&lt;/span&gt; &lt;span class="se"&gt;\&lt;/span&gt;
+    sudo make &lt;span class="o"&gt;&amp;amp;&amp;amp;&lt;/span&gt; sudo make install &lt;span class="nv"&gt;prefix&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;/usr/local &lt;span class="o"&gt;&amp;amp;&amp;amp;&lt;/span&gt; &lt;span class="se"&gt;\&lt;/span&gt;
+    sudo mv /usr/local/lib64/libbpf.* /lib/x86_64-linux-gnu/
+&lt;/pre&gt;&lt;/div&gt;
+&lt;/div&gt;
+&lt;div class="section" id="ebpf"&gt;
+&lt;h2 id="hidebpf"&gt;第一个 eBPF 程序&lt;a class="headerlink" href="#hidebpf" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;第一个 eBPF 程序将 trace 所有的 &lt;tt class="docutils literal"&gt;open&lt;/tt&gt; 系统调用，显示 &lt;tt class="docutils literal"&gt;open&lt;/tt&gt; 系统调用调用时的文件路径参数&lt;/p&gt;
+&lt;p&gt;eBPF C 代码如下（hello.c）:&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="cp"&gt;#include&lt;/span&gt; &lt;span class="cpf"&gt;&amp;lt;linux/bpf.h&amp;gt;&lt;/span&gt;&lt;span class="cp"&gt;&lt;/span&gt;
+&lt;span class="cp"&gt;#include&lt;/span&gt; &lt;span class="cpf"&gt;&amp;lt;linux/ptrace.h&amp;gt;&lt;/span&gt;&lt;span class="cp"&gt;&lt;/span&gt;
+&lt;span class="cp"&gt;#include&lt;/span&gt; &lt;span class="cpf"&gt;&amp;lt;linux/version.h&amp;gt;&lt;/span&gt;&lt;span class="cp"&gt;&lt;/span&gt;
+&lt;span class="cp"&gt;#include&lt;/span&gt; &lt;span class="cpf"&gt;&amp;lt;bpf_helpers.h&amp;gt;&lt;/span&gt;&lt;span class="cp"&gt;&lt;/span&gt;
+
+&lt;span class="n"&gt;SEC&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="s"&gt;&amp;quot;kprobe/do_sys_open&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+&lt;span class="kt"&gt;int&lt;/span&gt; &lt;span class="n"&gt;kprobe__do_sys_open&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="k"&gt;struct&lt;/span&gt; &lt;span class="n"&gt;pt_regs&lt;/span&gt; &lt;span class="o"&gt;*&lt;/span&gt;&lt;span class="n"&gt;ctx&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+&lt;span class="p"&gt;{&lt;/span&gt;
+        &lt;span class="kt"&gt;char&lt;/span&gt; &lt;span class="n"&gt;file_name&lt;/span&gt;&lt;span class="p"&gt;[&lt;/span&gt;&lt;span class="mi"&gt;256&lt;/span&gt;&lt;span class="p"&gt;];&lt;/span&gt;
+
+        &lt;span class="n"&gt;bpf_probe_read&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;file_name&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="k"&gt;sizeof&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;file_name&lt;/span&gt;&lt;span class="p"&gt;),&lt;/span&gt; &lt;span class="n"&gt;PT_REGS_PARM2&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;ctx&lt;/span&gt;&lt;span class="p"&gt;));&lt;/span&gt;
+
+        &lt;span class="kt"&gt;char&lt;/span&gt; &lt;span class="n"&gt;fmt&lt;/span&gt;&lt;span class="p"&gt;[]&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="s"&gt;&amp;quot;open file %s&lt;/span&gt;&lt;span class="se"&gt;\n&lt;/span&gt;&lt;span class="s"&gt;&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;;&lt;/span&gt;
+        &lt;span class="n"&gt;bpf_trace_printk&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;fmt&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="k"&gt;sizeof&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;fmt&lt;/span&gt;&lt;span class="p"&gt;),&lt;/span&gt; &lt;span class="o"&gt;&amp;amp;&lt;/span&gt;&lt;span class="n"&gt;file_name&lt;/span&gt;&lt;span class="p"&gt;);&lt;/span&gt;
+
+        &lt;span class="k"&gt;return&lt;/span&gt; &lt;span class="mi"&gt;0&lt;/span&gt;&lt;span class="p"&gt;;&lt;/span&gt;
+&lt;span class="p"&gt;}&lt;/span&gt;
+
+&lt;span class="kt"&gt;char&lt;/span&gt; &lt;span class="n"&gt;_license&lt;/span&gt;&lt;span class="p"&gt;[]&lt;/span&gt; &lt;span class="n"&gt;SEC&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="s"&gt;&amp;quot;license&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="s"&gt;&amp;quot;GPL&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;;&lt;/span&gt;
+&lt;/pre&gt;&lt;/div&gt;
+&lt;p&gt;通过下面的方法编译出最终的 hello.o 文件:&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;$ clang -O2 -emit-llvm -I/kernel-src/tools/testing/selftests/bpf -c hello.c -o hello.ll
+hello.c:11:48: warning: incompatible integer to pointer conversion passing &lt;span class="s1"&gt;&amp;#39;unsigned long&amp;#39;&lt;/span&gt; to parameter of &lt;span class="nb"&gt;type&lt;/span&gt; &lt;span class="s1"&gt;&amp;#39;const void *&amp;#39;&lt;/span&gt; &lt;span class="o"&gt;[&lt;/span&gt;-Wint-conversion&lt;span class="o"&gt;]&lt;/span&gt;
+                bpf_probe_read&lt;span class="o"&gt;(&lt;/span&gt;file_name, sizeof&lt;span class="o"&gt;(&lt;/span&gt;file_name&lt;span class="o"&gt;)&lt;/span&gt;, PT_REGS_PARM2&lt;span class="o"&gt;(&lt;/span&gt;ctx&lt;span class="o"&gt;))&lt;/span&gt;&lt;span class="p"&gt;;&lt;/span&gt;
+                                                             ^~~~~~~~~~~~~~~~~~
+/kernel-src/tools/testing/selftests/bpf/bpf_helpers.h:398:26: note: expanded from macro &lt;span class="s1"&gt;&amp;#39;PT_REGS_PARM2&amp;#39;&lt;/span&gt;
+&lt;span class="c1"&gt;#define PT_REGS_PARM2(x) ((x)-&amp;gt;rsi)&lt;/span&gt;
+                         ^~~~~~~~~~
+&lt;span class="m"&gt;1&lt;/span&gt; warning generated.
+$ llc -march&lt;span class="o"&gt;=&lt;/span&gt;bpf -filetype&lt;span class="o"&gt;=&lt;/span&gt;obj -o hello.o hello.ll
+
+$ ls hello.o
+hello.o
+&lt;/pre&gt;&lt;/div&gt;
+&lt;p&gt;然后在 Go 中使用 gobpf 加载的方法如下(hello.go):&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="kn"&gt;package&lt;/span&gt; &lt;span class="nx"&gt;main&lt;/span&gt;
+
+&lt;span class="kn"&gt;import&lt;/span&gt; &lt;span class="p"&gt;(&lt;/span&gt;
+    &lt;span class="s"&gt;&amp;quot;fmt&amp;quot;&lt;/span&gt;
+    &lt;span class="s"&gt;&amp;quot;time&amp;quot;&lt;/span&gt;
+    &lt;span class="s"&gt;&amp;quot;github.com/iovisor/gobpf/elf&amp;quot;&lt;/span&gt;
+&lt;span class="p"&gt;)&lt;/span&gt;
+
+&lt;span class="kd"&gt;func&lt;/span&gt; &lt;span class="nx"&gt;main&lt;/span&gt;&lt;span class="p"&gt;()&lt;/span&gt; &lt;span class="p"&gt;{&lt;/span&gt;
+    &lt;span class="nx"&gt;mod&lt;/span&gt; &lt;span class="o"&gt;:=&lt;/span&gt; &lt;span class="nx"&gt;elf&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;NewModule&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="s"&gt;&amp;quot;hello.o&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+
+    &lt;span class="nx"&gt;err&lt;/span&gt; &lt;span class="o"&gt;:=&lt;/span&gt; &lt;span class="nx"&gt;mod&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Load&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="kc"&gt;nil&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+    &lt;span class="k"&gt;if&lt;/span&gt; &lt;span class="nx"&gt;err&lt;/span&gt; &lt;span class="o"&gt;!=&lt;/span&gt; &lt;span class="kc"&gt;nil&lt;/span&gt; &lt;span class="p"&gt;{&lt;/span&gt;
+            &lt;span class="nb"&gt;panic&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="nx"&gt;err&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+    &lt;span class="p"&gt;}&lt;/span&gt;
+
+    &lt;span class="nx"&gt;err&lt;/span&gt; &lt;span class="p"&gt;=&lt;/span&gt; &lt;span class="nx"&gt;mod&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;EnableKprobes&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="mi"&gt;0&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+    &lt;span class="k"&gt;if&lt;/span&gt; &lt;span class="nx"&gt;err&lt;/span&gt; &lt;span class="o"&gt;!=&lt;/span&gt; &lt;span class="kc"&gt;nil&lt;/span&gt; &lt;span class="p"&gt;{&lt;/span&gt;
+            &lt;span class="nb"&gt;panic&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="nx"&gt;err&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+    &lt;span class="p"&gt;}&lt;/span&gt;
+
+    &lt;span class="k"&gt;for&lt;/span&gt; &lt;span class="p"&gt;{&lt;/span&gt;
+            &lt;span class="nx"&gt;fmt&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Println&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="s"&gt;&amp;quot;Waiting...&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+            &lt;span class="nx"&gt;time&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Sleep&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="mi"&gt;10&lt;/span&gt; &lt;span class="o"&gt;*&lt;/span&gt; &lt;span class="nx"&gt;time&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Second&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+    &lt;span class="p"&gt;}&lt;/span&gt;
+&lt;span class="p"&gt;}&lt;/span&gt;
+&lt;/pre&gt;&lt;/div&gt;
+&lt;p&gt;编译运行:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+$ go mod init
+$ go get github.com/iovisor/gobpf
+$ go build hello.go
+$ sudo ./hello
+Waiting...
+&lt;/pre&gt;
+&lt;p&gt;新开一个 shell 窗口，然后在窗口内执行下面的命令可以看到被 trace 的 &lt;tt class="docutils literal"&gt;open&lt;/tt&gt; 系统调用:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+$ sudo cat  /sys/kernel/debug/tracing/trace_pipe
+...
+systemd-journal-364     [000] .... 16819.802559: 0: open file /proc/492/attr/current
+systemd-journal-364     [000] .... 16819.802573: 0: open file /proc/492/sessionid
+systemd-journal-364     [000] .... 16819.802583: 0: open file /proc/492/loginuid
+systemd-journal-364     [000] .... 16819.802594: 0: open file /proc/492/cgroup
+...
+&lt;/pre&gt;
+&lt;p&gt;备注：&lt;/p&gt;
+&lt;p&gt;多次运行 hello 程序会出现如下错误:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+$ sudo ./hello
+panic: cannot write &amp;quot;p:pdo_sys_open do_sys_open\n&amp;quot; to kprobe_events: write /sys/kernel/debug/tracing/kprobe_events: file exists
+&lt;/pre&gt;
+&lt;p&gt;可以通过下面的方法清理上次运行的遗留信息:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+$ echo &amp;quot;&amp;quot; |sudo tee /sys/kernel/debug/tracing/kprobe_events
+&lt;/pre&gt;
+&lt;p&gt;然后再运行 &lt;tt class="docutils literal"&gt;sudo ./hello&lt;/tt&gt; 就不会有问题了。&lt;/p&gt;
+&lt;p&gt;P.S. 本文的所有代码在 Github 上都有一份完整版：&lt;a class="reference external" href="https://github.com/mozillazg/gobpf-examples/tree/master/1-helloword"&gt;https://github.com/mozillazg/gobpf-examples/tree/master/1-helloword&lt;/a&gt;&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class="section" id="id3"&gt;
+&lt;h2 id="hidid3"&gt;参考资料&lt;a class="headerlink" href="#hidid3" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;ul class="simple"&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://github.com/bpftools/linux-observability-with-bpf"&gt;bpftools/linux-observability-with-bpf: Code snippets from the O'Reilly book&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://github.com/iovisor/gobpf"&gt;iovisor/gobpf: Go bindings for creating BPF programs.&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://github.com/iovisor/bcc"&gt;iovisor/bcc: BCC - Tools for BPF-based Linux IO analysis, networking, monitoring, and more&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://est357.github.io/posts/cilium_iovisor/"&gt;GO BPF libraries: cilium ebpf vs iovisor gobpf&lt;/a&gt;&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/div&gt;
+</summary><category term="eBPF"></category><category term="gobpf"></category><category term="Go"></category><category term="gobpf 使用示例"></category></entry></feed>
