@@ -1,5 +1,66 @@
 <?xml version="1.0" encoding="utf-8"?>
-<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom"><channel><title>Huang Huang 的博客</title><link>https://mozillazg.com/</link><description></description><atom:link href="https://mozillazg.com/feeds/all.rss.xml" rel="self"></atom:link><lastBuildDate>Mon, 10 May 2021 00:00:00 +0000</lastBuildDate><item><title>gobpf 使用示例：如何找到一个系统调用对应的可用于 kprobe SEC 的内核函数</title><link>https://mozillazg.com/2021/05/ebpf-gobpf-how-to-find-system-call-kernel-function-for-kprobe-elf-section.html</link><description>&lt;div class="section" id="id1"&gt;
+<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom"><channel><title>Huang Huang 的博客</title><link>https://mozillazg.com/</link><description></description><atom:link href="https://mozillazg.com/feeds/all.rss.xml" rel="self"></atom:link><lastBuildDate>Sun, 30 May 2021 00:00:00 +0000</lastBuildDate><item><title>shellless 容器、binaryless 容器以及 distroless 容器</title><link>https://mozillazg.com/2021/05/security-use-shell-less-and-binary-less-distroless-container-with-root-less-container.html</link><description>&lt;p&gt;大家可能对 rootless 容器有一定的了解，rootless 容器说的是不要以 root 用户启动容器，以便简单 限制一下容器内进程的权限，一方面更符合安全上对权限控制的要求，
+另一方面也可以抵御部分容器逃逸问题。&lt;/p&gt;
+&lt;p&gt;这里要介绍另一个容器安全方面的建议，那就是，应当尽可能的使用 shellless/shell-less 容器，
+或使用 binaryless/binary-less 容器，甚至是使用 distroless 容器。&lt;/p&gt;
+&lt;div class="section" id="shellless-shell-less"&gt;
+&lt;h2 id="hidshellless-shell-less"&gt;shellless/shell-less 容器&lt;a class="headerlink" href="#hidshellless-shell-less" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;shellless 或者说 shell-less 容器， 顾名思义指的是 &lt;strong&gt;容器内不包含 shell&lt;/strong&gt; 。&lt;/p&gt;
+&lt;p&gt;因为容器内不包含 shell，所以 shell-less 容器可以免疫部分的 get shell 攻击和
+部分利用任意命令执行漏洞进行的攻击。&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class="section" id="binaryless-binary-less"&gt;
+&lt;h2 id="hidbinaryless-binary-less"&gt;binaryless/binary-less 容器&lt;a class="headerlink" href="#hidbinaryless-binary-less" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;binaryless 或者说 binary-less 容器，在 shell-less 容器的基础上更进一步，
+&lt;strong&gt;容器内不包含除用户业务程序外的任何其他二进制可执行文件和脚本&lt;/strong&gt; 。&lt;/p&gt;
+&lt;p&gt;因为不包含任何额外的二进制可执行文件，所以 binary-less 容器比 shell-less
+容器能够免疫更多的利用任意命令执行漏洞进行的攻击。&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class="section" id="distroless"&gt;
+&lt;h2 id="hiddistroless"&gt;distroless 容器&lt;a class="headerlink" href="#hiddistroless" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;distroless 容器在 binary-less 容器的基础上又跟进了一步，
+&lt;strong&gt;容器内不包含除用户业务程序及业务程序的运行时依赖外的任何其他程序、库以及非必须的系统文件&lt;/strong&gt; ，&lt;/p&gt;
+&lt;p&gt;因为只包含业务程序及其依赖，所以 distroless 容器又比 binary-less 容器能免疫更多的漏洞攻击。&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class="section" id="id1"&gt;
+&lt;h2 id="hidid1"&gt;实现方案&lt;a class="headerlink" href="#hidid1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;目前社区使用的两类容器方案可以实现 shell-less 、 binary-less 或 distroless 容器：&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;p class="first"&gt;一类是使用 &lt;tt class="docutils literal"&gt;scratch&lt;/tt&gt; 作为基础镜像，并且通过多阶段构建的方式 &lt;tt class="docutils literal"&gt;COPY&lt;/tt&gt; 业务所需的内容，类似下面这样：&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="k"&gt;FROM&lt;/span&gt;&lt;span class="s"&gt; golang:1.16 as builder&lt;/span&gt;
+&lt;span class="c"&gt;# ...&lt;/span&gt;
+&lt;span class="k"&gt;RUN&lt;/span&gt; go build xxx
+
+&lt;span class="k"&gt;FROM&lt;/span&gt;&lt;span class="s"&gt; scratch&lt;/span&gt;
+COPY --from&lt;span class="o"&gt;=&lt;/span&gt;builder /path/to/buld-files  /path/to/save
+&lt;span class="c"&gt;# ...&lt;/span&gt;
+&lt;/pre&gt;&lt;/div&gt;
+&lt;/li&gt;
+&lt;li&gt;&lt;p class="first"&gt;另一类是使用 &lt;a class="reference external" href="https://github.com/GoogleContainerTools/distroless"&gt;https://github.com/GoogleContainerTools/distroless&lt;/a&gt; 项目提供的镜像作为基础镜像，并且通过多阶段构建的方式 &lt;tt class="docutils literal"&gt;COPY&lt;/tt&gt; 业务所需的内容，类似下面这样：&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="k"&gt;FROM&lt;/span&gt;&lt;span class="s"&gt; gcr.io/distroless/base-debian10&lt;/span&gt;
+&lt;span class="c"&gt;# ...&lt;/span&gt;
+&lt;span class="k"&gt;RUN&lt;/span&gt; go build xxx
+
+&lt;span class="k"&gt;FROM&lt;/span&gt;&lt;span class="s"&gt; scratch&lt;/span&gt;
+COPY --from&lt;span class="o"&gt;=&lt;/span&gt;builder /path/to/buld-files  /path/to/save
+&lt;span class="c"&gt;# ...&lt;/span&gt;
+&lt;/pre&gt;&lt;/div&gt;
+&lt;/li&gt;
+&lt;/ul&gt;
+&lt;p&gt;当然，也可以其他方法实现类似 &lt;tt class="docutils literal"&gt;scratch&lt;/tt&gt; 或 &lt;tt class="docutils literal"&gt;gcr.io/distroless&lt;/tt&gt; 这样的 shell-less 、 binary-less 或 distroless 的基础镜像，
+然后按照类似上面的方法使用这些基础镜像来构建相应的业务镜像。&lt;/p&gt;
+&lt;p&gt;大家下次构建镜像的时候，推荐构建一个 shell-less 或 binary-less 的镜像，也可以尝试 distroless 镜像。
+我后面也会根据自己的实践维护一个类似 &lt;a class="reference external" href="https://github.com/GoogleContainerTools/distroless"&gt;https://github.com/GoogleContainerTools/distroless&lt;/a&gt; 的项目，
+提供一些 binary-less 的基础镜像，以及相应的各个场景下使用 binary-less 可能会面临的一些问题的可行的解决方法。&lt;/p&gt;
+&lt;div class="section" id="id2"&gt;
+&lt;h3 id="hidid2"&gt;参考资料&lt;a class="headerlink" href="#hidid2" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
+&lt;ul class="simple"&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://hub.docker.com/_/scratch"&gt;https://hub.docker.com/_/scratch&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://github.com/GoogleContainerTools/distroless"&gt;https://github.com/GoogleContainerTools/distroless&lt;/a&gt;&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+</description><dc:creator xmlns:dc="http://purl.org/dc/elements/1.1/">mozillazg</dc:creator><pubDate>Sun, 30 May 2021 00:00:00 +0000</pubDate><guid>tag:mozillazg.com,2021-05-30:2021/05/security-use-shell-less-and-binary-less-distroless-container-with-root-less-container.html</guid><category>container</category><category>容器</category><category>容器安全</category></item><item><title>gobpf 使用示例：如何找到一个系统调用对应的可用于 kprobe SEC 的内核函数</title><link>https://mozillazg.com/2021/05/ebpf-gobpf-how-to-find-system-call-kernel-function-for-kprobe-elf-section.html</link><description>&lt;div class="section" id="id1"&gt;
 &lt;h2 id="hidid1"&gt;前言&lt;a class="headerlink" href="#hidid1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;p&gt;前面 do_fchmodat 示例中我们是通过 &lt;tt class="docutils literal"&gt;chmod&lt;/tt&gt; 命令来进行演示程序工作结果的，
 那么是如何知道 &lt;tt class="docutils literal"&gt;chmod&lt;/tt&gt; 命令会调用 &lt;tt class="docutils literal"&gt;fchmodat&lt;/tt&gt; 系统调用并且对应的内核函数是
@@ -20,7 +81,7 @@ fchmodat(AT_FDCWD, &amp;quot;a.txt&amp;quot;, 0775)       = 0
 &lt;div class="section" id="proc-kallsyms"&gt;
 &lt;h2 id="hidproc-kallsyms"&gt;通过 /proc/kallsyms 文件查找内核函数&lt;a class="headerlink" href="#hidproc-kallsyms" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;p&gt;可以通过  /proc/kallsyms 查找 fchmodat 系统调用相关的函数
-（通过 &lt;tt class="docutils literal"&gt;grep T&lt;/tt&gt; 过滤掉不是全局可见的函数)&lt;/p&gt;
+（通过 &lt;tt class="docutils literal"&gt;grep T&lt;/tt&gt; 只显示全局可见的函数)&lt;/p&gt;
 &lt;pre class="literal-block"&gt;
 $ cat /proc/kallsyms |grep fchmodat |grep T
 0000000000000000 T do_fchmodat
@@ -28,7 +89,8 @@ $ cat /proc/kallsyms |grep fchmodat |grep T
 0000000000000000 T __ia32_sys_fchmodat
 &lt;/pre&gt;
 &lt;p&gt;可以看到可选的就是 &lt;tt class="docutils literal"&gt;do_fchmodat&lt;/tt&gt; 和 &lt;tt class="docutils literal"&gt;__x64_sys_fchmodat&lt;/tt&gt; 这两个，
-经过尝试发现实际应当使用 &lt;tt class="docutils literal"&gt;do_fchmodat&lt;/tt&gt; 。&lt;/p&gt;
+他们对应的源代码可以通过 linux 源码 &lt;a class="reference external" href="https://github.com/torvalds/linux"&gt;仓库&lt;/a&gt;
+或 &lt;a class="reference external" href="https://elixir.bootlin.com/"&gt;https://elixir.bootlin.com/&lt;/a&gt; 进行查找， 经过尝试后发现实际应当使用 &lt;tt class="docutils literal"&gt;do_fchmodat&lt;/tt&gt; 。&lt;/p&gt;
 &lt;/div&gt;
 &lt;div class="section" id="id2"&gt;
 &lt;h2 id="hidid2"&gt;参考资料&lt;a class="headerlink" href="#hidid2" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
@@ -2356,68 +2418,4 @@ Output: false
 &lt;li&gt;&lt;a class="reference external" href="https://leetcode.com/problems/leaf-similar-trees/"&gt;https://leetcode.com/problems/leaf-similar-trees/&lt;/a&gt;&lt;/li&gt;
 &lt;/ul&gt;
 &lt;/div&gt;
-</description><dc:creator xmlns:dc="http://purl.org/dc/elements/1.1/">mozillazg</dc:creator><pubDate>Sun, 17 Jan 2021 00:00:00 +0000</pubDate><guid>tag:mozillazg.com,2021-01-17:2021/01/leetcode-872-leaf-similar-trees.html</guid><category>Binary-Tree</category><category>二叉树</category></item><item><title>LeetCode: 429. N-ary Tree Level Order Traversal</title><link>https://mozillazg.com/2021/01/leetcode-429-n-ary-tree-level-order-traversal.html</link><description>&lt;div class="section" id="id1"&gt;
-&lt;h2 id="hidid1"&gt;题目&lt;a class="headerlink" href="#hidid1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
-&lt;p&gt;原题地址：&lt;a class="reference external" href="https://leetcode.com/problems/n-ary-tree-level-order-traversal/"&gt;https://leetcode.com/problems/n-ary-tree-level-order-traversal/&lt;/a&gt;&lt;/p&gt;
-&lt;p&gt;Given an n-ary tree, return the level order traversal of its nodes' values.&lt;/p&gt;
-&lt;blockquote&gt;
-Nary-Tree input serialization is represented in their level order traversal, each group of children is separated by the null value (See examples).&lt;/blockquote&gt;
-&lt;p&gt;Example 1:&lt;/p&gt;
-&lt;p&gt;&lt;img alt="image" src="/static/images/leetcode/narytreeexample.png" /&gt;&lt;/p&gt;
-&lt;pre class="literal-block"&gt;
-Input: root = [1,null,3,2,4,null,5,6]
-Output: [[1],[3,2,4],[5,6]]
-&lt;/pre&gt;
-&lt;p&gt;Example 2:&lt;/p&gt;
-&lt;p&gt;&lt;img alt="image2" src="/static/images/leetcode/sample_4_964.png" /&gt;&lt;/p&gt;
-&lt;pre class="literal-block"&gt;
-Input: root = [1,null,2,3,4,5,null,null,6,7,null,8,null,9,10,null,null,11,null,12,null,13,null,null,14]
-Output: [[1],[2,3,4,5],[6,7,8,9,10],[11,12,13],[14]]
-&lt;/pre&gt;
-&lt;p&gt;Constraints:&lt;/p&gt;
-&lt;ul class="simple"&gt;
-&lt;li&gt;The height of the n-ary tree is less than or equal to 1000&lt;/li&gt;
-&lt;li&gt;The total number of nodes is between &lt;tt class="docutils literal"&gt;[0, 10^4]&lt;/tt&gt;&lt;/li&gt;
-&lt;/ul&gt;
-&lt;/div&gt;
-&lt;div class="section" id="id2"&gt;
-&lt;h2 id="hidid2"&gt;解法&lt;a class="headerlink" href="#hidid2" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
-&lt;p&gt;广度优先，从上到下一层一层遍历，保存每一层的 value。&lt;/p&gt;
-&lt;p&gt;这个方法的 Python 代码类似下面这样:&lt;/p&gt;
-&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="sd"&gt;&amp;quot;&amp;quot;&amp;quot;&lt;/span&gt;
-&lt;span class="sd"&gt;# Definition for a Node.&lt;/span&gt;
-&lt;span class="sd"&gt;class Node(object):&lt;/span&gt;
-&lt;span class="sd"&gt;    def __init__(self, val=None, children=None):&lt;/span&gt;
-&lt;span class="sd"&gt;        self.val = val&lt;/span&gt;
-&lt;span class="sd"&gt;        self.children = children&lt;/span&gt;
-&lt;span class="sd"&gt;&amp;quot;&amp;quot;&amp;quot;&lt;/span&gt;
-
-&lt;span class="k"&gt;class&lt;/span&gt; &lt;span class="nc"&gt;Solution&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="nb"&gt;object&lt;/span&gt;&lt;span class="p"&gt;):&lt;/span&gt;
-    &lt;span class="k"&gt;def&lt;/span&gt; &lt;span class="nf"&gt;levelOrder&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="bp"&gt;self&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;root&lt;/span&gt;&lt;span class="p"&gt;):&lt;/span&gt;
-        &lt;span class="k"&gt;if&lt;/span&gt; &lt;span class="n"&gt;root&lt;/span&gt; &lt;span class="ow"&gt;is&lt;/span&gt; &lt;span class="bp"&gt;None&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;
-            &lt;span class="k"&gt;return&lt;/span&gt; &lt;span class="p"&gt;[]&lt;/span&gt;
-
-        &lt;span class="n"&gt;values&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="p"&gt;[]&lt;/span&gt;
-        &lt;span class="n"&gt;children&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="p"&gt;[&lt;/span&gt;&lt;span class="n"&gt;root&lt;/span&gt;&lt;span class="p"&gt;]&lt;/span&gt;
-
-        &lt;span class="k"&gt;while&lt;/span&gt; &lt;span class="n"&gt;children&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;
-            &lt;span class="n"&gt;children_values&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="p"&gt;[]&lt;/span&gt;
-            &lt;span class="n"&gt;new_children&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="p"&gt;[]&lt;/span&gt;
-            &lt;span class="k"&gt;for&lt;/span&gt; &lt;span class="n"&gt;c&lt;/span&gt; &lt;span class="ow"&gt;in&lt;/span&gt; &lt;span class="n"&gt;children&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;
-                &lt;span class="n"&gt;children_values&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;append&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;c&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;val&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
-                &lt;span class="k"&gt;if&lt;/span&gt; &lt;span class="n"&gt;c&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;children&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;
-                    &lt;span class="n"&gt;new_children&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;extend&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;c&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;children&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
-
-            &lt;span class="n"&gt;values&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;append&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;children_values&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
-            &lt;span class="n"&gt;children&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;new_children&lt;/span&gt;
-
-        &lt;span class="k"&gt;return&lt;/span&gt; &lt;span class="n"&gt;values&lt;/span&gt;
-&lt;/pre&gt;&lt;/div&gt;
-&lt;/div&gt;
-&lt;div class="section" id="id3"&gt;
-&lt;h2 id="hidid3"&gt;参考资料&lt;a class="headerlink" href="#hidid3" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
-&lt;ul class="simple"&gt;
-&lt;li&gt;&lt;a class="reference external" href="https://leetcode.com/problems/n-ary-tree-level-order-traversal/"&gt;https://leetcode.com/problems/n-ary-tree-level-order-traversal/&lt;/a&gt;&lt;/li&gt;
-&lt;/ul&gt;
-&lt;/div&gt;
-</description><dc:creator xmlns:dc="http://purl.org/dc/elements/1.1/">mozillazg</dc:creator><pubDate>Sat, 16 Jan 2021 00:00:00 +0000</pubDate><guid>tag:mozillazg.com,2021-01-16:2021/01/leetcode-429-n-ary-tree-level-order-traversal.html</guid><category>Binary-Tree</category><category>二叉树</category></item></channel></rss>
+</description><dc:creator xmlns:dc="http://purl.org/dc/elements/1.1/">mozillazg</dc:creator><pubDate>Sun, 17 Jan 2021 00:00:00 +0000</pubDate><guid>tag:mozillazg.com,2021-01-17:2021/01/leetcode-872-leaf-similar-trees.html</guid><category>Binary-Tree</category><category>二叉树</category></item></channel></rss>

@@ -1,5 +1,66 @@
 <?xml version="1.0" encoding="utf-8"?>
-<feed xmlns="http://www.w3.org/2005/Atom"><title>Huang Huang 的博客</title><link href="https://mozillazg.com/" rel="alternate"></link><link href="https://mozillazg.com/feeds/security.atom.xml" rel="self"></link><id>https://mozillazg.com/</id><updated>2021-04-03T00:00:00+00:00</updated><entry><title>《浅析软件供应链攻击之包抢注低成本钓鱼》阅读笔记</title><link href="https://mozillazg.com/2021/04/security-the-way-of-sofeware-supply-chain-attack-notes-01.html" rel="alternate"></link><updated>2021-04-03T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2021-04-03:2021/04/security-the-way-of-sofeware-supply-chain-attack-notes-01.html</id><summary type="html">&lt;div class="section" id="id2"&gt;
+<feed xmlns="http://www.w3.org/2005/Atom"><title>Huang Huang 的博客</title><link href="https://mozillazg.com/" rel="alternate"></link><link href="https://mozillazg.com/feeds/security.atom.xml" rel="self"></link><id>https://mozillazg.com/</id><updated>2021-05-30T00:00:00+00:00</updated><entry><title>shellless 容器、binaryless 容器以及 distroless 容器</title><link href="https://mozillazg.com/2021/05/security-use-shell-less-and-binary-less-distroless-container-with-root-less-container.html" rel="alternate"></link><updated>2021-05-30T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2021-05-30:2021/05/security-use-shell-less-and-binary-less-distroless-container-with-root-less-container.html</id><summary type="html">&lt;p&gt;大家可能对 rootless 容器有一定的了解，rootless 容器说的是不要以 root 用户启动容器，以便简单 限制一下容器内进程的权限，一方面更符合安全上对权限控制的要求，
+另一方面也可以抵御部分容器逃逸问题。&lt;/p&gt;
+&lt;p&gt;这里要介绍另一个容器安全方面的建议，那就是，应当尽可能的使用 shellless/shell-less 容器，
+或使用 binaryless/binary-less 容器，甚至是使用 distroless 容器。&lt;/p&gt;
+&lt;div class="section" id="shellless-shell-less"&gt;
+&lt;h2 id="hidshellless-shell-less"&gt;shellless/shell-less 容器&lt;a class="headerlink" href="#hidshellless-shell-less" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;shellless 或者说 shell-less 容器， 顾名思义指的是 &lt;strong&gt;容器内不包含 shell&lt;/strong&gt; 。&lt;/p&gt;
+&lt;p&gt;因为容器内不包含 shell，所以 shell-less 容器可以免疫部分的 get shell 攻击和
+部分利用任意命令执行漏洞进行的攻击。&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class="section" id="binaryless-binary-less"&gt;
+&lt;h2 id="hidbinaryless-binary-less"&gt;binaryless/binary-less 容器&lt;a class="headerlink" href="#hidbinaryless-binary-less" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;binaryless 或者说 binary-less 容器，在 shell-less 容器的基础上更进一步，
+&lt;strong&gt;容器内不包含除用户业务程序外的任何其他二进制可执行文件和脚本&lt;/strong&gt; 。&lt;/p&gt;
+&lt;p&gt;因为不包含任何额外的二进制可执行文件，所以 binary-less 容器比 shell-less
+容器能够免疫更多的利用任意命令执行漏洞进行的攻击。&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class="section" id="distroless"&gt;
+&lt;h2 id="hiddistroless"&gt;distroless 容器&lt;a class="headerlink" href="#hiddistroless" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;distroless 容器在 binary-less 容器的基础上又跟进了一步，
+&lt;strong&gt;容器内不包含除用户业务程序及业务程序的运行时依赖外的任何其他程序、库以及非必须的系统文件&lt;/strong&gt; ，&lt;/p&gt;
+&lt;p&gt;因为只包含业务程序及其依赖，所以 distroless 容器又比 binary-less 容器能免疫更多的漏洞攻击。&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class="section" id="id1"&gt;
+&lt;h2 id="hidid1"&gt;实现方案&lt;a class="headerlink" href="#hidid1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;目前社区使用的两类容器方案可以实现 shell-less 、 binary-less 或 distroless 容器：&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;p class="first"&gt;一类是使用 &lt;tt class="docutils literal"&gt;scratch&lt;/tt&gt; 作为基础镜像，并且通过多阶段构建的方式 &lt;tt class="docutils literal"&gt;COPY&lt;/tt&gt; 业务所需的内容，类似下面这样：&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="k"&gt;FROM&lt;/span&gt;&lt;span class="s"&gt; golang:1.16 as builder&lt;/span&gt;
+&lt;span class="c"&gt;# ...&lt;/span&gt;
+&lt;span class="k"&gt;RUN&lt;/span&gt; go build xxx
+
+&lt;span class="k"&gt;FROM&lt;/span&gt;&lt;span class="s"&gt; scratch&lt;/span&gt;
+COPY --from&lt;span class="o"&gt;=&lt;/span&gt;builder /path/to/buld-files  /path/to/save
+&lt;span class="c"&gt;# ...&lt;/span&gt;
+&lt;/pre&gt;&lt;/div&gt;
+&lt;/li&gt;
+&lt;li&gt;&lt;p class="first"&gt;另一类是使用 &lt;a class="reference external" href="https://github.com/GoogleContainerTools/distroless"&gt;https://github.com/GoogleContainerTools/distroless&lt;/a&gt; 项目提供的镜像作为基础镜像，并且通过多阶段构建的方式 &lt;tt class="docutils literal"&gt;COPY&lt;/tt&gt; 业务所需的内容，类似下面这样：&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="k"&gt;FROM&lt;/span&gt;&lt;span class="s"&gt; gcr.io/distroless/base-debian10&lt;/span&gt;
+&lt;span class="c"&gt;# ...&lt;/span&gt;
+&lt;span class="k"&gt;RUN&lt;/span&gt; go build xxx
+
+&lt;span class="k"&gt;FROM&lt;/span&gt;&lt;span class="s"&gt; scratch&lt;/span&gt;
+COPY --from&lt;span class="o"&gt;=&lt;/span&gt;builder /path/to/buld-files  /path/to/save
+&lt;span class="c"&gt;# ...&lt;/span&gt;
+&lt;/pre&gt;&lt;/div&gt;
+&lt;/li&gt;
+&lt;/ul&gt;
+&lt;p&gt;当然，也可以其他方法实现类似 &lt;tt class="docutils literal"&gt;scratch&lt;/tt&gt; 或 &lt;tt class="docutils literal"&gt;gcr.io/distroless&lt;/tt&gt; 这样的 shell-less 、 binary-less 或 distroless 的基础镜像，
+然后按照类似上面的方法使用这些基础镜像来构建相应的业务镜像。&lt;/p&gt;
+&lt;p&gt;大家下次构建镜像的时候，推荐构建一个 shell-less 或 binary-less 的镜像，也可以尝试 distroless 镜像。
+我后面也会根据自己的实践维护一个类似 &lt;a class="reference external" href="https://github.com/GoogleContainerTools/distroless"&gt;https://github.com/GoogleContainerTools/distroless&lt;/a&gt; 的项目，
+提供一些 binary-less 的基础镜像，以及相应的各个场景下使用 binary-less 可能会面临的一些问题的可行的解决方法。&lt;/p&gt;
+&lt;div class="section" id="id2"&gt;
+&lt;h3 id="hidid2"&gt;参考资料&lt;a class="headerlink" href="#hidid2" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
+&lt;ul class="simple"&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://hub.docker.com/_/scratch"&gt;https://hub.docker.com/_/scratch&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://github.com/GoogleContainerTools/distroless"&gt;https://github.com/GoogleContainerTools/distroless&lt;/a&gt;&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+</summary><category term="container"></category><category term="容器"></category><category term="容器安全"></category></entry><entry><title>《浅析软件供应链攻击之包抢注低成本钓鱼》阅读笔记</title><link href="https://mozillazg.com/2021/04/security-the-way-of-sofeware-supply-chain-attack-notes-01.html" rel="alternate"></link><updated>2021-04-03T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2021-04-03:2021/04/security-the-way-of-sofeware-supply-chain-attack-notes-01.html</id><summary type="html">&lt;div class="section" id="id2"&gt;
 &lt;h2 id="hidid2"&gt;前言&lt;a class="headerlink" href="#hidid2" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;p&gt;本文是 &lt;a class="reference external" href="https://mp.weixin.qq.com/s/JWSjKZWyuSvXdzYhU0INmQ"&gt;浅析软件供应链攻击之包抢注低成本钓鱼&lt;/a&gt;
 这篇文章的阅读笔记。&lt;/p&gt;
