@@ -1,5 +1,74 @@
 <?xml version="1.0" encoding="utf-8"?>
-<feed xmlns="http://www.w3.org/2005/Atom"><title>Huang Huang 的博客</title><link href="https://mozillazg.com/" rel="alternate"></link><link href="https://mozillazg.com/feeds/all.atom.xml" rel="self"></link><id>https://mozillazg.com/</id><updated>2021-05-30T00:00:00+00:00</updated><entry><title>shellless 容器、binaryless 容器以及 distroless 容器</title><link href="https://mozillazg.com/2021/05/security-use-shell-less-and-binary-less-distroless-container-with-root-less-container.html" rel="alternate"></link><updated>2021-05-30T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2021-05-30:2021/05/security-use-shell-less-and-binary-less-distroless-container-with-root-less-container.html</id><summary type="html">&lt;p&gt;大家可能对 rootless 容器有一定的了解，rootless 容器说的是不要以 root 用户启动容器，以便简单 限制一下容器内进程的权限，一方面更符合安全上对权限控制的要求，
+<feed xmlns="http://www.w3.org/2005/Atom"><title>Huang Huang 的博客</title><link href="https://mozillazg.com/" rel="alternate"></link><link href="https://mozillazg.com/feeds/all.atom.xml" rel="self"></link><id>https://mozillazg.com/</id><updated>2021-06-06T00:00:00+00:00</updated><entry><title>在 Kubernetes RBAC Role/ClusterRole 规则中使用通配符 *</title><link href="https://mozillazg.com/2021/06/k8s-kubernetes-rbac-rules-use-star-wildcard.html" rel="alternate"></link><updated>2021-06-06T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2021-06-06:2021/06/k8s-kubernetes-rbac-rules-use-star-wildcard.html</id><summary type="html">&lt;p&gt;在编写 Kubernetes RBAC Role/ClusterRole 中 &lt;tt class="docutils literal"&gt;rules&lt;/tt&gt; 字段中定义的规则时，我们可以通过通配符 &lt;tt class="docutils literal"&gt;*&lt;/tt&gt;
+来实现规则中匹配任意字符的需求。&lt;/p&gt;
+&lt;p&gt;不过通配符 &lt;tt class="docutils literal"&gt;*&lt;/tt&gt; 也不是可以任意使用的，下面是 &lt;tt class="docutils literal"&gt;rules&lt;/tt&gt; 字段使用的 &lt;tt class="docutils literal"&gt;PolicyRule&lt;/tt&gt; 的定义:&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="c1"&gt;// PolicyRule holds information that describes a policy rule, but does not contain information&lt;/span&gt;
+&lt;span class="c1"&gt;// about who the rule applies to or which namespace the rule applies to.&lt;/span&gt;
+&lt;span class="kd"&gt;type&lt;/span&gt; &lt;span class="nx"&gt;PolicyRule&lt;/span&gt; &lt;span class="kd"&gt;struct&lt;/span&gt; &lt;span class="p"&gt;{&lt;/span&gt;
+        &lt;span class="c1"&gt;// Verbs is a list of Verbs that apply to ALL the ResourceKinds and AttributeRestrictions contained in this rule. &amp;#39;*&amp;#39; represents all verbs.&lt;/span&gt;
+        &lt;span class="nx"&gt;Verbs&lt;/span&gt; &lt;span class="p"&gt;[]&lt;/span&gt;&lt;span class="kt"&gt;string&lt;/span&gt; &lt;span class="s"&gt;`json:&amp;quot;verbs&amp;quot; protobuf:&amp;quot;bytes,1,rep,name=verbs&amp;quot;`&lt;/span&gt;
+
+        &lt;span class="c1"&gt;// APIGroups is the name of the APIGroup that contains the resources.  If multiple API groups are specified, any action requested against one of&lt;/span&gt;
+        &lt;span class="c1"&gt;// the enumerated resources in any API group will be allowed.&lt;/span&gt;
+        &lt;span class="c1"&gt;// +optional&lt;/span&gt;
+        &lt;span class="nx"&gt;APIGroups&lt;/span&gt; &lt;span class="p"&gt;[]&lt;/span&gt;&lt;span class="kt"&gt;string&lt;/span&gt; &lt;span class="s"&gt;`json:&amp;quot;apiGroups,omitempty&amp;quot; protobuf:&amp;quot;bytes,2,rep,name=apiGroups&amp;quot;`&lt;/span&gt;
+        &lt;span class="c1"&gt;// Resources is a list of resources this rule applies to. &amp;#39;*&amp;#39; represents all resources.&lt;/span&gt;
+        &lt;span class="c1"&gt;// +optional&lt;/span&gt;
+        &lt;span class="nx"&gt;Resources&lt;/span&gt; &lt;span class="p"&gt;[]&lt;/span&gt;&lt;span class="kt"&gt;string&lt;/span&gt; &lt;span class="s"&gt;`json:&amp;quot;resources,omitempty&amp;quot; protobuf:&amp;quot;bytes,3,rep,name=resources&amp;quot;`&lt;/span&gt;
+        &lt;span class="c1"&gt;// ResourceNames is an optional white list of names that the rule applies to.  An empty set means that everything is allowed.&lt;/span&gt;
+        &lt;span class="c1"&gt;// +optional&lt;/span&gt;
+        &lt;span class="nx"&gt;ResourceNames&lt;/span&gt; &lt;span class="p"&gt;[]&lt;/span&gt;&lt;span class="kt"&gt;string&lt;/span&gt; &lt;span class="s"&gt;`json:&amp;quot;resourceNames,omitempty&amp;quot; protobuf:&amp;quot;bytes,4,rep,name=resourceNames&amp;quot;`&lt;/span&gt;
+
+        &lt;span class="c1"&gt;// NonResourceURLs is a set of partial urls that a user should have access to.  *s are allowed, but only as the full, final step in the path&lt;/span&gt;
+        &lt;span class="c1"&gt;// Since non-resource URLs are not namespaced, this field is only applicable for ClusterRoles referenced from a ClusterRoleBinding.&lt;/span&gt;
+        &lt;span class="c1"&gt;// Rules can either apply to API resources (such as &amp;quot;pods&amp;quot; or &amp;quot;secrets&amp;quot;) or non-resource URL paths (such as &amp;quot;/api&amp;quot;),  but not both.&lt;/span&gt;
+        &lt;span class="c1"&gt;// +optional&lt;/span&gt;
+        &lt;span class="nx"&gt;NonResourceURLs&lt;/span&gt; &lt;span class="p"&gt;[]&lt;/span&gt;&lt;span class="kt"&gt;string&lt;/span&gt; &lt;span class="s"&gt;`json:&amp;quot;nonResourceURLs,omitempty&amp;quot; protobuf:&amp;quot;bytes,5,rep,name=nonResourceURLs&amp;quot;`&lt;/span&gt;
+&lt;span class="p"&gt;}&lt;/span&gt;
+&lt;/pre&gt;&lt;/div&gt;
+&lt;p&gt;通过阅读 kubernetes 中 &lt;a class="reference external" href="https://github.com/kubernetes/kubernetes/blob/v1.21.1/plugin/pkg/auth/authorizer/rbac/rbac.go#L178-L193"&gt;PolicyRule 匹配逻辑的源代码&lt;/a&gt;
+可以知道 &lt;tt class="docutils literal"&gt;PolicyRule&lt;/tt&gt; 中各个字段使用通配符 &lt;tt class="docutils literal"&gt;*&lt;/tt&gt; 时有如下限制：&lt;/p&gt;
+&lt;ul class="simple"&gt;
+&lt;li&gt;&lt;tt class="docutils literal"&gt;verbs&lt;/tt&gt; 字段只支持通过使用 &lt;tt class="docutils literal"&gt;*&lt;/tt&gt; 匹配所有 Verb，不支持使用 &lt;tt class="docutils literal"&gt;*&lt;/tt&gt; 跟其他字符实现组合匹配：&lt;ul&gt;
+&lt;li&gt;&lt;tt class="docutils literal"&gt;*&lt;/tt&gt; ： &lt;strong&gt;有效&lt;/strong&gt; ，匹配所有 Verb&lt;/li&gt;
+&lt;li&gt;&lt;tt class="docutils literal"&gt;de*&lt;/tt&gt;: 无效&lt;/li&gt;
+&lt;li&gt;&lt;tt class="docutils literal"&gt;de*te&lt;/tt&gt;: 无效&lt;/li&gt;
+&lt;li&gt;&lt;tt class="docutils literal"&gt;*te&lt;/tt&gt;: 无效&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/li&gt;
+&lt;li&gt;&lt;tt class="docutils literal"&gt;apiGroups&lt;/tt&gt; 字段只支持通过使用 &lt;tt class="docutils literal"&gt;*&lt;/tt&gt; 匹配所有 APIGroup ，不支持使用 &lt;tt class="docutils literal"&gt;*&lt;/tt&gt; 跟其他字符实现组合匹配：&lt;ul&gt;
+&lt;li&gt;&lt;tt class="docutils literal"&gt;*&lt;/tt&gt; ： &lt;strong&gt;有效&lt;/strong&gt; ，匹配所有 APIGroup&lt;/li&gt;
+&lt;li&gt;&lt;tt class="docutils literal"&gt;co*&lt;/tt&gt;: 无效&lt;/li&gt;
+&lt;li&gt;&lt;tt class="docutils literal"&gt;c*e&lt;/tt&gt;: 无效&lt;/li&gt;
+&lt;li&gt;&lt;tt class="docutils literal"&gt;*re&lt;/tt&gt;: 无效&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/li&gt;
+&lt;li&gt;&lt;tt class="docutils literal"&gt;resources&lt;/tt&gt; 字段只支持通过使用 &lt;tt class="docutils literal"&gt;*&lt;/tt&gt; 匹配所有 resource，以及通过 &lt;tt class="docutils literal"&gt;*&lt;/tt&gt; 匹配所有 resource 的特定 &lt;a class="reference external" href="https://kubernetes.io/docs/reference/access-authn-authz/rbac/#referring-to-resources"&gt;subresource&lt;/a&gt; ：&lt;ul&gt;
+&lt;li&gt;&lt;tt class="docutils literal"&gt;*&lt;/tt&gt; ： &lt;strong&gt;有效&lt;/strong&gt; ，匹配所有 resource&lt;/li&gt;
+&lt;li&gt;&lt;tt class="docutils literal"&gt;po*&lt;/tt&gt;: 无效&lt;/li&gt;
+&lt;li&gt;&lt;tt class="docutils literal"&gt;po*s&lt;/tt&gt;: 无效&lt;/li&gt;
+&lt;li&gt;&lt;tt class="docutils literal"&gt;*ts&lt;/tt&gt;: 无效&lt;/li&gt;
+&lt;li&gt;&lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;*/&amp;lt;subresource&amp;gt;&lt;/span&gt;&lt;/tt&gt;:  &lt;strong&gt;有效&lt;/strong&gt; ，匹配所有 resource 的特定 &lt;tt class="docutils literal"&gt;&amp;lt;subresource&amp;gt;&lt;/tt&gt; ，比如 &lt;tt class="docutils literal"&gt;*/status&lt;/tt&gt; 或 &lt;tt class="docutils literal"&gt;*/scale&lt;/tt&gt;&lt;/li&gt;
+&lt;li&gt;&lt;tt class="docutils literal"&gt;*&amp;lt;subresource&amp;gt;&lt;/tt&gt;:  无效&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/li&gt;
+&lt;li&gt;&lt;tt class="docutils literal"&gt;resourceNames&lt;/tt&gt; 字段不支持通配符 &lt;tt class="docutils literal"&gt;*&lt;/tt&gt; ，当 &lt;tt class="docutils literal"&gt;resourceNames&lt;/tt&gt; 字段的值为空时匹配所有 resource name&lt;/li&gt;
+&lt;li&gt;&lt;tt class="docutils literal"&gt;nonResourceURLs&lt;/tt&gt; 字段只支持通过 &lt;tt class="docutils literal"&gt;*&lt;/tt&gt; 匹配所有 nonResourceURL、以及通过字符串末尾的 &lt;tt class="docutils literal"&gt;*&lt;/tt&gt; 匹配以特定字符串开头的任意 nonResourceURL：&lt;ul&gt;
+&lt;li&gt;&lt;tt class="docutils literal"&gt;*&lt;/tt&gt; ： &lt;strong&gt;有效&lt;/strong&gt; ，匹配所有 nonResourceURL&lt;/li&gt;
+&lt;li&gt;&lt;tt class="docutils literal"&gt;/health*&lt;/tt&gt;:  &lt;strong&gt;有效&lt;/strong&gt; ，匹配以 &lt;tt class="docutils literal"&gt;/health&lt;/tt&gt; 开头的任意 nonResourceURL，比如 &lt;tt class="docutils literal"&gt;/health&lt;/tt&gt; 、 &lt;tt class="docutils literal"&gt;/healthy&lt;/tt&gt; 、 &lt;tt class="docutils literal"&gt;/health/foo/bar&lt;/tt&gt;&lt;/li&gt;
+&lt;li&gt;&lt;tt class="docutils literal"&gt;*foo&lt;/tt&gt;: 无效&lt;/li&gt;
+&lt;li&gt;&lt;tt class="docutils literal"&gt;/*foo&lt;/tt&gt;: 无效&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/li&gt;
+&lt;/ul&gt;
+&lt;div class="section" id="id1"&gt;
+&lt;h2 id="hidid1"&gt;参考资料&lt;a class="headerlink" href="#hidid1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;ul class="simple"&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://kubernetes.io/docs/reference/access-authn-authz/rbac/"&gt;Using RBAC Authorization | Kubernetes&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://github.com/kubernetes/kubernetes/blob/v1.21.1/plugin/pkg/auth/authorizer/rbac/rbac.go#L178-L193"&gt;kubernetes/rbac.go at v1.21.1 · kubernetes/kubernetes&lt;/a&gt;&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/div&gt;
+</summary><category term="kubernetes"></category><category term="RBAC"></category></entry><entry><title>shellless 容器、binaryless 容器以及 distroless 容器</title><link href="https://mozillazg.com/2021/05/security-use-shell-less-and-binary-less-distroless-container-with-root-less-container.html" rel="alternate"></link><updated>2021-05-30T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2021-05-30:2021/05/security-use-shell-less-and-binary-less-distroless-container-with-root-less-container.html</id><summary type="html">&lt;p&gt;大家可能对 rootless 容器有一定的了解，rootless 容器说的是不要以 root 用户启动容器，以便简单 限制一下容器内进程的权限，一方面更符合安全上对权限控制的要求，
 另一方面也可以抵御部分容器逃逸问题。&lt;/p&gt;
 &lt;p&gt;这里要介绍另一个容器安全方面的建议，那就是，应当尽可能的使用 shellless/shell-less 容器，
 或使用 binaryless/binary-less 容器，甚至是使用 distroless 容器。&lt;/p&gt;
@@ -2339,83 +2408,6 @@ Output: [1,1,0,1,1,null,1]
 &lt;h2 id="hidid3"&gt;参考资料&lt;a class="headerlink" href="#hidid3" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;ul class="simple"&gt;
 &lt;li&gt;&lt;a class="reference external" href="https://leetcode.com/problems/binary-tree-pruning/"&gt;https://leetcode.com/problems/binary-tree-pruning/&lt;/a&gt;&lt;/li&gt;
-&lt;/ul&gt;
-&lt;/div&gt;
-</summary><category term="Binary-Tree"></category><category term="二叉树"></category></entry><entry><title>LeetCode: 872. Leaf-Similar Trees</title><link href="https://mozillazg.com/2021/01/leetcode-872-leaf-similar-trees.html" rel="alternate"></link><updated>2021-01-17T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2021-01-17:2021/01/leetcode-872-leaf-similar-trees.html</id><summary type="html">&lt;div class="section" id="id1"&gt;
-&lt;h2 id="hidid1"&gt;题目&lt;a class="headerlink" href="#hidid1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
-&lt;p&gt;原题地址：&lt;a class="reference external" href="https://leetcode.com/problems/leaf-similar-trees/"&gt;https://leetcode.com/problems/leaf-similar-trees/&lt;/a&gt;&lt;/p&gt;
-&lt;p&gt;Consider all the leaves of a binary tree, from left to right order, the values of those leaves form a
-&lt;strong&gt;leaf value sequence&lt;/strong&gt;.&lt;/p&gt;
-&lt;p&gt;&lt;img alt="image1" src="/static/images/leetcode/tree.png" /&gt;&lt;/p&gt;
-&lt;p&gt;For example, in the given tree above, the leaf value sequence is &lt;tt class="docutils literal"&gt;(6, 7, 4, 9, 8)&lt;/tt&gt;.&lt;/p&gt;
-&lt;p&gt;Two binary trees are considered leaf-similar if their leaf value sequence is the same.&lt;/p&gt;
-&lt;p&gt;Return &lt;tt class="docutils literal"&gt;true&lt;/tt&gt; if and only if the two given trees with head nodes &lt;tt class="docutils literal"&gt;root1&lt;/tt&gt; and &lt;tt class="docutils literal"&gt;root2&lt;/tt&gt; are leaf-similar.&lt;/p&gt;
-&lt;p&gt;Example 1:&lt;/p&gt;
-&lt;p&gt;&lt;img alt="image2" src="/static/images/leetcode/leaf-similar-1.jpg" /&gt;&lt;/p&gt;
-&lt;pre class="literal-block"&gt;
-Input: root1 = [3,5,1,6,2,9,8,null,null,7,4], root2 = [3,5,1,6,7,4,2,null,null,null,null,null,null,9,8]
-Output: true
-&lt;/pre&gt;
-&lt;p&gt;Example 2:&lt;/p&gt;
-&lt;pre class="literal-block"&gt;
-Input: root1 = [1], root2 = [1]
-Output: true
-&lt;/pre&gt;
-&lt;p&gt;Example 3:&lt;/p&gt;
-&lt;pre class="literal-block"&gt;
-Input: root1 = [1], root2 = [2]
-Output: false
-&lt;/pre&gt;
-&lt;p&gt;Example 4:&lt;/p&gt;
-&lt;pre class="literal-block"&gt;
-Input: root1 = [1,2], root2 = [2,2]
-Output: true
-&lt;/pre&gt;
-&lt;p&gt;Example 5:&lt;/p&gt;
-&lt;p&gt;&lt;img alt="image5" src="/static/images/leetcode/leaf-similar-2.jpg" /&gt;&lt;/p&gt;
-&lt;pre class="literal-block"&gt;
-Input: root1 = [1,2,3], root2 = [1,3,2]
-Output: false
-&lt;/pre&gt;
-&lt;p&gt;Constraints:&lt;/p&gt;
-&lt;ul class="simple"&gt;
-&lt;li&gt;The number of nodes in each tree will be in the range &lt;tt class="docutils literal"&gt;[1, 200]&lt;/tt&gt;.&lt;/li&gt;
-&lt;li&gt;Both of the given trees will have values in the range &lt;tt class="docutils literal"&gt;[0, 200]&lt;/tt&gt;.&lt;/li&gt;
-&lt;/ul&gt;
-&lt;/div&gt;
-&lt;div class="section" id="id2"&gt;
-&lt;h2 id="hidid2"&gt;解法&lt;a class="headerlink" href="#hidid2" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
-&lt;p&gt;遍历二叉树（比如前序遍历之类的））找到 root1 和 root2 的 leaf value sequence ，然后比较两个列表内的值是否相等。&lt;/p&gt;
-&lt;p&gt;这个方法的 Python 代码类似下面这样:&lt;/p&gt;
-&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="c1"&gt;# Definition for a binary tree node.&lt;/span&gt;
-&lt;span class="c1"&gt;# class TreeNode(object):&lt;/span&gt;
-&lt;span class="c1"&gt;#     def __init__(self, val=0, left=None, right=None):&lt;/span&gt;
-&lt;span class="c1"&gt;#         self.val = val&lt;/span&gt;
-&lt;span class="c1"&gt;#         self.left = left&lt;/span&gt;
-&lt;span class="c1"&gt;#         self.right = right&lt;/span&gt;
-&lt;span class="k"&gt;class&lt;/span&gt; &lt;span class="nc"&gt;Solution&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="nb"&gt;object&lt;/span&gt;&lt;span class="p"&gt;):&lt;/span&gt;
-    &lt;span class="k"&gt;def&lt;/span&gt; &lt;span class="nf"&gt;leafSimilar&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="bp"&gt;self&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;root1&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;root2&lt;/span&gt;&lt;span class="p"&gt;):&lt;/span&gt;
-        &lt;span class="n"&gt;leafs_1&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="bp"&gt;self&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;collect_leafs&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;root1&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="p"&gt;[])&lt;/span&gt;
-        &lt;span class="n"&gt;leafs_2&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="bp"&gt;self&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;collect_leafs&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;root2&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="p"&gt;[])&lt;/span&gt;
-        &lt;span class="k"&gt;return&lt;/span&gt; &lt;span class="n"&gt;leafs_1&lt;/span&gt; &lt;span class="o"&gt;==&lt;/span&gt; &lt;span class="n"&gt;leafs_2&lt;/span&gt;
-
-    &lt;span class="k"&gt;def&lt;/span&gt; &lt;span class="nf"&gt;collect_leafs&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="bp"&gt;self&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;root&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;values&lt;/span&gt;&lt;span class="p"&gt;):&lt;/span&gt;
-        &lt;span class="k"&gt;if&lt;/span&gt; &lt;span class="n"&gt;root&lt;/span&gt; &lt;span class="ow"&gt;is&lt;/span&gt; &lt;span class="bp"&gt;None&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;
-            &lt;span class="k"&gt;return&lt;/span&gt; &lt;span class="n"&gt;values&lt;/span&gt;
-
-        &lt;span class="k"&gt;if&lt;/span&gt; &lt;span class="n"&gt;root&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;left&lt;/span&gt; &lt;span class="ow"&gt;is&lt;/span&gt; &lt;span class="bp"&gt;None&lt;/span&gt; &lt;span class="ow"&gt;and&lt;/span&gt; &lt;span class="n"&gt;root&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;right&lt;/span&gt; &lt;span class="ow"&gt;is&lt;/span&gt; &lt;span class="bp"&gt;None&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;
-            &lt;span class="n"&gt;values&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;append&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;root&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;val&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
-
-        &lt;span class="bp"&gt;self&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;collect_leafs&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;root&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;left&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;values&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
-        &lt;span class="bp"&gt;self&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;collect_leafs&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;root&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;right&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;values&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
-
-        &lt;span class="k"&gt;return&lt;/span&gt; &lt;span class="n"&gt;values&lt;/span&gt;
-&lt;/pre&gt;&lt;/div&gt;
-&lt;/div&gt;
-&lt;div class="section" id="id3"&gt;
-&lt;h2 id="hidid3"&gt;参考资料&lt;a class="headerlink" href="#hidid3" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
-&lt;ul class="simple"&gt;
-&lt;li&gt;&lt;a class="reference external" href="https://leetcode.com/problems/leaf-similar-trees/"&gt;https://leetcode.com/problems/leaf-similar-trees/&lt;/a&gt;&lt;/li&gt;
 &lt;/ul&gt;
 &lt;/div&gt;
 </summary><category term="Binary-Tree"></category><category term="二叉树"></category></entry></feed>
