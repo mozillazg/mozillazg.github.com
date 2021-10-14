@@ -1,5 +1,69 @@
 <?xml version="1.0" encoding="utf-8"?>
-<feed xmlns="http://www.w3.org/2005/Atom"><title>Huang Huang 的博客</title><link href="https://mozillazg.com/" rel="alternate"></link><link href="https://mozillazg.com/feeds/security.atom.xml" rel="self"></link><id>https://mozillazg.com/</id><updated>2021-08-01T00:00:00+00:00</updated><entry><title>binaryless 容器基础镜像</title><link href="https://mozillazg.com/2021/08/security-binaryless-base-image.html" rel="alternate"></link><updated>2021-08-01T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2021-08-01:2021/08/security-binaryless-base-image.html</id><summary type="html">&lt;p&gt;&lt;a class="reference external" href="https://mozillazg.com/2021/05/security-use-shell-less-and-binary-less-distroless-container-with-root-less-container.html"&gt;前面&lt;/a&gt; 说过会维护一个 binaryless 容器基础镜像的项目，这个基础镜像的项目今天正式发布第一个版本。&lt;/p&gt;
+<feed xmlns="http://www.w3.org/2005/Atom"><title>Huang Huang 的博客</title><link href="https://mozillazg.com/" rel="alternate"></link><link href="https://mozillazg.com/feeds/security.atom.xml" rel="self"></link><id>https://mozillazg.com/</id><updated>2021-10-07T00:00:00+00:00</updated><entry><title>IP 地址解析库的不同实现导致应用存在安全隐患</title><link href="https://mozillazg.com/2021/10/security-ipaddress-risk-with-leading-zeros.html" rel="alternate"></link><updated>2021-10-07T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2021-10-07:2021/10/security-ipaddress-risk-with-leading-zeros.html</id><summary type="html">&lt;p&gt;先来看一个例子，对于 &lt;tt class="docutils literal"&gt;0177.0.0.1&lt;/tt&gt; 这个 IP 地址不同的程序会解析出不同的结果：&lt;/p&gt;
+&lt;p&gt;curl&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+curl 0177.0.0.1 -v
+* Rebuilt URL to: 0177.0.0.1/
+*   Trying 177.0.0.1...
+* TCP_NODELAY set
+&lt;/pre&gt;
+&lt;p&gt;ping&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+$ ping 0177.0.0.1
+PING 0177.0.0.1 (127.0.0.1): 56 data bytes
+64 bytes from 127.0.0.1: icmp_seq=0 ttl=64 time=0.059 ms
+64 bytes from 127.0.0.1: icmp_seq=1 ttl=64 time=0.084 ms
+^C
+&lt;/pre&gt;
+&lt;p&gt;可以看到，对于 &lt;tt class="docutils literal"&gt;0177.0.0.1&lt;/tt&gt; 这个 IP 地址，
+&lt;tt class="docutils literal"&gt;curl&lt;/tt&gt; 将它解析为 &lt;tt class="docutils literal"&gt;177.0.0.1&lt;/tt&gt; ，而 &lt;tt class="docutils literal"&gt;ping&lt;/tt&gt; 却解析为了 &lt;tt class="docutils literal"&gt;127.0.0.1&lt;/tt&gt; 。&lt;/p&gt;
+&lt;p&gt;之所以会有这种不一样的结果，是因为对于应该如何解析 IP 地址中数字前面的 0 并没有一个统一的标准，
+有的程序将这种情况标记为无效 IP ，有些程序将 &lt;tt class="docutils literal"&gt;0xx&lt;/tt&gt; 解析为 8 进制数字，有些程序将它解析为 10 进制数字。&lt;/p&gt;
+&lt;p&gt;正因为存在这种不统一的情况，也就导致应用程序对 IP 地址的校验逻辑存在安全隐患。&lt;/p&gt;
+&lt;p&gt;假设有一个服务的功能是访问用户输入的地址然后返回相应的响应信息，处于安全上的考虑，
+会校验用户的输入，拦截访问服务内部 IP 的地址：&lt;/p&gt;
+&lt;ol class="arabic simple"&gt;
+&lt;li&gt;用户输入 &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;http://0177.0.0.1:8080/path/to/secret&lt;/span&gt;&lt;/tt&gt;&lt;/li&gt;
+&lt;li&gt;服务端的校验程序使用的 IP 解析库将地址中包含的 IP 地址解析为 &lt;tt class="docutils literal"&gt;177.0.0.1&lt;/tt&gt; ，然后放行了该请求&lt;/li&gt;
+&lt;li&gt;实际执行这个请求用户输入的服务，在请求这个地址时，使用的 IP 地址相关库将它解析为了 &lt;tt class="docutils literal"&gt;127.0.0.1&lt;/tt&gt; ，
+此时就会存在安全隐患，导致出现了非预期的结果。&lt;/li&gt;
+&lt;/ol&gt;
+&lt;p&gt;基于 IP 黑名单的 ACL 或者过滤逻辑都有潜在的受这个问题影响的安全隐患， 这一问题的相关 CVE 可以参考【参考资料】中列出的部分 CVE 。&lt;/p&gt;
+&lt;div class="section" id="id1"&gt;
+&lt;h2 id="hidid1"&gt;参考资料&lt;a class="headerlink" href="#hidid1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;ul class="simple"&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://sick.codes/sick-2021-014/"&gt;CVE-2021-29921 - python stdlib &amp;quot;ipaddress&amp;quot; - Improper Input Validation of octal literals in python 3.8.0 thru v3.10 results in indeterminate SSRF &amp;amp; RFI vulnerabilities. - &amp;quot;ipaddress leading zeros in IPv4 address&amp;quot; - Sick Codes - Security Research, Hardware &amp;amp; Software Hacking, Consulting, Linux, IoT, Cloud, Embedded, Arch, Tweaks &amp;amp; Tips!&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://sick.codes/sick-2021-015/"&gt;CVE-2021-29922 - rust standard library &amp;quot;net&amp;quot; - Improper Input Validation of octal literals in rust 1.52.0 std::net and below results in indeterminate SSRF &amp;amp; RFI vulnerabilities. - Sick Codes - Security Research, Hardware &amp;amp; Software Hacking, Consulting, Linux, IoT, Cloud, Embedded, Arch, Tweaks &amp;amp; Tips!&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://sick.codes/sick-2021-016/"&gt;CVE-2021-29923 - golang standard library &amp;quot;net&amp;quot; - Improper Input Validation of octal literals in golang 1.16.2 and below standard library &amp;quot;net&amp;quot; results in indeterminate SSRF &amp;amp; RFI vulnerabilities. - Sick Codes - Security Research, Hardware &amp;amp; Software Hacking, Consulting, Linux, IoT, Cloud, Embedded, Arch, Tweaks &amp;amp; Tips!&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2021-33571"&gt;CVE-2021-33571 – In Django 2.2 before 2.2.24, 3.x before 3.1.12, and 3.2 before 3.2.4, URLValidator, validate_ipv4_address, and validate_ipv46_address do not prohibit leading zero characters in octal literals. This may allow a bypass of access control that is based on IP addresses. (validate_ipv4_address and validate_ipv46_address are unaffected with Python 3.9.5+..) .&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2019-12161"&gt;CVE-2019-12161 – CVE-2019-12161 WPO WebPageTest 19.04 allows SSRF because ValidateURL in www/runtest.php does not consider octal encoding of IP addresses (such as 0300.0250 as a replacement for 192.168).&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2016-4029"&gt;CVE-2016-4029 – WordPress before 4.5 does not consider octal and hexadecimal IP address formats when determining an intranet address, which allows remote attackers to bypass an intended SSRF protection mechanism via a crafted address.&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://bugs.python.org/issue36384"&gt;Issue 36384: [security] CVE-2021-29921: ipaddress Should not reject IPv4 addresses with leading zeroes as ambiguously octal - Python tracker&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://github.com/golang/go/issues/30999"&gt;net: reject leading zeros in IP address parsers [freeze exception] · Issue #30999 · golang/go&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://johnjhacking.com/blog/cve-2020-28360/"&gt;cve-2020-28360 - John J Hacking&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://sick.codes/universal-netmask-npm-package-used-by-270000-projects-vulnerable-to-octal-input-data-server-side-request-forgery-remote-file-inclusion-local-file-inclusion-and-more-cve-2021-28918/"&gt;Universal &amp;quot;netmask&amp;quot; npm package, used by 270,000+ projects, vulnerable to octal input data: server-side request forgery, remote file inclusion, local file inclusion, and more (CVE-2021-28918) - Sick Codes - Security Research, Hardware &amp;amp; Software Hacking, Consulting, Linux, IoT, Cloud, Embedded, Arch, Tweaks &amp;amp; Tips!&lt;/a&gt;&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/div&gt;
+</summary><category term="安全"></category></entry><entry><title>通过给开源项目提交 PR 然后触发 CI 流程的方式获取敏感信息</title><link href="https://mozillazg.com/2021/10/security-the-way-of-sofeware-supply-chain-attack-via-pull-request.html" rel="alternate"></link><updated>2021-10-06T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2021-10-06:2021/10/security-the-way-of-sofeware-supply-chain-attack-via-pull-request.html</id><summary type="html">&lt;p&gt;开源项目的使用越来越广泛，各大公司和个人也积极的参与和开发了不同的开源项目。
+同时开源项目的安全问题也越来越受到广泛的关注，其中即有开源项目代码方面的安全问题，
+也有开源项目使用的第三方服务、开发流程导致的安全问题。&lt;/p&gt;
+&lt;p&gt;这篇文章介绍的是 CI 流程中可能会出现的安全问题：攻击者可以通过给开源项目提交 PR 的方式获取项目开发流程中涉及的 CI 系统中的敏感信息。&lt;/p&gt;
+&lt;p&gt;整个流程如下：&lt;/p&gt;
+&lt;ol class="arabic simple"&gt;
+&lt;li&gt;攻击者 fork 目标开源项目仓库，修改仓库代码增加可以获取 CI 环境中敏感信息代码或者可以在 CI 环境中运行恶意脚本和软件的代码&lt;/li&gt;
+&lt;li&gt;然后工具者将修改后的代码通过 Pull Request 的方式提交到上游项目中（不需要合并代码）&lt;/li&gt;
+&lt;li&gt;一般上游项目在 PR 提交时都会触发项目中设置的 CI 流程，此时 CI 流程中就会运行攻击者修改好的恶意代码&lt;/li&gt;
+&lt;li&gt;如果 CI 环境设置不当或者 CI 服务有安全隐患的话，攻击者就可以通过 CI job 窃取环境中的敏感信息（比如密码、token、ak、证书等信息）、 入侵整个 CI job 所在节点、整个 CI 服务甚至整个公司所有资产。&lt;/li&gt;
+&lt;/ol&gt;
+&lt;p&gt;相关案例可以阅读参考资料中最近爆出的几个安全事项。&lt;/p&gt;
+&lt;div class="section" id="id1"&gt;
+&lt;h2 id="hidid1"&gt;参考资料&lt;a class="headerlink" href="#hidid1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;ul class="simple"&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://arstechnica.com/information-technology/2021/09/travis-ci-flaw-exposed-secrets-for-thousands-of-open-source-projects/"&gt;Travis CI flaw exposed secrets of thousands of open source projects | Ars Technica&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://goteleport.com/blog/hack-via-pull-request/"&gt;How to attack cloud infrastructure via a malicious pull request | Teleport&lt;/a&gt;&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/div&gt;
+</summary><category term="软件供应链安全"></category><category term="supply-chain-security"></category></entry><entry><title>binaryless 容器基础镜像</title><link href="https://mozillazg.com/2021/08/security-binaryless-base-image.html" rel="alternate"></link><updated>2021-08-01T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2021-08-01:2021/08/security-binaryless-base-image.html</id><summary type="html">&lt;p&gt;&lt;a class="reference external" href="https://mozillazg.com/2021/05/security-use-shell-less-and-binary-less-distroless-container-with-root-less-container.html"&gt;前面&lt;/a&gt; 说过会维护一个 binaryless 容器基础镜像的项目，这个基础镜像的项目今天正式发布第一个版本。&lt;/p&gt;
 &lt;p&gt;项目地址：&lt;/p&gt;
 &lt;p&gt;&lt;a class="reference external" href="https://github.com/mozillazg/binaryless"&gt;https://github.com/mozillazg/binaryless&lt;/a&gt;&lt;/p&gt;
 &lt;p&gt;目前提供如下基础镜像:&lt;/p&gt;

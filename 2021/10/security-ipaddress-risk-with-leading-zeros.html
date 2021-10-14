@@ -1,0 +1,383 @@
+<!DOCTYPE html>
+<html lang="zh-hans" prefix="og: http://ogp.me/ns# fb: https://www.facebook.com/2008/fbml" class="han-init">
+<head>
+    <title>IP 地址解析库的不同实现导致应用存在安全隐患 - Huang Huang 的博客</title>
+    <!-- Using the latest rendering mode for IE -->
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <!-- share.css -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/social-share.js@1.0.16/dist/css/share.min.css">
+
+
+    <link href="https://mozillazg.com/favicon.ico" rel="icon">
+
+<link rel="canonical" href="https://mozillazg.com/2021/10/security-ipaddress-risk-with-leading-zeros.html">
+
+        <meta name="author" content="mozillazg" />
+        <meta name="keywords" content="安全" />
+    <meta name="description" content="先来看一个例子，对于 0177.0.0.1 这个 IP 地址不同的程序会解析出不同的结果： curl curl 0177.0.0.1 -v * Rebuilt URL to: 0177.0.0.1/ * Trying 177.0.0.1... * TCP_NODELAY set ping $ ping 0177.0.0.1 PING 0177.0.0.1 (127.0.0.1): 56 data bytes 64 bytes from 127.0.0.1: icmp_seq=0 ttl=64 time=0.059 ms 64 bytes from 127.0.0.1: icmp_seq=1 ttl=64 time=0.084 ms ^C 可以看到，对于 0177.0.0.1 这个 IP 地址， curl 将它解析为 177.0.0.1 ，而 ping 却解析为了 127.0.0.1 。 之所以会有这种不一样的结果，是因为对于应该如何解析 IP 地址中数字前面的 0 并没有一个统一的标准， 有的程序将这种情况标记为无效 IP ，有些程序将 0xx 解析为 8 进制数字，有些程序将它解析为 10 进制数字。 正因为存在这种不统一的情况，也就导致应用程序对 IP 地址的校验逻辑存在安全隐患。 假设有一个服务的功能是访问用户输入的地址然后返回相应的响应信息，处于安全上的考虑， 会校验用户的输入，拦截访问服务内部 IP 的地址： 用户输入 http://0177.0.0.1:8080/path/to/secret 服务端的校验程序使用的 IP 解析库将地址中包含的 IP 地址解析为 177.0.0.1 ，然后放行了该请求 实际执行这个请求用户输入的服务，在请求这个地址时，使用的 IP 地址相关库将它解析为了 127.0.0.1 ， 此时就会存在安全隐患，导致出现了非预期的结果。 基于 IP 黑名单的 ACL 或者过滤逻辑都有潜在的受这个问题影响的安全隐患， 这一问题的相关 CVE 可以参考【参考资料】中列出的部分 CVE 。 参考资料¶ CVE-2021-29921 - python stdlib &#34;ipaddress&#34; - Improper Input Validation of octal literals in python 3.8.0 thru v3.10 results in indeterminate SSRF &amp; RFI vulnerabilities. - &#34;ipaddress leading zeros in IPv4 address&#34; - Sick Codes - Security Research, Hardware &amp; Software Hacking, Consulting, Linux, IoT, Cloud, Embedded, Arch, Tweaks &amp; Tips! CVE-2021-29922 - rust standard library &#34;net&#34; - Improper Input Validation of octal literals in rust 1.52.0 std::net and below results in indeterminate SSRF &amp; RFI vulnerabilities. - Sick Codes - Security Research, Hardware &amp; Software Hacking, Consulting, Linux, IoT, Cloud, Embedded, Arch, Tweaks &amp; Tips! CVE-2021-29923 - golang standard library &#34;net&#34; - Improper Input Validation of octal literals in golang 1.16.2 and below standard library &#34;net&#34; results in indeterminate SSRF &amp; RFI vulnerabilities. - Sick Codes - Security Research, Hardware &amp; Software Hacking, Consulting, Linux, IoT, Cloud, Embedded, Arch, Tweaks &amp; Tips! CVE-2021-33571 – In Django 2.2 before 2.2.24, 3.x before 3.1.12, and 3.2 before 3.2.4, URLValidator, validate_ipv4_address, and validate_ipv46_address do not prohibit leading zero characters in octal literals. This may allow a bypass of access control that is based on IP addresses. (validate_ipv4_address and validate_ipv46_address are unaffected with Python 3.9.5+..) . CVE-2019-12161 – CVE-2019-12161 WPO WebPageTest 19.04 allows SSRF because ValidateURL in www/runtest.php does not consider octal encoding of IP addresses (such as 0300.0250 as a replacement for 192.168). CVE-2016-4029 – WordPress before 4.5 does not consider octal and hexadecimal IP address formats when determining an intranet address, which allows remote attackers to bypass an intended SSRF protection mechanism via a crafted address. Issue 36384: [security] CVE-2021-29921: ipaddress Should not reject IPv4 addresses with leading zeroes as ambiguously octal - Python tracker net: reject leading zeros in IP address parsers [freeze exception] · Issue #30999 · golang/go cve-2020-28360 - John J Hacking Universal &#34;netmask&#34; npm package, used by 270,000+ projects, vulnerable to octal input data: server-side request forgery, remote file inclusion, local file inclusion, and more (CVE-2021-28918) - Sick Codes - Security Research, Hardware &amp; Software Hacking, Consulting, Linux, IoT, Cloud, Embedded, Arch, Tweaks &amp; Tips!" />
+
+    <style>
+      .js-toc {
+        margin-bottom: 20px;
+      }
+      .donate-modal {
+        text-align: center;
+      }
+      #donate-modal-container .donate-image {
+        max-height: 300px !important;
+        min-height: inherit !important;
+      }
+    </style>
+
+        <meta property="og:site_name" content="Huang Huang 的博客" />
+        <meta property="og:type" content="article"/>
+        <meta property="og:title" content="IP 地址解析库的不同实现导致应用存在安全隐患"/>
+        <meta property="og:url" content="https://mozillazg.com/2021/10/security-ipaddress-risk-with-leading-zeros.html"/>
+        <meta property="og:description" content="先来看一个例子，对于 0177.0.0.1 这个 IP 地址不同的程序会解析出不同的结果： curl curl 0177.0.0.1 -v * Rebuilt URL to: 0177.0.0.1/ * Trying 177.0.0.1... * TCP_NODELAY set ping $ ping 0177.0.0.1 PING 0177.0.0.1 (127.0.0.1): 56 data bytes 64 bytes from 127.0.0.1: icmp_seq=0 ttl=64 time=0.059 ms 64 bytes from 127.0.0.1: icmp_seq=1 ttl=64 time=0.084 ms ^C 可以看到，对于 0177.0.0.1 这个 IP 地址， curl 将它解析为 177.0.0.1 ，而 ping 却解析为了 127.0.0.1 。 之所以会有这种不一样的结果，是因为对于应该如何解析 IP 地址中数字前面的 0 并没有一个统一的标准， 有的程序将这种情况标记为无效 IP ，有些程序将 0xx 解析为 8 进制数字，有些程序将它解析为 10 进制数字。 正因为存在这种不统一的情况，也就导致应用程序对 IP 地址的校验逻辑存在安全隐患。 假设有一个服务的功能是访问用户输入的地址然后返回相应的响应信息，处于安全上的考虑， 会校验用户的输入，拦截访问服务内部 IP 的地址： 用户输入 http://0177.0.0.1:8080/path/to/secret 服务端的校验程序使用的 IP 解析库将地址中包含的 IP 地址解析为 177.0.0.1 ，然后放行了该请求 实际执行这个请求用户输入的服务，在请求这个地址时，使用的 IP 地址相关库将它解析为了 127.0.0.1 ， 此时就会存在安全隐患，导致出现了非预期的结果。 基于 IP 黑名单的 ACL 或者过滤逻辑都有潜在的受这个问题影响的安全隐患， 这一问题的相关 CVE 可以参考【参考资料】中列出的部分 CVE 。 参考资料¶ CVE-2021-29921 - python stdlib &#34;ipaddress&#34; - Improper Input Validation of octal literals in python 3.8.0 thru v3.10 results in indeterminate SSRF &amp; RFI vulnerabilities. - &#34;ipaddress leading zeros in IPv4 address&#34; - Sick Codes - Security Research, Hardware &amp; Software Hacking, Consulting, Linux, IoT, Cloud, Embedded, Arch, Tweaks &amp; Tips! CVE-2021-29922 - rust standard library &#34;net&#34; - Improper Input Validation of octal literals in rust 1.52.0 std::net and below results in indeterminate SSRF &amp; RFI vulnerabilities. - Sick Codes - Security Research, Hardware &amp; Software Hacking, Consulting, Linux, IoT, Cloud, Embedded, Arch, Tweaks &amp; Tips! CVE-2021-29923 - golang standard library &#34;net&#34; - Improper Input Validation of octal literals in golang 1.16.2 and below standard library &#34;net&#34; results in indeterminate SSRF &amp; RFI vulnerabilities. - Sick Codes - Security Research, Hardware &amp; Software Hacking, Consulting, Linux, IoT, Cloud, Embedded, Arch, Tweaks &amp; Tips! CVE-2021-33571 – In Django 2.2 before 2.2.24, 3.x before 3.1.12, and 3.2 before 3.2.4, URLValidator, validate_ipv4_address, and validate_ipv46_address do not prohibit leading zero characters in octal literals. This may allow a bypass of access control that is based on IP addresses. (validate_ipv4_address and validate_ipv46_address are unaffected with Python 3.9.5+..) . CVE-2019-12161 – CVE-2019-12161 WPO WebPageTest 19.04 allows SSRF because ValidateURL in www/runtest.php does not consider octal encoding of IP addresses (such as 0300.0250 as a replacement for 192.168). CVE-2016-4029 – WordPress before 4.5 does not consider octal and hexadecimal IP address formats when determining an intranet address, which allows remote attackers to bypass an intended SSRF protection mechanism via a crafted address. Issue 36384: [security] CVE-2021-29921: ipaddress Should not reject IPv4 addresses with leading zeroes as ambiguously octal - Python tracker net: reject leading zeros in IP address parsers [freeze exception] · Issue #30999 · golang/go cve-2020-28360 - John J Hacking Universal &#34;netmask&#34; npm package, used by 270,000+ projects, vulnerable to octal input data: server-side request forgery, remote file inclusion, local file inclusion, and more (CVE-2021-28918) - Sick Codes - Security Research, Hardware &amp; Software Hacking, Consulting, Linux, IoT, Cloud, Embedded, Arch, Tweaks &amp; Tips!"/>
+        <meta property="article:published_time" content="2021-10-07" />
+            <meta property="article:section" content="security" />
+            <meta property="article:tag" content="安全" />
+            <meta property="article:author" content="mozillazg" />
+            <meta property="og:image"
+                  content="https://mozillazg.com/static/avatar.jpeg"/>
+
+
+    <meta name="twitter:card" content="summary">
+        <meta name="twitter:site" content="@mozillazg">
+        <meta name="twitter:creator" content="@mozillazg">
+    <meta name="twitter:domain" content="https://mozillazg.com">
+            <meta property="twitter:image"
+                  content="https://mozillazg.com/static/avatar.jpeg"/>
+
+    <!-- Bootstrap -->
+        <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@3.3.4/dist/css/bootstrap.min.css" type="text/css"/>
+    <link href="https://cdn.jsdelivr.net/npm/font-awesome@4.3.0/css/font-awesome.min.css" rel="stylesheet">
+
+    <link href="https://cdn.jsdelivr.net/npm/pygments-css@1.0.0/github.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://mozillazg.com/theme/css/style.css" type="text/css"/>
+            <link href="https://mozillazg.com/static/custom.css" rel="stylesheet">
+
+        <link href="https://mozillazg.com/feeds/all.atom.xml" type="application/atom+xml" rel="alternate"
+              title="Huang Huang 的博客 ATOM Feed"/>
+
+        <link href="https://mozillazg.com/feeds/all.rss.xml" type="application/rss+xml" rel="alternate"
+              title="Huang Huang 的博客 RSS Feed"/>
+
+
+        <link href="https://mozillazg.com/feeds/security.atom.xml" type="application/atom+xml" rel="alternate"
+              title="Huang Huang 的博客 security ATOM Feed"/>
+
+
+    <script type="application/ld+json">
+    {
+        "@context": "https://schema.org",
+        "@type": "Website",
+        "publisher": {
+            "@type": "Person",
+            "name": "mozillazg",
+            "logo": "https://mozillazg.com/static/avatar.jpeg"
+        },
+        "author": {
+            "@type": "Person",
+            "name": "mozillazg",
+            "image": "https://mozillazg.com/static/avatar.jpeg",
+            "url": "https://mozillazg.com",
+            "sameAs": []
+        },
+        // "headline": "",
+        "url": "https://mozillazg.com/2021/10/security-ipaddress-risk-with-leading-zeros.html",
+        "datePublished": "2021-10-07",
+        // "dateModified": "",
+        "image": "https://mozillazg.com/static/avatar.jpeg",
+        "keywords": "安全",
+        "description": "先来看一个例子，对于 0177.0.0.1 这个 IP 地址不同的程序会解析出不同的结果： curl curl 0177.0.0.1 -v * Rebuilt URL to: 0177.0.0.1/ * Trying 177.0.0.1... * TCP_NODELAY set ping $ ping 0177.0.0.1 PING 0177.0.0.1 (127.0.0.1): 56 data bytes 64 bytes from 127.0.0.1: icmp_seq=0 ttl=64 time=0.059 ms 64 bytes from 127.0.0.1: icmp_seq=1 ttl=64 time=0.084 ms ^C 可以看到，对于 0177.0.0.1 这个 IP 地址， curl 将它解析为 177.0.0.1 ，而 ping 却解析为了 127.0.0.1 。 之所以会有这种不一样的结果，是因为对于应该如何解析 IP 地址中数字前面的 0 并没有一个统一的标准， 有的程序将这种情况标记为无效 IP ，有些程序将 0xx 解析为 8 进制数字，有些程序将它解析为 10 进制数字。 正因为存在这种不统一的情况，也就导致应用程序对 IP 地址的校验逻辑存在安全隐患。 假设有一个服务的功能是访问用户输入的地址然后返回相应的响应信息，处于安全上的考虑， 会校验用户的输入，拦截访问服务内部 IP 的地址： 用户输入 http://0177.0.0.1:8080/path/to/secret 服务端的校验程序使用的 IP 解析库将地址中包含的 IP 地址解析为 177.0.0.1 ，然后放行了该请求 实际执行这个请求用户输入的服务，在请求这个地址时，使用的 IP 地址相关库将它解析为了 127.0.0.1 ， 此时就会存在安全隐患，导致出现了非预期的结果。 基于 IP 黑名单的 ACL 或者过滤逻辑都有潜在的受这个问题影响的安全隐患， 这一问题的相关 CVE 可以参考【参考资料】中列出的部分 CVE 。 参考资料¶ CVE-2021-29921 - python stdlib &#34;ipaddress&#34; - Improper Input Validation of octal literals in python 3.8.0 thru v3.10 results in indeterminate SSRF &amp; RFI vulnerabilities. - &#34;ipaddress leading zeros in IPv4 address&#34; - Sick Codes - Security Research, Hardware &amp; Software Hacking, Consulting, Linux, IoT, Cloud, Embedded, Arch, Tweaks &amp; Tips! CVE-2021-29922 - rust standard library &#34;net&#34; - Improper Input Validation of octal literals in rust 1.52.0 std::net and below results in indeterminate SSRF &amp; RFI vulnerabilities. - Sick Codes - Security Research, Hardware &amp; Software Hacking, Consulting, Linux, IoT, Cloud, Embedded, Arch, Tweaks &amp; Tips! CVE-2021-29923 - golang standard library &#34;net&#34; - Improper Input Validation of octal literals in golang 1.16.2 and below standard library &#34;net&#34; results in indeterminate SSRF &amp; RFI vulnerabilities. - Sick Codes - Security Research, Hardware &amp; Software Hacking, Consulting, Linux, IoT, Cloud, Embedded, Arch, Tweaks &amp; Tips! CVE-2021-33571 – In Django 2.2 before 2.2.24, 3.x before 3.1.12, and 3.2 before 3.2.4, URLValidator, validate_ipv4_address, and validate_ipv46_address do not prohibit leading zero characters in octal literals. This may allow a bypass of access control that is based on IP addresses. (validate_ipv4_address and validate_ipv46_address are unaffected with Python 3.9.5+..) . CVE-2019-12161 – CVE-2019-12161 WPO WebPageTest 19.04 allows SSRF because ValidateURL in www/runtest.php does not consider octal encoding of IP addresses (such as 0300.0250 as a replacement for 192.168). CVE-2016-4029 – WordPress before 4.5 does not consider octal and hexadecimal IP address formats when determining an intranet address, which allows remote attackers to bypass an intended SSRF protection mechanism via a crafted address. Issue 36384: [security] CVE-2021-29921: ipaddress Should not reject IPv4 addresses with leading zeroes as ambiguously octal - Python tracker net: reject leading zeros in IP address parsers [freeze exception] · Issue #30999 · golang/go cve-2020-28360 - John J Hacking Universal &#34;netmask&#34; npm package, used by 270,000+ projects, vulnerable to octal input data: server-side request forgery, remote file inclusion, local file inclusion, and more (CVE-2021-28918) - Sick Codes - Security Research, Hardware &amp; Software Hacking, Consulting, Linux, IoT, Cloud, Embedded, Arch, Tweaks &amp; Tips!",
+        "mainEntityOfPage": {
+            "@type": "WebPage",
+            "@id": "https://mozillazg.com"
+        }
+    }
+    </script>
+
+</head>
+<body>
+
+<div class="navbar" role="navigation">
+	<div class="container">
+        <div class="navbar-header">
+            <button type="button" class="navbar-toggle" data-toggle="collapse" data-target=".navbar-ex1-collapse">
+                <span class="sr-only">Toggle navigation</span>
+                <span class="icon-bar"></span>
+                <span class="icon-bar"></span>
+                <span class="icon-bar"></span>
+            </button>
+            <a href="https://mozillazg.com/" class="navbar-brand">
+Huang Huang 的博客            </a>
+        </div>
+        <div class="collapse navbar-collapse navbar-ex1-collapse">
+            <ul class="nav navbar-nav">
+                    <li><a href="https://mozillazg.com/feeds/all.atom.xml">Feed</a></li>
+                    <li><a href="/2014/10/pages/about-me.html">About</a></li>
+            </ul>
+            <ul class="nav navbar-nav navbar-right">
+              <li><a href="https://mozillazg.com/archives.html"><i class="fa fa-th-list"></i><span class="icon-label">Archives</span></a></li>
+            </ul>
+        </div>
+        <!-- /.navbar-collapse -->
+    </div>
+</div> <!-- /.navbar -->
+<!-- Banner -->
+<!-- End Banner -->
+<div class="container">
+    <div class="row">
+        <div class="col-lg-12">
+    <section id="content" class="yue">
+        <article>
+            <header class="text-center">
+                <h1>
+                    <a href="https://mozillazg.com/2021/10/security-ipaddress-risk-with-leading-zeros.html"
+                       rel="bookmark"
+                       title="Permalink to IP 地址解析库的不同实现导致应用存在安全隐患">
+                        IP 地址解析库的不同实现导致应用存在安全隐患
+                    </a>
+                </h1>
+                <p class="published">
+                    <time datetime="2021-10-07T00:00:00+00:00">
+                    2021-10-07
+                    </time>
+                </p>
+            </header>
+            <div class="entry-content">
+                <div class="well-sm article-info">
+<footer class="post-info">
+        <a href="https://mozillazg.com/category/security.html">security</a>
+
+
+<span class="label label-default hide">Tags</span>
+	<a href="https://mozillazg.com/tag/an-quan.html">安全</a>
+    
+</footer><!-- /.post-info -->                </div>
+                <div class="js-toc"></div>
+                <div>
+                <p>先来看一个例子，对于 <tt class="docutils literal">0177.0.0.1</tt> 这个 IP 地址不同的程序会解析出不同的结果：</p>
+<p>curl</p>
+<pre class="literal-block">
+curl 0177.0.0.1 -v
+* Rebuilt URL to: 0177.0.0.1/
+*   Trying 177.0.0.1...
+* TCP_NODELAY set
+</pre>
+<p>ping</p>
+<pre class="literal-block">
+$ ping 0177.0.0.1
+PING 0177.0.0.1 (127.0.0.1): 56 data bytes
+64 bytes from 127.0.0.1: icmp_seq=0 ttl=64 time=0.059 ms
+64 bytes from 127.0.0.1: icmp_seq=1 ttl=64 time=0.084 ms
+^C
+</pre>
+<p>可以看到，对于 <tt class="docutils literal">0177.0.0.1</tt> 这个 IP 地址，
+<tt class="docutils literal">curl</tt> 将它解析为 <tt class="docutils literal">177.0.0.1</tt> ，而 <tt class="docutils literal">ping</tt> 却解析为了 <tt class="docutils literal">127.0.0.1</tt> 。</p>
+<p>之所以会有这种不一样的结果，是因为对于应该如何解析 IP 地址中数字前面的 0 并没有一个统一的标准，
+有的程序将这种情况标记为无效 IP ，有些程序将 <tt class="docutils literal">0xx</tt> 解析为 8 进制数字，有些程序将它解析为 10 进制数字。</p>
+<p>正因为存在这种不统一的情况，也就导致应用程序对 IP 地址的校验逻辑存在安全隐患。</p>
+<p>假设有一个服务的功能是访问用户输入的地址然后返回相应的响应信息，处于安全上的考虑，
+会校验用户的输入，拦截访问服务内部 IP 的地址：</p>
+<ol class="arabic simple">
+<li>用户输入 <tt class="docutils literal"><span class="pre">http://0177.0.0.1:8080/path/to/secret</span></tt></li>
+<li>服务端的校验程序使用的 IP 解析库将地址中包含的 IP 地址解析为 <tt class="docutils literal">177.0.0.1</tt> ，然后放行了该请求</li>
+<li>实际执行这个请求用户输入的服务，在请求这个地址时，使用的 IP 地址相关库将它解析为了 <tt class="docutils literal">127.0.0.1</tt> ，
+此时就会存在安全隐患，导致出现了非预期的结果。</li>
+</ol>
+<p>基于 IP 黑名单的 ACL 或者过滤逻辑都有潜在的受这个问题影响的安全隐患， 这一问题的相关 CVE 可以参考【参考资料】中列出的部分 CVE 。</p>
+<div class="section" id="id1">
+<h2 id="hidid1">参考资料<a class="headerlink" href="#hidid1" title="Permalink to this headline">¶</a></h2>
+<ul class="simple">
+<li><a class="reference external" href="https://sick.codes/sick-2021-014/">CVE-2021-29921 - python stdlib &quot;ipaddress&quot; - Improper Input Validation of octal literals in python 3.8.0 thru v3.10 results in indeterminate SSRF &amp; RFI vulnerabilities. - &quot;ipaddress leading zeros in IPv4 address&quot; - Sick Codes - Security Research, Hardware &amp; Software Hacking, Consulting, Linux, IoT, Cloud, Embedded, Arch, Tweaks &amp; Tips!</a></li>
+<li><a class="reference external" href="https://sick.codes/sick-2021-015/">CVE-2021-29922 - rust standard library &quot;net&quot; - Improper Input Validation of octal literals in rust 1.52.0 std::net and below results in indeterminate SSRF &amp; RFI vulnerabilities. - Sick Codes - Security Research, Hardware &amp; Software Hacking, Consulting, Linux, IoT, Cloud, Embedded, Arch, Tweaks &amp; Tips!</a></li>
+<li><a class="reference external" href="https://sick.codes/sick-2021-016/">CVE-2021-29923 - golang standard library &quot;net&quot; - Improper Input Validation of octal literals in golang 1.16.2 and below standard library &quot;net&quot; results in indeterminate SSRF &amp; RFI vulnerabilities. - Sick Codes - Security Research, Hardware &amp; Software Hacking, Consulting, Linux, IoT, Cloud, Embedded, Arch, Tweaks &amp; Tips!</a></li>
+<li><a class="reference external" href="https://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2021-33571">CVE-2021-33571 – In Django 2.2 before 2.2.24, 3.x before 3.1.12, and 3.2 before 3.2.4, URLValidator, validate_ipv4_address, and validate_ipv46_address do not prohibit leading zero characters in octal literals. This may allow a bypass of access control that is based on IP addresses. (validate_ipv4_address and validate_ipv46_address are unaffected with Python 3.9.5+..) .</a></li>
+<li><a class="reference external" href="https://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2019-12161">CVE-2019-12161 – CVE-2019-12161 WPO WebPageTest 19.04 allows SSRF because ValidateURL in www/runtest.php does not consider octal encoding of IP addresses (such as 0300.0250 as a replacement for 192.168).</a></li>
+<li><a class="reference external" href="https://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2016-4029">CVE-2016-4029 – WordPress before 4.5 does not consider octal and hexadecimal IP address formats when determining an intranet address, which allows remote attackers to bypass an intended SSRF protection mechanism via a crafted address.</a></li>
+<li><a class="reference external" href="https://bugs.python.org/issue36384">Issue 36384: [security] CVE-2021-29921: ipaddress Should not reject IPv4 addresses with leading zeroes as ambiguously octal - Python tracker</a></li>
+<li><a class="reference external" href="https://github.com/golang/go/issues/30999">net: reject leading zeros in IP address parsers [freeze exception] · Issue #30999 · golang/go</a></li>
+<li><a class="reference external" href="https://johnjhacking.com/blog/cve-2020-28360/">cve-2020-28360 - John J Hacking</a></li>
+<li><a class="reference external" href="https://sick.codes/universal-netmask-npm-package-used-by-270000-projects-vulnerable-to-octal-input-data-server-side-request-forgery-remote-file-inclusion-local-file-inclusion-and-more-cve-2021-28918/">Universal &quot;netmask&quot; npm package, used by 270,000+ projects, vulnerable to octal input data: server-side request forgery, remote file inclusion, local file inclusion, and more (CVE-2021-28918) - Sick Codes - Security Research, Hardware &amp; Software Hacking, Consulting, Linux, IoT, Cloud, Embedded, Arch, Tweaks &amp; Tips!</a></li>
+</ul>
+</div>
+
+                </div>
+            </div>
+            <!-- /.entry-content -->
+<section class="text-center">
+  
+<div id="donate"></div>
+
+<div class="social-share"></div>
+<div class="social-comment-note">
+<p>有任何建议和想法欢迎在下方评论区留言或者加我<a href="/static/wechat.png">微信</a>交流</p>
+</div>
+
+</section>
+<section class="well" id="related-posts">
+    <p>Related Posts:</p>
+    <ul>
+        <li><a href="https://mozillazg.com/2016/05/python-some-security-problems-about-use-exec-function.rst.html">在 python 中使用 exec 函数时需要注意的一些安全问题</a></li>
+    </ul>
+</section>
+    <hr/>
+    <section class="comments" id="comments">
+        <h2>Comments</h2>
+
+        <div id="disqus_thread"></div>
+        <script type="text/javascript">
+            /* * * CONFIGURATION VARIABLES: EDIT BEFORE PASTING INTO YOUR WEBPAGE * * */
+            var disqus_shortname = 'my-github-blog'; // required: replace example with your forum shortname
+
+                    var disqus_identifier = 'security-ipaddress-risk-with-leading-zeros';
+                var disqus_url = 'https://mozillazg.com/2021/10/security-ipaddress-risk-with-leading-zeros.html';
+
+            var disqus_config = function () {
+                this.language = "zh-hans";
+            };
+
+            /* * * DON'T EDIT BELOW THIS LINE * * */
+            (function () {
+                var dsq = document.createElement('script');
+                dsq.type = 'text/javascript';
+                dsq.async = true;
+                dsq.src = '//' + disqus_shortname + '.disqus.com/embed.js';
+                (document.getElementsByTagName('head')[0] || document.getElementsByTagName('body')[0]).appendChild(dsq);
+            })();
+        </script>
+        <noscript>Please enable JavaScript to view the <a href="http://disqus.com/?ref_noscript">comments powered by
+            Disqus.</a></noscript>
+        <a href="http://disqus.com" class="dsq-brlink">comments powered by <span class="logo-disqus">Disqus</span></a>
+
+    </section>
+        </article>
+    </section>
+
+        </div>
+    </div>
+</div>
+<footer>
+   <div class="container">
+      <hr>
+      <div class="row">
+         <div class="col-xs-10">&copy; 2021 mozillazg
+            &middot; Powered by <a href="https://github.com/DandyDev/pelican-bootstrap3" target="_blank">pelican-bootstrap3</a>,
+            <a href="http://docs.getpelican.com/" target="_blank">Pelican</a>,
+            <a href="http://getbootstrap.com" target="_blank">Bootstrap</a>              <p><small>  <a rel="license" href="http://creativecommons.org/licenses/by-sa/4.0/"><img alt="Creative Commons License" style="border-width:0" src="/static/images/by-sa-80x15.png" /></a>
+    &quot;<span xmlns:dct="http://purl.org/dc/terms/" property="dct:title">Huang Huang 的博客</span>&quot; by <a xmlns:cc="http://creativecommons.org/ns#" href="https://mozillazg.com" property="cc:attributionName" rel="cc:attributionURL">mozillazg</a> is
+  licensed under a <a rel="license" href="http://creativecommons.org/licenses/by-sa/4.0/">Creative Commons Attribution-ShareAlike 4.0 International License</a>, except where indicated otherwise.
+</small></p>
+         </div>
+         <div class="col-xs-2"><p class="pull-right"><i class="fa fa-arrow-up"></i> <a href="#">Back to top</a></p></div>
+      </div>
+   </div>
+</footer>
+<script src="https://cdn.jsdelivr.net/npm/jquery@2.1.1/dist/jquery.min.js"></script>
+
+<!-- Include all compiled plugins (below), or include individual files as needed -->
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@3.3.4/dist/js/bootstrap.min.js"></script>
+
+<!-- Enable responsive features in IE8 with Respond.js (https://github.com/scottjehl/Respond) -->
+
+    <!-- Disqus -->
+    <script type="text/javascript">
+        /* * * CONFIGURATION VARIABLES: EDIT BEFORE PASTING INTO YOUR WEBPAGE * * */
+        var disqus_shortname = 'my-github-blog'; // required: replace example with your forum shortname
+
+        /* * * DON'T EDIT BELOW THIS LINE * * */
+        (function () {
+            var s = document.createElement('script');
+            s.async = true;
+            s.type = 'text/javascript';
+            s.src = '//' + disqus_shortname + '.disqus.com/count.js';
+            (document.getElementsByTagName('HEAD')[0] || document.getElementsByTagName('BODY')[0]).appendChild(s);
+        }());
+    </script>
+    <!-- End Disqus Code -->
+    <!-- Google Analytics Universal -->
+    <script type="text/javascript">
+        (function(i,s,o,g,r,a,m){i['GoogleAnalyticsObject']=r;i[r]=i[r]||function(){
+        (i[r].q=i[r].q||[]).push(arguments)},i[r].l=1*new Date();a=s.createElement(o),
+        m=s.getElementsByTagName(o)[0];a.async=1;a.src=g;m.parentNode.insertBefore(a,m)
+        })(window,document,'script','//www.google-analytics.com/analytics.js','ga');
+
+        ga('create', 'UA-77172981-1', 'auto');
+        ga('send', 'pageview');
+    </script>
+    <!-- End Google Analytics Universal Code -->
+
+<!-- share.js -->
+<script src="https://cdn.jsdelivr.net/npm/social-share.js@1.0.16/dist/js/social-share.min.js"></script>
+
+
+
+<script src="https://cdn.jsdelivr.net/npm/tocbot@3.0.2/dist/tocbot.min.js"></script>
+<script>
+$(document).ready(function(){
+  tocbot.init({
+    // Where to render the table of contents.
+    tocSelector: '.js-toc',
+    // Where to grab the headings to build the table of contents.
+    contentSelector: '.entry-content',
+    // Which headings to grab inside of the contentSelector element.
+    headingSelector: 'h2, h3, h4,h5',
+    // Headings that match the ignoreSelector will be skipped.
+    ignoreSelector: '.js-toc-ignore',
+    // Main class to add to links.
+    linkClass: 'toc-link',
+    // Extra classes to add to links.
+    extraLinkClasses: '',
+    // Class to add to active links,
+    // the link corresponding to the top most heading on the page.
+    activeLinkClass: 'is-active-link',
+    // Main class to add to lists.
+    listClass: 'toc-list',
+    // Extra classes to add to lists.
+    extraListClasses: '',
+    // Class that gets added when a list should be collapsed.
+    isCollapsedClass: 'is-collapsed',
+    // Class that gets added when a list should be able
+    // to be collapsed but isn't necessarily collpased.
+    collapsibleClass: 'is-collapsible',
+    // Class to add to list items.
+    listItemClass: 'toc-list-item',
+    // How many heading levels should not be collpased.
+    // For example, number 6 will show everything since
+    // there are only 6 heading levels and number 0 will collpase them all.
+    // The sections that are hidden will open
+    // and close as you scroll to headings within them.
+    collapseDepth: 6,
+    // Smooth scrolling enabled.
+    smoothScroll: true,
+    // Smooth scroll duration.
+    smoothScrollDuration: 420,
+    // Callback for scroll end (requires: smoothScroll).
+    scrollEndCallback: function (e) {},
+    // Headings offset between the headings and the top of the document (this is meant for minor adjustments).
+    headingsOffset: 0,
+    // Timeout between events firing to make sure it's
+    // not too rapid (for performance reasons).
+    throttleTimeout: 50,
+    // Element to add the positionFixedClass to.
+    positionFixedSelector: null,
+    // Fixed position class to add to make sidebar fixed after scrolling
+    // down past the fixedSidebarOffset.
+    positionFixedClass: 'is-position-fixed',
+    // fixedSidebarOffset can be any number but by default is set
+    // to auto which sets the fixedSidebarOffset to the sidebar
+    // element's offsetTop from the top of the document on init.
+    fixedSidebarOffset: 'auto',
+    // includeHtml can be set to true to include the HTML markup from the
+    // heading node instead of just including the textContent.
+    includeHtml: false
+  });
+});
+</script>
+</body>
+</html>

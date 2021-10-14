@@ -1,5 +1,254 @@
 <?xml version="1.0" encoding="utf-8"?>
-<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom"><channel><title>Huang Huang 的博客</title><link>https://mozillazg.com/</link><description></description><atom:link href="https://mozillazg.com/feeds/mozillazg.rss.xml" rel="self"></atom:link><lastBuildDate>Sun, 01 Aug 2021 00:00:00 +0000</lastBuildDate><item><title>binaryless 容器基础镜像</title><link>https://mozillazg.com/2021/08/security-binaryless-base-image.html</link><description>&lt;p&gt;&lt;a class="reference external" href="https://mozillazg.com/2021/05/security-use-shell-less-and-binary-less-distroless-container-with-root-less-container.html"&gt;前面&lt;/a&gt; 说过会维护一个 binaryless 容器基础镜像的项目，这个基础镜像的项目今天正式发布第一个版本。&lt;/p&gt;
+<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom"><channel><title>Huang Huang 的博客</title><link>https://mozillazg.com/</link><description></description><atom:link href="https://mozillazg.com/feeds/mozillazg.rss.xml" rel="self"></atom:link><lastBuildDate>Thu, 07 Oct 2021 00:00:00 +0000</lastBuildDate><item><title>从编译后的二进制可执行文件中解析 Go 项目的依赖包信息</title><link>https://mozillazg.com/2021/10/go-find-package-info-from-binary-file.html</link><description>&lt;p&gt;本文介绍从编译后的二进制可执行文件中解析原 Go 项目中的依赖包信息的一些方法，
+解决类似：接手一个老项目但是这个老项目中又依赖了另一个老项目的二进制可执行文件，
+导致无法知道这个二进制可执行文件具体是其对应源代码仓库的哪个版本的代码编译出来的尴尬情况，
+通过依赖包信息间接定位源码版本（无法完全实现这个需求，还需要结合代码仓库变更历史等手段）。&lt;/p&gt;
+&lt;!-- 使用 Go module 的项目 --&gt;
+&lt;!-- ========================== --&gt;
+&lt;div class="section" id="go-version"&gt;
+&lt;h2 id="hidgo-version"&gt;go version 命令&lt;a class="headerlink" href="#hidgo-version" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;可以先尝试使用 &lt;tt class="docutils literal"&gt;go version&lt;/tt&gt; 命令获取二进制文件中包含的依赖包信息：&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;$ go version -m go-bin
+go-bin: go1.17.1
+        path    github.com/mozillazg/go-bin-dep-sample/gomodule
+        mod     github.com/mozillazg/go-bin-dep-sample/gomodule &lt;span class="o"&gt;(&lt;/span&gt;devel&lt;span class="o"&gt;)&lt;/span&gt;
+        dep     github.com/mozillazg/go-pinyin  v0.18.0 h1:hQompXO23/0ohH8YNjvfsAITnCQImCiR/Fny8EhIeW0&lt;span class="o"&gt;=&lt;/span&gt;
+&lt;/pre&gt;&lt;/div&gt;
+&lt;/div&gt;
+&lt;div class="section" id="strings"&gt;
+&lt;h2&gt;&lt;tt class="docutils literal"&gt;strings&lt;/tt&gt; 命令&lt;/h2&gt;
+&lt;p&gt;也可以使用 &lt;tt class="docutils literal"&gt;strings&lt;/tt&gt; 命令获取二进制文件中的信息:&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;$ strings go-bin &lt;span class="p"&gt;|&lt;/span&gt;grep github.com
+github.com/mozillazg/go-bin-dep-sample/gomodule
+github.com/mozillazg/go-bin-dep-sample/gomodule
+github.com/mozillazg/go-pinyin
+github.com/mozillazg/go-pinyin.initial
+...
+github.com/mozillazg/go-pinyin.NewArgs
+/go/pkg/mod/github.com/mozillazg/go-pinyin@v0.18.0/pinyin.go
+/go/pkg/mod/github.com/mozillazg/go-pinyin@v0.18.0/phonetic_symbol.go
+/go/pkg/mod/github.com/mozillazg/go-pinyin@v0.18.0/pinyin_dict.go
+/go/src/github.com/mozillazg/go-bin-dep-sample/gomodule/main.go
+github.com/mozillazg/go-pinyin.initial
+...
+github.com/mozillazg/go-pinyin.PinyinDict
+&lt;/pre&gt;&lt;/div&gt;
+&lt;/div&gt;
+&lt;div class="section" id="go-tool-nm"&gt;
+&lt;h2 id="hidgo-tool-nm"&gt;go tool nm 命令&lt;a class="headerlink" href="#hidgo-tool-nm" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;&lt;tt class="docutils literal"&gt;go tool nm&lt;/tt&gt; 命令也可以得到相关信息:&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;$ go tool nm go-bin &lt;span class="p"&gt;|&lt;/span&gt;grep github.com
+  64ab00 D github.com/mozillazg/go-pinyin..inittask
+  65b588 D github.com/mozillazg/go-pinyin.Fallback
+  ...
+  49ba60 T github.com/mozillazg/go-pinyin.toFixed.func1
+&lt;/pre&gt;&lt;/div&gt;
+&lt;/div&gt;
+&lt;div class="section" id="go-tool-objdump"&gt;
+&lt;h2 id="hidgo-tool-objdump"&gt;go tool objdump 命令&lt;a class="headerlink" href="#hidgo-tool-objdump" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;&lt;tt class="docutils literal"&gt;go tool objdump&lt;/tt&gt; 命令也可以间接得到相关信息:&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;$ go tool objdump go-bin &lt;span class="p"&gt;|&lt;/span&gt;grep github.com
+TEXT github.com/mozillazg/go-pinyin.initial&lt;span class="o"&gt;(&lt;/span&gt;SB&lt;span class="o"&gt;)&lt;/span&gt; /go/pkg/mod/github.com/mozillazg/go-pinyin@v0.18.0/pinyin.go
+  pinyin.go:108             0x49b37d                488b1534831c00          MOVQ github.com/mozillazg/go-pinyin.initialArray+8&lt;span class="o"&gt;(&lt;/span&gt;SB&lt;span class="o"&gt;)&lt;/span&gt;, DX
+  pinyin.go:108             0x49b384                488b3525831c00          MOVQ github.com/mozillazg/go-pinyin.initialArray&lt;span class="o"&gt;(&lt;/span&gt;SB&lt;span class="o"&gt;)&lt;/span&gt;, SI
+  pinyin.go:106             0x49b44f                e90cffffff              JMP github.com/mozillazg/go-pinyin.initial&lt;span class="o"&gt;(&lt;/span&gt;SB&lt;span class="o"&gt;)&lt;/span&gt;
+TEXT github.com/mozillazg/go-pinyin.final&lt;span class="o"&gt;(&lt;/span&gt;SB&lt;span class="o"&gt;)&lt;/span&gt; /go/pkg/mod/github.com/mozillazg/go-pinyin@v0.18.0/pinyin.go
+  pinyin.go:119             0x49b482                e8d9feffff              CALL github.com/mozillazg/go-pinyin.initial&lt;span class="o"&gt;(&lt;/span&gt;SB&lt;span class="o"&gt;)&lt;/span&gt;
+  ...
+  phonetic_symbol.go:4      0x49c6a7                e974fbffff              JMP github.com/mozillazg/go-pinyin.init&lt;span class="o"&gt;(&lt;/span&gt;SB&lt;span class="o"&gt;)&lt;/span&gt;
+TEXT main.main&lt;span class="o"&gt;(&lt;/span&gt;SB&lt;span class="o"&gt;)&lt;/span&gt; /go/src/github.com/mozillazg/go-bin-dep-sample/gomodule/main.go
+  pinyin.go:102             0x49c6f3                488b15be5c1f00          MOVQ github.com/mozillazg/go-pinyin.Style&lt;span class="o"&gt;(&lt;/span&gt;SB&lt;span class="o"&gt;)&lt;/span&gt;, DX
+  pinyin.go:102             0x49c70a                488b350ff61b00          MOVQ github.com/mozillazg/go-pinyin.Separator&lt;span class="o"&gt;(&lt;/span&gt;SB&lt;span class="o"&gt;)&lt;/span&gt;, SI
+  pinyin.go:102             0x49c711                4c8b0510f61b00          MOVQ github.com/mozillazg/go-pinyin.Separator+8&lt;span class="o"&gt;(&lt;/span&gt;SB&lt;span class="o"&gt;)&lt;/span&gt;, R8
+  pinyin.go:102             0x49c722                4c8b0d5fee1b00          MOVQ github.com/mozillazg/go-pinyin.Fallback&lt;span class="o"&gt;(&lt;/span&gt;SB&lt;span class="o"&gt;)&lt;/span&gt;, R9
+  main.go:10                0x49c744                e897f7ffff              CALL github.com/mozillazg/go-pinyin.Pinyin&lt;span class="o"&gt;(&lt;/span&gt;SB&lt;span class="o"&gt;)&lt;/span&gt;
+&lt;/pre&gt;&lt;/div&gt;
+&lt;/div&gt;
+&lt;div class="section" id="redress"&gt;
+&lt;h2 id="hidredress"&gt;redress 工具&lt;a class="headerlink" href="#hidredress" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;&lt;a class="reference external" href="https://github.com/goretk/redress"&gt;redress&lt;/a&gt; 是一个专门用于分析 Go 二进制可执行文件的开源软件，通过这个工具也可以得到想要的包信息：&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;$ redress -pkg -filepath -vendor -unknown go-bin
+Packages:
+main &lt;span class="p"&gt;|&lt;/span&gt; /go/src/github.com/mozillazg/go-bin-dep-sample/gomodule
+
+Vendors:
+github.com/mozillazg/go-pinyin &lt;span class="p"&gt;|&lt;/span&gt; /go/pkg/mod/github.com/mozillazg/go-pinyin@v0.18.0
+
+Unknown Libraries:
+&lt;/pre&gt;&lt;/div&gt;
+&lt;!--  --&gt;
+&lt;!-- go-bin 文件的源代码： https://github.com/mozillazg/go-bin-dep-sample/tree/master/gomodule --&gt;
+&lt;!--  --&gt;
+&lt;!--  --&gt;
+&lt;!-- 使用 Go module + vendor 的项目 --&gt;
+&lt;!-- ==================================== --&gt;
+&lt;!--  --&gt;
+&lt;!-- 对于使用了 Go module + vendor 的项目，同样既可以使用 ``go version`` ： --&gt;
+&lt;!--  --&gt;
+&lt;!-- .. code:: bash --&gt;
+&lt;!--  --&gt;
+&lt;!-- $ go version -m go-bin --&gt;
+&lt;!-- go-bin: go1.17.1 --&gt;
+&lt;!-- path    github.com/mozillazg/go-bin-dep-sample/gomodulevendor --&gt;
+&lt;!-- mod     github.com/mozillazg/go-bin-dep-sample/gomodulevendor   (devel) --&gt;
+&lt;!-- dep     github.com/mozillazg/go-pinyin  v0.18.0 --&gt;
+&lt;!--  --&gt;
+&lt;!--  --&gt;
+&lt;!-- 也可以使用 ``strings`` 命令: --&gt;
+&lt;!--  --&gt;
+&lt;!-- .. code-block:: bash --&gt;
+&lt;!--  --&gt;
+&lt;!-- $ strings go-bin |grep github.com --&gt;
+&lt;!-- github.com/mozillazg/go-bin-dep-sample/gomodulevendor --&gt;
+&lt;!-- github.com/mozillazg/go-bin-dep-sample/gomodulevendor --&gt;
+&lt;!-- github.com/mozillazg/go-pinyin --&gt;
+&lt;!-- github.com/mozillazg/go-pinyin.initial --&gt;
+&lt;!-- ... --&gt;
+&lt;!-- github.com/mozillazg/go-pinyin.NewArgs --&gt;
+&lt;!-- /go/src/github.com/mozillazg/go-bin-dep-sample/gomodulevendor/vendor/github.com/mozillazg/go-pinyin/pinyin.go --&gt;
+&lt;!-- /go/src/github.com/mozillazg/go-bin-dep-sample/gomodulevendor/vendor/github.com/mozillazg/go-pinyin/phonetic_symbol.go --&gt;
+&lt;!-- /go/src/github.com/mozillazg/go-bin-dep-sample/gomodulevendor/vendor/github.com/mozillazg/go-pinyin/pinyin_dict.go --&gt;
+&lt;!-- /go/src/github.com/mozillazg/go-bin-dep-sample/gomodulevendor/main.go --&gt;
+&lt;!-- github.com/mozillazg/go-pinyin.initial --&gt;
+&lt;!-- ... --&gt;
+&lt;!-- github.com/mozillazg/go-pinyin.PinyinDict --&gt;
+&lt;!--  --&gt;
+&lt;!-- go-bin 文件的源代码： https://github.com/mozillazg/go-bin-dep-sample/tree/master/gomodulevendor --&gt;
+&lt;!--  --&gt;
+&lt;!--  --&gt;
+&lt;!-- 只使用 vendor 的项目 --&gt;
+&lt;!-- ====================== --&gt;
+&lt;!--  --&gt;
+&lt;!-- 只使用 vendor 但是未使用 Go module 的项目（老版本的 Go 编译的二进制，比如 Go 1.12），不能直接使用 ``go version``: --&gt;
+&lt;!--  --&gt;
+&lt;!-- .. code-block:: bash --&gt;
+&lt;!--  --&gt;
+&lt;!-- $ go version -m go-bin --&gt;
+&lt;!-- go-bin: go version not found --&gt;
+&lt;!--  --&gt;
+&lt;!-- 通过 ``strings`` 命令来查找二进制文件中的信息： --&gt;
+&lt;!--  --&gt;
+&lt;!-- .. code-block:: bash --&gt;
+&lt;!--  --&gt;
+&lt;!-- $ strings go-bin |grep github.com --&gt;
+&lt;!-- Wgithub.com/mozillazg/go-bin-dep-sample/onlyvendor/vendor/github.com/mozillazg/go-pinyin --&gt;
+&lt;!-- github.com/mozillazg/go-bin-dep-sample/onlyvendor/vendor/github.com/mozillazg/go-pinyin.initial --&gt;
+&lt;!-- ... --&gt;
+&lt;!-- github.com/mozillazg/go-bin-dep-sample/onlyvendor/vendor/github.com/mozillazg/go-pinyin.init --&gt;
+&lt;!-- /go/src/github.com/mozillazg/go-bin-dep-sample/onlyvendor/main.go --&gt;
+&lt;!-- /go/src/github.com/mozillazg/go-bin-dep-sample/onlyvendor/vendor/github.com/mozillazg/go-pinyin/pinyin_dict.go --&gt;
+&lt;!-- /go/src/github.com/mozillazg/go-bin-dep-sample/onlyvendor/vendor/github.com/mozillazg/go-pinyin/phonetic_symbol.go --&gt;
+&lt;!-- /go/src/github.com/mozillazg/go-bin-dep-sample/onlyvendor/vendor/github.com/mozillazg/go-pinyin/pinyin.go --&gt;
+&lt;!-- github.com/mozillazg/go-bin-dep-sample/onlyvendor/vendor/github.com/mozillazg/go-pinyin.Style --&gt;
+&lt;!-- github.com/mozillazg/go-bin-dep-sample/onlyvendor/vendor/github.com/mozillazg/go-pinyin.Heteronym --&gt;
+&lt;!-- ... --&gt;
+&lt;!-- github.com/mozillazg/go-bin-dep-sample/onlyvendor/vendor/github.com/mozillazg/go-pinyin.init --&gt;
+&lt;!--  --&gt;
+&lt;!--  --&gt;
+&lt;!-- go-bin 文件的源代码：https://github.com/mozillazg/go-bin-dep-sample/tree/master/onlyvendor --&gt;
+&lt;!--  --&gt;
+&lt;!--  --&gt;
+&lt;!-- 即不使用 Go module 也不使用 vendor 的项目 --&gt;
+&lt;!-- ========================================== --&gt;
+&lt;!--  --&gt;
+&lt;!-- 既不使用 Go module 也不使用 vendor 的项目（老版本的 Go 编译的二进制，比如 Go 1.12. 如果是新版本的 Go 默认会使用 Go module），同样不能使用 ``go version``: --&gt;
+&lt;!--  --&gt;
+&lt;!-- .. code-block:: bash --&gt;
+&lt;!--  --&gt;
+&lt;!-- $ go version -m go-bin --&gt;
+&lt;!-- go-bin: go version not found --&gt;
+&lt;!--  --&gt;
+&lt;!-- 可以使用 ``strings`` 命令: --&gt;
+&lt;!--  --&gt;
+&lt;!-- .. code-block:: bash --&gt;
+&lt;!--  --&gt;
+&lt;!-- $ strings go-bin |grep github.com --&gt;
+&lt;!-- github.com/mozillazg/go-pinyin --&gt;
+&lt;!-- github.com/mozillazg/go-pinyin.initial --&gt;
+&lt;!-- ... --&gt;
+&lt;!-- github.com/mozillazg/go-pinyin.init --&gt;
+&lt;!-- /go/src/github.com/mozillazg/go-bin-dep-sample/oldnovendor/main.go --&gt;
+&lt;!-- /go/src/github.com/mozillazg/go-pinyin/pinyin_dict.go --&gt;
+&lt;!-- /go/src/github.com/mozillazg/go-pinyin/phonetic_symbol.go --&gt;
+&lt;!-- /go/src/github.com/mozillazg/go-pinyin/pinyin.go --&gt;
+&lt;!-- github.com/mozillazg/go-pinyin.Style --&gt;
+&lt;!-- ... --&gt;
+&lt;!-- github.com/mozillazg/go-pinyin.init --&gt;
+&lt;!--  --&gt;
+&lt;!--  --&gt;
+&lt;!-- go-bin 文件的源代码：https://github.com/mozillazg/go-bin-dep-sample/tree/master/oldnovendor --&gt;
+&lt;!--  --&gt;
+&lt;!--  --&gt;
+&lt;!-- 参考资料 --&gt;
+&lt;!-- ======== --&gt;
+&lt;!--  --&gt;
+&lt;!--  --&gt;
+&lt;/div&gt;
+</description><dc:creator xmlns:dc="http://purl.org/dc/elements/1.1/">mozillazg</dc:creator><pubDate>Thu, 07 Oct 2021 00:00:00 +0000</pubDate><guid>tag:mozillazg.com,2021-10-07:2021/10/go-find-package-info-from-binary-file.html</guid></item><item><title>IP 地址解析库的不同实现导致应用存在安全隐患</title><link>https://mozillazg.com/2021/10/security-ipaddress-risk-with-leading-zeros.html</link><description>&lt;p&gt;先来看一个例子，对于 &lt;tt class="docutils literal"&gt;0177.0.0.1&lt;/tt&gt; 这个 IP 地址不同的程序会解析出不同的结果：&lt;/p&gt;
+&lt;p&gt;curl&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+curl 0177.0.0.1 -v
+* Rebuilt URL to: 0177.0.0.1/
+*   Trying 177.0.0.1...
+* TCP_NODELAY set
+&lt;/pre&gt;
+&lt;p&gt;ping&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+$ ping 0177.0.0.1
+PING 0177.0.0.1 (127.0.0.1): 56 data bytes
+64 bytes from 127.0.0.1: icmp_seq=0 ttl=64 time=0.059 ms
+64 bytes from 127.0.0.1: icmp_seq=1 ttl=64 time=0.084 ms
+^C
+&lt;/pre&gt;
+&lt;p&gt;可以看到，对于 &lt;tt class="docutils literal"&gt;0177.0.0.1&lt;/tt&gt; 这个 IP 地址，
+&lt;tt class="docutils literal"&gt;curl&lt;/tt&gt; 将它解析为 &lt;tt class="docutils literal"&gt;177.0.0.1&lt;/tt&gt; ，而 &lt;tt class="docutils literal"&gt;ping&lt;/tt&gt; 却解析为了 &lt;tt class="docutils literal"&gt;127.0.0.1&lt;/tt&gt; 。&lt;/p&gt;
+&lt;p&gt;之所以会有这种不一样的结果，是因为对于应该如何解析 IP 地址中数字前面的 0 并没有一个统一的标准，
+有的程序将这种情况标记为无效 IP ，有些程序将 &lt;tt class="docutils literal"&gt;0xx&lt;/tt&gt; 解析为 8 进制数字，有些程序将它解析为 10 进制数字。&lt;/p&gt;
+&lt;p&gt;正因为存在这种不统一的情况，也就导致应用程序对 IP 地址的校验逻辑存在安全隐患。&lt;/p&gt;
+&lt;p&gt;假设有一个服务的功能是访问用户输入的地址然后返回相应的响应信息，处于安全上的考虑，
+会校验用户的输入，拦截访问服务内部 IP 的地址：&lt;/p&gt;
+&lt;ol class="arabic simple"&gt;
+&lt;li&gt;用户输入 &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;http://0177.0.0.1:8080/path/to/secret&lt;/span&gt;&lt;/tt&gt;&lt;/li&gt;
+&lt;li&gt;服务端的校验程序使用的 IP 解析库将地址中包含的 IP 地址解析为 &lt;tt class="docutils literal"&gt;177.0.0.1&lt;/tt&gt; ，然后放行了该请求&lt;/li&gt;
+&lt;li&gt;实际执行这个请求用户输入的服务，在请求这个地址时，使用的 IP 地址相关库将它解析为了 &lt;tt class="docutils literal"&gt;127.0.0.1&lt;/tt&gt; ，
+此时就会存在安全隐患，导致出现了非预期的结果。&lt;/li&gt;
+&lt;/ol&gt;
+&lt;p&gt;基于 IP 黑名单的 ACL 或者过滤逻辑都有潜在的受这个问题影响的安全隐患， 这一问题的相关 CVE 可以参考【参考资料】中列出的部分 CVE 。&lt;/p&gt;
+&lt;div class="section" id="id1"&gt;
+&lt;h2 id="hidid1"&gt;参考资料&lt;a class="headerlink" href="#hidid1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;ul class="simple"&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://sick.codes/sick-2021-014/"&gt;CVE-2021-29921 - python stdlib &amp;quot;ipaddress&amp;quot; - Improper Input Validation of octal literals in python 3.8.0 thru v3.10 results in indeterminate SSRF &amp;amp; RFI vulnerabilities. - &amp;quot;ipaddress leading zeros in IPv4 address&amp;quot; - Sick Codes - Security Research, Hardware &amp;amp; Software Hacking, Consulting, Linux, IoT, Cloud, Embedded, Arch, Tweaks &amp;amp; Tips!&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://sick.codes/sick-2021-015/"&gt;CVE-2021-29922 - rust standard library &amp;quot;net&amp;quot; - Improper Input Validation of octal literals in rust 1.52.0 std::net and below results in indeterminate SSRF &amp;amp; RFI vulnerabilities. - Sick Codes - Security Research, Hardware &amp;amp; Software Hacking, Consulting, Linux, IoT, Cloud, Embedded, Arch, Tweaks &amp;amp; Tips!&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://sick.codes/sick-2021-016/"&gt;CVE-2021-29923 - golang standard library &amp;quot;net&amp;quot; - Improper Input Validation of octal literals in golang 1.16.2 and below standard library &amp;quot;net&amp;quot; results in indeterminate SSRF &amp;amp; RFI vulnerabilities. - Sick Codes - Security Research, Hardware &amp;amp; Software Hacking, Consulting, Linux, IoT, Cloud, Embedded, Arch, Tweaks &amp;amp; Tips!&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2021-33571"&gt;CVE-2021-33571 – In Django 2.2 before 2.2.24, 3.x before 3.1.12, and 3.2 before 3.2.4, URLValidator, validate_ipv4_address, and validate_ipv46_address do not prohibit leading zero characters in octal literals. This may allow a bypass of access control that is based on IP addresses. (validate_ipv4_address and validate_ipv46_address are unaffected with Python 3.9.5+..) .&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2019-12161"&gt;CVE-2019-12161 – CVE-2019-12161 WPO WebPageTest 19.04 allows SSRF because ValidateURL in www/runtest.php does not consider octal encoding of IP addresses (such as 0300.0250 as a replacement for 192.168).&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2016-4029"&gt;CVE-2016-4029 – WordPress before 4.5 does not consider octal and hexadecimal IP address formats when determining an intranet address, which allows remote attackers to bypass an intended SSRF protection mechanism via a crafted address.&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://bugs.python.org/issue36384"&gt;Issue 36384: [security] CVE-2021-29921: ipaddress Should not reject IPv4 addresses with leading zeroes as ambiguously octal - Python tracker&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://github.com/golang/go/issues/30999"&gt;net: reject leading zeros in IP address parsers [freeze exception] · Issue #30999 · golang/go&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://johnjhacking.com/blog/cve-2020-28360/"&gt;cve-2020-28360 - John J Hacking&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://sick.codes/universal-netmask-npm-package-used-by-270000-projects-vulnerable-to-octal-input-data-server-side-request-forgery-remote-file-inclusion-local-file-inclusion-and-more-cve-2021-28918/"&gt;Universal &amp;quot;netmask&amp;quot; npm package, used by 270,000+ projects, vulnerable to octal input data: server-side request forgery, remote file inclusion, local file inclusion, and more (CVE-2021-28918) - Sick Codes - Security Research, Hardware &amp;amp; Software Hacking, Consulting, Linux, IoT, Cloud, Embedded, Arch, Tweaks &amp;amp; Tips!&lt;/a&gt;&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/div&gt;
+</description><dc:creator xmlns:dc="http://purl.org/dc/elements/1.1/">mozillazg</dc:creator><pubDate>Thu, 07 Oct 2021 00:00:00 +0000</pubDate><guid>tag:mozillazg.com,2021-10-07:2021/10/security-ipaddress-risk-with-leading-zeros.html</guid><category>安全</category></item><item><title>通过给开源项目提交 PR 然后触发 CI 流程的方式获取敏感信息</title><link>https://mozillazg.com/2021/10/security-the-way-of-sofeware-supply-chain-attack-via-pull-request.html</link><description>&lt;p&gt;开源项目的使用越来越广泛，各大公司和个人也积极的参与和开发了不同的开源项目。
+同时开源项目的安全问题也越来越受到广泛的关注，其中即有开源项目代码方面的安全问题，
+也有开源项目使用的第三方服务、开发流程导致的安全问题。&lt;/p&gt;
+&lt;p&gt;这篇文章介绍的是 CI 流程中可能会出现的安全问题：攻击者可以通过给开源项目提交 PR 的方式获取项目开发流程中涉及的 CI 系统中的敏感信息。&lt;/p&gt;
+&lt;p&gt;整个流程如下：&lt;/p&gt;
+&lt;ol class="arabic simple"&gt;
+&lt;li&gt;攻击者 fork 目标开源项目仓库，修改仓库代码增加可以获取 CI 环境中敏感信息代码或者可以在 CI 环境中运行恶意脚本和软件的代码&lt;/li&gt;
+&lt;li&gt;然后工具者将修改后的代码通过 Pull Request 的方式提交到上游项目中（不需要合并代码）&lt;/li&gt;
+&lt;li&gt;一般上游项目在 PR 提交时都会触发项目中设置的 CI 流程，此时 CI 流程中就会运行攻击者修改好的恶意代码&lt;/li&gt;
+&lt;li&gt;如果 CI 环境设置不当或者 CI 服务有安全隐患的话，攻击者就可以通过 CI job 窃取环境中的敏感信息（比如密码、token、ak、证书等信息）、 入侵整个 CI job 所在节点、整个 CI 服务甚至整个公司所有资产。&lt;/li&gt;
+&lt;/ol&gt;
+&lt;p&gt;相关案例可以阅读参考资料中最近爆出的几个安全事项。&lt;/p&gt;
+&lt;div class="section" id="id1"&gt;
+&lt;h2 id="hidid1"&gt;参考资料&lt;a class="headerlink" href="#hidid1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;ul class="simple"&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://arstechnica.com/information-technology/2021/09/travis-ci-flaw-exposed-secrets-for-thousands-of-open-source-projects/"&gt;Travis CI flaw exposed secrets of thousands of open source projects | Ars Technica&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://goteleport.com/blog/hack-via-pull-request/"&gt;How to attack cloud infrastructure via a malicious pull request | Teleport&lt;/a&gt;&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/div&gt;
+</description><dc:creator xmlns:dc="http://purl.org/dc/elements/1.1/">mozillazg</dc:creator><pubDate>Wed, 06 Oct 2021 00:00:00 +0000</pubDate><guid>tag:mozillazg.com,2021-10-06:2021/10/security-the-way-of-sofeware-supply-chain-attack-via-pull-request.html</guid><category>软件供应链安全</category><category>supply-chain-security</category></item><item><title>binaryless 容器基础镜像</title><link>https://mozillazg.com/2021/08/security-binaryless-base-image.html</link><description>&lt;p&gt;&lt;a class="reference external" href="https://mozillazg.com/2021/05/security-use-shell-less-and-binary-less-distroless-container-with-root-less-container.html"&gt;前面&lt;/a&gt; 说过会维护一个 binaryless 容器基础镜像的项目，这个基础镜像的项目今天正式发布第一个版本。&lt;/p&gt;
 &lt;p&gt;项目地址：&lt;/p&gt;
 &lt;p&gt;&lt;a class="reference external" href="https://github.com/mozillazg/binaryless"&gt;https://github.com/mozillazg/binaryless&lt;/a&gt;&lt;/p&gt;
 &lt;p&gt;目前提供如下基础镜像:&lt;/p&gt;
@@ -124,7 +373,7 @@ Admission Controllers 即包括 kube-apiserver 内置的 &lt;a class="reference 
 &lt;/li&gt;
 &lt;/ul&gt;
 &lt;/li&gt;
-&lt;li&gt;然后再通过调用 CRI 的 &lt;tt class="docutils literal"&gt;PodSandboxStatus&lt;/tt&gt; 接口查询一下创建的 pod sandbox 的状态，确保创建的 pod sandbox 无异常&lt;/li&gt;
+&lt;li&gt;然后再通过调用 CRI 的 &lt;tt class="docutils literal"&gt;PodSandboxStatus&lt;/tt&gt; 接口查询一下创建的 pod sandbox 的状态，确保创建的 pod sandbox 无异常，同时获取 status 中包含的 pod IP 信息。&lt;/li&gt;
 &lt;li&gt;启动 ephemeral 容器， &lt;a class="reference external" href="https://github.com/kubernetes/kubernetes/blob/e781d2a672f044d47e75f0ec7015666d06164410/pkg/kubelet/kuberuntime/kuberuntime_container.go#L130-L239"&gt;启动容器&lt;/a&gt; 的步骤如下：&lt;ol class="arabic"&gt;
 &lt;li&gt;使用前面 6 获取的 secret 数据 pull image&lt;/li&gt;
 &lt;li&gt;调用 CRI 的 &lt;tt class="docutils literal"&gt;CreateContainer&lt;/tt&gt; 接口创建容器&lt;/li&gt;
@@ -2112,244 +2361,4 @@ Explanation: All root-to-leaf paths are: 1-&amp;gt;2-&amp;gt;5, 1-&amp;gt;3
 &lt;li&gt;&lt;a class="reference external" href="https://leetcode.com/problems/binary-tree-paths/"&gt;https://leetcode.com/problems/binary-tree-paths/&lt;/a&gt;&lt;/li&gt;
 &lt;/ul&gt;
 &lt;/div&gt;
-</description><dc:creator xmlns:dc="http://purl.org/dc/elements/1.1/">mozillazg</dc:creator><pubDate>Sat, 06 Feb 2021 00:00:00 +0000</pubDate><guid>tag:mozillazg.com,2021-02-06:2021/02/leetcode-257-binary-tree-paths.html</guid><category>Binary-Tree</category><category>二叉树</category><category>Tree</category><category>树</category></item><item><title>LeetCode: 113. Path Sum II</title><link>https://mozillazg.com/2021/01/leetcode-113-path-sum-ii.html</link><description>&lt;div class="section" id="id1"&gt;
-&lt;h2 id="hidid1"&gt;题目&lt;a class="headerlink" href="#hidid1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
-&lt;p&gt;原题地址：&lt;a class="reference external" href="https://leetcode.com/problems/path-sum-ii/"&gt;https://leetcode.com/problems/path-sum-ii/&lt;/a&gt;&lt;/p&gt;
-&lt;p&gt;Given the root of a binary tree and an integer targetSum, return all root-to-leaf paths where each path's sum equals targetSum.&lt;/p&gt;
-&lt;p&gt;A leaf is a node with no children.&lt;/p&gt;
-&lt;p&gt;Example 1:&lt;/p&gt;
-&lt;p&gt;&lt;img alt="image1" src="/static/images/leetcode/pathsumii1.jpg" /&gt;&lt;/p&gt;
-&lt;blockquote&gt;
-&lt;/blockquote&gt;
-&lt;pre class="literal-block"&gt;
-Input: root = [5,4,8,11,null,13,4,7,2,null,null,5,1], targetSum = 22
-Output: [[5,4,11,2],[5,8,4,5]]
-&lt;/pre&gt;
-&lt;p&gt;Example 2:&lt;/p&gt;
-&lt;p&gt;&lt;img alt="image2" src="/static/images/leetcode/pathsum2.jpg" /&gt;&lt;/p&gt;
-&lt;blockquote&gt;
-&lt;/blockquote&gt;
-&lt;pre class="literal-block"&gt;
-Input: root = [1,2,3], targetSum = 5
-Output: []
-&lt;/pre&gt;
-&lt;p&gt;Example 3:&lt;/p&gt;
-&lt;pre class="literal-block"&gt;
-Input: root = [1,2], targetSum = 0
-Output: []
-&lt;/pre&gt;
-&lt;p&gt;Constraints:&lt;/p&gt;
-&lt;ul class="simple"&gt;
-&lt;li&gt;The number of nodes in the tree is in the range &lt;tt class="docutils literal"&gt;[0, 5000]&lt;/tt&gt;.&lt;/li&gt;
-&lt;li&gt;&lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;-1000&lt;/span&gt; &amp;lt;= Node.val &amp;lt;= 1000&lt;/tt&gt;&lt;/li&gt;
-&lt;li&gt;&lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;-1000&lt;/span&gt; &amp;lt;= targetSum &amp;lt;= 1000&lt;/tt&gt;&lt;/li&gt;
-&lt;/ul&gt;
-&lt;/div&gt;
-&lt;div class="section" id="id2"&gt;
-&lt;h2 id="hidid2"&gt;解法&lt;a class="headerlink" href="#hidid2" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
-&lt;p&gt;这个题跟 &lt;a class="reference external" href="http://mozillazg.com/2021/01/leetcode-112-path-sum.html"&gt;112. Path Sum&lt;/a&gt;
-的区别是需要找到所有符合条件的 path ，并返回这些 path 上的节点组成的列表。&lt;/p&gt;
-&lt;p&gt;所以，需要在查找的过程中记录沿途经过的节点的值，
-在找到符合条件的 leaf 节点的时候将沿途的节点值收集并保存起来。&lt;/p&gt;
-&lt;p&gt;这个思路的 Python 代码类似下面这样：&lt;/p&gt;
-&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="c1"&gt;# Definition for a binary tree node.&lt;/span&gt;
-&lt;span class="c1"&gt;# class TreeNode(object):&lt;/span&gt;
-&lt;span class="c1"&gt;#     def __init__(self, val=0, left=None, right=None):&lt;/span&gt;
-&lt;span class="c1"&gt;#         self.val = val&lt;/span&gt;
-&lt;span class="c1"&gt;#         self.left = left&lt;/span&gt;
-&lt;span class="c1"&gt;#         self.right = right&lt;/span&gt;
-&lt;span class="k"&gt;class&lt;/span&gt; &lt;span class="nc"&gt;Solution&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="nb"&gt;object&lt;/span&gt;&lt;span class="p"&gt;):&lt;/span&gt;
-    &lt;span class="k"&gt;def&lt;/span&gt; &lt;span class="nf"&gt;__init__&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="bp"&gt;self&lt;/span&gt;&lt;span class="p"&gt;):&lt;/span&gt;
-        &lt;span class="bp"&gt;self&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;paths&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="p"&gt;[]&lt;/span&gt;
-        &lt;span class="bp"&gt;self&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;curr&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="p"&gt;[]&lt;/span&gt;
-
-    &lt;span class="k"&gt;def&lt;/span&gt; &lt;span class="nf"&gt;pathSum&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="bp"&gt;self&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;root&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;targetSum&lt;/span&gt;&lt;span class="p"&gt;):&lt;/span&gt;
-        &lt;span class="k"&gt;if&lt;/span&gt; &lt;span class="n"&gt;root&lt;/span&gt; &lt;span class="ow"&gt;is&lt;/span&gt; &lt;span class="bp"&gt;None&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;
-            &lt;span class="k"&gt;return&lt;/span&gt; &lt;span class="bp"&gt;self&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;paths&lt;/span&gt;
-
-        &lt;span class="k"&gt;if&lt;/span&gt; &lt;span class="n"&gt;root&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;left&lt;/span&gt; &lt;span class="ow"&gt;is&lt;/span&gt; &lt;span class="bp"&gt;None&lt;/span&gt; &lt;span class="ow"&gt;and&lt;/span&gt; &lt;span class="n"&gt;root&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;right&lt;/span&gt; &lt;span class="ow"&gt;is&lt;/span&gt; &lt;span class="bp"&gt;None&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;
-            &lt;span class="k"&gt;if&lt;/span&gt; &lt;span class="n"&gt;root&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;val&lt;/span&gt; &lt;span class="o"&gt;==&lt;/span&gt; &lt;span class="n"&gt;targetSum&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;
-                &lt;span class="n"&gt;curr&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="bp"&gt;self&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;curr&lt;/span&gt;&lt;span class="p"&gt;[:]&lt;/span&gt;
-                &lt;span class="n"&gt;curr&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;append&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;root&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;val&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
-                &lt;span class="bp"&gt;self&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;paths&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;append&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;curr&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
-            &lt;span class="k"&gt;return&lt;/span&gt; &lt;span class="bp"&gt;self&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;paths&lt;/span&gt;
-
-        &lt;span class="bp"&gt;self&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;curr&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;append&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;root&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;val&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
-        &lt;span class="n"&gt;new_sum&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;targetSum&lt;/span&gt; &lt;span class="o"&gt;-&lt;/span&gt; &lt;span class="n"&gt;root&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;val&lt;/span&gt;
-        &lt;span class="bp"&gt;self&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;pathSum&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;root&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;left&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;new_sum&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
-        &lt;span class="bp"&gt;self&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;pathSum&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;root&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;right&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;new_sum&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
-
-        &lt;span class="bp"&gt;self&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;curr&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;pop&lt;/span&gt;&lt;span class="p"&gt;()&lt;/span&gt;
-
-        &lt;span class="k"&gt;return&lt;/span&gt; &lt;span class="bp"&gt;self&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;paths&lt;/span&gt;
-&lt;/pre&gt;&lt;/div&gt;
-&lt;/div&gt;
-&lt;div class="section" id="id3"&gt;
-&lt;h2 id="hidid3"&gt;参考资料&lt;a class="headerlink" href="#hidid3" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
-&lt;ul class="simple"&gt;
-&lt;li&gt;&lt;a class="reference external" href="https://leetcode.com/problems/path-sum-ii/"&gt;https://leetcode.com/problems/path-sum-ii/&lt;/a&gt;&lt;/li&gt;
-&lt;/ul&gt;
-&lt;/div&gt;
-</description><dc:creator xmlns:dc="http://purl.org/dc/elements/1.1/">mozillazg</dc:creator><pubDate>Sun, 24 Jan 2021 00:00:00 +0000</pubDate><guid>tag:mozillazg.com,2021-01-24:2021/01/leetcode-113-path-sum-ii.html</guid><category>Binary-Tree</category><category>二叉树</category><category>Tree</category><category>树</category></item><item><title>LeetCode: 437. Path Sum III</title><link>https://mozillazg.com/2021/01/leetcode-437-path-sum-iii.html</link><description>&lt;div class="section" id="id1"&gt;
-&lt;h2 id="hidid1"&gt;题目&lt;a class="headerlink" href="#hidid1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
-&lt;p&gt;原题地址：&lt;a class="reference external" href="https://leetcode.com/problems/path-sum-iii/"&gt;https://leetcode.com/problems/path-sum-iii/&lt;/a&gt;&lt;/p&gt;
-&lt;p&gt;You are given a binary tree in which each node contains an integer value.&lt;/p&gt;
-&lt;p&gt;Find the number of paths that sum to a given value.&lt;/p&gt;
-&lt;p&gt;The path does not need to start or end at the root or a leaf, but it must go downwards (traveling only from parent nodes to child nodes).&lt;/p&gt;
-&lt;p&gt;The tree has no more than 1,000 nodes and the values are in the range -1,000,000 to 1,000,000.&lt;/p&gt;
-&lt;p&gt;Example:&lt;/p&gt;
-&lt;pre class="literal-block"&gt;
-root = [10,5,-3,3,2,null,11,3,-2,null,1], sum = 8
-
-      10
-     /  \
-    5   -3
-   / \    \
-  3   2   11
- / \   \
-3  -2   1
-&lt;/pre&gt;
-&lt;p&gt;Return 3. The paths that sum to 8 are:&lt;/p&gt;
-&lt;pre class="literal-block"&gt;
-1.  5 -&amp;gt; 3
-2.  5 -&amp;gt; 2 -&amp;gt; 1
-3. -3 -&amp;gt; 11
-&lt;/pre&gt;
-&lt;/div&gt;
-&lt;div class="section" id="id2"&gt;
-&lt;h2 id="hidid2"&gt;解法&lt;a class="headerlink" href="#hidid2" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
-&lt;p&gt;先限定 path 只能从 root 节点开始，这样的话，
-按照 &lt;a class="reference external" href="http://mozillazg.com/2021/01/leetcode-112-path-sum.html"&gt;112. Path Sum&lt;/a&gt;  的思路，
-相应的 Python 代码类似下面这样：&lt;/p&gt;
-&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="c1"&gt;# Definition for a binary tree node.&lt;/span&gt;
-&lt;span class="c1"&gt;# class TreeNode(object):&lt;/span&gt;
-&lt;span class="c1"&gt;#     def __init__(self, val=0, left=None, right=None):&lt;/span&gt;
-&lt;span class="c1"&gt;#         self.val = val&lt;/span&gt;
-&lt;span class="c1"&gt;#         self.left = left&lt;/span&gt;
-&lt;span class="c1"&gt;#         self.right = right&lt;/span&gt;
-&lt;span class="k"&gt;class&lt;/span&gt; &lt;span class="nc"&gt;Solution&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="nb"&gt;object&lt;/span&gt;&lt;span class="p"&gt;):&lt;/span&gt;
-    &lt;span class="k"&gt;def&lt;/span&gt; &lt;span class="nf"&gt;__init__&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="bp"&gt;self&lt;/span&gt;&lt;span class="p"&gt;):&lt;/span&gt;
-        &lt;span class="bp"&gt;self&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;_count&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="mi"&gt;0&lt;/span&gt;
-
-    &lt;span class="k"&gt;def&lt;/span&gt; &lt;span class="nf"&gt;pathSum&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="bp"&gt;self&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;root&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;target_sum&lt;/span&gt;&lt;span class="p"&gt;):&lt;/span&gt;
-
-        &lt;span class="bp"&gt;self&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;_preorder&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;root&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;target_sum&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
-
-        &lt;span class="k"&gt;return&lt;/span&gt; &lt;span class="bp"&gt;self&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;_count&lt;/span&gt;
-
-    &lt;span class="k"&gt;def&lt;/span&gt; &lt;span class="nf"&gt;_preorder&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="bp"&gt;self&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;root&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;target_sum&lt;/span&gt;&lt;span class="p"&gt;):&lt;/span&gt;
-        &lt;span class="k"&gt;if&lt;/span&gt; &lt;span class="n"&gt;root&lt;/span&gt; &lt;span class="ow"&gt;is&lt;/span&gt; &lt;span class="bp"&gt;None&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;
-            &lt;span class="k"&gt;return&lt;/span&gt; &lt;span class="mi"&gt;0&lt;/span&gt;
-
-        &lt;span class="k"&gt;if&lt;/span&gt; &lt;span class="n"&gt;root&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;val&lt;/span&gt; &lt;span class="o"&gt;==&lt;/span&gt; &lt;span class="n"&gt;target_sum&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;
-            &lt;span class="bp"&gt;self&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;_count&lt;/span&gt; &lt;span class="o"&gt;+=&lt;/span&gt; &lt;span class="mi"&gt;1&lt;/span&gt;
-
-        &lt;span class="n"&gt;new_sum&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;target_sum&lt;/span&gt; &lt;span class="o"&gt;-&lt;/span&gt; &lt;span class="n"&gt;root&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;val&lt;/span&gt;
-
-        &lt;span class="bp"&gt;self&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;_preorder&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;root&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;left&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;new_sum&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
-        &lt;span class="bp"&gt;self&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;_preorder&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;root&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;right&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;new_sum&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
-&lt;/pre&gt;&lt;/div&gt;
-&lt;p&gt;但是，因为题目中说了不仅限于从 root 开始: The path does not need to start or end at the root or a leaf, but it must go downwards (traveling only from parent nodes to child nodes).
-所以，需要修改上面的代码，让每个节点都走一遍上面从 root 开始的查找过程。&lt;/p&gt;
-&lt;p&gt;这个思路的 Python 代码类似下面这样：&lt;/p&gt;
-&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="c1"&gt;# Definition for a binary tree node.&lt;/span&gt;
-&lt;span class="c1"&gt;# class TreeNode(object):&lt;/span&gt;
-&lt;span class="c1"&gt;#     def __init__(self, val=0, left=None, right=None):&lt;/span&gt;
-&lt;span class="c1"&gt;#         self.val = val&lt;/span&gt;
-&lt;span class="c1"&gt;#         self.left = left&lt;/span&gt;
-&lt;span class="c1"&gt;#         self.right = right&lt;/span&gt;
-&lt;span class="k"&gt;class&lt;/span&gt; &lt;span class="nc"&gt;Solution&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="nb"&gt;object&lt;/span&gt;&lt;span class="p"&gt;):&lt;/span&gt;
-    &lt;span class="k"&gt;def&lt;/span&gt; &lt;span class="nf"&gt;__init__&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="bp"&gt;self&lt;/span&gt;&lt;span class="p"&gt;):&lt;/span&gt;
-        &lt;span class="bp"&gt;self&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;_count&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="mi"&gt;0&lt;/span&gt;
-
-    &lt;span class="k"&gt;def&lt;/span&gt; &lt;span class="nf"&gt;pathSum&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="bp"&gt;self&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;root&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;target_sum&lt;/span&gt;&lt;span class="p"&gt;):&lt;/span&gt;
-        &lt;span class="k"&gt;if&lt;/span&gt; &lt;span class="n"&gt;root&lt;/span&gt; &lt;span class="ow"&gt;is&lt;/span&gt; &lt;span class="bp"&gt;None&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;
-            &lt;span class="k"&gt;return&lt;/span&gt; &lt;span class="mi"&gt;0&lt;/span&gt;
-
-        &lt;span class="bp"&gt;self&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;_preorder&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;root&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;target_sum&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
-
-        &lt;span class="bp"&gt;self&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;pathSum&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;root&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;left&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;target_sum&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
-        &lt;span class="bp"&gt;self&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;pathSum&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;root&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;right&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;target_sum&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
-
-        &lt;span class="k"&gt;return&lt;/span&gt; &lt;span class="bp"&gt;self&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;_count&lt;/span&gt;
-
-    &lt;span class="k"&gt;def&lt;/span&gt; &lt;span class="nf"&gt;_preorder&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="bp"&gt;self&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;root&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;target_sum&lt;/span&gt;&lt;span class="p"&gt;):&lt;/span&gt;
-        &lt;span class="k"&gt;if&lt;/span&gt; &lt;span class="n"&gt;root&lt;/span&gt; &lt;span class="ow"&gt;is&lt;/span&gt; &lt;span class="bp"&gt;None&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;
-            &lt;span class="k"&gt;return&lt;/span&gt; &lt;span class="mi"&gt;0&lt;/span&gt;
-
-        &lt;span class="k"&gt;if&lt;/span&gt; &lt;span class="n"&gt;root&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;val&lt;/span&gt; &lt;span class="o"&gt;==&lt;/span&gt; &lt;span class="n"&gt;target_sum&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;
-            &lt;span class="bp"&gt;self&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;_count&lt;/span&gt; &lt;span class="o"&gt;+=&lt;/span&gt; &lt;span class="mi"&gt;1&lt;/span&gt;
-
-        &lt;span class="n"&gt;new_sum&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;target_sum&lt;/span&gt; &lt;span class="o"&gt;-&lt;/span&gt; &lt;span class="n"&gt;root&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;val&lt;/span&gt;
-
-        &lt;span class="bp"&gt;self&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;_preorder&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;root&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;left&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;new_sum&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
-        &lt;span class="bp"&gt;self&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;_preorder&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;root&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;right&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;new_sum&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
-&lt;/pre&gt;&lt;/div&gt;
-&lt;/div&gt;
-&lt;div class="section" id="id3"&gt;
-&lt;h2 id="hidid3"&gt;参考资料&lt;a class="headerlink" href="#hidid3" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
-&lt;ul class="simple"&gt;
-&lt;li&gt;&lt;a class="reference external" href="https://leetcode.com/problems/path-sum-iii/"&gt;https://leetcode.com/problems/path-sum-iii/&lt;/a&gt;&lt;/li&gt;
-&lt;/ul&gt;
-&lt;/div&gt;
-</description><dc:creator xmlns:dc="http://purl.org/dc/elements/1.1/">mozillazg</dc:creator><pubDate>Sun, 24 Jan 2021 00:00:00 +0000</pubDate><guid>tag:mozillazg.com,2021-01-24:2021/01/leetcode-437-path-sum-iii.html</guid><category>Binary-Tree</category><category>二叉树</category><category>preorder</category><category>前序遍历</category><category>Tree</category><category>树</category></item><item><title>LeetCode: 112. Path Sum</title><link>https://mozillazg.com/2021/01/leetcode-112-path-sum.html</link><description>&lt;div class="section" id="id1"&gt;
-&lt;h2 id="hidid1"&gt;题目&lt;a class="headerlink" href="#hidid1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
-&lt;p&gt;原题地址：&lt;a class="reference external" href="https://leetcode.com/problems/path-sum/"&gt;https://leetcode.com/problems/path-sum/&lt;/a&gt;&lt;/p&gt;
-&lt;p&gt;Given the root of a binary tree and an integer targetSum, return true if the tree has a root-to-leaf path such that adding up all the values along the path equals targetSum.&lt;/p&gt;
-&lt;p&gt;A leaf is a node with no children.&lt;/p&gt;
-&lt;p&gt;Example 1:&lt;/p&gt;
-&lt;p&gt;&lt;img alt="image1" src="/static/images/leetcode/pathsum1.jpg" /&gt;&lt;/p&gt;
-&lt;blockquote&gt;
-&lt;/blockquote&gt;
-&lt;pre class="literal-block"&gt;
-Input: root = [5,4,8,11,null,13,4,7,2,null,null,null,1], targetSum = 22
-Output: true
-&lt;/pre&gt;
-&lt;p&gt;Example 2:&lt;/p&gt;
-&lt;p&gt;&lt;img alt="image2" src="/static/images/leetcode/pathsum2.jpg" /&gt;&lt;/p&gt;
-&lt;blockquote&gt;
-&lt;/blockquote&gt;
-&lt;pre class="literal-block"&gt;
-Input: root = [1,2,3], targetSum = 5
-Output: false
-&lt;/pre&gt;
-&lt;p&gt;Example 3:&lt;/p&gt;
-&lt;pre class="literal-block"&gt;
-Input: root = [1,2], targetSum = 0
-Output: false
-&lt;/pre&gt;
-&lt;p&gt;Constraints:&lt;/p&gt;
-&lt;ul class="simple"&gt;
-&lt;li&gt;The number of nodes in the tree is in the range &lt;tt class="docutils literal"&gt;[0, 5000]&lt;/tt&gt;.&lt;/li&gt;
-&lt;li&gt;&lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;-1000&lt;/span&gt; &amp;lt;= Node.val &amp;lt;= 1000&lt;/tt&gt;&lt;/li&gt;
-&lt;li&gt;&lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;-1000&lt;/span&gt; &amp;lt;= targetSum &amp;lt;= 1000&lt;/tt&gt;&lt;/li&gt;
-&lt;/ul&gt;
-&lt;/div&gt;
-&lt;div class="section" id="id2"&gt;
-&lt;h2 id="hidid2"&gt;解法&lt;a class="headerlink" href="#hidid2" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
-&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="c1"&gt;# Definition for a binary tree node.&lt;/span&gt;
-&lt;span class="c1"&gt;# class TreeNode(object):&lt;/span&gt;
-&lt;span class="c1"&gt;#     def __init__(self, val=0, left=None, right=None):&lt;/span&gt;
-&lt;span class="c1"&gt;#         self.val = val&lt;/span&gt;
-&lt;span class="c1"&gt;#         self.left = left&lt;/span&gt;
-&lt;span class="c1"&gt;#         self.right = right&lt;/span&gt;
-&lt;span class="k"&gt;class&lt;/span&gt; &lt;span class="nc"&gt;Solution&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="nb"&gt;object&lt;/span&gt;&lt;span class="p"&gt;):&lt;/span&gt;
-    &lt;span class="k"&gt;def&lt;/span&gt; &lt;span class="nf"&gt;hasPathSum&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="bp"&gt;self&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;root&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;targetSum&lt;/span&gt;&lt;span class="p"&gt;):&lt;/span&gt;
-        &lt;span class="k"&gt;if&lt;/span&gt; &lt;span class="n"&gt;root&lt;/span&gt; &lt;span class="ow"&gt;is&lt;/span&gt; &lt;span class="bp"&gt;None&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;
-            &lt;span class="k"&gt;return&lt;/span&gt; &lt;span class="bp"&gt;False&lt;/span&gt;
-
-        &lt;span class="k"&gt;if&lt;/span&gt; &lt;span class="n"&gt;root&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;left&lt;/span&gt; &lt;span class="ow"&gt;is&lt;/span&gt; &lt;span class="bp"&gt;None&lt;/span&gt; &lt;span class="ow"&gt;and&lt;/span&gt; &lt;span class="n"&gt;root&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;right&lt;/span&gt; &lt;span class="ow"&gt;is&lt;/span&gt; &lt;span class="bp"&gt;None&lt;/span&gt; &lt;span class="ow"&gt;and&lt;/span&gt; &lt;span class="n"&gt;root&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;val&lt;/span&gt; &lt;span class="o"&gt;==&lt;/span&gt; &lt;span class="n"&gt;targetSum&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;
-            &lt;span class="k"&gt;return&lt;/span&gt; &lt;span class="bp"&gt;True&lt;/span&gt;
-
-        &lt;span class="n"&gt;new_sum&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;targetSum&lt;/span&gt; &lt;span class="o"&gt;-&lt;/span&gt; &lt;span class="n"&gt;root&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;val&lt;/span&gt;
-
-        &lt;span class="k"&gt;return&lt;/span&gt; &lt;span class="bp"&gt;self&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;hasPathSum&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;root&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;left&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;new_sum&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt; &lt;span class="ow"&gt;or&lt;/span&gt; &lt;span class="bp"&gt;self&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;hasPathSum&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;root&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;right&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;new_sum&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
-&lt;/pre&gt;&lt;/div&gt;
-&lt;/div&gt;
-&lt;div class="section" id="id3"&gt;
-&lt;h2 id="hidid3"&gt;参考资料&lt;a class="headerlink" href="#hidid3" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
-&lt;ul class="simple"&gt;
-&lt;li&gt;&lt;a class="reference external" href="https://leetcode.com/problems/path-sum/"&gt;https://leetcode.com/problems/path-sum/&lt;/a&gt;&lt;/li&gt;
-&lt;/ul&gt;
-&lt;/div&gt;
-</description><dc:creator xmlns:dc="http://purl.org/dc/elements/1.1/">mozillazg</dc:creator><pubDate>Sat, 23 Jan 2021 00:00:00 +0000</pubDate><guid>tag:mozillazg.com,2021-01-23:2021/01/leetcode-112-path-sum.html</guid><category>Binary-Tree</category><category>二叉树</category><category>Tree</category><category>树</category></item></channel></rss>
+</description><dc:creator xmlns:dc="http://purl.org/dc/elements/1.1/">mozillazg</dc:creator><pubDate>Sat, 06 Feb 2021 00:00:00 +0000</pubDate><guid>tag:mozillazg.com,2021-02-06:2021/02/leetcode-257-binary-tree-paths.html</guid><category>Binary-Tree</category><category>二叉树</category><category>Tree</category><category>树</category></item></channel></rss>
