@@ -18,6 +18,8 @@
         <meta name="author" content="mozillazg" />
         <meta name="keywords" content="asyncio" />
     <meta name="description" content="本文是 https://pymotw.com/3/asyncio/control.html 的学习笔记，强烈推荐直接阅读原文。 对于线性执行的 Coroutines 可以很方便的通过 await 来控制。 对于组合式的 Coroutines，比如在一个 coroutine 中等待其他并发执行的 Coroutines 完成的操作也可以通过 asyncio 模块来实现。 等待多个 Coroutines¶ 在一个 Coroutine 中等待其他多个 Coroutines 操作完成是一个很常见的需求，比如下载一批数据，执行对顺序没有要求，只想要最后的结果。 wait() 方法可以实现暂停当前 Coroutine， 直到后台其他 Coroutines 操作完成： # asyncio_wait.py import asyncio async def phase(i): print(&#39;in phase {}&#39;.format(i)) await asyncio.sleep(0.1 * i) print(&#39;done with phase {}&#39;.format(i)) return &#39;phase {} result&#39;.format(i) async def main(num_phases): print(&#39;starting main&#39;) phases = [ phase(i) for i in range(num_phases) ] print(&#39;waiting for phases to complete&#39;) completed, pending = await asyncio.wait(phases) results = [t.result() for t in completed] print(&#39;results: {!r}&#39;.format(results)) event_loop = asyncio.get_event_loop() try: event_loop.run_until_complete(main(3)) finally: event_loop.close() 在 wait 内部，它使用一个集合来保存它创建的 Task 实例，所以它保存的 Task 的结果是无序的。wait 返回一个由两个集合组成的元祖，一个保存状态为 done 的 Task ，一个保存状态为 pending 的 Task: $ python3.6 asyncio_wait.py starting main waiting for phases to complete in phase 0 in phase 2 in phase 1 done with phase 0 done with phase 1 done with phase 2 results: [&#39;phase 0 result&#39;, &#39;phase 2 result&#39;, &#39;phase 1 result&#39;] 当调用 wait 时指定 timeout 参数才会有可能出现结果中包含状态为 pending 的 Task: # asyncio_wait_timeout.py import asyncio async def phase(i): print(&#39;in phase {}&#39;.format(i)) try: await asyncio.sleep(0.1 * i) except asyncio.CancelledError: print(&#39;phase {} canceled&#39;.format(i)) raise else: print(&#39;done with phase {}&#39;.format(i)) return &#39;phase {} result&#39;.format(i) async def main(num_phases): print(&#39;starting main&#39;) phases = [ phase(i) for i in range(num_phases) ] print(&#39;waiting 0.1 for phases to complete&#39;) completed, pending = await asyncio.wait(phases, timeout=0.1) print(&#39;{} completed and {} pending&#39;.format( len(completed), len(pending), )) if pending: print(&#39;canceling tasks&#39;) for t in pending: t.cancel() print(&#39;exiting main&#39;) event_loop = asyncio.get_event_loop() try: event_loop.run_until_complete(main(3)) finally: event_loop.close() 对于 pending 的 task 最好是把它们 cancel 掉，否则事件循环在之后会继续执行它们或者退出程序的时候会有警告信息. $ python3.6 asyncio_wait_timeout.py starting main waiting 0.1 for phases to complete in phase 0 in phase 2 in phase 1 done with phase 0 1 completed and 2 pending canceling tasks exiting main phase 1 canceled phase 2 canceled 不 cancel 会警告的情况: # asyncio_wait_timeout_without_cancel.py import asyncio async def phase(i): print(&#39;in phase {}&#39;.format(i)) try: await asyncio.sleep(0.1 * i) except asyncio.CancelledError: print(&#39;phase {} canceled&#39;.format(i)) raise else: print(&#39;done with phase {}&#39;.format(i)) return &#39;phase {} result&#39;.format(i) async def main(num_phases): print(&#39;starting main&#39;) phases = [ phase(i) for i in range(num_phases) ] print(&#39;waiting 0.1 for phases to complete&#39;) completed, pending = await asyncio.wait(phases, timeout=0.1) print(&#39;{} completed and {} pending&#39;.format( len(completed), len(pending), )) print(&#39;exiting main&#39;) event_loop = asyncio.get_event_loop() try: event_loop.run_until_complete(main(3)) finally: event_loop.close() 运行结果: $ python3.6 asyncio_wait_timeout_without_cancel_warn.py starting main waiting 0.1 for phases to complete in phase 1 in phase 0 in phase 2 done with phase 0 1 completed and 2 pending exiting main done with phase 1 Task was destroyed but it is pending! task: &lt;Task pending coro=&lt;phase() done, defined at asyncio_wait_timeout_without_cancel_warn.py:5&gt; wait_for=&lt;Future pending cb=[&lt;TaskWakeupMethWrapper object at 0x10e227918&gt;()]&gt;&gt; pending 还会继续执行的情况: # asyncio_wait_timeout_without_cancel_continue.py import asyncio async def phase(i): print(&#39;in phase {}&#39;.format(i)) try: await asyncio.sleep(0.1 * i) except asyncio.CancelledError: print(&#39;phase {} canceled&#39;.format(i)) raise else: print(&#39;done with phase {}&#39;.format(i)) return &#39;phase {} result&#39;.format(i) async def main(num_phases): print(&#39;starting main&#39;) phases = [ phase(i) for i in range(num_phases) ] print(&#39;waiting 0.1 for phases to complete&#39;) completed, pending = await asyncio.wait(phases, timeout=0.1) print(&#39;{} completed and {} pending&#39;.format( len(completed), len(pending), )) print(&#39;exiting main&#39;) event_loop = asyncio.get_event_loop() try: event_loop.run_until_complete(main(3)) event_loop.run_until_complete(asyncio.sleep(3)) finally: event_loop.close() 运行结果 $ python3.6 asyncio_wait_timeout_without_cancel_continue.py starting main waiting 0.1 for phases to complete in phase 1 in phase 0 in phase 2 done with phase 0 1 completed and 2 pending exiting main done with phase 1 done with phase 2 收集 Coroutines 结果¶ 如果 Coroutines 是在程序中显示生成的，并且只关心返回值结果的话，gather() 是一种比较好的收集多个操作结果的方法： # asyncio_gather.py import asyncio async def phase1(): print(&#39;in phase1&#39;) await asyncio.sleep(2) print(&#39;done with phase1&#39;) return &#39;phase1 result&#39; async def phase2(): print(&#39;in phase2&#39;) await asyncio.sleep(1) print(&#39;done with phase2&#39;) return &#39;phase2 result&#39; async def main(): print(&#39;starting main&#39;) print(&#39;waiting for phases to complete&#39;) results = await asyncio.gather( phase1(), phase2() ) print(&#39;results: {!r}&#39;.format(results)) event_loop = asyncio.get_event_loop() try: event_loop.run_until_complete(main()) finally: event_loop.close() 通过 gather 创建的 task 对外部是不可见的，所以它们不能被取消。返回值是按输入参数顺序保存的对应 coroutine 的执行结果，无论真正执行的时候是否按顺序执行的，最终的结果都是有序的。 $ python3.6 asyncio_gather.py starting main waiting for phases to complete in phase2 in phase1 done with phase2 done with phase1 results: [&#39;phase1 result&#39;, &#39;phase2 result&#39;] 当后台操作完成的时候做一些事情¶ as_completed() 是一个生成器，它将管理传入的 coroutines 执行， 每次迭代都将返回一个 coroutine 执行完成的 task。 跟 wait() 一样，as_completed() 也不会保证顺序，跟 wait() 的区别就是它不会等待所有的 coroutine 操作都完成以后才能做其他操作。 # asyncio_as_completed.py import asyncio async def phase(i): print(&#39;in phase {}&#39;.format(i)) await asyncio.sleep(0.5 - (0.1 * i)) print(&#39;done with phase {}&#39;.format(i)) return &#39;phase {} result&#39;.format(i) async def main(num_phases): print(&#39;starting main&#39;) phases = [ phase(i) for i in range(num_phases) ] print(&#39;waiting for phases to complete&#39;) results = [] for next_to_complete in asyncio.as_completed(phases): answer = await next_to_complete print(&#39;recevived answer {!r}&#39;.format(answer)) results.append(answer) print(&#39;results: {!r}&#39;.format(results)) return results event_loop = asyncio.get_event_loop() try: event_loop.run_until_complete(main(3)) finally: event_loop.close() 结果: $ python3.6 asyncio_as_completed.py starting main waiting for phases to complete in phase 1 in phase 2 in phase 0 done with phase 2 recevived answer &#39;phase 2 result&#39; done with phase 1 recevived answer &#39;phase 1 result&#39; done with phase 0 recevived answer &#39;phase 0 result&#39; results: [&#39;phase 2 result&#39;, &#39;phase 1 result&#39;, &#39;phase 0 result&#39;] 参考资料¶ Composing Coroutines with Control Structures — PyMOTW 3 18.5.3. Tasks and coroutines — Python 3.6.2 documentation" />
+    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-4941850466486001"
+     crossorigin="anonymous"></script>
 
     <style>
       .js-toc {
@@ -93,7 +95,360 @@
         // "dateModified": "",
         "image": "https://mozillazg.com/static/avatar.jpeg",
         "keywords": "asyncio",
-        "description": "本文是 https://pymotw.com/3/asyncio/control.html 的学习笔记，强烈推荐直接阅读原文。 对于线性执行的 Coroutines 可以很方便的通过 await 来控制。 对于组合式的 Coroutines，比如在一个 coroutine 中等待其他并发执行的 Coroutines 完成的操作也可以通过 asyncio 模块来实现。 等待多个 Coroutines¶ 在一个 Coroutine 中等待其他多个 Coroutines 操作完成是一个很常见的需求，比如下载一批数据，执行对顺序没有要求，只想要最后的结果。 wait() 方法可以实现暂停当前 Coroutine， 直到后台其他 Coroutines 操作完成： # asyncio_wait.py import asyncio async def phase(i): print(&#39;in phase {}&#39;.format(i)) await asyncio.sleep(0.1 * i) print(&#39;done with phase {}&#39;.format(i)) return &#39;phase {} result&#39;.format(i) async def main(num_phases): print(&#39;starting main&#39;) phases = [ phase(i) for i in range(num_phases) ] print(&#39;waiting for phases to complete&#39;) completed, pending = await asyncio.wait(phases) results = [t.result() for t in completed] print(&#39;results: {!r}&#39;.format(results)) event_loop = asyncio.get_event_loop() try: event_loop.run_until_complete(main(3)) finally: event_loop.close() 在 wait 内部，它使用一个集合来保存它创建的 Task 实例，所以它保存的 Task 的结果是无序的。wait 返回一个由两个集合组成的元祖，一个保存状态为 done 的 Task ，一个保存状态为 pending 的 Task: $ python3.6 asyncio_wait.py starting main waiting for phases to complete in phase 0 in phase 2 in phase 1 done with phase 0 done with phase 1 done with phase 2 results: [&#39;phase 0 result&#39;, &#39;phase 2 result&#39;, &#39;phase 1 result&#39;] 当调用 wait 时指定 timeout 参数才会有可能出现结果中包含状态为 pending 的 Task: # asyncio_wait_timeout.py import asyncio async def phase(i): print(&#39;in phase {}&#39;.format(i)) try: await asyncio.sleep(0.1 * i) except asyncio.CancelledError: print(&#39;phase {} canceled&#39;.format(i)) raise else: print(&#39;done with phase {}&#39;.format(i)) return &#39;phase {} result&#39;.format(i) async def main(num_phases): print(&#39;starting main&#39;) phases = [ phase(i) for i in range(num_phases) ] print(&#39;waiting 0.1 for phases to complete&#39;) completed, pending = await asyncio.wait(phases, timeout=0.1) print(&#39;{} completed and {} pending&#39;.format( len(completed), len(pending), )) if pending: print(&#39;canceling tasks&#39;) for t in pending: t.cancel() print(&#39;exiting main&#39;) event_loop = asyncio.get_event_loop() try: event_loop.run_until_complete(main(3)) finally: event_loop.close() 对于 pending 的 task 最好是把它们 cancel 掉，否则事件循环在之后会继续执行它们或者退出程序的时候会有警告信息. $ python3.6 asyncio_wait_timeout.py starting main waiting 0.1 for phases to complete in phase 0 in phase 2 in phase 1 done with phase 0 1 completed and 2 pending canceling tasks exiting main phase 1 canceled phase 2 canceled 不 cancel 会警告的情况: # asyncio_wait_timeout_without_cancel.py import asyncio async def phase(i): print(&#39;in phase {}&#39;.format(i)) try: await asyncio.sleep(0.1 * i) except asyncio.CancelledError: print(&#39;phase {} canceled&#39;.format(i)) raise else: print(&#39;done with phase {}&#39;.format(i)) return &#39;phase {} result&#39;.format(i) async def main(num_phases): print(&#39;starting main&#39;) phases = [ phase(i) for i in range(num_phases) ] print(&#39;waiting 0.1 for phases to complete&#39;) completed, pending = await asyncio.wait(phases, timeout=0.1) print(&#39;{} completed and {} pending&#39;.format( len(completed), len(pending), )) print(&#39;exiting main&#39;) event_loop = asyncio.get_event_loop() try: event_loop.run_until_complete(main(3)) finally: event_loop.close() 运行结果: $ python3.6 asyncio_wait_timeout_without_cancel_warn.py starting main waiting 0.1 for phases to complete in phase 1 in phase 0 in phase 2 done with phase 0 1 completed and 2 pending exiting main done with phase 1 Task was destroyed but it is pending! task: &lt;Task pending coro=&lt;phase() done, defined at asyncio_wait_timeout_without_cancel_warn.py:5&gt; wait_for=&lt;Future pending cb=[&lt;TaskWakeupMethWrapper object at 0x10e227918&gt;()]&gt;&gt; pending 还会继续执行的情况: # asyncio_wait_timeout_without_cancel_continue.py import asyncio async def phase(i): print(&#39;in phase {}&#39;.format(i)) try: await asyncio.sleep(0.1 * i) except asyncio.CancelledError: print(&#39;phase {} canceled&#39;.format(i)) raise else: print(&#39;done with phase {}&#39;.format(i)) return &#39;phase {} result&#39;.format(i) async def main(num_phases): print(&#39;starting main&#39;) phases = [ phase(i) for i in range(num_phases) ] print(&#39;waiting 0.1 for phases to complete&#39;) completed, pending = await asyncio.wait(phases, timeout=0.1) print(&#39;{} completed and {} pending&#39;.format( len(completed), len(pending), )) print(&#39;exiting main&#39;) event_loop = asyncio.get_event_loop() try: event_loop.run_until_complete(main(3)) event_loop.run_until_complete(asyncio.sleep(3)) finally: event_loop.close() 运行结果 $ python3.6 asyncio_wait_timeout_without_cancel_continue.py starting main waiting 0.1 for phases to complete in phase 1 in phase 0 in phase 2 done with phase 0 1 completed and 2 pending exiting main done with phase 1 done with phase 2 收集 Coroutines 结果¶ 如果 Coroutines 是在程序中显示生成的，并且只关心返回值结果的话，gather() 是一种比较好的收集多个操作结果的方法： # asyncio_gather.py import asyncio async def phase1(): print(&#39;in phase1&#39;) await asyncio.sleep(2) print(&#39;done with phase1&#39;) return &#39;phase1 result&#39; async def phase2(): print(&#39;in phase2&#39;) await asyncio.sleep(1) print(&#39;done with phase2&#39;) return &#39;phase2 result&#39; async def main(): print(&#39;starting main&#39;) print(&#39;waiting for phases to complete&#39;) results = await asyncio.gather( phase1(), phase2() ) print(&#39;results: {!r}&#39;.format(results)) event_loop = asyncio.get_event_loop() try: event_loop.run_until_complete(main()) finally: event_loop.close() 通过 gather 创建的 task 对外部是不可见的，所以它们不能被取消。返回值是按输入参数顺序保存的对应 coroutine 的执行结果，无论真正执行的时候是否按顺序执行的，最终的结果都是有序的。 $ python3.6 asyncio_gather.py starting main waiting for phases to complete in phase2 in phase1 done with phase2 done with phase1 results: [&#39;phase1 result&#39;, &#39;phase2 result&#39;] 当后台操作完成的时候做一些事情¶ as_completed() 是一个生成器，它将管理传入的 coroutines 执行， 每次迭代都将返回一个 coroutine 执行完成的 task。 跟 wait() 一样，as_completed() 也不会保证顺序，跟 wait() 的区别就是它不会等待所有的 coroutine 操作都完成以后才能做其他操作。 # asyncio_as_completed.py import asyncio async def phase(i): print(&#39;in phase {}&#39;.format(i)) await asyncio.sleep(0.5 - (0.1 * i)) print(&#39;done with phase {}&#39;.format(i)) return &#39;phase {} result&#39;.format(i) async def main(num_phases): print(&#39;starting main&#39;) phases = [ phase(i) for i in range(num_phases) ] print(&#39;waiting for phases to complete&#39;) results = [] for next_to_complete in asyncio.as_completed(phases): answer = await next_to_complete print(&#39;recevived answer {!r}&#39;.format(answer)) results.append(answer) print(&#39;results: {!r}&#39;.format(results)) return results event_loop = asyncio.get_event_loop() try: event_loop.run_until_complete(main(3)) finally: event_loop.close() 结果: $ python3.6 asyncio_as_completed.py starting main waiting for phases to complete in phase 1 in phase 2 in phase 0 done with phase 2 recevived answer &#39;phase 2 result&#39; done with phase 1 recevived answer &#39;phase 1 result&#39; done with phase 0 recevived answer &#39;phase 0 result&#39; results: [&#39;phase 2 result&#39;, &#39;phase 1 result&#39;, &#39;phase 0 result&#39;] 参考资料¶ Composing Coroutines with Control Structures — PyMOTW 3 18.5.3. Tasks and coroutines — Python 3.6.2 documentation",
+        // "description": "本文是 https://pymotw.com/3/asyncio/control.html 的学习笔记，强烈推荐直接阅读原文。 对于线性执行的 Coroutines 可以很方便的通过 await 来控制。 对于组合式的 Coroutines，比如在一个 coroutine 中等待其他并发执行的 Coroutines 完成的操作也可以通过 asyncio 模块来实现。 等待多个 Coroutines¶ 在一个 Coroutine 中等待其他多个 Coroutines 操作完成是一个很常见的需求，比如下载一批数据，执行对顺序没有要求，只想要最后的结果。 wait() 方法可以实现暂停当前 Coroutine， 直到后台其他 Coroutines 操作完成： # asyncio_wait.py import asyncio async def phase(i): print(&#39;in phase {}&#39;.format(i)) await asyncio.sleep(0.1 * i) print(&#39;done with phase {}&#39;.format(i)) return &#39;phase {} result&#39;.format(i) async def main(num_phases): print(&#39;starting main&#39;) phases = [ phase(i) for i in range(num_phases) ] print(&#39;waiting for phases to complete&#39;) completed, pending = await asyncio.wait(phases) results = [t.result() for t in completed] print(&#39;results: {!r}&#39;.format(results)) event_loop = asyncio.get_event_loop() try: event_loop.run_until_complete(main(3)) finally: event_loop.close() 在 wait 内部，它使用一个集合来保存它创建的 Task 实例，所以它保存的 Task 的结果是无序的。wait 返回一个由两个集合组成的元祖，一个保存状态为 done 的 Task ，一个保存状态为 pending 的 Task: $ python3.6 asyncio_wait.py starting main waiting for phases to complete in phase 0 in phase 2 in phase 1 done with phase 0 done with phase 1 done with phase 2 results: [&#39;phase 0 result&#39;, &#39;phase 2 result&#39;, &#39;phase 1 result&#39;] 当调用 wait 时指定 timeout 参数才会有可能出现结果中包含状态为 pending 的 Task: # asyncio_wait_timeout.py import asyncio async def phase(i): print(&#39;in phase {}&#39;.format(i)) try: await asyncio.sleep(0.1 * i) except asyncio.CancelledError: print(&#39;phase {} canceled&#39;.format(i)) raise else: print(&#39;done with phase {}&#39;.format(i)) return &#39;phase {} result&#39;.format(i) async def main(num_phases): print(&#39;starting main&#39;) phases = [ phase(i) for i in range(num_phases) ] print(&#39;waiting 0.1 for phases to complete&#39;) completed, pending = await asyncio.wait(phases, timeout=0.1) print(&#39;{} completed and {} pending&#39;.format( len(completed), len(pending), )) if pending: print(&#39;canceling tasks&#39;) for t in pending: t.cancel() print(&#39;exiting main&#39;) event_loop = asyncio.get_event_loop() try: event_loop.run_until_complete(main(3)) finally: event_loop.close() 对于 pending 的 task 最好是把它们 cancel 掉，否则事件循环在之后会继续执行它们或者退出程序的时候会有警告信息. $ python3.6 asyncio_wait_timeout.py starting main waiting 0.1 for phases to complete in phase 0 in phase 2 in phase 1 done with phase 0 1 completed and 2 pending canceling tasks exiting main phase 1 canceled phase 2 canceled 不 cancel 会警告的情况: # asyncio_wait_timeout_without_cancel.py import asyncio async def phase(i): print(&#39;in phase {}&#39;.format(i)) try: await asyncio.sleep(0.1 * i) except asyncio.CancelledError: print(&#39;phase {} canceled&#39;.format(i)) raise else: print(&#39;done with phase {}&#39;.format(i)) return &#39;phase {} result&#39;.format(i) async def main(num_phases): print(&#39;starting main&#39;) phases = [ phase(i) for i in range(num_phases) ] print(&#39;waiting 0.1 for phases to complete&#39;) completed, pending = await asyncio.wait(phases, timeout=0.1) print(&#39;{} completed and {} pending&#39;.format( len(completed), len(pending), )) print(&#39;exiting main&#39;) event_loop = asyncio.get_event_loop() try: event_loop.run_until_complete(main(3)) finally: event_loop.close() 运行结果: $ python3.6 asyncio_wait_timeout_without_cancel_warn.py starting main waiting 0.1 for phases to complete in phase 1 in phase 0 in phase 2 done with phase 0 1 completed and 2 pending exiting main done with phase 1 Task was destroyed but it is pending! task: &lt;Task pending coro=&lt;phase() done, defined at asyncio_wait_timeout_without_cancel_warn.py:5&gt; wait_for=&lt;Future pending cb=[&lt;TaskWakeupMethWrapper object at 0x10e227918&gt;()]&gt;&gt; pending 还会继续执行的情况: # asyncio_wait_timeout_without_cancel_continue.py import asyncio async def phase(i): print(&#39;in phase {}&#39;.format(i)) try: await asyncio.sleep(0.1 * i) except asyncio.CancelledError: print(&#39;phase {} canceled&#39;.format(i)) raise else: print(&#39;done with phase {}&#39;.format(i)) return &#39;phase {} result&#39;.format(i) async def main(num_phases): print(&#39;starting main&#39;) phases = [ phase(i) for i in range(num_phases) ] print(&#39;waiting 0.1 for phases to complete&#39;) completed, pending = await asyncio.wait(phases, timeout=0.1) print(&#39;{} completed and {} pending&#39;.format( len(completed), len(pending), )) print(&#39;exiting main&#39;) event_loop = asyncio.get_event_loop() try: event_loop.run_until_complete(main(3)) event_loop.run_until_complete(asyncio.sleep(3)) finally: event_loop.close() 运行结果 $ python3.6 asyncio_wait_timeout_without_cancel_continue.py starting main waiting 0.1 for phases to complete in phase 1 in phase 0 in phase 2 done with phase 0 1 completed and 2 pending exiting main done with phase 1 done with phase 2 收集 Coroutines 结果¶ 如果 Coroutines 是在程序中显示生成的，并且只关心返回值结果的话，gather() 是一种比较好的收集多个操作结果的方法： # asyncio_gather.py import asyncio async def phase1(): print(&#39;in phase1&#39;) await asyncio.sleep(2) print(&#39;done with phase1&#39;) return &#39;phase1 result&#39; async def phase2(): print(&#39;in phase2&#39;) await asyncio.sleep(1) print(&#39;done with phase2&#39;) return &#39;phase2 result&#39; async def main(): print(&#39;starting main&#39;) print(&#39;waiting for phases to complete&#39;) results = await asyncio.gather( phase1(), phase2() ) print(&#39;results: {!r}&#39;.format(results)) event_loop = asyncio.get_event_loop() try: event_loop.run_until_complete(main()) finally: event_loop.close() 通过 gather 创建的 task 对外部是不可见的，所以它们不能被取消。返回值是按输入参数顺序保存的对应 coroutine 的执行结果，无论真正执行的时候是否按顺序执行的，最终的结果都是有序的。 $ python3.6 asyncio_gather.py starting main waiting for phases to complete in phase2 in phase1 done with phase2 done with phase1 results: [&#39;phase1 result&#39;, &#39;phase2 result&#39;] 当后台操作完成的时候做一些事情¶ as_completed() 是一个生成器，它将管理传入的 coroutines 执行， 每次迭代都将返回一个 coroutine 执行完成的 task。 跟 wait() 一样，as_completed() 也不会保证顺序，跟 wait() 的区别就是它不会等待所有的 coroutine 操作都完成以后才能做其他操作。 # asyncio_as_completed.py import asyncio async def phase(i): print(&#39;in phase {}&#39;.format(i)) await asyncio.sleep(0.5 - (0.1 * i)) print(&#39;done with phase {}&#39;.format(i)) return &#39;phase {} result&#39;.format(i) async def main(num_phases): print(&#39;starting main&#39;) phases = [ phase(i) for i in range(num_phases) ] print(&#39;waiting for phases to complete&#39;) results = [] for next_to_complete in asyncio.as_completed(phases): answer = await next_to_complete print(&#39;recevived answer {!r}&#39;.format(answer)) results.append(answer) print(&#39;results: {!r}&#39;.format(results)) return results event_loop = asyncio.get_event_loop() try: event_loop.run_until_complete(main(3)) finally: event_loop.close() 结果: $ python3.6 asyncio_as_completed.py starting main waiting for phases to complete in phase 1 in phase 2 in phase 0 done with phase 2 recevived answer &#39;phase 2 result&#39; done with phase 1 recevived answer &#39;phase 1 result&#39; done with phase 0 recevived answer &#39;phase 0 result&#39; results: [&#39;phase 2 result&#39;, &#39;phase 1 result&#39;, &#39;phase 0 result&#39;] 参考资料¶ Composing Coroutines with Control Structures — PyMOTW 3 18.5.3. Tasks and coroutines — Python 3.6.2 documentation",
+        "description": "<p>本文是 <a class="reference external" href="https://pymotw.com/3/asyncio/control.html">https://pymotw.com/3/asyncio/control.html</a>
+的学习笔记，强烈推荐直接阅读原文。</p>
+<p>对于线性执行的 Coroutines 可以很方便的通过 <tt class="docutils literal">await</tt> 来控制。
+对于组合式的 Coroutines，比如在一个 coroutine 中等待其他并发执行的
+Coroutines 完成的操作也可以通过 asyncio 模块来实现。</p>
+<div class="section" id="coroutines">
+<h2 id="hidcoroutines">等待多个 Coroutines<a class="headerlink" href="#hidcoroutines" title="Permalink to this headline">¶</a></h2>
+<div class="line-block">
+<div class="line">在一个 Coroutine 中等待其他多个 Coroutines
+操作完成是一个很常见的需求，比如下载一批数据，执行对顺序没有要求，只想要最后的结果。</div>
+<div class="line"><tt class="docutils literal">wait()</tt> 方法可以实现暂停当前 Coroutine， 直到后台其他 Coroutines
+操作完成：</div>
+</div>
+<pre class="code python literal-block">
+<span class="c1"># asyncio_wait.py</span>
+<span class="kn">import</span> <span class="nn">asyncio</span>
+
+
+<span class="n">async</span> <span class="k">def</span> <span class="nf">phase</span><span class="p">(</span><span class="n">i</span><span class="p">):</span>
+    <span class="k">print</span><span class="p">(</span><span class="s1">'in phase {}'</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">i</span><span class="p">))</span>
+    <span class="n">await</span> <span class="n">asyncio</span><span class="o">.</span><span class="n">sleep</span><span class="p">(</span><span class="mf">0.1</span> <span class="o">*</span> <span class="n">i</span><span class="p">)</span>
+    <span class="k">print</span><span class="p">(</span><span class="s1">'done with phase {}'</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">i</span><span class="p">))</span>
+    <span class="k">return</span> <span class="s1">'phase {} result'</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">i</span><span class="p">)</span>
+
+
+<span class="n">async</span> <span class="k">def</span> <span class="nf">main</span><span class="p">(</span><span class="n">num_phases</span><span class="p">):</span>
+    <span class="k">print</span><span class="p">(</span><span class="s1">'starting main'</span><span class="p">)</span>
+    <span class="n">phases</span> <span class="o">=</span> <span class="p">[</span>
+        <span class="n">phase</span><span class="p">(</span><span class="n">i</span><span class="p">)</span>
+        <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">num_phases</span><span class="p">)</span>
+    <span class="p">]</span>
+    <span class="k">print</span><span class="p">(</span><span class="s1">'waiting for phases to complete'</span><span class="p">)</span>
+    <span class="n">completed</span><span class="p">,</span> <span class="n">pending</span> <span class="o">=</span> <span class="n">await</span> <span class="n">asyncio</span><span class="o">.</span><span class="n">wait</span><span class="p">(</span><span class="n">phases</span><span class="p">)</span>
+    <span class="n">results</span> <span class="o">=</span> <span class="p">[</span><span class="n">t</span><span class="o">.</span><span class="n">result</span><span class="p">()</span> <span class="k">for</span> <span class="n">t</span> <span class="ow">in</span> <span class="n">completed</span><span class="p">]</span>
+    <span class="k">print</span><span class="p">(</span><span class="s1">'results: {!r}'</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">results</span><span class="p">))</span>
+
+
+<span class="n">event_loop</span> <span class="o">=</span> <span class="n">asyncio</span><span class="o">.</span><span class="n">get_event_loop</span><span class="p">()</span>
+<span class="k">try</span><span class="p">:</span>
+    <span class="n">event_loop</span><span class="o">.</span><span class="n">run_until_complete</span><span class="p">(</span><span class="n">main</span><span class="p">(</span><span class="mi">3</span><span class="p">))</span>
+<span class="k">finally</span><span class="p">:</span>
+    <span class="n">event_loop</span><span class="o">.</span><span class="n">close</span><span class="p">()</span>
+</pre>
+<p>在 <tt class="docutils literal">wait</tt> 内部，它使用一个集合来保存它创建的 <tt class="docutils literal">Task</tt>
+实例，所以它保存的 <tt class="docutils literal">Task</tt> 的结果是无序的。<tt class="docutils literal">wait</tt>
+返回一个由两个集合组成的元祖，一个保存状态为 done 的 <tt class="docutils literal">Task</tt>
+，一个保存状态为 pending 的 <tt class="docutils literal">Task</tt>:</p>
+<pre class="literal-block">
+$ python3.6 asyncio_wait.py
+starting main
+waiting for phases to complete
+in phase 0
+in phase 2
+in phase 1
+done with phase 0
+done with phase 1
+done with phase 2
+results: ['phase 0 result', 'phase 2 result', 'phase 1 result']
+</pre>
+<p>当调用 <tt class="docutils literal">wait</tt> 时指定 <tt class="docutils literal">timeout</tt> 参数才会有可能出现结果中包含状态为
+pending 的 <tt class="docutils literal">Task</tt>:</p>
+<pre class="code python literal-block">
+<span class="c1"># asyncio_wait_timeout.py</span>
+<span class="kn">import</span> <span class="nn">asyncio</span>
+
+
+<span class="n">async</span> <span class="k">def</span> <span class="nf">phase</span><span class="p">(</span><span class="n">i</span><span class="p">):</span>
+    <span class="k">print</span><span class="p">(</span><span class="s1">'in phase {}'</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">i</span><span class="p">))</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="n">await</span> <span class="n">asyncio</span><span class="o">.</span><span class="n">sleep</span><span class="p">(</span><span class="mf">0.1</span> <span class="o">*</span> <span class="n">i</span><span class="p">)</span>
+    <span class="k">except</span> <span class="n">asyncio</span><span class="o">.</span><span class="n">CancelledError</span><span class="p">:</span>
+        <span class="k">print</span><span class="p">(</span><span class="s1">'phase {} canceled'</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">i</span><span class="p">))</span>
+        <span class="k">raise</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="k">print</span><span class="p">(</span><span class="s1">'done with phase {}'</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">i</span><span class="p">))</span>
+        <span class="k">return</span> <span class="s1">'phase {} result'</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">i</span><span class="p">)</span>
+
+
+<span class="n">async</span> <span class="k">def</span> <span class="nf">main</span><span class="p">(</span><span class="n">num_phases</span><span class="p">):</span>
+    <span class="k">print</span><span class="p">(</span><span class="s1">'starting main'</span><span class="p">)</span>
+    <span class="n">phases</span> <span class="o">=</span> <span class="p">[</span>
+        <span class="n">phase</span><span class="p">(</span><span class="n">i</span><span class="p">)</span>
+        <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">num_phases</span><span class="p">)</span>
+    <span class="p">]</span>
+    <span class="k">print</span><span class="p">(</span><span class="s1">'waiting 0.1 for phases to complete'</span><span class="p">)</span>
+    <span class="n">completed</span><span class="p">,</span> <span class="n">pending</span> <span class="o">=</span> <span class="n">await</span> <span class="n">asyncio</span><span class="o">.</span><span class="n">wait</span><span class="p">(</span><span class="n">phases</span><span class="p">,</span> <span class="n">timeout</span><span class="o">=</span><span class="mf">0.1</span><span class="p">)</span>
+    <span class="k">print</span><span class="p">(</span><span class="s1">'{} completed and {} pending'</span><span class="o">.</span><span class="n">format</span><span class="p">(</span>
+        <span class="nb">len</span><span class="p">(</span><span class="n">completed</span><span class="p">),</span> <span class="nb">len</span><span class="p">(</span><span class="n">pending</span><span class="p">),</span>
+    <span class="p">))</span>
+    <span class="k">if</span> <span class="n">pending</span><span class="p">:</span>
+        <span class="k">print</span><span class="p">(</span><span class="s1">'canceling tasks'</span><span class="p">)</span>
+        <span class="k">for</span> <span class="n">t</span> <span class="ow">in</span> <span class="n">pending</span><span class="p">:</span>
+            <span class="n">t</span><span class="o">.</span><span class="n">cancel</span><span class="p">()</span>
+
+    <span class="k">print</span><span class="p">(</span><span class="s1">'exiting main'</span><span class="p">)</span>
+
+
+<span class="n">event_loop</span> <span class="o">=</span> <span class="n">asyncio</span><span class="o">.</span><span class="n">get_event_loop</span><span class="p">()</span>
+<span class="k">try</span><span class="p">:</span>
+    <span class="n">event_loop</span><span class="o">.</span><span class="n">run_until_complete</span><span class="p">(</span><span class="n">main</span><span class="p">(</span><span class="mi">3</span><span class="p">))</span>
+<span class="k">finally</span><span class="p">:</span>
+    <span class="n">event_loop</span><span class="o">.</span><span class="n">close</span><span class="p">()</span>
+</pre>
+<p>对于 pending 的 task 最好是把它们 cancel
+掉，否则事件循环在之后会继续执行它们或者退出程序的时候会有警告信息.</p>
+<pre class="literal-block">
+$ python3.6 asyncio_wait_timeout.py
+starting main
+waiting 0.1 for phases to complete
+in phase 0
+in phase 2
+in phase 1
+done with phase 0
+1 completed and 2 pending
+canceling tasks
+exiting main
+phase 1 canceled
+phase 2 canceled
+</pre>
+<p>不 cancel 会警告的情况:</p>
+<pre class="code python literal-block">
+<span class="c1"># asyncio_wait_timeout_without_cancel.py</span>
+<span class="kn">import</span> <span class="nn">asyncio</span>
+
+
+<span class="n">async</span> <span class="k">def</span> <span class="nf">phase</span><span class="p">(</span><span class="n">i</span><span class="p">):</span>
+    <span class="k">print</span><span class="p">(</span><span class="s1">'in phase {}'</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">i</span><span class="p">))</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="n">await</span> <span class="n">asyncio</span><span class="o">.</span><span class="n">sleep</span><span class="p">(</span><span class="mf">0.1</span> <span class="o">*</span> <span class="n">i</span><span class="p">)</span>
+    <span class="k">except</span> <span class="n">asyncio</span><span class="o">.</span><span class="n">CancelledError</span><span class="p">:</span>
+        <span class="k">print</span><span class="p">(</span><span class="s1">'phase {} canceled'</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">i</span><span class="p">))</span>
+        <span class="k">raise</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="k">print</span><span class="p">(</span><span class="s1">'done with phase {}'</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">i</span><span class="p">))</span>
+        <span class="k">return</span> <span class="s1">'phase {} result'</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">i</span><span class="p">)</span>
+
+
+<span class="n">async</span> <span class="k">def</span> <span class="nf">main</span><span class="p">(</span><span class="n">num_phases</span><span class="p">):</span>
+    <span class="k">print</span><span class="p">(</span><span class="s1">'starting main'</span><span class="p">)</span>
+    <span class="n">phases</span> <span class="o">=</span> <span class="p">[</span>
+        <span class="n">phase</span><span class="p">(</span><span class="n">i</span><span class="p">)</span>
+        <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">num_phases</span><span class="p">)</span>
+    <span class="p">]</span>
+    <span class="k">print</span><span class="p">(</span><span class="s1">'waiting 0.1 for phases to complete'</span><span class="p">)</span>
+    <span class="n">completed</span><span class="p">,</span> <span class="n">pending</span> <span class="o">=</span> <span class="n">await</span> <span class="n">asyncio</span><span class="o">.</span><span class="n">wait</span><span class="p">(</span><span class="n">phases</span><span class="p">,</span> <span class="n">timeout</span><span class="o">=</span><span class="mf">0.1</span><span class="p">)</span>
+    <span class="k">print</span><span class="p">(</span><span class="s1">'{} completed and {} pending'</span><span class="o">.</span><span class="n">format</span><span class="p">(</span>
+        <span class="nb">len</span><span class="p">(</span><span class="n">completed</span><span class="p">),</span> <span class="nb">len</span><span class="p">(</span><span class="n">pending</span><span class="p">),</span>
+    <span class="p">))</span>
+
+    <span class="k">print</span><span class="p">(</span><span class="s1">'exiting main'</span><span class="p">)</span>
+
+
+<span class="n">event_loop</span> <span class="o">=</span> <span class="n">asyncio</span><span class="o">.</span><span class="n">get_event_loop</span><span class="p">()</span>
+<span class="k">try</span><span class="p">:</span>
+    <span class="n">event_loop</span><span class="o">.</span><span class="n">run_until_complete</span><span class="p">(</span><span class="n">main</span><span class="p">(</span><span class="mi">3</span><span class="p">))</span>
+<span class="k">finally</span><span class="p">:</span>
+    <span class="n">event_loop</span><span class="o">.</span><span class="n">close</span><span class="p">()</span>
+</pre>
+<p>运行结果:</p>
+<pre class="literal-block">
+$ python3.6 asyncio_wait_timeout_without_cancel_warn.py
+starting main
+waiting 0.1 for phases to complete
+in phase 1
+in phase 0
+in phase 2
+done with phase 0
+1 completed and 2 pending
+exiting main
+done with phase 1
+Task was destroyed but it is pending!
+task: &lt;Task pending coro=&lt;phase() done, defined at asyncio_wait_timeout_without_cancel_warn.py:5&gt; wait_for=&lt;Future pending cb=[&lt;TaskWakeupMethWrapper object at 0x10e227918&gt;()]&gt;&gt;
+</pre>
+<p>pending 还会继续执行的情况:</p>
+<pre class="code python literal-block">
+<span class="c1"># asyncio_wait_timeout_without_cancel_continue.py</span>
+<span class="kn">import</span> <span class="nn">asyncio</span>
+
+
+<span class="n">async</span> <span class="k">def</span> <span class="nf">phase</span><span class="p">(</span><span class="n">i</span><span class="p">):</span>
+    <span class="k">print</span><span class="p">(</span><span class="s1">'in phase {}'</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">i</span><span class="p">))</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="n">await</span> <span class="n">asyncio</span><span class="o">.</span><span class="n">sleep</span><span class="p">(</span><span class="mf">0.1</span> <span class="o">*</span> <span class="n">i</span><span class="p">)</span>
+    <span class="k">except</span> <span class="n">asyncio</span><span class="o">.</span><span class="n">CancelledError</span><span class="p">:</span>
+        <span class="k">print</span><span class="p">(</span><span class="s1">'phase {} canceled'</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">i</span><span class="p">))</span>
+        <span class="k">raise</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="k">print</span><span class="p">(</span><span class="s1">'done with phase {}'</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">i</span><span class="p">))</span>
+        <span class="k">return</span> <span class="s1">'phase {} result'</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">i</span><span class="p">)</span>
+
+
+<span class="n">async</span> <span class="k">def</span> <span class="nf">main</span><span class="p">(</span><span class="n">num_phases</span><span class="p">):</span>
+    <span class="k">print</span><span class="p">(</span><span class="s1">'starting main'</span><span class="p">)</span>
+    <span class="n">phases</span> <span class="o">=</span> <span class="p">[</span>
+        <span class="n">phase</span><span class="p">(</span><span class="n">i</span><span class="p">)</span>
+        <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">num_phases</span><span class="p">)</span>
+    <span class="p">]</span>
+    <span class="k">print</span><span class="p">(</span><span class="s1">'waiting 0.1 for phases to complete'</span><span class="p">)</span>
+    <span class="n">completed</span><span class="p">,</span> <span class="n">pending</span> <span class="o">=</span> <span class="n">await</span> <span class="n">asyncio</span><span class="o">.</span><span class="n">wait</span><span class="p">(</span><span class="n">phases</span><span class="p">,</span> <span class="n">timeout</span><span class="o">=</span><span class="mf">0.1</span><span class="p">)</span>
+    <span class="k">print</span><span class="p">(</span><span class="s1">'{} completed and {} pending'</span><span class="o">.</span><span class="n">format</span><span class="p">(</span>
+        <span class="nb">len</span><span class="p">(</span><span class="n">completed</span><span class="p">),</span> <span class="nb">len</span><span class="p">(</span><span class="n">pending</span><span class="p">),</span>
+    <span class="p">))</span>
+
+    <span class="k">print</span><span class="p">(</span><span class="s1">'exiting main'</span><span class="p">)</span>
+
+
+<span class="n">event_loop</span> <span class="o">=</span> <span class="n">asyncio</span><span class="o">.</span><span class="n">get_event_loop</span><span class="p">()</span>
+<span class="k">try</span><span class="p">:</span>
+    <span class="n">event_loop</span><span class="o">.</span><span class="n">run_until_complete</span><span class="p">(</span><span class="n">main</span><span class="p">(</span><span class="mi">3</span><span class="p">))</span>
+    <span class="n">event_loop</span><span class="o">.</span><span class="n">run_until_complete</span><span class="p">(</span><span class="n">asyncio</span><span class="o">.</span><span class="n">sleep</span><span class="p">(</span><span class="mi">3</span><span class="p">))</span>
+<span class="k">finally</span><span class="p">:</span>
+    <span class="n">event_loop</span><span class="o">.</span><span class="n">close</span><span class="p">()</span>
+</pre>
+<p>运行结果</p>
+<pre class="literal-block">
+$ python3.6 asyncio_wait_timeout_without_cancel_continue.py
+starting main
+waiting 0.1 for phases to complete
+in phase 1
+in phase 0
+in phase 2
+done with phase 0
+1 completed and 2 pending
+exiting main
+done with phase 1
+done with phase 2
+</pre>
+</div>
+<div class="section" id="id1">
+<h2 id="hidid1">收集 Coroutines 结果<a class="headerlink" href="#hidid1" title="Permalink to this headline">¶</a></h2>
+<p>如果 Coroutines
+是在程序中显示生成的，并且只关心返回值结果的话，<tt class="docutils literal">gather()</tt>
+是一种比较好的收集多个操作结果的方法：</p>
+<pre class="code python literal-block">
+<span class="c1"># asyncio_gather.py</span>
+<span class="kn">import</span> <span class="nn">asyncio</span>
+
+
+<span class="n">async</span> <span class="k">def</span> <span class="nf">phase1</span><span class="p">():</span>
+    <span class="k">print</span><span class="p">(</span><span class="s1">'in phase1'</span><span class="p">)</span>
+    <span class="n">await</span> <span class="n">asyncio</span><span class="o">.</span><span class="n">sleep</span><span class="p">(</span><span class="mi">2</span><span class="p">)</span>
+    <span class="k">print</span><span class="p">(</span><span class="s1">'done with phase1'</span><span class="p">)</span>
+    <span class="k">return</span> <span class="s1">'phase1 result'</span>
+
+
+<span class="n">async</span> <span class="k">def</span> <span class="nf">phase2</span><span class="p">():</span>
+    <span class="k">print</span><span class="p">(</span><span class="s1">'in phase2'</span><span class="p">)</span>
+    <span class="n">await</span> <span class="n">asyncio</span><span class="o">.</span><span class="n">sleep</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span>
+    <span class="k">print</span><span class="p">(</span><span class="s1">'done with phase2'</span><span class="p">)</span>
+    <span class="k">return</span> <span class="s1">'phase2 result'</span>
+
+
+<span class="n">async</span> <span class="k">def</span> <span class="nf">main</span><span class="p">():</span>
+    <span class="k">print</span><span class="p">(</span><span class="s1">'starting main'</span><span class="p">)</span>
+    <span class="k">print</span><span class="p">(</span><span class="s1">'waiting for phases to complete'</span><span class="p">)</span>
+    <span class="n">results</span> <span class="o">=</span> <span class="n">await</span> <span class="n">asyncio</span><span class="o">.</span><span class="n">gather</span><span class="p">(</span>
+        <span class="n">phase1</span><span class="p">(),</span>
+        <span class="n">phase2</span><span class="p">()</span>
+    <span class="p">)</span>
+    <span class="k">print</span><span class="p">(</span><span class="s1">'results: {!r}'</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">results</span><span class="p">))</span>
+
+
+<span class="n">event_loop</span> <span class="o">=</span> <span class="n">asyncio</span><span class="o">.</span><span class="n">get_event_loop</span><span class="p">()</span>
+<span class="k">try</span><span class="p">:</span>
+    <span class="n">event_loop</span><span class="o">.</span><span class="n">run_until_complete</span><span class="p">(</span><span class="n">main</span><span class="p">())</span>
+<span class="k">finally</span><span class="p">:</span>
+    <span class="n">event_loop</span><span class="o">.</span><span class="n">close</span><span class="p">()</span>
+</pre>
+<p>通过 gather 创建的 task
+对外部是不可见的，所以它们不能被取消。返回值是按输入参数顺序保存的对应
+coroutine
+的执行结果，无论真正执行的时候是否按顺序执行的，最终的结果都是有序的。</p>
+<pre class="literal-block">
+$ python3.6 asyncio_gather.py
+starting main
+waiting for phases to complete
+in phase2
+in phase1
+done with phase2
+done with phase1
+results: ['phase1 result', 'phase2 result']
+</pre>
+</div>
+<div class="section" id="id2">
+<h2 id="hidid2">当后台操作完成的时候做一些事情<a class="headerlink" href="#hidid2" title="Permalink to this headline">¶</a></h2>
+<div class="line-block">
+<div class="line"><tt class="docutils literal">as_completed()</tt> 是一个生成器，它将管理传入的 coroutines 执行，</div>
+<div class="line">每次迭代都将返回一个 coroutine 执行完成的 task。</div>
+<div class="line">跟 <tt class="docutils literal">wait()</tt> 一样，<tt class="docutils literal">as_completed()</tt> 也不会保证顺序，跟 <tt class="docutils literal">wait()</tt>
+的区别就是它不会等待所有的</div>
+<div class="line">coroutine 操作都完成以后才能做其他操作。</div>
+</div>
+<pre class="code python literal-block">
+<span class="c1"># asyncio_as_completed.py</span>
+<span class="kn">import</span> <span class="nn">asyncio</span>
+
+
+<span class="n">async</span> <span class="k">def</span> <span class="nf">phase</span><span class="p">(</span><span class="n">i</span><span class="p">):</span>
+    <span class="k">print</span><span class="p">(</span><span class="s1">'in phase {}'</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">i</span><span class="p">))</span>
+    <span class="n">await</span> <span class="n">asyncio</span><span class="o">.</span><span class="n">sleep</span><span class="p">(</span><span class="mf">0.5</span> <span class="o">-</span> <span class="p">(</span><span class="mf">0.1</span> <span class="o">*</span> <span class="n">i</span><span class="p">))</span>
+    <span class="k">print</span><span class="p">(</span><span class="s1">'done with phase {}'</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">i</span><span class="p">))</span>
+    <span class="k">return</span> <span class="s1">'phase {} result'</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">i</span><span class="p">)</span>
+
+
+<span class="n">async</span> <span class="k">def</span> <span class="nf">main</span><span class="p">(</span><span class="n">num_phases</span><span class="p">):</span>
+    <span class="k">print</span><span class="p">(</span><span class="s1">'starting main'</span><span class="p">)</span>
+    <span class="n">phases</span> <span class="o">=</span> <span class="p">[</span>
+        <span class="n">phase</span><span class="p">(</span><span class="n">i</span><span class="p">)</span>
+        <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">num_phases</span><span class="p">)</span>
+    <span class="p">]</span>
+    <span class="k">print</span><span class="p">(</span><span class="s1">'waiting for phases to complete'</span><span class="p">)</span>
+    <span class="n">results</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="k">for</span> <span class="n">next_to_complete</span> <span class="ow">in</span> <span class="n">asyncio</span><span class="o">.</span><span class="n">as_completed</span><span class="p">(</span><span class="n">phases</span><span class="p">):</span>
+        <span class="n">answer</span> <span class="o">=</span> <span class="n">await</span> <span class="n">next_to_complete</span>
+        <span class="k">print</span><span class="p">(</span><span class="s1">'recevived answer {!r}'</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">answer</span><span class="p">))</span>
+        <span class="n">results</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">answer</span><span class="p">)</span>
+    <span class="k">print</span><span class="p">(</span><span class="s1">'results: {!r}'</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">results</span><span class="p">))</span>
+    <span class="k">return</span> <span class="n">results</span>
+
+
+<span class="n">event_loop</span> <span class="o">=</span> <span class="n">asyncio</span><span class="o">.</span><span class="n">get_event_loop</span><span class="p">()</span>
+<span class="k">try</span><span class="p">:</span>
+    <span class="n">event_loop</span><span class="o">.</span><span class="n">run_until_complete</span><span class="p">(</span><span class="n">main</span><span class="p">(</span><span class="mi">3</span><span class="p">))</span>
+<span class="k">finally</span><span class="p">:</span>
+    <span class="n">event_loop</span><span class="o">.</span><span class="n">close</span><span class="p">()</span>
+</pre>
+<p>结果:</p>
+<pre class="literal-block">
+$ python3.6 asyncio_as_completed.py
+starting main
+waiting for phases to complete
+in phase 1
+in phase 2
+in phase 0
+done with phase 2
+recevived answer 'phase 2 result'
+done with phase 1
+recevived answer 'phase 1 result'
+done with phase 0
+recevived answer 'phase 0 result'
+results: ['phase 2 result', 'phase 1 result', 'phase 0 result']
+</pre>
+</div>
+<div class="section" id="id3">
+<h2 id="hidid3">参考资料<a class="headerlink" href="#hidid3" title="Permalink to this headline">¶</a></h2>
+<ul class="simple">
+<li><a class="reference external" href="https://pymotw.com/3/asyncio/control.html">Composing Coroutines with Control Structures — PyMOTW
+3</a></li>
+<li><a class="reference external" href="https://docs.python.org/3.6/library/asyncio-task.html">18.5.3. Tasks and coroutines — Python 3.6.2
+documentation</a></li>
+</ul>
+</div>
+",
         "mainEntityOfPage": {
             "@type": "WebPage",
             "@id": "https://mozillazg.com"
@@ -530,11 +885,11 @@ documentation</a></li>
 <section class="well" id="related-posts">
     <p>Related Posts:</p>
     <ul>
-        <li><a href="https://mozillazg.com/2017/08/python-asyncio-note-task-usage.html">asyncio 学习笔记：并发执行 Task</a></li>
         <li><a href="https://mozillazg.com/2017/08/python-asyncio-note-synchronization-primitives.html">asyncio 学习笔记：同步原语</a></li>
+        <li><a href="https://mozillazg.com/2017/08/python-asyncio-note-coroutine-schedule.html">asyncio 学习笔记：调用定时函数</a></li>
         <li><a href="https://mozillazg.com/2017/08/python-asyncio-note-coroutines-base-usage.html">asyncio 学习笔记：基本用法</a></li>
         <li><a href="https://mozillazg.com/2017/08/python-asyncio-note-future-usage.html">asyncio 学习笔记：产生异步结果</a></li>
-        <li><a href="https://mozillazg.com/2017/08/python-asyncio-note-io-protocol.html">asyncio 学习笔记：使用抽象类 Protocol 实现异步 I/O</a></li>
+        <li><a href="https://mozillazg.com/2017/08/python-asyncio-note-task-usage.html">asyncio 学习笔记：并发执行 Task</a></li>
     </ul>
 </section>
     <hr/>
@@ -577,7 +932,7 @@ documentation</a></li>
    <div class="container">
       <hr>
       <div class="row">
-         <div class="col-xs-10">&copy; 2021 mozillazg
+         <div class="col-xs-10">&copy; 2022 mozillazg
             &middot; Powered by <a href="https://github.com/DandyDev/pelican-bootstrap3" target="_blank">pelican-bootstrap3</a>,
             <a href="http://docs.getpelican.com/" target="_blank">Pelican</a>,
             <a href="http://getbootstrap.com" target="_blank">Bootstrap</a>              <p><small>  <a rel="license" href="http://creativecommons.org/licenses/by-sa/4.0/"><img alt="Creative Commons License" style="border-width:0" src="/static/images/by-sa-80x15.png" /></a>

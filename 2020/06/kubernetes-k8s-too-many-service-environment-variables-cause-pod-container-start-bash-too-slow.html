@@ -18,6 +18,8 @@
         <meta name="author" content="mozillazg" />
         <meta name="keywords" content="k8s,kubernetes,bash" />
     <meta name="description" content="前言¶ 当集群里创建了特别多的 service 时可能会导致容器中 bash 启动特别慢，原因是 service 相关的环境变量信息太多了。 解决方法¶ 先说解决方法：可以考虑通过配置 pod spec 增加 enableServiceLinks: false 禁用自动注入 service 信息到环境变量的方式来加速 bash 启动速度。 详见： Service-environment variables should be optional · Issue #60099 · kubernetes/kubernetes 下面再说一下 debug 方法。 DEBUG¶ 通过下面的 DEBUG 方法发现导致容器中执行 bash 特别慢是因为环境变量太多导致的。 模拟环境¶ 测试环境变量比较少的时候启动 bash 的时间: $ docker run -it --rm ubuntu:16.04 bash # env |wc -l 8 # time bash -c exit real 0m0.003s user 0m0.000s sys 0m0.000s 可以看到启动速度是非常快的。下面模拟一下环境变量特别多的环境: # for i in {1..10000}; do export &#34;SERVICE_$i&#34;=&#34;$i&#34;; done # env |wc -l 10008 看一下在环境变量特别多的环境下的 bash 启动时间: # time bash -c exit real 0m0.395s user 0m0.380s sys 0m0.000s 可以看到速度慢了 100 多倍。 下面来 debug 一下速度慢的真正原因，是否真的是环境变量特别多导致的。 debug 问题原因¶ 先安装一下 strace 命令: # apt-get update # apt-get install strace 然后通过 strace 命令来对比不同启动时间下的差别 （实际上一般会先通过 -c 来统计系统调用时间，这里通过 -c 无法得到实际原因所以就没写这个步骤了）: # strace -T -o result_slow.log -- bash -c exit # 实际场景下一般是到没有问题的容器中去获取 result_fast 的结果 # for i in {1..10000}; do unset &#34;SERVICE_$i&#34;; done # strace -T -o result_fast.log -- bash -c exit 通过对比 result_fast.log 和 result_slow.log 发现有个比较大的差别是 execve 系统调用的参数不一样并且花费的时间也有很大差别: # result_slow.log execve(&#34;/bin/bash&#34;, [&#34;bash&#34;, &#34;-c&#34;, &#34;exit&#34;], [/* 10008 vars */]) = 0 &lt;0.002256&gt; # result_fast.log execve(&#34;/bin/bash&#34;, [&#34;bash&#34;, &#34;-c&#34;, &#34;exit&#34;], [/* 8 vars */]) = 0 &lt;0.000345&gt; 通过查看 文档 可知 execve 系统调用的第三个参数传入的是环境变量: int execve(const char *pathname, char *const argv[], char *const envp[]); 也就是环境变量的数量不一样导致 execve 所花的时间有很大差异。可以通过执行 strace 命令的时候加一个 -v 参数来查看这个 /* 10008 vars */ 的具体内容来验证: execve(&#34;/bin/bash&#34;, [&#34;bash&#34;, &#34;-c&#34;, &#34;exit&#34;], [&#34;SERVICE_9928=9928&#34;, &#34;SERVICE_9911=9911&#34;, ... , &#34;SERVICE_76=76&#34;, &#34;_=/usr/bin/strace&#34;]) = 0 &lt;0.001230&gt; 总结¶ 当集群里创建了特别多的 service 并且介意由此导致的 bash 启动特别慢的问题时，可以考虑通过配置 pod spec 增加 enableServiceLinks: false 禁用自动注入 service 信息到环境变量的方式来加速 bash 启动速度。 参考资料¶ Service-environment variables should be optional · Issue #60099 · kubernetes/kubernetes strace 常用操作 - Huang Huang 的博客 execve(2) - Linux manual page" />
+    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-4941850466486001"
+     crossorigin="anonymous"></script>
 
     <style>
       .js-toc {
@@ -95,7 +97,97 @@
         // "dateModified": "",
         "image": "https://mozillazg.com/static/avatar.jpeg",
         "keywords": "k8s, kubernetes, bash",
-        "description": "前言¶ 当集群里创建了特别多的 service 时可能会导致容器中 bash 启动特别慢，原因是 service 相关的环境变量信息太多了。 解决方法¶ 先说解决方法：可以考虑通过配置 pod spec 增加 enableServiceLinks: false 禁用自动注入 service 信息到环境变量的方式来加速 bash 启动速度。 详见： Service-environment variables should be optional · Issue #60099 · kubernetes/kubernetes 下面再说一下 debug 方法。 DEBUG¶ 通过下面的 DEBUG 方法发现导致容器中执行 bash 特别慢是因为环境变量太多导致的。 模拟环境¶ 测试环境变量比较少的时候启动 bash 的时间: $ docker run -it --rm ubuntu:16.04 bash # env |wc -l 8 # time bash -c exit real 0m0.003s user 0m0.000s sys 0m0.000s 可以看到启动速度是非常快的。下面模拟一下环境变量特别多的环境: # for i in {1..10000}; do export &#34;SERVICE_$i&#34;=&#34;$i&#34;; done # env |wc -l 10008 看一下在环境变量特别多的环境下的 bash 启动时间: # time bash -c exit real 0m0.395s user 0m0.380s sys 0m0.000s 可以看到速度慢了 100 多倍。 下面来 debug 一下速度慢的真正原因，是否真的是环境变量特别多导致的。 debug 问题原因¶ 先安装一下 strace 命令: # apt-get update # apt-get install strace 然后通过 strace 命令来对比不同启动时间下的差别 （实际上一般会先通过 -c 来统计系统调用时间，这里通过 -c 无法得到实际原因所以就没写这个步骤了）: # strace -T -o result_slow.log -- bash -c exit # 实际场景下一般是到没有问题的容器中去获取 result_fast 的结果 # for i in {1..10000}; do unset &#34;SERVICE_$i&#34;; done # strace -T -o result_fast.log -- bash -c exit 通过对比 result_fast.log 和 result_slow.log 发现有个比较大的差别是 execve 系统调用的参数不一样并且花费的时间也有很大差别: # result_slow.log execve(&#34;/bin/bash&#34;, [&#34;bash&#34;, &#34;-c&#34;, &#34;exit&#34;], [/* 10008 vars */]) = 0 &lt;0.002256&gt; # result_fast.log execve(&#34;/bin/bash&#34;, [&#34;bash&#34;, &#34;-c&#34;, &#34;exit&#34;], [/* 8 vars */]) = 0 &lt;0.000345&gt; 通过查看 文档 可知 execve 系统调用的第三个参数传入的是环境变量: int execve(const char *pathname, char *const argv[], char *const envp[]); 也就是环境变量的数量不一样导致 execve 所花的时间有很大差异。可以通过执行 strace 命令的时候加一个 -v 参数来查看这个 /* 10008 vars */ 的具体内容来验证: execve(&#34;/bin/bash&#34;, [&#34;bash&#34;, &#34;-c&#34;, &#34;exit&#34;], [&#34;SERVICE_9928=9928&#34;, &#34;SERVICE_9911=9911&#34;, ... , &#34;SERVICE_76=76&#34;, &#34;_=/usr/bin/strace&#34;]) = 0 &lt;0.001230&gt; 总结¶ 当集群里创建了特别多的 service 并且介意由此导致的 bash 启动特别慢的问题时，可以考虑通过配置 pod spec 增加 enableServiceLinks: false 禁用自动注入 service 信息到环境变量的方式来加速 bash 启动速度。 参考资料¶ Service-environment variables should be optional · Issue #60099 · kubernetes/kubernetes strace 常用操作 - Huang Huang 的博客 execve(2) - Linux manual page",
+        // "description": "前言¶ 当集群里创建了特别多的 service 时可能会导致容器中 bash 启动特别慢，原因是 service 相关的环境变量信息太多了。 解决方法¶ 先说解决方法：可以考虑通过配置 pod spec 增加 enableServiceLinks: false 禁用自动注入 service 信息到环境变量的方式来加速 bash 启动速度。 详见： Service-environment variables should be optional · Issue #60099 · kubernetes/kubernetes 下面再说一下 debug 方法。 DEBUG¶ 通过下面的 DEBUG 方法发现导致容器中执行 bash 特别慢是因为环境变量太多导致的。 模拟环境¶ 测试环境变量比较少的时候启动 bash 的时间: $ docker run -it --rm ubuntu:16.04 bash # env |wc -l 8 # time bash -c exit real 0m0.003s user 0m0.000s sys 0m0.000s 可以看到启动速度是非常快的。下面模拟一下环境变量特别多的环境: # for i in {1..10000}; do export &#34;SERVICE_$i&#34;=&#34;$i&#34;; done # env |wc -l 10008 看一下在环境变量特别多的环境下的 bash 启动时间: # time bash -c exit real 0m0.395s user 0m0.380s sys 0m0.000s 可以看到速度慢了 100 多倍。 下面来 debug 一下速度慢的真正原因，是否真的是环境变量特别多导致的。 debug 问题原因¶ 先安装一下 strace 命令: # apt-get update # apt-get install strace 然后通过 strace 命令来对比不同启动时间下的差别 （实际上一般会先通过 -c 来统计系统调用时间，这里通过 -c 无法得到实际原因所以就没写这个步骤了）: # strace -T -o result_slow.log -- bash -c exit # 实际场景下一般是到没有问题的容器中去获取 result_fast 的结果 # for i in {1..10000}; do unset &#34;SERVICE_$i&#34;; done # strace -T -o result_fast.log -- bash -c exit 通过对比 result_fast.log 和 result_slow.log 发现有个比较大的差别是 execve 系统调用的参数不一样并且花费的时间也有很大差别: # result_slow.log execve(&#34;/bin/bash&#34;, [&#34;bash&#34;, &#34;-c&#34;, &#34;exit&#34;], [/* 10008 vars */]) = 0 &lt;0.002256&gt; # result_fast.log execve(&#34;/bin/bash&#34;, [&#34;bash&#34;, &#34;-c&#34;, &#34;exit&#34;], [/* 8 vars */]) = 0 &lt;0.000345&gt; 通过查看 文档 可知 execve 系统调用的第三个参数传入的是环境变量: int execve(const char *pathname, char *const argv[], char *const envp[]); 也就是环境变量的数量不一样导致 execve 所花的时间有很大差异。可以通过执行 strace 命令的时候加一个 -v 参数来查看这个 /* 10008 vars */ 的具体内容来验证: execve(&#34;/bin/bash&#34;, [&#34;bash&#34;, &#34;-c&#34;, &#34;exit&#34;], [&#34;SERVICE_9928=9928&#34;, &#34;SERVICE_9911=9911&#34;, ... , &#34;SERVICE_76=76&#34;, &#34;_=/usr/bin/strace&#34;]) = 0 &lt;0.001230&gt; 总结¶ 当集群里创建了特别多的 service 并且介意由此导致的 bash 启动特别慢的问题时，可以考虑通过配置 pod spec 增加 enableServiceLinks: false 禁用自动注入 service 信息到环境变量的方式来加速 bash 启动速度。 参考资料¶ Service-environment variables should be optional · Issue #60099 · kubernetes/kubernetes strace 常用操作 - Huang Huang 的博客 execve(2) - Linux manual page",
+        "description": "<div class="section" id="id1">
+<h2 id="hidid1">前言<a class="headerlink" href="#hidid1" title="Permalink to this headline">¶</a></h2>
+<p>当集群里创建了特别多的 service 时可能会导致容器中 bash 启动特别慢，原因是 service 相关的环境变量信息太多了。</p>
+</div>
+<div class="section" id="id2">
+<h2 id="hidid2">解决方法<a class="headerlink" href="#hidid2" title="Permalink to this headline">¶</a></h2>
+<p>先说解决方法：可以考虑通过配置 pod spec 增加 <tt class="docutils literal">enableServiceLinks: false</tt> 禁用自动注入 service 信息到环境变量的方式来加速 bash 启动速度。 详见： <a class="reference external" href="https://github.com/kubernetes/kubernetes/issues/60099">Service-environment variables should be optional · Issue #60099 · kubernetes/kubernetes</a></p>
+<p>下面再说一下 debug 方法。</p>
+</div>
+<div class="section" id="debug">
+<h2 id="hiddebug">DEBUG<a class="headerlink" href="#hiddebug" title="Permalink to this headline">¶</a></h2>
+<p>通过下面的 DEBUG 方法发现导致容器中执行 bash 特别慢是因为环境变量太多导致的。</p>
+<div class="section" id="id3">
+<h3 id="hidid3">模拟环境<a class="headerlink" href="#hidid3" title="Permalink to this headline">¶</a></h3>
+<p>测试环境变量比较少的时候启动 bash 的时间:</p>
+<pre class="literal-block">
+$ docker run -it --rm ubuntu:16.04 bash
+# env |wc -l
+8
+
+# time bash -c exit
+
+real        0m0.003s
+user        0m0.000s
+sys 0m0.000s
+</pre>
+<p>可以看到启动速度是非常快的。下面模拟一下环境变量特别多的环境:</p>
+<pre class="literal-block">
+# for i in {1..10000}; do export &quot;SERVICE_$i&quot;=&quot;$i&quot;; done
+# env |wc -l
+10008
+</pre>
+<p>看一下在环境变量特别多的环境下的 bash 启动时间:</p>
+<pre class="literal-block">
+# time bash -c exit
+
+real        0m0.395s
+user        0m0.380s
+sys 0m0.000s
+</pre>
+<p>可以看到速度慢了 100 多倍。</p>
+<p>下面来 debug 一下速度慢的真正原因，是否真的是环境变量特别多导致的。</p>
+</div>
+<div class="section" id="id4">
+<h3 id="hidid4">debug 问题原因<a class="headerlink" href="#hidid4" title="Permalink to this headline">¶</a></h3>
+<p>先安装一下 strace 命令:</p>
+<pre class="literal-block">
+# apt-get update
+# apt-get install strace
+</pre>
+<p>然后通过 strace 命令来对比不同启动时间下的差别 （实际上一般会先通过 <tt class="docutils literal"><span class="pre">-c</span></tt> 来统计系统调用时间，这里通过 <tt class="docutils literal"><span class="pre">-c</span></tt> 无法得到实际原因所以就没写这个步骤了）:</p>
+<pre class="literal-block">
+# strace -T -o result_slow.log -- bash -c exit
+
+# 实际场景下一般是到没有问题的容器中去获取 result_fast 的结果
+# for i in {1..10000}; do unset &quot;SERVICE_$i&quot;; done
+# strace -T -o result_fast.log -- bash -c exit
+</pre>
+<p>通过对比 result_fast.log 和 result_slow.log 发现有个比较大的差别是 execve 系统调用的参数不一样并且花费的时间也有很大差别:</p>
+<pre class="literal-block">
+# result_slow.log
+execve(&quot;/bin/bash&quot;, [&quot;bash&quot;, &quot;-c&quot;, &quot;exit&quot;], [/* 10008 vars */]) = 0 &lt;0.002256&gt;
+
+# result_fast.log
+execve(&quot;/bin/bash&quot;, [&quot;bash&quot;, &quot;-c&quot;, &quot;exit&quot;], [/* 8 vars */]) = 0 &lt;0.000345&gt;
+</pre>
+<p>通过查看 <a class="reference external" href="https://man7.org/linux/man-pages/man2/execve.2.html">文档</a> 可知 <tt class="docutils literal">execve</tt> 系统调用的第三个参数传入的是环境变量:</p>
+<pre class="literal-block">
+int execve(const char *pathname, char *const argv[],
+           char *const envp[]);
+</pre>
+<p>也就是环境变量的数量不一样导致 execve 所花的时间有很大差异。可以通过执行 strace 命令的时候加一个 <tt class="docutils literal"><span class="pre">-v</span></tt> 参数来查看这个 <tt class="docutils literal">/* 10008 vars */</tt> 的具体内容来验证:</p>
+<pre class="literal-block">
+execve(&quot;/bin/bash&quot;, [&quot;bash&quot;, &quot;-c&quot;, &quot;exit&quot;], [&quot;SERVICE_9928=9928&quot;, &quot;SERVICE_9911=9911&quot;, ... , &quot;SERVICE_76=76&quot;, &quot;_=/usr/bin/strace&quot;]) = 0 &lt;0.001230&gt;
+</pre>
+</div>
+</div>
+<div class="section" id="id5">
+<h2 id="hidid5">总结<a class="headerlink" href="#hidid5" title="Permalink to this headline">¶</a></h2>
+<p>当集群里创建了特别多的 service 并且介意由此导致的 bash 启动特别慢的问题时，可以考虑通过配置 pod spec 增加 <tt class="docutils literal">enableServiceLinks: false</tt> 禁用自动注入 service 信息到环境变量的方式来加速 bash 启动速度。</p>
+</div>
+<div class="section" id="id6">
+<h2 id="hidid6">参考资料<a class="headerlink" href="#hidid6" title="Permalink to this headline">¶</a></h2>
+<ul class="simple">
+<li><a class="reference external" href="https://github.com/kubernetes/kubernetes/issues/60099">Service-environment variables should be optional · Issue #60099 · kubernetes/kubernetes</a></li>
+<li><a class="reference external" href="https://mozillazg.com/2019/03/linux-debug-with-strace-cookbook-examples.html">strace 常用操作 - Huang Huang 的博客</a></li>
+<li><a class="reference external" href="https://man7.org/linux/man-pages/man2/execve.2.html">execve(2) - Linux manual page</a></li>
+</ul>
+</div>
+",
         "mainEntityOfPage": {
             "@type": "WebPage",
             "@id": "https://mozillazg.com"
@@ -274,10 +366,10 @@ execve(&quot;/bin/bash&quot;, [&quot;bash&quot;, &quot;-c&quot;, &quot;exit&quot
     <p>Related Posts:</p>
     <ul>
         <li><a href="https://mozillazg.com/2020/06/k8s-kubernetes-kubectl-syntax-of-impersonate-as-user-or-serviceaccount-or-group.html">kubernetes 用户扮演 API</a></li>
-        <li><a href="https://mozillazg.com/2020/05/k8s-kubernetes-use-which-psp-when-there-are-multiple-pod-security-policies.html">当有多个可用的 Pod Security Policy 时 k8s 的 PSP 选择策略</a></li>
         <li><a href="https://mozillazg.com/2020/07/k8s-kubernetes-client-go-list-get-create-update-patch-delete-crd-resource-without-generate-client-code-update-or-create-via-yaml.html">在不生成 crd client 代码的情况下通过 client-go 增删改查 k8s crd 资源</a></li>
-        <li><a href="https://mozillazg.com/2018/08/linux-bash-shell-script-cookbook.html">Bash Shell 常用语法和操作</a></li>
-        <li><a href="https://mozillazg.com/2021/07/k8s-kubernetes-what-happen-when-pod-from-create-to-running.html">Pod 从创建到 Running 背后发生了什么</a></li>
+        <li><a href="https://mozillazg.com/2020/05/k8s-kubernetes-use-which-psp-when-there-are-multiple-pod-security-policies.html">当有多个可用的 Pod Security Policy 时 k8s 的 PSP 选择策略</a></li>
+        <li><a href="https://mozillazg.com/2021/11/security-use-dns-srv-to-get-all-service-info.html">通过向 DNS 服务发送 SRV 查询请求获取 kubernetes 集群内所有 Service 信息</a></li>
+        <li><a href="https://mozillazg.com/2021/06/k8s-kubernetes-rbac-rules-use-star-wildcard.html">在 Kubernetes RBAC Role/ClusterRole 规则中使用通配符 *</a></li>
     </ul>
 </section>
     <hr/>
@@ -320,7 +412,7 @@ execve(&quot;/bin/bash&quot;, [&quot;bash&quot;, &quot;-c&quot;, &quot;exit&quot
    <div class="container">
       <hr>
       <div class="row">
-         <div class="col-xs-10">&copy; 2021 mozillazg
+         <div class="col-xs-10">&copy; 2022 mozillazg
             &middot; Powered by <a href="https://github.com/DandyDev/pelican-bootstrap3" target="_blank">pelican-bootstrap3</a>,
             <a href="http://docs.getpelican.com/" target="_blank">Pelican</a>,
             <a href="http://getbootstrap.com" target="_blank">Bootstrap</a>              <p><small>  <a rel="license" href="http://creativecommons.org/licenses/by-sa/4.0/"><img alt="Creative Commons License" style="border-width:0" src="/static/images/by-sa-80x15.png" /></a>

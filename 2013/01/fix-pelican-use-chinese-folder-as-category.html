@@ -18,6 +18,8 @@
         <meta name="author" content="mozillazg" />
         <meta name="keywords" content="pelican,python" />
     <meta name="description" content="前提： windows + pelican 3.1 + python 2.6 并且 pelican 配置文件中设置了 USE_FOLDER_AS_CATEGORY = True（默认为 True，只要不设置为 False 即可） 默认情况下，pelican 不支持中文文件夹作为分类目录： d:\myblog&gt;pelican content -o output -s pelicanconf.py -D ... CRITICAL: &#39;utf8&#39; codec can&#39;t decode byte 0xd3 in position 2: invalid continuation byte Traceback (most recent call last): File &#34;C:\Python26\Scripts\pelican-script.py&#34;, line 9, in &lt;module&gt; load_entry_point(&#39;pelican==3.1&#39;, &#39;console_scripts&#39;, &#39;pelican&#39;)() File &#34;C:\Python26\lib\site-packages\pelican\__init__.py&#34;, line 319, in main pelican.run() File &#34;C:\Python26\lib\site-packages\pelican\__init__.py&#34;, line 152, in run p.generate_context() File &#34;C:\Python26\lib\site-packages\pelican\generators.py&#34;, line 337, in generate_context .decode(&#39;utf-8&#39;) File &#34;C:\Python26\lib\encodings\utf_8.py&#34;, line 16, in decode return codecs.utf_8_decode(input, errors, True) UnicodeDecodeError: &#39;utf8&#39; codec can&#39;t decode byte 0xd3 in position 2: invalid continuation byte 从错误信息中我们可以看到 pelican 对文件夹名称默认按 utf8 编码进行解码，而在 windows 下文件（夹）名称默认是按 gbk 进行编码的，所以就出现了编码错误。 下面我们来修复这个错误。 编辑文件 C:\Python26\lib\site-packages\pelican\generators.py 进行以下两步操作即可： 首先导入 sys 模块：import sys 然后编辑第 338 行左右的category = os.path.basename(os.path.dirname(f))\ .decode(&#39;utf-8&#39;) 为 category = os.path.basename(os.path.dirname(f))\ .decode(sys.stdin.encoding) 此处的修改是为了让程序使用系统默认的输入编码（简体中文版 Windows 下默认是 gbk）进行解码。 进行相关修改后，再次执行 pelican content -o output -s pelicanconf.py -D 生成 html 文件，执行过程一切顺利。 但也有一个不完美的地方： 虽然在浏览器中这个不会是乱码，但看起来还是有点不爽。 下面我们要将它变成中文拼音，这样就不会乱码了。 继续编辑 generators.py 文件： 导入相关模块：from pelican.utils import slugify 。 这个模块的作用是将非 ASCII 字符转换为 ASCII 字符，比如，将 中国 转换为 zhong-guo 。 将 199 行左右的for cat, arts in self.categories: arts.sort(key=attrgetter(&#39;date&#39;), reverse=True) 改为 for cat, arts in self.categories: cat = slugify(cat) arts.sort(key=attrgetter(&#39;date&#39;), reverse=True) 修改后的效果：" />
+    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-4941850466486001"
+     crossorigin="anonymous"></script>
 
     <style>
       .js-toc {
@@ -94,7 +96,76 @@
         // "dateModified": "",
         "image": "https://mozillazg.com/static/avatar.jpeg",
         "keywords": "pelican, python",
-        "description": "前提： windows + pelican 3.1 + python 2.6 并且 pelican 配置文件中设置了 USE_FOLDER_AS_CATEGORY = True（默认为 True，只要不设置为 False 即可） 默认情况下，pelican 不支持中文文件夹作为分类目录： d:\myblog&gt;pelican content -o output -s pelicanconf.py -D ... CRITICAL: &#39;utf8&#39; codec can&#39;t decode byte 0xd3 in position 2: invalid continuation byte Traceback (most recent call last): File &#34;C:\Python26\Scripts\pelican-script.py&#34;, line 9, in &lt;module&gt; load_entry_point(&#39;pelican==3.1&#39;, &#39;console_scripts&#39;, &#39;pelican&#39;)() File &#34;C:\Python26\lib\site-packages\pelican\__init__.py&#34;, line 319, in main pelican.run() File &#34;C:\Python26\lib\site-packages\pelican\__init__.py&#34;, line 152, in run p.generate_context() File &#34;C:\Python26\lib\site-packages\pelican\generators.py&#34;, line 337, in generate_context .decode(&#39;utf-8&#39;) File &#34;C:\Python26\lib\encodings\utf_8.py&#34;, line 16, in decode return codecs.utf_8_decode(input, errors, True) UnicodeDecodeError: &#39;utf8&#39; codec can&#39;t decode byte 0xd3 in position 2: invalid continuation byte 从错误信息中我们可以看到 pelican 对文件夹名称默认按 utf8 编码进行解码，而在 windows 下文件（夹）名称默认是按 gbk 进行编码的，所以就出现了编码错误。 下面我们来修复这个错误。 编辑文件 C:\Python26\lib\site-packages\pelican\generators.py 进行以下两步操作即可： 首先导入 sys 模块：import sys 然后编辑第 338 行左右的category = os.path.basename(os.path.dirname(f))\ .decode(&#39;utf-8&#39;) 为 category = os.path.basename(os.path.dirname(f))\ .decode(sys.stdin.encoding) 此处的修改是为了让程序使用系统默认的输入编码（简体中文版 Windows 下默认是 gbk）进行解码。 进行相关修改后，再次执行 pelican content -o output -s pelicanconf.py -D 生成 html 文件，执行过程一切顺利。 但也有一个不完美的地方： 虽然在浏览器中这个不会是乱码，但看起来还是有点不爽。 下面我们要将它变成中文拼音，这样就不会乱码了。 继续编辑 generators.py 文件： 导入相关模块：from pelican.utils import slugify 。 这个模块的作用是将非 ASCII 字符转换为 ASCII 字符，比如，将 中国 转换为 zhong-guo 。 将 199 行左右的for cat, arts in self.categories: arts.sort(key=attrgetter(&#39;date&#39;), reverse=True) 改为 for cat, arts in self.categories: cat = slugify(cat) arts.sort(key=attrgetter(&#39;date&#39;), reverse=True) 修改后的效果：",
+        // "description": "前提： windows + pelican 3.1 + python 2.6 并且 pelican 配置文件中设置了 USE_FOLDER_AS_CATEGORY = True（默认为 True，只要不设置为 False 即可） 默认情况下，pelican 不支持中文文件夹作为分类目录： d:\myblog&gt;pelican content -o output -s pelicanconf.py -D ... CRITICAL: &#39;utf8&#39; codec can&#39;t decode byte 0xd3 in position 2: invalid continuation byte Traceback (most recent call last): File &#34;C:\Python26\Scripts\pelican-script.py&#34;, line 9, in &lt;module&gt; load_entry_point(&#39;pelican==3.1&#39;, &#39;console_scripts&#39;, &#39;pelican&#39;)() File &#34;C:\Python26\lib\site-packages\pelican\__init__.py&#34;, line 319, in main pelican.run() File &#34;C:\Python26\lib\site-packages\pelican\__init__.py&#34;, line 152, in run p.generate_context() File &#34;C:\Python26\lib\site-packages\pelican\generators.py&#34;, line 337, in generate_context .decode(&#39;utf-8&#39;) File &#34;C:\Python26\lib\encodings\utf_8.py&#34;, line 16, in decode return codecs.utf_8_decode(input, errors, True) UnicodeDecodeError: &#39;utf8&#39; codec can&#39;t decode byte 0xd3 in position 2: invalid continuation byte 从错误信息中我们可以看到 pelican 对文件夹名称默认按 utf8 编码进行解码，而在 windows 下文件（夹）名称默认是按 gbk 进行编码的，所以就出现了编码错误。 下面我们来修复这个错误。 编辑文件 C:\Python26\lib\site-packages\pelican\generators.py 进行以下两步操作即可： 首先导入 sys 模块：import sys 然后编辑第 338 行左右的category = os.path.basename(os.path.dirname(f))\ .decode(&#39;utf-8&#39;) 为 category = os.path.basename(os.path.dirname(f))\ .decode(sys.stdin.encoding) 此处的修改是为了让程序使用系统默认的输入编码（简体中文版 Windows 下默认是 gbk）进行解码。 进行相关修改后，再次执行 pelican content -o output -s pelicanconf.py -D 生成 html 文件，执行过程一切顺利。 但也有一个不完美的地方： 虽然在浏览器中这个不会是乱码，但看起来还是有点不爽。 下面我们要将它变成中文拼音，这样就不会乱码了。 继续编辑 generators.py 文件： 导入相关模块：from pelican.utils import slugify 。 这个模块的作用是将非 ASCII 字符转换为 ASCII 字符，比如，将 中国 转换为 zhong-guo 。 将 199 行左右的for cat, arts in self.categories: arts.sort(key=attrgetter(&#39;date&#39;), reverse=True) 改为 for cat, arts in self.categories: cat = slugify(cat) arts.sort(key=attrgetter(&#39;date&#39;), reverse=True) 修改后的效果：",
+        "description": "<p>前提：</p>
+<p>windows + pelican 3.1 + python 2.6    <br />
+并且 pelican 配置文件中设置了 <code>USE_FOLDER_AS_CATEGORY = True</code>（默认为 True，只要不设置为 False 即可）</p>
+<p>默认情况下，pelican 不支持中文文件夹作为分类目录：</p>
+<div class="highlight"><pre><span></span><span class="go">d:\myblog&gt;pelican content -o output -s pelicanconf.py -D</span>
+<span class="go">...</span>
+
+<span class="go">CRITICAL: &#39;utf8&#39; codec can&#39;t decode byte 0xd3 in position 2: invalid continuation byte</span>
+<span class="go">Traceback (most recent call last):</span>
+<span class="go">  File &quot;C:\Python26\Scripts\pelican-script.py&quot;, line 9, in &lt;module&gt;</span>
+<span class="go">    load_entry_point(&#39;pelican==3.1&#39;, &#39;console_scripts&#39;, &#39;pelican&#39;)()</span>
+<span class="go">  File &quot;C:\Python26\lib\site-packages\pelican\__init__.py&quot;, line 319, in main</span>
+<span class="go">    pelican.run()</span>
+<span class="go">  File &quot;C:\Python26\lib\site-packages\pelican\__init__.py&quot;, line 152, in run</span>
+<span class="go">    p.generate_context()</span>
+<span class="go">  File &quot;C:\Python26\lib\site-packages\pelican\generators.py&quot;, line 337, in generate_context</span>
+<span class="go">    .decode(&#39;utf-8&#39;)</span>
+<span class="go">  File &quot;C:\Python26\lib\encodings\utf_8.py&quot;, line 16, in decode</span>
+<span class="go">    return codecs.utf_8_decode(input, errors, True)</span>
+<span class="go">UnicodeDecodeError: &#39;utf8&#39; codec can&#39;t decode byte 0xd3 in position 2: invalid continuation byte</span>
+</pre></div>
+
+
+<p>从错误信息中我们可以看到 pelican 对文件夹名称默认按 utf8 编码进行解码，而在 windows 下文件（夹）名称默认是按 gbk 进行编码的，所以就出现了编码错误。</p>
+<p>下面我们来修复这个错误。</p>
+<p>编辑文件 <code>C:\Python26\lib\site-packages\pelican\generators.py</code> 进行以下两步操作即可：</p>
+<ol>
+<li>首先导入 sys 模块：<code>import sys</code></li>
+<li>然后编辑第 338 行左右的<div class="highlight"><pre><span></span><span class="n">category</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">basename</span><span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">dirname</span><span class="p">(</span><span class="n">f</span><span class="p">))</span>\
+           <span class="o">.</span><span class="n">decode</span><span class="p">(</span><span class="s1">&#39;utf-8&#39;</span><span class="p">)</span>
+</pre></div>
+
+
+<p>为</p>
+<div class="highlight"><pre><span></span><span class="n">category</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">basename</span><span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">dirname</span><span class="p">(</span><span class="n">f</span><span class="p">))</span>\
+           <span class="o">.</span><span class="n">decode</span><span class="p">(</span><span class="n">sys</span><span class="o">.</span><span class="n">stdin</span><span class="o">.</span><span class="n">encoding</span><span class="p">)</span>
+</pre></div>
+
+
+<p>此处的修改是为了让程序使用系统默认的输入编码（简体中文版 Windows 下默认是 gbk）进行解码。</p>
+</li>
+</ol>
+<p>进行相关修改后，再次执行 <code>pelican content -o output -s pelicanconf.py -D</code> 生成 html 文件，执行过程一切顺利。</p>
+<p>但也有一个不完美的地方：</p>
+<p><img alt="" src="/static/images/2013-1-pelican-issue-01.png" /></p>
+<p><img alt="" src="/static/images/2013-1-pelican-issue-02.png" /></p>
+<p>虽然在浏览器中这个不会是乱码，但看起来还是有点不爽。
+下面我们要将它变成中文拼音，这样就不会乱码了。</p>
+<p>继续编辑 generators.py 文件：</p>
+<ol>
+<li>导入相关模块：<code>from pelican.utils import slugify</code> 。
+   这个模块的作用是将非 ASCII 字符转换为 ASCII 字符，比如，将 <code>中国</code> 转换为 <code>zhong-guo</code> 。</li>
+<li>将 199 行左右的<div class="highlight"><pre><span></span><span class="k">for</span> <span class="n">cat</span><span class="p">,</span> <span class="n">arts</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">categories</span><span class="p">:</span>
+    <span class="n">arts</span><span class="o">.</span><span class="n">sort</span><span class="p">(</span><span class="n">key</span><span class="o">=</span><span class="n">attrgetter</span><span class="p">(</span><span class="s1">&#39;date&#39;</span><span class="p">),</span> <span class="n">reverse</span><span class="o">=</span><span class="bp">True</span><span class="p">)</span>
+</pre></div>
+
+
+<p>改为</p>
+<div class="highlight"><pre><span></span><span class="k">for</span> <span class="n">cat</span><span class="p">,</span> <span class="n">arts</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">categories</span><span class="p">:</span>
+    <span class="n">cat</span> <span class="o">=</span> <span class="n">slugify</span><span class="p">(</span><span class="n">cat</span><span class="p">)</span>
+    <span class="n">arts</span><span class="o">.</span><span class="n">sort</span><span class="p">(</span><span class="n">key</span><span class="o">=</span><span class="n">attrgetter</span><span class="p">(</span><span class="s1">&#39;date&#39;</span><span class="p">),</span> <span class="n">reverse</span><span class="o">=</span><span class="bp">True</span><span class="p">)</span>
+</pre></div>
+
+
+</li>
+</ol>
+<p>修改后的效果：</p>
+<p><img alt="" src="/static/images/2013-1-pelican-fixed-01.png" /></p>
+<p><img alt="" src="/static/images/2013-1-pelican-fixed-02.png" /></p>",
         "mainEntityOfPage": {
             "@type": "WebPage",
             "@id": "https://mozillazg.com"
@@ -249,11 +320,11 @@ Huang Huang 的博客            </a>
 <section class="well" id="related-posts">
     <p>Related Posts:</p>
     <ul>
-        <li><a href="https://mozillazg.com/2013/04/django-custom-model-display-name-on-admin-pages.html">[django]自定义 model 在后台显示的名称</a></li>
-        <li><a href="https://mozillazg.com/2013/04/django-admin-list_display-include-foreignkey.html">[django]list_display 中包含外键内的字段</a></li>
-        <li><a href="https://mozillazg.com/2013/02/django-offical-coding-style.html">[django]官方编码规范</a></li>
+        <li><a href="https://mozillazg.com/2013/06/python-valueerror-unsupported-format-character-p-0x70-at-index-8.html">[python]解决使用 argparse 时出现：ValueError: unsupported format character 'p' (0x70) at index 8</a></li>
+        <li><a href="https://mozillazg.com/2016/04/linux-how-to-build-boost.python-on-centos7.md.html">如何在 centos 7 上编译 boost</a></li>
+        <li><a href="https://mozillazg.com/2013/10/python-for-loop-pit.html">[python]for 循环中的局部变量陷阱</a></li>
         <li><a href="https://mozillazg.com/2013/04/django-admin-add-user-form-include-email-field.html">[django]让后台新增用户的表单包含 email 字段</a></li>
-        <li><a href="https://mozillazg.com/2013/01/django-variables-and-attributes-may-not-begin-with-underscores.html">[django] Variables and attributes may not begin with underscores</a></li>
+        <li><a href="https://mozillazg.com/2014/01/python-create-immutable-class.html">[python]如何创建一个不可变的类</a></li>
     </ul>
 </section>
     <hr/>
@@ -296,7 +367,7 @@ Huang Huang 的博客            </a>
    <div class="container">
       <hr>
       <div class="row">
-         <div class="col-xs-10">&copy; 2021 mozillazg
+         <div class="col-xs-10">&copy; 2022 mozillazg
             &middot; Powered by <a href="https://github.com/DandyDev/pelican-bootstrap3" target="_blank">pelican-bootstrap3</a>,
             <a href="http://docs.getpelican.com/" target="_blank">Pelican</a>,
             <a href="http://getbootstrap.com" target="_blank">Bootstrap</a>              <p><small>  <a rel="license" href="http://creativecommons.org/licenses/by-sa/4.0/"><img alt="Creative Commons License" style="border-width:0" src="/static/images/by-sa-80x15.png" /></a>

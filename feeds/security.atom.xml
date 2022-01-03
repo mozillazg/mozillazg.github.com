@@ -1,5 +1,141 @@
 <?xml version="1.0" encoding="utf-8"?>
-<feed xmlns="http://www.w3.org/2005/Atom"><title>Huang Huang 的博客</title><link href="https://mozillazg.com/" rel="alternate"></link><link href="https://mozillazg.com/feeds/security.atom.xml" rel="self"></link><id>https://mozillazg.com/</id><updated>2021-10-07T00:00:00+00:00</updated><entry><title>IP 地址解析库的不同实现导致应用存在安全隐患</title><link href="https://mozillazg.com/2021/10/security-ipaddress-risk-with-leading-zeros.html" rel="alternate"></link><updated>2021-10-07T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2021-10-07:2021/10/security-ipaddress-risk-with-leading-zeros.html</id><summary type="html">&lt;p&gt;先来看一个例子，对于 &lt;tt class="docutils literal"&gt;0177.0.0.1&lt;/tt&gt; 这个 IP 地址不同的程序会解析出不同的结果：&lt;/p&gt;
+<feed xmlns="http://www.w3.org/2005/Atom"><title>Huang Huang 的博客</title><link href="https://mozillazg.com/" rel="alternate"></link><link href="https://mozillazg.com/feeds/security.atom.xml" rel="self"></link><id>https://mozillazg.com/</id><updated>2021-12-12T00:00:00+00:00</updated><entry><title>Github Action 的 context 功能容易被攻击者利用实施脚本注入攻击</title><link href="https://mozillazg.com/2021/12/security-script-injection-attack-via-github-action-context.html" rel="alternate"></link><updated>2021-12-12T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2021-12-12:2021/12/security-script-injection-attack-via-github-action-context.html</id><summary type="html">&lt;p&gt;Github Action 提供了一个叫 &lt;a class="reference external" href="https://docs.github.com/en/actions/learn-github-actions/contexts"&gt;context&lt;/a&gt; 的功能，通过 context 可以在 workflow 中应用当前仓库、当前 job 等等
+上下文 metadata 信息，其中通过 &lt;a class="reference external" href="https://docs.github.com/en/actions/learn-github-actions/contexts#github-context"&gt;github context&lt;/a&gt; 可以获取当前 workflow 的运行信息，比如分支名称、issue/PR 标题，
+commit id, issue/PR message 等等。&lt;/p&gt;
+&lt;p&gt;github context 获取到的很多信息其实是第三方控制的信息，
+比如贡献者通过 PR 触发 CI 时，github context 中的很多信息就是贡献者提交 PR
+的那个贡献者所控制的分支的相关信息。&lt;/p&gt;
+&lt;p&gt;基于 github context 的这个特点，攻击者可以通过 PR 流程来实施脚本注入攻击。
+比如，攻击者可以通过构造一个 shell 语句作为一个分支的名称，然后提交 PR 以触发 CI，
+如果 CI 中 github action workflow 有直接在 shell 命令中使用分支名的逻辑话，
+就会触发执行攻击者构造的 shell 语句的操作，攻击者就成功实施了脚本注入攻击。&lt;/p&gt;
+&lt;p&gt;下面演示一个在 github action 中会存在脚本注入攻击问题的 workflow 语法的例子：&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+- name: test
+  run: |
+    echo 'show branch name: '
+    echo &amp;quot;${{ github.ref_name }}&amp;quot;
+&lt;/pre&gt;
+&lt;p&gt;上面这个 run 指令中，通过 echo 输出了执行当前 workflow 的分支名称，看起来没啥问题。
+但是，但我创建一个名为 &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;$(ls$IFS$(echo$IFS'UkVBRE1FLm1kCg=='|base64$IFS'-d'))&lt;/span&gt;&lt;/tt&gt; 的分支
+然后在这个分支下触发 workflow 的时候， 结果就会跟预期的不一样了：&lt;/p&gt;
+&lt;p&gt;&lt;img alt="image" src="/static/images/security/github-action-script-injection.png" /&gt;&lt;/p&gt;
+&lt;blockquote&gt;
+&lt;/blockquote&gt;
+&lt;div class="section" id="id1"&gt;
+&lt;h2 id="hidid1"&gt;参考资料&lt;a class="headerlink" href="#hidid1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;ul class="simple"&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://docs.github.com/en/actions/security-guides/security-hardening-for-github-actions#understanding-the-risk-of-script-injections"&gt;Security hardening for GitHub Actions - GitHub Docs&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://python-security.readthedocs.io/pypi-vuln/index-2021-07-27-combine-prs-workflow.html"&gt;Vulnerability in GitHub Actions workflow for PyPI — Python Security 0.0 documentation&lt;/a&gt;&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/div&gt;
+</summary></entry><entry><title>通过向 DNS 服务发送 SRV 查询请求获取 kubernetes 集群内所有 Service 信息</title><link href="https://mozillazg.com/2021/11/security-use-dns-srv-to-get-all-service-info.html" rel="alternate"></link><updated>2021-11-14T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2021-11-14:2021/11/security-use-dns-srv-to-get-all-service-info.html</id><summary type="html">&lt;p&gt;coredns 的 &lt;a class="reference external" href="https://github.com/coredns/coredns/blob/v1.8.6/plugin/kubernetes/README.md#wildcards"&gt;Wildcards&lt;/a&gt; 功能能够让我们通过一个简单的 SRV 查询就可以获取到整个 kubernetes 集群内的所有 service 信息。&lt;/p&gt;
+&lt;p&gt;获取 service 和对应的 service ip 和端口信息（其中 &lt;tt class="docutils literal"&gt;*&lt;/tt&gt; 可以替换为 &lt;tt class="docutils literal"&gt;any&lt;/tt&gt; ）：&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+$ dig srv *.*.svc.cluster.local
+
+; &amp;lt;&amp;lt;&amp;gt;&amp;gt; DiG 9.16.20 &amp;lt;&amp;lt;&amp;gt;&amp;gt; srv *.*.svc.cluster.local
+;; global options: +cmd
+;; Got answer:
+;; WARNING: .local is reserved for Multicast DNS
+;; You are currently testing what happens when an mDNS query is leaked to DNS
+;; -&amp;gt;&amp;gt;HEADER&amp;lt;&amp;lt;- opcode: QUERY, status: NOERROR, id: 41570
+;; flags: qr aa rd; QUERY: 1, ANSWER: 4, AUTHORITY: 0, ADDITIONAL: 4
+;; WARNING: recursion requested but not available
+
+;; OPT PSEUDOSECTION:
+; EDNS: version: 0, flags:; udp: 4096
+; COOKIE: 54380f3a1b0cb590 (echoed)
+;; QUESTION SECTION:
+;*.*.svc.cluster.local.             IN      SRV
+
+;; ANSWER SECTION:
+*.*.svc.cluster.local.      30      IN      SRV     0 20 443 kubernetes.default.svc.cluster.local.
+*.*.svc.cluster.local.      30      IN      SRV     0 20 53 kube-dns.kube-system.svc.cluster.local.
+*.*.svc.cluster.local.      30      IN      SRV     0 20 9153 kube-dns.kube-system.svc.cluster.local.
+*.*.svc.cluster.local.      30      IN      SRV     0 20 80 my-service.ns-1.svc.cluster.local.
+
+;; ADDITIONAL SECTION:
+my-service.ns-1.svc.cluster.local. 30 IN A  10.96.146.96
+kube-dns.kube-system.svc.cluster.local.     30 IN A 10.96.0.10
+kubernetes.default.svc.cluster.local. 30 IN A       10.96.0.1
+
+;; Query time: 2 msec
+;; SERVER: 10.96.0.10#53(10.96.0.10)
+;; WHEN: Sun Nov 14 07:08:27 UTC 2021
+;; MSG SIZE  rcvd: 526
+&lt;/pre&gt;
+&lt;p&gt;上面的 &lt;tt class="docutils literal"&gt;0 20 53 &lt;span class="pre"&gt;kube-dns.kube-system.svc.cluster.local.&lt;/span&gt;&lt;/tt&gt; 记录中，
+&lt;tt class="docutils literal"&gt;53&lt;/tt&gt; 是端口信息， &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;kube-dns.kube-system.svc.cluster.local&lt;/span&gt;&lt;/tt&gt; 是
+service 的域名其中包含了 service 名称、namspace 等信息:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+$ kubectl -n kube-system get svc kube-dns
+NAME       TYPE        CLUSTER-IP   EXTERNAL-IP   PORT(S)                  AGE
+kube-dns   ClusterIP   10.96.0.10   &amp;lt;none&amp;gt;        53/UDP,53/TCP,9153/TCP   92m
+&lt;/pre&gt;
+&lt;p&gt;获取 service 以及对应的 endpoints 信息:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+$ dig srv *.*.*.svc.cluster.local
+
+; &amp;lt;&amp;lt;&amp;gt;&amp;gt; DiG 9.16.20 &amp;lt;&amp;lt;&amp;gt;&amp;gt; srv *.*.*.svc.cluster.local
+;; global options: +cmd
+;; Got answer:
+;; WARNING: .local is reserved for Multicast DNS
+;; You are currently testing what happens when an mDNS query is leaked to DNS
+;; -&amp;gt;&amp;gt;HEADER&amp;lt;&amp;lt;- opcode: QUERY, status: NOERROR, id: 55650
+;; flags: qr aa rd; QUERY: 1, ANSWER: 5, AUTHORITY: 0, ADDITIONAL: 4
+;; WARNING: recursion requested but not available
+
+;; OPT PSEUDOSECTION:
+; EDNS: version: 0, flags:; udp: 4096
+; COOKIE: 8d5836f2b43e3675 (echoed)
+;; QUESTION SECTION:
+;*.*.*.svc.cluster.local.   IN      SRV
+
+;; ANSWER SECTION:
+*.*.*.svc.cluster.local. 30 IN      SRV     0 14 6443 172-18-0-3.kubernetes.default.svc.cluster.local.
+*.*.*.svc.cluster.local. 30 IN      SRV     0 14 53 10-244-0-3.kube-dns.kube-system.svc.cluster.local.
+*.*.*.svc.cluster.local. 30 IN      SRV     0 14 9153 10-244-0-3.kube-dns.kube-system.svc.cluster.local.
+*.*.*.svc.cluster.local. 30 IN      SRV     0 14 53 10-244-0-4.kube-dns.kube-system.svc.cluster.local.
+*.*.*.svc.cluster.local. 30 IN      SRV     0 14 9153 10-244-0-4.kube-dns.kube-system.svc.cluster.local.
+
+;; ADDITIONAL SECTION:
+10-244-0-4.kube-dns.kube-system.svc.cluster.local. 30 IN A 10.244.0.4
+10-244-0-3.kube-dns.kube-system.svc.cluster.local. 30 IN A 10.244.0.3
+172-18-0-3.kubernetes.default.svc.cluster.local. 30 IN A 172.18.0.3
+
+;; Query time: 2 msec
+;; SERVER: 10.96.0.10#53(10.96.0.10)
+;; WHEN: Sun Nov 14 07:09:38 UTC 2021
+;; MSG SIZE  rcvd: 715
+&lt;/pre&gt;
+&lt;p&gt;上面的 &lt;tt class="docutils literal"&gt;0 14 53 &lt;span class="pre"&gt;10-244-0-3.kube-dns.kube-system.svc.cluster.local.&lt;/span&gt;&lt;/tt&gt; 记录中
+&lt;tt class="docutils literal"&gt;53&lt;/tt&gt; 是其中一个 endpoint 的端口信息， &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;10-244-0-3&lt;/span&gt;&lt;/tt&gt; 是 endpoint 的 ip 地址:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+$ kubectl -n kube-system describe svc kube-dns
+Name:              kube-dns
+Namespace:         kube-system
+...
+IP:                10.96.0.10
+Port:              dns  53/UDP
+TargetPort:        53/UDP
+Endpoints:         10.244.0.3:53,10.244.0.4:53
+Port:              dns-tcp  53/TCP
+TargetPort:        53/TCP
+Endpoints:         10.244.0.3:53,10.244.0.4:53
+Port:              metrics  9153/TCP
+TargetPort:        9153/TCP
+Endpoints:         10.244.0.3:9153,10.244.0.4:9153
+...
+&lt;/pre&gt;
+&lt;div class="section" id="id1"&gt;
+&lt;h2 id="hidid1"&gt;参考资料&lt;a class="headerlink" href="#hidid1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;ul class="simple"&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://github.com/coredns/coredns/blob/v1.8.6/plugin/kubernetes/README.md#wildcards"&gt;coredns/README.md at v1.8.6 · coredns/coredns&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://kubernetes.io/docs/concepts/services-networking/dns-pod-service/"&gt;DNS for Services and Pods | Kubernetes&lt;/a&gt;&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/div&gt;
+</summary><category term="kubernetes"></category><category term="coredns"></category><category term="dns"></category></entry><entry><title>IP 地址解析库的不同实现导致应用存在安全隐患</title><link href="https://mozillazg.com/2021/10/security-ipaddress-risk-with-leading-zeros.html" rel="alternate"></link><updated>2021-10-07T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2021-10-07:2021/10/security-ipaddress-risk-with-leading-zeros.html</id><summary type="html">&lt;p&gt;先来看一个例子，对于 &lt;tt class="docutils literal"&gt;0177.0.0.1&lt;/tt&gt; 这个 IP 地址不同的程序会解析出不同的结果：&lt;/p&gt;
 &lt;p&gt;curl&lt;/p&gt;
 &lt;pre class="literal-block"&gt;
 curl 0177.0.0.1 -v

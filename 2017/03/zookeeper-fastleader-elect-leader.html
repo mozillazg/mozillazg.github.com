@@ -18,6 +18,8 @@
         <meta name="author" content="mozillazg" />
         <meta name="keywords" content="zookeeper,leader选举" />
     <meta name="description" content="ZooKeeper 在集群模式下默认会使用 FastLeader 算法来选举 leader。下面将说说 ZooKeeper 集群使用 FastLeader 算法选举的具体过程。写的过程中参考了多篇文章，详见文末的参考资料。 首先需要明确几个概念: 节点状态：每个集群中的节点都有一个状态 LOOKING/FOLLOWING/LEADING/OBSERVING。每个节点启动的时候都是 LOOKING 状态，如果这个节点参与选举但最后不是leader，则状态是 FOLLOWING，如果不参与选举则是 OBSERVING，leader 的状态是 LEADING。 epoch: 表示选举轮数。 zxid: 事务 zxid 包含了本地数据的最后更新时间相关的信息。 serverid: 当前 server 的 ID, 通过配置文件指定(比如: echo &#39;1&#39; &gt; myid)。 先用文字描述一下大概的选举思想： 在没有遇到比我牛的人之前，第一票推荐我自己 当接收到其他人的选举信息时，如果他们推荐的人没我牛，那我还是推荐我自己 我有一个票箱，保存了当前这一轮选举中自己的推荐人以及接收到的推荐人信息，一人一票，重复或过期的票概不接受 当我发现了比我牛的人的时候，改为推荐这个牛人 如果我发现我的选举轮数落后了，清空票箱，改为推荐接收到的最新选举中大家推荐的最牛的那个人（如果没有人比我牛，那还是推荐我自己） 不断的重复上面的过程，不断的告诉别人“我的投票是第几轮”、“我推举的人是谁”。直到我的票箱中“我推举的最牛的人”收到了不少于 N / 2 + 1 的推举投票，此时这个人就是我认定的最终 leader。 当我确定了谁是最终 leader 并且这个 leader 一切正常，我就更新我的状态为 FOLLOWING/LEADING（我自己是最终 leader 则是 LEADING 否则就是 FOLLOWING），之后的选举中都直接反馈我确定的这个最终 leader。 那么，以什么标准来确定一个节点可以成为一个 leader 呢？ 依次比较 epoch, zxid, serverid ： 接收到的消息中，有 epoch 比我大的，则选 epoch 大的消息中确定的 server 如果 epoch 相等，则选 zxid 最大的 server 如果 zxid 也相等，则选 serverid 最大的 server (有的节点生来就是当 leader 的 😂） switch (n.state) { //LOOKING消息，则 case LOOKING: ...... //检查下收到的这张选票是否可以胜出，依次比较选举轮数epoch，事务zxid，服务器编号server id } else if (totalOrderPredicate(n.leader, n.zxid, n.peerEpoch, proposedLeader, proposedZxid, proposedEpoch)) { //胜出了，就把自己的投票修改为对方的，然后广播消息 updateProposal(n.leader, n.zxid, n.peerEpoch); sendNotifications(); } } protected boolean totalOrderPredicate(long newId, long newZxid, long newEpoch, long curId, long curZxid, long curEpoch) { return ( (newEpoch &gt; curEpoch) || ((newEpoch == curEpoch) &amp;&amp; ((newZxid &gt; curZxid) || ((newZxid == curZxid) &amp;&amp; (newId &gt; curId)))) ); } 从网上找了一个流程图，可以看看： 举个例子，理想情况下，先后启动三个节点的选举过程如下： 第一轮：每个节点广播选自己（此时只有 node1) 第二轮：node2 启动了，发起一轮投票。node1 收到了 node2 选它自己的投票，发现 node2 比自己牛，广播选 node2。此时 node1 发现 node2 获得了2票 &gt;= N / 2 + 1，认定 node2 为 leader 进入 following 状态。 node2 收到了 node1 选自己的广播，此时 node2 发现自己 获得了2票 &gt;= N / 2 + 1，进入 leading 状态。 第三轮：node3 启动了，发起一轮投票。node1 和 node2 都选 node2 , node3 通过比对发现 node2 的票数 &gt;= N /2 + 1，认定 node2 是 leader 进入 following 状态。 上面就是 FastLeader 算法选举的简单介绍了，更详细的信息可以查阅官方文档和代码。 参考¶ 图解zookeeper FastLeader选举算法 - loop in codes zookeeper3.3.3源码分析(二)FastLeader选举算法 - xhh198781的专栏 - 博客频道 - CSDN.NET 深入浅出Zookeeper之五 Leader选举 - 吊丝码农 - ITeye技术网站 Zookeeper-Zookeeper leader选举 - 横刀天笑 - 博客园 hadoop系列：zookeeper（2）——zookeeper核心原理（选举） - JAVA入门中 - 博客频道 - CSDN.NET zookeeper/FastLeaderElection.java at branch-3.4 · apache/zookeeper ZooKeeper Administrator&#39;s Guide" />
+    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-4941850466486001"
+     crossorigin="anonymous"></script>
 
     <style>
       .js-toc {
@@ -94,7 +96,77 @@
         // "dateModified": "",
         "image": "https://mozillazg.com/static/avatar.jpeg",
         "keywords": "zookeeper, leader选举",
-        "description": "ZooKeeper 在集群模式下默认会使用 FastLeader 算法来选举 leader。下面将说说 ZooKeeper 集群使用 FastLeader 算法选举的具体过程。写的过程中参考了多篇文章，详见文末的参考资料。 首先需要明确几个概念: 节点状态：每个集群中的节点都有一个状态 LOOKING/FOLLOWING/LEADING/OBSERVING。每个节点启动的时候都是 LOOKING 状态，如果这个节点参与选举但最后不是leader，则状态是 FOLLOWING，如果不参与选举则是 OBSERVING，leader 的状态是 LEADING。 epoch: 表示选举轮数。 zxid: 事务 zxid 包含了本地数据的最后更新时间相关的信息。 serverid: 当前 server 的 ID, 通过配置文件指定(比如: echo &#39;1&#39; &gt; myid)。 先用文字描述一下大概的选举思想： 在没有遇到比我牛的人之前，第一票推荐我自己 当接收到其他人的选举信息时，如果他们推荐的人没我牛，那我还是推荐我自己 我有一个票箱，保存了当前这一轮选举中自己的推荐人以及接收到的推荐人信息，一人一票，重复或过期的票概不接受 当我发现了比我牛的人的时候，改为推荐这个牛人 如果我发现我的选举轮数落后了，清空票箱，改为推荐接收到的最新选举中大家推荐的最牛的那个人（如果没有人比我牛，那还是推荐我自己） 不断的重复上面的过程，不断的告诉别人“我的投票是第几轮”、“我推举的人是谁”。直到我的票箱中“我推举的最牛的人”收到了不少于 N / 2 + 1 的推举投票，此时这个人就是我认定的最终 leader。 当我确定了谁是最终 leader 并且这个 leader 一切正常，我就更新我的状态为 FOLLOWING/LEADING（我自己是最终 leader 则是 LEADING 否则就是 FOLLOWING），之后的选举中都直接反馈我确定的这个最终 leader。 那么，以什么标准来确定一个节点可以成为一个 leader 呢？ 依次比较 epoch, zxid, serverid ： 接收到的消息中，有 epoch 比我大的，则选 epoch 大的消息中确定的 server 如果 epoch 相等，则选 zxid 最大的 server 如果 zxid 也相等，则选 serverid 最大的 server (有的节点生来就是当 leader 的 😂） switch (n.state) { //LOOKING消息，则 case LOOKING: ...... //检查下收到的这张选票是否可以胜出，依次比较选举轮数epoch，事务zxid，服务器编号server id } else if (totalOrderPredicate(n.leader, n.zxid, n.peerEpoch, proposedLeader, proposedZxid, proposedEpoch)) { //胜出了，就把自己的投票修改为对方的，然后广播消息 updateProposal(n.leader, n.zxid, n.peerEpoch); sendNotifications(); } } protected boolean totalOrderPredicate(long newId, long newZxid, long newEpoch, long curId, long curZxid, long curEpoch) { return ( (newEpoch &gt; curEpoch) || ((newEpoch == curEpoch) &amp;&amp; ((newZxid &gt; curZxid) || ((newZxid == curZxid) &amp;&amp; (newId &gt; curId)))) ); } 从网上找了一个流程图，可以看看： 举个例子，理想情况下，先后启动三个节点的选举过程如下： 第一轮：每个节点广播选自己（此时只有 node1) 第二轮：node2 启动了，发起一轮投票。node1 收到了 node2 选它自己的投票，发现 node2 比自己牛，广播选 node2。此时 node1 发现 node2 获得了2票 &gt;= N / 2 + 1，认定 node2 为 leader 进入 following 状态。 node2 收到了 node1 选自己的广播，此时 node2 发现自己 获得了2票 &gt;= N / 2 + 1，进入 leading 状态。 第三轮：node3 启动了，发起一轮投票。node1 和 node2 都选 node2 , node3 通过比对发现 node2 的票数 &gt;= N /2 + 1，认定 node2 是 leader 进入 following 状态。 上面就是 FastLeader 算法选举的简单介绍了，更详细的信息可以查阅官方文档和代码。 参考¶ 图解zookeeper FastLeader选举算法 - loop in codes zookeeper3.3.3源码分析(二)FastLeader选举算法 - xhh198781的专栏 - 博客频道 - CSDN.NET 深入浅出Zookeeper之五 Leader选举 - 吊丝码农 - ITeye技术网站 Zookeeper-Zookeeper leader选举 - 横刀天笑 - 博客园 hadoop系列：zookeeper（2）——zookeeper核心原理（选举） - JAVA入门中 - 博客频道 - CSDN.NET zookeeper/FastLeaderElection.java at branch-3.4 · apache/zookeeper ZooKeeper Administrator&#39;s Guide",
+        // "description": "ZooKeeper 在集群模式下默认会使用 FastLeader 算法来选举 leader。下面将说说 ZooKeeper 集群使用 FastLeader 算法选举的具体过程。写的过程中参考了多篇文章，详见文末的参考资料。 首先需要明确几个概念: 节点状态：每个集群中的节点都有一个状态 LOOKING/FOLLOWING/LEADING/OBSERVING。每个节点启动的时候都是 LOOKING 状态，如果这个节点参与选举但最后不是leader，则状态是 FOLLOWING，如果不参与选举则是 OBSERVING，leader 的状态是 LEADING。 epoch: 表示选举轮数。 zxid: 事务 zxid 包含了本地数据的最后更新时间相关的信息。 serverid: 当前 server 的 ID, 通过配置文件指定(比如: echo &#39;1&#39; &gt; myid)。 先用文字描述一下大概的选举思想： 在没有遇到比我牛的人之前，第一票推荐我自己 当接收到其他人的选举信息时，如果他们推荐的人没我牛，那我还是推荐我自己 我有一个票箱，保存了当前这一轮选举中自己的推荐人以及接收到的推荐人信息，一人一票，重复或过期的票概不接受 当我发现了比我牛的人的时候，改为推荐这个牛人 如果我发现我的选举轮数落后了，清空票箱，改为推荐接收到的最新选举中大家推荐的最牛的那个人（如果没有人比我牛，那还是推荐我自己） 不断的重复上面的过程，不断的告诉别人“我的投票是第几轮”、“我推举的人是谁”。直到我的票箱中“我推举的最牛的人”收到了不少于 N / 2 + 1 的推举投票，此时这个人就是我认定的最终 leader。 当我确定了谁是最终 leader 并且这个 leader 一切正常，我就更新我的状态为 FOLLOWING/LEADING（我自己是最终 leader 则是 LEADING 否则就是 FOLLOWING），之后的选举中都直接反馈我确定的这个最终 leader。 那么，以什么标准来确定一个节点可以成为一个 leader 呢？ 依次比较 epoch, zxid, serverid ： 接收到的消息中，有 epoch 比我大的，则选 epoch 大的消息中确定的 server 如果 epoch 相等，则选 zxid 最大的 server 如果 zxid 也相等，则选 serverid 最大的 server (有的节点生来就是当 leader 的 😂） switch (n.state) { //LOOKING消息，则 case LOOKING: ...... //检查下收到的这张选票是否可以胜出，依次比较选举轮数epoch，事务zxid，服务器编号server id } else if (totalOrderPredicate(n.leader, n.zxid, n.peerEpoch, proposedLeader, proposedZxid, proposedEpoch)) { //胜出了，就把自己的投票修改为对方的，然后广播消息 updateProposal(n.leader, n.zxid, n.peerEpoch); sendNotifications(); } } protected boolean totalOrderPredicate(long newId, long newZxid, long newEpoch, long curId, long curZxid, long curEpoch) { return ( (newEpoch &gt; curEpoch) || ((newEpoch == curEpoch) &amp;&amp; ((newZxid &gt; curZxid) || ((newZxid == curZxid) &amp;&amp; (newId &gt; curId)))) ); } 从网上找了一个流程图，可以看看： 举个例子，理想情况下，先后启动三个节点的选举过程如下： 第一轮：每个节点广播选自己（此时只有 node1) 第二轮：node2 启动了，发起一轮投票。node1 收到了 node2 选它自己的投票，发现 node2 比自己牛，广播选 node2。此时 node1 发现 node2 获得了2票 &gt;= N / 2 + 1，认定 node2 为 leader 进入 following 状态。 node2 收到了 node1 选自己的广播，此时 node2 发现自己 获得了2票 &gt;= N / 2 + 1，进入 leading 状态。 第三轮：node3 启动了，发起一轮投票。node1 和 node2 都选 node2 , node3 通过比对发现 node2 的票数 &gt;= N /2 + 1，认定 node2 是 leader 进入 following 状态。 上面就是 FastLeader 算法选举的简单介绍了，更详细的信息可以查阅官方文档和代码。 参考¶ 图解zookeeper FastLeader选举算法 - loop in codes zookeeper3.3.3源码分析(二)FastLeader选举算法 - xhh198781的专栏 - 博客频道 - CSDN.NET 深入浅出Zookeeper之五 Leader选举 - 吊丝码农 - ITeye技术网站 Zookeeper-Zookeeper leader选举 - 横刀天笑 - 博客园 hadoop系列：zookeeper（2）——zookeeper核心原理（选举） - JAVA入门中 - 博客频道 - CSDN.NET zookeeper/FastLeaderElection.java at branch-3.4 · apache/zookeeper ZooKeeper Administrator&#39;s Guide",
+        "description": "<p>ZooKeeper 在集群模式下默认会使用 FastLeader 算法来选举 leader。下面将说说 ZooKeeper 集群使用 FastLeader 算法选举的具体过程。写的过程中参考了多篇文章，详见文末的参考资料。</p>
+<p>首先需要明确几个概念:</p>
+<ul class="simple">
+<li>节点状态：每个集群中的节点都有一个状态 LOOKING/FOLLOWING/LEADING/OBSERVING。每个节点启动的时候都是 LOOKING 状态，如果这个节点参与选举但最后不是leader，则状态是 FOLLOWING，如果不参与选举则是 OBSERVING，leader 的状态是 LEADING。</li>
+<li>epoch: 表示选举轮数。</li>
+<li>zxid: 事务 zxid 包含了本地数据的最后更新时间相关的信息。</li>
+<li>serverid: 当前 server 的 ID, 通过配置文件指定(比如: <tt class="docutils literal">echo '1' &gt; myid</tt>)。</li>
+</ul>
+<p>先用文字描述一下大概的选举思想：</p>
+<ul class="simple">
+<li>在没有遇到比我牛的人之前，第一票推荐我自己</li>
+<li>当接收到其他人的选举信息时，如果他们推荐的人没我牛，那我还是推荐我自己</li>
+<li>我有一个票箱，保存了当前这一轮选举中自己的推荐人以及接收到的推荐人信息，一人一票，重复或过期的票概不接受</li>
+<li>当我发现了比我牛的人的时候，改为推荐这个牛人</li>
+<li>如果我发现我的选举轮数落后了，清空票箱，改为推荐接收到的最新选举中大家推荐的最牛的那个人（如果没有人比我牛，那还是推荐我自己）</li>
+<li>不断的重复上面的过程，不断的告诉别人“我的投票是第几轮”、“我推举的人是谁”。直到我的票箱中“我推举的最牛的人”收到了不少于 <strong>N / 2 + 1</strong> 的推举投票，此时这个人就是我认定的最终 leader。</li>
+<li>当我确定了谁是最终 leader 并且这个 leader 一切正常，我就更新我的状态为 FOLLOWING/LEADING（我自己是最终  leader 则是 LEADING 否则就是 FOLLOWING），之后的选举中都直接反馈我确定的这个最终 leader。</li>
+</ul>
+<p>那么，以什么标准来确定一个节点可以成为一个 leader 呢？
+依次比较 epoch, zxid, serverid ：</p>
+<ul class="simple">
+<li>接收到的消息中，有 epoch 比我大的，则选 epoch 大的消息中确定的 server</li>
+<li>如果 epoch 相等，则选 zxid 最大的 server</li>
+<li>如果 zxid 也相等，则选 serverid 最大的 server (有的节点生来就是当 leader 的 😂）</li>
+</ul>
+<div class="highlight"><pre><span></span><span class="k">switch</span> <span class="o">(</span><span class="n">n</span><span class="o">.</span><span class="na">state</span><span class="o">)</span> <span class="o">{</span>
+<span class="c1">//LOOKING消息，则</span>
+<span class="k">case</span> <span class="n">LOOKING</span><span class="o">:</span>
+<span class="o">......</span>
+    <span class="c1">//检查下收到的这张选票是否可以胜出，依次比较选举轮数epoch，事务zxid，服务器编号server id</span>
+    <span class="o">}</span> <span class="k">else</span> <span class="k">if</span> <span class="o">(</span><span class="n">totalOrderPredicate</span><span class="o">(</span><span class="n">n</span><span class="o">.</span><span class="na">leader</span><span class="o">,</span> <span class="n">n</span><span class="o">.</span><span class="na">zxid</span><span class="o">,</span> <span class="n">n</span><span class="o">.</span><span class="na">peerEpoch</span><span class="o">,</span>
+            <span class="n">proposedLeader</span><span class="o">,</span> <span class="n">proposedZxid</span><span class="o">,</span> <span class="n">proposedEpoch</span><span class="o">))</span> <span class="o">{</span>
+        <span class="c1">//胜出了，就把自己的投票修改为对方的，然后广播消息</span>
+        <span class="n">updateProposal</span><span class="o">(</span><span class="n">n</span><span class="o">.</span><span class="na">leader</span><span class="o">,</span> <span class="n">n</span><span class="o">.</span><span class="na">zxid</span><span class="o">,</span> <span class="n">n</span><span class="o">.</span><span class="na">peerEpoch</span><span class="o">);</span>
+        <span class="n">sendNotifications</span><span class="o">();</span>
+    <span class="o">}</span>
+<span class="o">}</span>
+
+<span class="kd">protected</span> <span class="kt">boolean</span> <span class="nf">totalOrderPredicate</span><span class="o">(</span><span class="kt">long</span> <span class="n">newId</span><span class="o">,</span> <span class="kt">long</span> <span class="n">newZxid</span><span class="o">,</span> <span class="kt">long</span> <span class="n">newEpoch</span><span class="o">,</span> <span class="kt">long</span> <span class="n">curId</span><span class="o">,</span> <span class="kt">long</span> <span class="n">curZxid</span><span class="o">,</span> <span class="kt">long</span> <span class="n">curEpoch</span><span class="o">)</span> <span class="o">{</span>
+    <span class="k">return</span> <span class="o">(</span>
+        <span class="o">(</span><span class="n">newEpoch</span> <span class="o">&gt;</span> <span class="n">curEpoch</span><span class="o">)</span> <span class="o">||</span>
+        <span class="o">((</span><span class="n">newEpoch</span> <span class="o">==</span> <span class="n">curEpoch</span><span class="o">)</span> <span class="o">&amp;&amp;</span>
+        <span class="o">((</span><span class="n">newZxid</span> <span class="o">&gt;</span> <span class="n">curZxid</span><span class="o">)</span> <span class="o">||</span> <span class="o">((</span><span class="n">newZxid</span> <span class="o">==</span> <span class="n">curZxid</span><span class="o">)</span> <span class="o">&amp;&amp;</span>
+        <span class="o">(</span><span class="n">newId</span> <span class="o">&gt;</span> <span class="n">curId</span><span class="o">))))</span>
+    <span class="o">);</span>
+    <span class="o">}</span>
+</pre></div>
+<p>从网上找了一个流程图，可以看看：</p>
+<p><img alt="flow.png" src="/static/images/zookeeper/elect-leader.png" /></p>
+<p>举个例子，理想情况下，先后启动三个节点的选举过程如下：</p>
+<ul class="simple">
+<li>第一轮：每个节点广播选自己（此时只有 node1)</li>
+<li>第二轮：node2 启动了，发起一轮投票。node1 收到了 node2 选它自己的投票，发现 node2 比自己牛，广播选 node2。此时 node1 发现 node2 获得了2票 &gt;= N / 2 + 1，认定 node2 为 leader 进入 following 状态。
+node2 收到了 node1 选自己的广播，此时 node2 发现自己 获得了2票 &gt;= N / 2 + 1，进入 leading 状态。</li>
+<li>第三轮：node3 启动了，发起一轮投票。node1 和 node2 都选 node2 , node3 通过比对发现 node2 的票数 &gt;= N /2 + 1，认定 node2 是 leader 进入 following 状态。</li>
+</ul>
+<p>上面就是 FastLeader 算法选举的简单介绍了，更详细的信息可以查阅官方文档和代码。</p>
+<div class="section" id="id1">
+<h2 id="hidid1">参考<a class="headerlink" href="#hidid1" title="Permalink to this headline">¶</a></h2>
+<ul class="simple">
+<li><a class="reference external" href="http://codemacro.com/2014/10/19/zk-fastleaderelection/">图解zookeeper FastLeader选举算法 - loop in codes</a></li>
+<li><a class="reference external" href="http://blog.csdn.net/xhh198781/article/details/6619203">zookeeper3.3.3源码分析(二)FastLeader选举算法 - xhh198781的专栏 - 博客频道 - CSDN.NET</a></li>
+<li><a class="reference external" href="http://iwinit.iteye.com/blog/1773531">深入浅出Zookeeper之五 Leader选举 - 吊丝码农 - ITeye技术网站</a></li>
+<li><a class="reference external" href="http://www.cnblogs.com/yuyijq/p/4116365.html">Zookeeper-Zookeeper leader选举 - 横刀天笑 - 博客园</a></li>
+<li><a class="reference external" href="http://blog.csdn.net/yinwenjie/article/details/47613309">hadoop系列：zookeeper（2）——zookeeper核心原理（选举） - JAVA入门中 - 博客频道 - CSDN.NET</a></li>
+<li><a class="reference external" href="https://github.com/apache/zookeeper/blob/branch-3.4/src/java/main/org/apache/zookeeper/server/quorum/FastLeaderElection.java">zookeeper/FastLeaderElection.java at branch-3.4 · apache/zookeeper</a></li>
+<li><a class="reference external" href="http://zookeeper.apache.org/doc/r3.4.10/zookeeperAdmin.html#sc_configuration">ZooKeeper Administrator's Guide</a></li>
+</ul>
+</div>
+",
         "mainEntityOfPage": {
             "@type": "WebPage",
             "@id": "https://mozillazg.com"
@@ -287,7 +359,7 @@ node2 收到了 node1 选自己的广播，此时 node2 发现自己 获得了2�
    <div class="container">
       <hr>
       <div class="row">
-         <div class="col-xs-10">&copy; 2021 mozillazg
+         <div class="col-xs-10">&copy; 2022 mozillazg
             &middot; Powered by <a href="https://github.com/DandyDev/pelican-bootstrap3" target="_blank">pelican-bootstrap3</a>,
             <a href="http://docs.getpelican.com/" target="_blank">Pelican</a>,
             <a href="http://getbootstrap.com" target="_blank">Bootstrap</a>              <p><small>  <a rel="license" href="http://creativecommons.org/licenses/by-sa/4.0/"><img alt="Creative Commons License" style="border-width:0" src="/static/images/by-sa-80x15.png" /></a>

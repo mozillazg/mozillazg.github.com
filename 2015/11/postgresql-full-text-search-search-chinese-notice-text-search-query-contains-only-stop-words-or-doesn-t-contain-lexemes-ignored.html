@@ -18,6 +18,8 @@
         <meta name="author" content="mozillazg" />
         <meta name="keywords" content="postgresql" />
     <meta name="description" content="图片来源: http://derpinews.tumblr.com/post/132078326118/were-back 最近使用了一下 postgresql 的 full text search 功能，在开发机器上可以实现简单的搜索中文的功能， 但是到其他服务器上后总是出现可以搜索英文但是搜索中文却没有结果的情况。 通过在 postgres 的 shell 中执行程序生成的搜索语句后发现：当搜索条件是中文时，总是提示： NOTICE: text-search query contains only stop words or doesn&#39;t contain lexemes, ignored 通过大半天的查资料，验证之后，终于解决了这个问题。如果你也出现类似问题的话，可以检查是否有一样的问题： 数据库编码不是 UTF-8 之类的支持中文的编码。 P.S. 如果搜索英文也有这个问题的话，可以把搜索时的解释器由 english 改成 simple: postgres=# SELECT to_tsvector(&#39;somthing&#39;) @@ to_tsquery(&#39;english&#39;, &#39;s:*&#39;); NOTICE: text-search query contains only stop words or doesn&#39;t contain lexemes, ignored ?column? ---------- f (1 row) postgres=# SELECT to_tsvector(&#39;somthing&#39;) @@ to_tsquery(&#39;simple&#39;, &#39;s:*&#39;); ?column? ---------- t (1 row) simple 。如果你搜索时使用的解释器是 `english` 的话改成 `simple` 或者安装的其他支持中文的解释器: --&gt; 数据库编码 默认 postgresql 内的数据库编码是 SQL_ASCII 编码，这个导致进行全文检索的时候没法搜索中文。 请看下面这个两个数据库，一个是 SQL_ASCII 编码，一个是 UTF8 编码。 相同的搜索语句结果也不一样： postgres=# \l List of databases Name | Owner | Encoding | Collate | Ctype | Access privileges -----------+----------+-----------+-------------+-------------+----------------------- db1 | owner | UTF8 | en_US.UTF-8 | en_US.UTF-8 | =Tc/owner + | | | | | owner=CTc/owner db2 | owner | SQL_ASCII | C | C | =Tc/owner + postgres=# \c db1 db1=# db1=# SELECT to_tsvector(&#39;我们&#39;) @@ to_tsquery(&#39;我:*&#39;); ?column? ---------- t (1 row) db1=# db1=# \c db2 db2=# db2=# SELECT to_tsvector(&#39;我们&#39;) @@ to_tsquery(&#39;我:*&#39;); NOTICE: text-search query contains only stop words or doesn&#39;t contain lexemes, ignored ?column? ---------- f (1 row) db2=# 下面讲一下如何将数据库转换为 UTF-8 编码。 修改数据库 Encoding, Collate, Ctype 备份要转换的数据库: pg_dump --format=t -d db_name -U user_name -W -h 127.0.0.1 &gt; dump.sql 更新 template1 的编码: update pg_database set encoding = 6, datcollate = &#39;en_US.UTF8&#39;, datctype = &#39;en_US.UTF8&#39; where datname = &#39;template1&#39;; drop 原有的数据库或者改名: /* 改名 */ ALTER DATABASE db_name RENAME TO db_name_bak; /* 删除 */ drop database db_name; 重新创建数据库，指定编码： CREATE DATABASE db_name WITH ENCODING &#39;UTF8&#39; LC_COLLATE=&#39;en_US.UTF-8&#39; LC_CTYPE=&#39;en_US.UTF-8&#39; owner user_name TEMPLATE=template1; 数据库权限: GRANT ALL PRIVILEGES ON DATABASE db_name to user_name; \c db_name; ALTER SCHEMA public OWNER to user_name; GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO user_name; GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO user_name; 恢复数据库数据： pg_restore -d db_name -h 127.0.0.1 -U user_name &lt; dump.sql 现在再试一下应该已经可以正常搜索中文了。 参考资料 http://stackoverflow.com/questions/16736891/pgerror-error-new-encoding-utf8-is-incompatible http://www.postgresql.org/docs/9.4/static/multibyte.html http://stackoverflow.com/questions/380924/how-can-i-change-database-encoding-for-a-postgresql-database-using-sql-or-phppga https://coderwall.com/p/j-_mia/make-postgres-default-to-utf8 https://github.com/wvanbergen/scoped_search/issues/23 https://github.com/ckan/ckan/pull/1838 https://ruby-china.org/topics/14607 https://github.com/kvesteri/sqlalchemy-searchable/issues/33" />
+    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-4941850466486001"
+     crossorigin="anonymous"></script>
 
     <style>
       .js-toc {
@@ -93,7 +95,144 @@
         // "dateModified": "",
         "image": "https://mozillazg.com/static/avatar.jpeg",
         "keywords": "postgresql",
-        "description": "图片来源: http://derpinews.tumblr.com/post/132078326118/were-back 最近使用了一下 postgresql 的 full text search 功能，在开发机器上可以实现简单的搜索中文的功能， 但是到其他服务器上后总是出现可以搜索英文但是搜索中文却没有结果的情况。 通过在 postgres 的 shell 中执行程序生成的搜索语句后发现：当搜索条件是中文时，总是提示： NOTICE: text-search query contains only stop words or doesn&#39;t contain lexemes, ignored 通过大半天的查资料，验证之后，终于解决了这个问题。如果你也出现类似问题的话，可以检查是否有一样的问题： 数据库编码不是 UTF-8 之类的支持中文的编码。 P.S. 如果搜索英文也有这个问题的话，可以把搜索时的解释器由 english 改成 simple: postgres=# SELECT to_tsvector(&#39;somthing&#39;) @@ to_tsquery(&#39;english&#39;, &#39;s:*&#39;); NOTICE: text-search query contains only stop words or doesn&#39;t contain lexemes, ignored ?column? ---------- f (1 row) postgres=# SELECT to_tsvector(&#39;somthing&#39;) @@ to_tsquery(&#39;simple&#39;, &#39;s:*&#39;); ?column? ---------- t (1 row) simple 。如果你搜索时使用的解释器是 `english` 的话改成 `simple` 或者安装的其他支持中文的解释器: --&gt; 数据库编码 默认 postgresql 内的数据库编码是 SQL_ASCII 编码，这个导致进行全文检索的时候没法搜索中文。 请看下面这个两个数据库，一个是 SQL_ASCII 编码，一个是 UTF8 编码。 相同的搜索语句结果也不一样： postgres=# \l List of databases Name | Owner | Encoding | Collate | Ctype | Access privileges -----------+----------+-----------+-------------+-------------+----------------------- db1 | owner | UTF8 | en_US.UTF-8 | en_US.UTF-8 | =Tc/owner + | | | | | owner=CTc/owner db2 | owner | SQL_ASCII | C | C | =Tc/owner + postgres=# \c db1 db1=# db1=# SELECT to_tsvector(&#39;我们&#39;) @@ to_tsquery(&#39;我:*&#39;); ?column? ---------- t (1 row) db1=# db1=# \c db2 db2=# db2=# SELECT to_tsvector(&#39;我们&#39;) @@ to_tsquery(&#39;我:*&#39;); NOTICE: text-search query contains only stop words or doesn&#39;t contain lexemes, ignored ?column? ---------- f (1 row) db2=# 下面讲一下如何将数据库转换为 UTF-8 编码。 修改数据库 Encoding, Collate, Ctype 备份要转换的数据库: pg_dump --format=t -d db_name -U user_name -W -h 127.0.0.1 &gt; dump.sql 更新 template1 的编码: update pg_database set encoding = 6, datcollate = &#39;en_US.UTF8&#39;, datctype = &#39;en_US.UTF8&#39; where datname = &#39;template1&#39;; drop 原有的数据库或者改名: /* 改名 */ ALTER DATABASE db_name RENAME TO db_name_bak; /* 删除 */ drop database db_name; 重新创建数据库，指定编码： CREATE DATABASE db_name WITH ENCODING &#39;UTF8&#39; LC_COLLATE=&#39;en_US.UTF-8&#39; LC_CTYPE=&#39;en_US.UTF-8&#39; owner user_name TEMPLATE=template1; 数据库权限: GRANT ALL PRIVILEGES ON DATABASE db_name to user_name; \c db_name; ALTER SCHEMA public OWNER to user_name; GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO user_name; GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO user_name; 恢复数据库数据： pg_restore -d db_name -h 127.0.0.1 -U user_name &lt; dump.sql 现在再试一下应该已经可以正常搜索中文了。 参考资料 http://stackoverflow.com/questions/16736891/pgerror-error-new-encoding-utf8-is-incompatible http://www.postgresql.org/docs/9.4/static/multibyte.html http://stackoverflow.com/questions/380924/how-can-i-change-database-encoding-for-a-postgresql-database-using-sql-or-phppga https://coderwall.com/p/j-_mia/make-postgres-default-to-utf8 https://github.com/wvanbergen/scoped_search/issues/23 https://github.com/ckan/ckan/pull/1838 https://ruby-china.org/topics/14607 https://github.com/kvesteri/sqlalchemy-searchable/issues/33",
+        // "description": "图片来源: http://derpinews.tumblr.com/post/132078326118/were-back 最近使用了一下 postgresql 的 full text search 功能，在开发机器上可以实现简单的搜索中文的功能， 但是到其他服务器上后总是出现可以搜索英文但是搜索中文却没有结果的情况。 通过在 postgres 的 shell 中执行程序生成的搜索语句后发现：当搜索条件是中文时，总是提示： NOTICE: text-search query contains only stop words or doesn&#39;t contain lexemes, ignored 通过大半天的查资料，验证之后，终于解决了这个问题。如果你也出现类似问题的话，可以检查是否有一样的问题： 数据库编码不是 UTF-8 之类的支持中文的编码。 P.S. 如果搜索英文也有这个问题的话，可以把搜索时的解释器由 english 改成 simple: postgres=# SELECT to_tsvector(&#39;somthing&#39;) @@ to_tsquery(&#39;english&#39;, &#39;s:*&#39;); NOTICE: text-search query contains only stop words or doesn&#39;t contain lexemes, ignored ?column? ---------- f (1 row) postgres=# SELECT to_tsvector(&#39;somthing&#39;) @@ to_tsquery(&#39;simple&#39;, &#39;s:*&#39;); ?column? ---------- t (1 row) simple 。如果你搜索时使用的解释器是 `english` 的话改成 `simple` 或者安装的其他支持中文的解释器: --&gt; 数据库编码 默认 postgresql 内的数据库编码是 SQL_ASCII 编码，这个导致进行全文检索的时候没法搜索中文。 请看下面这个两个数据库，一个是 SQL_ASCII 编码，一个是 UTF8 编码。 相同的搜索语句结果也不一样： postgres=# \l List of databases Name | Owner | Encoding | Collate | Ctype | Access privileges -----------+----------+-----------+-------------+-------------+----------------------- db1 | owner | UTF8 | en_US.UTF-8 | en_US.UTF-8 | =Tc/owner + | | | | | owner=CTc/owner db2 | owner | SQL_ASCII | C | C | =Tc/owner + postgres=# \c db1 db1=# db1=# SELECT to_tsvector(&#39;我们&#39;) @@ to_tsquery(&#39;我:*&#39;); ?column? ---------- t (1 row) db1=# db1=# \c db2 db2=# db2=# SELECT to_tsvector(&#39;我们&#39;) @@ to_tsquery(&#39;我:*&#39;); NOTICE: text-search query contains only stop words or doesn&#39;t contain lexemes, ignored ?column? ---------- f (1 row) db2=# 下面讲一下如何将数据库转换为 UTF-8 编码。 修改数据库 Encoding, Collate, Ctype 备份要转换的数据库: pg_dump --format=t -d db_name -U user_name -W -h 127.0.0.1 &gt; dump.sql 更新 template1 的编码: update pg_database set encoding = 6, datcollate = &#39;en_US.UTF8&#39;, datctype = &#39;en_US.UTF8&#39; where datname = &#39;template1&#39;; drop 原有的数据库或者改名: /* 改名 */ ALTER DATABASE db_name RENAME TO db_name_bak; /* 删除 */ drop database db_name; 重新创建数据库，指定编码： CREATE DATABASE db_name WITH ENCODING &#39;UTF8&#39; LC_COLLATE=&#39;en_US.UTF-8&#39; LC_CTYPE=&#39;en_US.UTF-8&#39; owner user_name TEMPLATE=template1; 数据库权限: GRANT ALL PRIVILEGES ON DATABASE db_name to user_name; \c db_name; ALTER SCHEMA public OWNER to user_name; GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO user_name; GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO user_name; 恢复数据库数据： pg_restore -d db_name -h 127.0.0.1 -U user_name &lt; dump.sql 现在再试一下应该已经可以正常搜索中文了。 参考资料 http://stackoverflow.com/questions/16736891/pgerror-error-new-encoding-utf8-is-incompatible http://www.postgresql.org/docs/9.4/static/multibyte.html http://stackoverflow.com/questions/380924/how-can-i-change-database-encoding-for-a-postgresql-database-using-sql-or-phppga https://coderwall.com/p/j-_mia/make-postgres-default-to-utf8 https://github.com/wvanbergen/scoped_search/issues/23 https://github.com/ckan/ckan/pull/1838 https://ruby-china.org/topics/14607 https://github.com/kvesteri/sqlalchemy-searchable/issues/33",
+        "description": "<p><img alt="" src="/static/images/postgresql/tumblr_inline_nwxibtWTJU1rrl2l6_500.png" /></p>
+<p>图片来源: <a href="http://derpinews.tumblr.com/post/132078326118/were-back">http://derpinews.tumblr.com/post/132078326118/were-back</a></p>
+<p>最近使用了一下 postgresql 的 full text search 功能，在开发机器上可以实现简单的搜索中文的功能，
+但是到其他服务器上后总是出现可以搜索英文但是搜索中文却没有结果的情况。
+通过在 postgres 的 shell 中执行程序生成的搜索语句后发现：当搜索条件是中文时，总是提示：</p>
+<div class="highlight"><pre><span></span><span class="n">NOTICE</span><span class="o">:</span>  <span class="n">text</span><span class="o">-</span><span class="n">search</span> <span class="n">query</span> <span class="n">contains</span> <span class="n">only</span> <span class="n">stop</span> <span class="n">words</span> <span class="n">or</span> <span class="n">doesn</span><span class="err">&#39;</span><span class="n">t</span> <span class="n">contain</span> <span class="n">lexemes</span><span class="o">,</span> <span class="n">ignored</span>
+</pre></div>
+
+
+<p>通过大半天的查资料，验证之后，终于解决了这个问题。如果你也出现类似问题的话，可以检查是否有一样的问题：
+数据库编码不是 <code>UTF-8</code> 之类的支持中文的编码。</p>
+<p>P.S. 如果搜索英文也有这个问题的话，可以把搜索时的解释器由 <code>english</code> 改成 <code>simple</code>:</p>
+<div class="highlight"><pre><span></span><span class="nt">postgres</span><span class="o">=</span><span class="err">#</span> <span class="nt">SELECT</span> <span class="nt">to_tsvector</span><span class="o">(</span><span class="s1">&#39;somthing&#39;</span><span class="o">)</span> <span class="o">@@</span> <span class="nt">to_tsquery</span><span class="o">(</span><span class="s1">&#39;english&#39;</span><span class="o">,</span> <span class="s1">&#39;s:*&#39;</span><span class="o">);</span>
+<span class="nt">NOTICE</span><span class="o">:</span>  <span class="nt">text-search</span> <span class="nt">query</span> <span class="nt">contains</span> <span class="nt">only</span> <span class="nt">stop</span> <span class="nt">words</span> <span class="nt">or</span> <span class="nt">doesn</span><span class="s1">&#39;t contain lexemes, ignored</span>
+<span class="s1"> ?column? </span>
+<span class="s1">----------</span>
+<span class="s1"> f</span>
+<span class="s1">(1 row)</span>
+
+<span class="s1">postgres=# SELECT to_tsvector(&#39;</span><span class="nt">somthing</span><span class="s1">&#39;) @@ to_tsquery(&#39;</span><span class="nt">simple</span><span class="s1">&#39;, &#39;</span><span class="nt">s</span><span class="o">:*</span><span class="err">&#39;</span><span class="o">);</span>
+ <span class="o">?</span><span class="nt">column</span><span class="o">?</span> 
+<span class="nt">----------</span>
+ <span class="nt">t</span>
+<span class="o">(</span><span class="nt">1</span> <span class="nt">row</span><span class="o">)</span>
+</pre></div>
+
+
+<!--
+##解析器
+
+english -> simple 。如果你搜索时使用的解释器是 `english` 的话改成 `simple` 或者安装的其他支持中文的解释器:
+-->
+
+<h2>数据库编码</h2>
+<p>默认 postgresql 内的数据库编码是 <code>SQL_ASCII</code> 编码，这个导致进行全文检索的时候没法搜索中文。
+请看下面这个两个数据库，一个是 <code>SQL_ASCII</code> 编码，一个是 <code>UTF8</code> 编码。
+相同的搜索语句结果也不一样：</p>
+<div class="highlight"><pre><span></span><span class="nt">postgres</span><span class="o">=</span><span class="err">#</span> <span class="err">\</span><span class="nt">l</span>
+                                  <span class="nt">List</span> <span class="nt">of</span> <span class="nt">databases</span>
+   <span class="nt">Name</span>    <span class="o">|</span>  <span class="nt">Owner</span>   <span class="o">|</span> <span class="nt">Encoding</span>  <span class="o">|</span>   <span class="nt">Collate</span>   <span class="o">|</span>    <span class="nt">Ctype</span>    <span class="o">|</span>   <span class="nt">Access</span> <span class="nt">privileges</span>   
+<span class="nt">-----------</span><span class="o">+</span><span class="nt">----------</span><span class="o">+</span><span class="nt">-----------</span><span class="o">+</span><span class="nt">-------------</span><span class="o">+</span><span class="nt">-------------</span><span class="o">+</span><span class="nt">-----------------------</span>
+ <span class="nt">db1</span>  <span class="o">|</span> <span class="nt">owner</span> <span class="o">|</span> <span class="nt">UTF8</span>      <span class="o">|</span> <span class="nt">en_US</span><span class="nc">.UTF-8</span> <span class="o">|</span> <span class="nt">en_US</span><span class="nc">.UTF-8</span> <span class="o">|</span> <span class="o">=</span><span class="nt">Tc</span><span class="o">/</span><span class="nt">owner</span>         <span class="o">+</span>
+           <span class="o">|</span>          <span class="o">|</span>           <span class="o">|</span>             <span class="o">|</span>             <span class="o">|</span> <span class="nt">owner</span><span class="o">=</span><span class="nt">CTc</span><span class="o">/</span><span class="nt">owner</span>
+ <span class="nt">db2</span>     <span class="o">|</span> <span class="nt">owner</span>   <span class="o">|</span> <span class="nt">SQL_ASCII</span> <span class="o">|</span> <span class="nt">C</span>           <span class="o">|</span> <span class="nt">C</span>           <span class="o">|</span> <span class="o">=</span><span class="nt">Tc</span><span class="o">/</span><span class="nt">owner</span>           <span class="o">+</span>
+
+
+<span class="nt">postgres</span><span class="o">=</span><span class="err">#</span> <span class="err">\</span><span class="nt">c</span> <span class="nt">db1</span>
+<span class="nt">db1</span><span class="o">=</span><span class="err">#</span>
+<span class="nt">db1</span><span class="o">=</span><span class="err">#</span> <span class="nt">SELECT</span> <span class="nt">to_tsvector</span><span class="o">(</span><span class="s1">&#39;我们&#39;</span><span class="o">)</span> <span class="o">@@</span> <span class="nt">to_tsquery</span><span class="o">(</span><span class="s1">&#39;我:*&#39;</span><span class="o">);</span>
+ <span class="o">?</span><span class="nt">column</span><span class="o">?</span> 
+<span class="nt">----------</span>
+ <span class="nt">t</span>
+<span class="o">(</span><span class="nt">1</span> <span class="nt">row</span><span class="o">)</span>
+
+<span class="nt">db1</span><span class="o">=</span><span class="err">#</span>
+
+<span class="nt">db1</span><span class="o">=</span><span class="err">#</span> <span class="err">\</span><span class="nt">c</span> <span class="nt">db2</span>
+<span class="nt">db2</span><span class="o">=</span><span class="err">#</span>
+<span class="nt">db2</span><span class="o">=</span><span class="err">#</span> <span class="nt">SELECT</span> <span class="nt">to_tsvector</span><span class="o">(</span><span class="s1">&#39;我们&#39;</span><span class="o">)</span> <span class="o">@@</span> <span class="nt">to_tsquery</span><span class="o">(</span><span class="s1">&#39;我:*&#39;</span><span class="o">);</span>
+<span class="nt">NOTICE</span><span class="o">:</span>  <span class="nt">text-search</span> <span class="nt">query</span> <span class="nt">contains</span> <span class="nt">only</span> <span class="nt">stop</span> <span class="nt">words</span> <span class="nt">or</span> <span class="nt">doesn</span><span class="err">&#39;</span><span class="nt">t</span> <span class="nt">contain</span> <span class="nt">lexemes</span><span class="o">,</span> <span class="nt">ignored</span>
+ <span class="o">?</span><span class="nt">column</span><span class="o">?</span> 
+<span class="nt">----------</span>
+ <span class="nt">f</span>
+<span class="o">(</span><span class="nt">1</span> <span class="nt">row</span><span class="o">)</span>
+
+<span class="nt">db2</span><span class="o">=</span><span class="err">#</span>
+</pre></div>
+
+
+<p>下面讲一下如何将数据库转换为 <code>UTF-8</code> 编码。</p>
+<h3>修改数据库 Encoding, Collate, Ctype</h3>
+<ol>
+<li>
+<p>备份要转换的数据库:</p>
+<div class="highlight"><pre><span></span>pg_dump --format=t -d db_name -U user_name -W -h 127.0.0.1 &gt; dump.sql
+</pre></div>
+
+
+</li>
+<li>
+<p>更新 <code>template1</code> 的编码:</p>
+<div class="highlight"><pre><span></span>update pg_database set encoding = 6, datcollate = &#39;en_US.UTF8&#39;, datctype = &#39;en_US.UTF8&#39; where datname = &#39;template1&#39;;
+</pre></div>
+
+
+</li>
+<li>
+<p>drop 原有的数据库或者改名:</p>
+<div class="highlight"><pre><span></span><span class="cm">/* 改名 */</span><span class="w"></span>
+ALTER<span class="w"> </span>DATABASE<span class="w"> </span>db_name<span class="w"> </span>RENAME<span class="w"> </span><span class="kr">TO</span><span class="w"> </span>db_name_bak<span class="err">;</span><span class="w"></span>
+<span class="cm">/* 删除 */</span><span class="w"></span>
+<span class="kr">drop</span><span class="w"> </span>database<span class="w"> </span>db_name<span class="err">;</span><span class="w"></span>
+</pre></div>
+
+
+</li>
+<li>
+<p>重新创建数据库，指定编码：</p>
+<div class="highlight"><pre><span></span>CREATE DATABASE db_name WITH ENCODING &#39;UTF8&#39; LC_COLLATE=&#39;en_US.UTF-8&#39; LC_CTYPE=&#39;en_US.UTF-8&#39; owner user_name TEMPLATE=template1;
+</pre></div>
+
+
+</li>
+<li>
+<p>数据库权限:</p>
+<div class="highlight"><pre><span></span>GRANT ALL PRIVILEGES ON DATABASE db_name to user_name;
+
+\c db_name;
+ALTER SCHEMA public OWNER to user_name;
+GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO user_name;
+GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO user_name;
+</pre></div>
+
+
+</li>
+<li>
+<p>恢复数据库数据：</p>
+<div class="highlight"><pre><span></span>pg_restore -d db_name -h 127.0.0.1 -U user_name &lt; dump.sql
+</pre></div>
+
+
+</li>
+<li>
+<p>现在再试一下应该已经可以正常搜索中文了。</p>
+</li>
+</ol>
+<h2>参考资料</h2>
+<ul>
+<li><a href="http://stackoverflow.com/questions/16736891/pgerror-error-new-encoding-utf8-is-incompatible">http://stackoverflow.com/questions/16736891/pgerror-error-new-encoding-utf8-is-incompatible</a></li>
+<li><a href="http://www.postgresql.org/docs/9.4/static/multibyte.html">http://www.postgresql.org/docs/9.4/static/multibyte.html</a></li>
+<li><a href="http://stackoverflow.com/questions/380924/how-can-i-change-database-encoding-for-a-postgresql-database-using-sql-or-phppga">http://stackoverflow.com/questions/380924/how-can-i-change-database-encoding-for-a-postgresql-database-using-sql-or-phppga</a></li>
+<li><a href="https://coderwall.com/p/j-_mia/make-postgres-default-to-utf8">https://coderwall.com/p/j-_mia/make-postgres-default-to-utf8</a></li>
+<li><a href="https://github.com/wvanbergen/scoped_search/issues/23">https://github.com/wvanbergen/scoped_search/issues/23</a></li>
+<li><a href="https://github.com/ckan/ckan/pull/1838">https://github.com/ckan/ckan/pull/1838</a></li>
+<li><a href="https://ruby-china.org/topics/14607">https://ruby-china.org/topics/14607</a></li>
+<li><a href="https://github.com/kvesteri/sqlalchemy-searchable/issues/33">https://github.com/kvesteri/sqlalchemy-searchable/issues/33</a></li>
+</ul>",
         "mainEntityOfPage": {
             "@type": "WebPage",
             "@id": "https://mozillazg.com"
@@ -314,11 +453,11 @@ GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO user_name;
 <section class="well" id="related-posts">
     <p>Related Posts:</p>
     <ul>
-        <li><a href="https://mozillazg.com/2016/01/sqlalchemy-use-postgresql-uuid.html">使用 sqlalchemy 时如何配置使用 postgresql 的 uuid 类型</a></li>
         <li><a href="https://mozillazg.com/2016/02/psycopg2-how-to-get-lastrowid-when-insert-a-new-row.html">psycopg2 插入数据时如何获取新纪录的主键值</a></li>
-        <li><a href="https://mozillazg.com/2015/04/postgresql-dealing-date_trunc-function-with-timezone.html">[postgreqsql] 处理 date_trunc 函数的时区问题</a></li>
-        <li><a href="https://mozillazg.com/2014/06/hello-postgresql.html">[database] postgresql 常用操作</a></li>
         <li><a href="https://mozillazg.com/2016/01/install-postgresql-9.5-on-centos-7.html">如何在 centos 7 上安装 postgresql 9.5</a></li>
+        <li><a href="https://mozillazg.com/2014/06/hello-postgresql.html">[database] postgresql 常用操作</a></li>
+        <li><a href="https://mozillazg.com/2015/04/postgresql-dealing-date_trunc-function-with-timezone.html">[postgreqsql] 处理 date_trunc 函数的时区问题</a></li>
+        <li><a href="https://mozillazg.com/2016/01/sqlalchemy-use-postgresql-uuid.html">使用 sqlalchemy 时如何配置使用 postgresql 的 uuid 类型</a></li>
     </ul>
 </section>
     <hr/>
@@ -361,7 +500,7 @@ GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO user_name;
    <div class="container">
       <hr>
       <div class="row">
-         <div class="col-xs-10">&copy; 2021 mozillazg
+         <div class="col-xs-10">&copy; 2022 mozillazg
             &middot; Powered by <a href="https://github.com/DandyDev/pelican-bootstrap3" target="_blank">pelican-bootstrap3</a>,
             <a href="http://docs.getpelican.com/" target="_blank">Pelican</a>,
             <a href="http://getbootstrap.com" target="_blank">Bootstrap</a>              <p><small>  <a rel="license" href="http://creativecommons.org/licenses/by-sa/4.0/"><img alt="Creative Commons License" style="border-width:0" src="/static/images/by-sa-80x15.png" /></a>

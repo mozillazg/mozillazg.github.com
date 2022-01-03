@@ -18,6 +18,8 @@
         <meta name="author" content="mozillazg" />
         <meta name="keywords" content="kubernetes,RBAC" />
     <meta name="description" content="在编写 Kubernetes RBAC Role/ClusterRole 中 rules 字段中定义的规则时，我们可以通过通配符 * 来实现规则中匹配任意字符的需求。 不过通配符 * 也不是可以任意使用的，下面是 rules 字段使用的 PolicyRule 的定义: // PolicyRule holds information that describes a policy rule, but does not contain information // about who the rule applies to or which namespace the rule applies to. type PolicyRule struct { // Verbs is a list of Verbs that apply to ALL the ResourceKinds and AttributeRestrictions contained in this rule. &#39;*&#39; represents all verbs. Verbs []string `json:&#34;verbs&#34; protobuf:&#34;bytes,1,rep,name=verbs&#34;` // APIGroups is the name of the APIGroup that contains the resources. If multiple API groups are specified, any action requested against one of // the enumerated resources in any API group will be allowed. // +optional APIGroups []string `json:&#34;apiGroups,omitempty&#34; protobuf:&#34;bytes,2,rep,name=apiGroups&#34;` // Resources is a list of resources this rule applies to. &#39;*&#39; represents all resources. // +optional Resources []string `json:&#34;resources,omitempty&#34; protobuf:&#34;bytes,3,rep,name=resources&#34;` // ResourceNames is an optional white list of names that the rule applies to. An empty set means that everything is allowed. // +optional ResourceNames []string `json:&#34;resourceNames,omitempty&#34; protobuf:&#34;bytes,4,rep,name=resourceNames&#34;` // NonResourceURLs is a set of partial urls that a user should have access to. *s are allowed, but only as the full, final step in the path // Since non-resource URLs are not namespaced, this field is only applicable for ClusterRoles referenced from a ClusterRoleBinding. // Rules can either apply to API resources (such as &#34;pods&#34; or &#34;secrets&#34;) or non-resource URL paths (such as &#34;/api&#34;), but not both. // +optional NonResourceURLs []string `json:&#34;nonResourceURLs,omitempty&#34; protobuf:&#34;bytes,5,rep,name=nonResourceURLs&#34;` } 通过阅读 kubernetes 中 PolicyRule 匹配逻辑的 源 代码 可以知道 PolicyRule 中各个字段使用通配符 * 时有如下限制： verbs 字段只支持通过使用 * 匹配所有 Verb，不支持使用 * 跟其他字符实现组合匹配： * ： 有效 ，匹配所有 Verb de*: 无效 de*te: 无效 *te: 无效 apiGroups 字段只支持通过使用 * 匹配所有 APIGroup ，不支持使用 * 跟其他字符实现组合匹配： * ： 有效 ，匹配所有 APIGroup co*: 无效 c*e: 无效 *re: 无效 resources 字段只支持通过使用 * 匹配所有 resource，以及通过 * 匹配所有 resource 的特定 subresource ： * ： 有效 ，匹配所有 resource po*: 无效 po*s: 无效 *ts: 无效 */&lt;subresource&gt;: 有效 ，匹配所有 resource 的特定 &lt;subresource&gt; ，比如 */status 或 */scale *&lt;subresource&gt;: 无效 resourceNames 字段不支持通配符 * ，当 resourceNames 字段的值为空时匹配所有 resource name nonResourceURLs 字段只支持通过 * 匹配所有 nonResourceURL、以及通过字符串末尾的 * 匹配以特定字符串开头的任意 nonResourceURL： * ： 有效 ，匹配所有 nonResourceURL /health*: 有效 ，匹配以 /health 开头的任意 nonResourceURL，比如 /health 、 /healthy 、 /health/foo/bar *foo: 无效 /*foo: 无效 参考资料¶ Using RBAC Authorization | Kubernetes kubernetes/rbac.go at v1.21.1 · kubernetes/kubernetes" />
+    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-4941850466486001"
+     crossorigin="anonymous"></script>
 
     <style>
       .js-toc {
@@ -94,7 +96,77 @@
         // "dateModified": "",
         "image": "https://mozillazg.com/static/avatar.jpeg",
         "keywords": "kubernetes, RBAC",
-        "description": "在编写 Kubernetes RBAC Role/ClusterRole 中 rules 字段中定义的规则时，我们可以通过通配符 * 来实现规则中匹配任意字符的需求。 不过通配符 * 也不是可以任意使用的，下面是 rules 字段使用的 PolicyRule 的定义: // PolicyRule holds information that describes a policy rule, but does not contain information // about who the rule applies to or which namespace the rule applies to. type PolicyRule struct { // Verbs is a list of Verbs that apply to ALL the ResourceKinds and AttributeRestrictions contained in this rule. &#39;*&#39; represents all verbs. Verbs []string `json:&#34;verbs&#34; protobuf:&#34;bytes,1,rep,name=verbs&#34;` // APIGroups is the name of the APIGroup that contains the resources. If multiple API groups are specified, any action requested against one of // the enumerated resources in any API group will be allowed. // +optional APIGroups []string `json:&#34;apiGroups,omitempty&#34; protobuf:&#34;bytes,2,rep,name=apiGroups&#34;` // Resources is a list of resources this rule applies to. &#39;*&#39; represents all resources. // +optional Resources []string `json:&#34;resources,omitempty&#34; protobuf:&#34;bytes,3,rep,name=resources&#34;` // ResourceNames is an optional white list of names that the rule applies to. An empty set means that everything is allowed. // +optional ResourceNames []string `json:&#34;resourceNames,omitempty&#34; protobuf:&#34;bytes,4,rep,name=resourceNames&#34;` // NonResourceURLs is a set of partial urls that a user should have access to. *s are allowed, but only as the full, final step in the path // Since non-resource URLs are not namespaced, this field is only applicable for ClusterRoles referenced from a ClusterRoleBinding. // Rules can either apply to API resources (such as &#34;pods&#34; or &#34;secrets&#34;) or non-resource URL paths (such as &#34;/api&#34;), but not both. // +optional NonResourceURLs []string `json:&#34;nonResourceURLs,omitempty&#34; protobuf:&#34;bytes,5,rep,name=nonResourceURLs&#34;` } 通过阅读 kubernetes 中 PolicyRule 匹配逻辑的 源 代码 可以知道 PolicyRule 中各个字段使用通配符 * 时有如下限制： verbs 字段只支持通过使用 * 匹配所有 Verb，不支持使用 * 跟其他字符实现组合匹配： * ： 有效 ，匹配所有 Verb de*: 无效 de*te: 无效 *te: 无效 apiGroups 字段只支持通过使用 * 匹配所有 APIGroup ，不支持使用 * 跟其他字符实现组合匹配： * ： 有效 ，匹配所有 APIGroup co*: 无效 c*e: 无效 *re: 无效 resources 字段只支持通过使用 * 匹配所有 resource，以及通过 * 匹配所有 resource 的特定 subresource ： * ： 有效 ，匹配所有 resource po*: 无效 po*s: 无效 *ts: 无效 */&lt;subresource&gt;: 有效 ，匹配所有 resource 的特定 &lt;subresource&gt; ，比如 */status 或 */scale *&lt;subresource&gt;: 无效 resourceNames 字段不支持通配符 * ，当 resourceNames 字段的值为空时匹配所有 resource name nonResourceURLs 字段只支持通过 * 匹配所有 nonResourceURL、以及通过字符串末尾的 * 匹配以特定字符串开头的任意 nonResourceURL： * ： 有效 ，匹配所有 nonResourceURL /health*: 有效 ，匹配以 /health 开头的任意 nonResourceURL，比如 /health 、 /healthy 、 /health/foo/bar *foo: 无效 /*foo: 无效 参考资料¶ Using RBAC Authorization | Kubernetes kubernetes/rbac.go at v1.21.1 · kubernetes/kubernetes",
+        // "description": "在编写 Kubernetes RBAC Role/ClusterRole 中 rules 字段中定义的规则时，我们可以通过通配符 * 来实现规则中匹配任意字符的需求。 不过通配符 * 也不是可以任意使用的，下面是 rules 字段使用的 PolicyRule 的定义: // PolicyRule holds information that describes a policy rule, but does not contain information // about who the rule applies to or which namespace the rule applies to. type PolicyRule struct { // Verbs is a list of Verbs that apply to ALL the ResourceKinds and AttributeRestrictions contained in this rule. &#39;*&#39; represents all verbs. Verbs []string `json:&#34;verbs&#34; protobuf:&#34;bytes,1,rep,name=verbs&#34;` // APIGroups is the name of the APIGroup that contains the resources. If multiple API groups are specified, any action requested against one of // the enumerated resources in any API group will be allowed. // +optional APIGroups []string `json:&#34;apiGroups,omitempty&#34; protobuf:&#34;bytes,2,rep,name=apiGroups&#34;` // Resources is a list of resources this rule applies to. &#39;*&#39; represents all resources. // +optional Resources []string `json:&#34;resources,omitempty&#34; protobuf:&#34;bytes,3,rep,name=resources&#34;` // ResourceNames is an optional white list of names that the rule applies to. An empty set means that everything is allowed. // +optional ResourceNames []string `json:&#34;resourceNames,omitempty&#34; protobuf:&#34;bytes,4,rep,name=resourceNames&#34;` // NonResourceURLs is a set of partial urls that a user should have access to. *s are allowed, but only as the full, final step in the path // Since non-resource URLs are not namespaced, this field is only applicable for ClusterRoles referenced from a ClusterRoleBinding. // Rules can either apply to API resources (such as &#34;pods&#34; or &#34;secrets&#34;) or non-resource URL paths (such as &#34;/api&#34;), but not both. // +optional NonResourceURLs []string `json:&#34;nonResourceURLs,omitempty&#34; protobuf:&#34;bytes,5,rep,name=nonResourceURLs&#34;` } 通过阅读 kubernetes 中 PolicyRule 匹配逻辑的 源 代码 可以知道 PolicyRule 中各个字段使用通配符 * 时有如下限制： verbs 字段只支持通过使用 * 匹配所有 Verb，不支持使用 * 跟其他字符实现组合匹配： * ： 有效 ，匹配所有 Verb de*: 无效 de*te: 无效 *te: 无效 apiGroups 字段只支持通过使用 * 匹配所有 APIGroup ，不支持使用 * 跟其他字符实现组合匹配： * ： 有效 ，匹配所有 APIGroup co*: 无效 c*e: 无效 *re: 无效 resources 字段只支持通过使用 * 匹配所有 resource，以及通过 * 匹配所有 resource 的特定 subresource ： * ： 有效 ，匹配所有 resource po*: 无效 po*s: 无效 *ts: 无效 */&lt;subresource&gt;: 有效 ，匹配所有 resource 的特定 &lt;subresource&gt; ，比如 */status 或 */scale *&lt;subresource&gt;: 无效 resourceNames 字段不支持通配符 * ，当 resourceNames 字段的值为空时匹配所有 resource name nonResourceURLs 字段只支持通过 * 匹配所有 nonResourceURL、以及通过字符串末尾的 * 匹配以特定字符串开头的任意 nonResourceURL： * ： 有效 ，匹配所有 nonResourceURL /health*: 有效 ，匹配以 /health 开头的任意 nonResourceURL，比如 /health 、 /healthy 、 /health/foo/bar *foo: 无效 /*foo: 无效 参考资料¶ Using RBAC Authorization | Kubernetes kubernetes/rbac.go at v1.21.1 · kubernetes/kubernetes",
+        "description": "<p>在编写 Kubernetes RBAC Role/ClusterRole 中 <tt class="docutils literal">rules</tt> 字段中定义的规则时，我们可以通过通配符 <tt class="docutils literal">*</tt>
+来实现规则中匹配任意字符的需求。</p>
+<p>不过通配符 <tt class="docutils literal">*</tt> 也不是可以任意使用的，下面是 <tt class="docutils literal">rules</tt> 字段使用的 <tt class="docutils literal">PolicyRule</tt> 的定义:</p>
+<div class="highlight"><pre><span></span><span class="c1">// PolicyRule holds information that describes a policy rule, but does not contain information</span>
+<span class="c1">// about who the rule applies to or which namespace the rule applies to.</span>
+<span class="kd">type</span> <span class="nx">PolicyRule</span> <span class="kd">struct</span> <span class="p">{</span>
+        <span class="c1">// Verbs is a list of Verbs that apply to ALL the ResourceKinds and AttributeRestrictions contained in this rule. &#39;*&#39; represents all verbs.</span>
+        <span class="nx">Verbs</span> <span class="p">[]</span><span class="kt">string</span> <span class="s">`json:&quot;verbs&quot; protobuf:&quot;bytes,1,rep,name=verbs&quot;`</span>
+
+        <span class="c1">// APIGroups is the name of the APIGroup that contains the resources.  If multiple API groups are specified, any action requested against one of</span>
+        <span class="c1">// the enumerated resources in any API group will be allowed.</span>
+        <span class="c1">// +optional</span>
+        <span class="nx">APIGroups</span> <span class="p">[]</span><span class="kt">string</span> <span class="s">`json:&quot;apiGroups,omitempty&quot; protobuf:&quot;bytes,2,rep,name=apiGroups&quot;`</span>
+        <span class="c1">// Resources is a list of resources this rule applies to. &#39;*&#39; represents all resources.</span>
+        <span class="c1">// +optional</span>
+        <span class="nx">Resources</span> <span class="p">[]</span><span class="kt">string</span> <span class="s">`json:&quot;resources,omitempty&quot; protobuf:&quot;bytes,3,rep,name=resources&quot;`</span>
+        <span class="c1">// ResourceNames is an optional white list of names that the rule applies to.  An empty set means that everything is allowed.</span>
+        <span class="c1">// +optional</span>
+        <span class="nx">ResourceNames</span> <span class="p">[]</span><span class="kt">string</span> <span class="s">`json:&quot;resourceNames,omitempty&quot; protobuf:&quot;bytes,4,rep,name=resourceNames&quot;`</span>
+
+        <span class="c1">// NonResourceURLs is a set of partial urls that a user should have access to.  *s are allowed, but only as the full, final step in the path</span>
+        <span class="c1">// Since non-resource URLs are not namespaced, this field is only applicable for ClusterRoles referenced from a ClusterRoleBinding.</span>
+        <span class="c1">// Rules can either apply to API resources (such as &quot;pods&quot; or &quot;secrets&quot;) or non-resource URL paths (such as &quot;/api&quot;),  but not both.</span>
+        <span class="c1">// +optional</span>
+        <span class="nx">NonResourceURLs</span> <span class="p">[]</span><span class="kt">string</span> <span class="s">`json:&quot;nonResourceURLs,omitempty&quot; protobuf:&quot;bytes,5,rep,name=nonResourceURLs&quot;`</span>
+<span class="p">}</span>
+</pre></div>
+<p>通过阅读 kubernetes 中 PolicyRule 匹配逻辑的 <a class="reference external" href="https://github.com/kubernetes/kubernetes/blob/v1.21.1/plugin/pkg/auth/authorizer/rbac/rbac.go#L178-L193">源</a> <a class="reference external" href="https://github.com/kubernetes/kubernetes/blob/v1.21.1/pkg/apis/rbac/v1/evaluation_helpers.go">代码</a>
+可以知道 <tt class="docutils literal">PolicyRule</tt> 中各个字段使用通配符 <tt class="docutils literal">*</tt> 时有如下限制：</p>
+<ul class="simple">
+<li><tt class="docutils literal">verbs</tt> 字段只支持通过使用 <tt class="docutils literal">*</tt> 匹配所有 Verb，不支持使用 <tt class="docutils literal">*</tt> 跟其他字符实现组合匹配：<ul>
+<li><tt class="docutils literal">*</tt> ： <strong>有效</strong> ，匹配所有 Verb</li>
+<li><tt class="docutils literal">de*</tt>: 无效</li>
+<li><tt class="docutils literal">de*te</tt>: 无效</li>
+<li><tt class="docutils literal">*te</tt>: 无效</li>
+</ul>
+</li>
+<li><tt class="docutils literal">apiGroups</tt> 字段只支持通过使用 <tt class="docutils literal">*</tt> 匹配所有 APIGroup ，不支持使用 <tt class="docutils literal">*</tt> 跟其他字符实现组合匹配：<ul>
+<li><tt class="docutils literal">*</tt> ： <strong>有效</strong> ，匹配所有 APIGroup</li>
+<li><tt class="docutils literal">co*</tt>: 无效</li>
+<li><tt class="docutils literal">c*e</tt>: 无效</li>
+<li><tt class="docutils literal">*re</tt>: 无效</li>
+</ul>
+</li>
+<li><tt class="docutils literal">resources</tt> 字段只支持通过使用 <tt class="docutils literal">*</tt> 匹配所有 resource，以及通过 <tt class="docutils literal">*</tt> 匹配所有 resource 的特定 <a class="reference external" href="https://kubernetes.io/docs/reference/access-authn-authz/rbac/#referring-to-resources">subresource</a> ：<ul>
+<li><tt class="docutils literal">*</tt> ： <strong>有效</strong> ，匹配所有 resource</li>
+<li><tt class="docutils literal">po*</tt>: 无效</li>
+<li><tt class="docutils literal">po*s</tt>: 无效</li>
+<li><tt class="docutils literal">*ts</tt>: 无效</li>
+<li><tt class="docutils literal"><span class="pre">*/&lt;subresource&gt;</span></tt>:  <strong>有效</strong> ，匹配所有 resource 的特定 <tt class="docutils literal">&lt;subresource&gt;</tt> ，比如 <tt class="docutils literal">*/status</tt> 或 <tt class="docutils literal">*/scale</tt></li>
+<li><tt class="docutils literal">*&lt;subresource&gt;</tt>:  无效</li>
+</ul>
+</li>
+<li><tt class="docutils literal">resourceNames</tt> 字段不支持通配符 <tt class="docutils literal">*</tt> ，当 <tt class="docutils literal">resourceNames</tt> 字段的值为空时匹配所有 resource name</li>
+<li><tt class="docutils literal">nonResourceURLs</tt> 字段只支持通过 <tt class="docutils literal">*</tt> 匹配所有 nonResourceURL、以及通过字符串末尾的 <tt class="docutils literal">*</tt> 匹配以特定字符串开头的任意 nonResourceURL：<ul>
+<li><tt class="docutils literal">*</tt> ： <strong>有效</strong> ，匹配所有 nonResourceURL</li>
+<li><tt class="docutils literal">/health*</tt>:  <strong>有效</strong> ，匹配以 <tt class="docutils literal">/health</tt> 开头的任意 nonResourceURL，比如 <tt class="docutils literal">/health</tt> 、 <tt class="docutils literal">/healthy</tt> 、 <tt class="docutils literal">/health/foo/bar</tt></li>
+<li><tt class="docutils literal">*foo</tt>: 无效</li>
+<li><tt class="docutils literal">/*foo</tt>: 无效</li>
+</ul>
+</li>
+</ul>
+<div class="section" id="id1">
+<h2 id="hidid1">参考资料<a class="headerlink" href="#hidid1" title="Permalink to this headline">¶</a></h2>
+<ul class="simple">
+<li><a class="reference external" href="https://kubernetes.io/docs/reference/access-authn-authz/rbac/">Using RBAC Authorization | Kubernetes</a></li>
+<li><a class="reference external" href="https://github.com/kubernetes/kubernetes/blob/v1.21.1/plugin/pkg/auth/authorizer/rbac/rbac.go#L178-L193">kubernetes/rbac.go at v1.21.1 · kubernetes/kubernetes</a></li>
+</ul>
+</div>
+",
         "mainEntityOfPage": {
             "@type": "WebPage",
             "@id": "https://mozillazg.com"
@@ -251,10 +323,10 @@ Huang Huang 的博客            </a>
     <p>Related Posts:</p>
     <ul>
         <li><a href="https://mozillazg.com/2020/06/k8s-kubernetes-kubectl-syntax-of-impersonate-as-user-or-serviceaccount-or-group.html">kubernetes 用户扮演 API</a></li>
-        <li><a href="https://mozillazg.com/2020/05/k8s-kubernetes-use-which-psp-when-there-are-multiple-pod-security-policies.html">当有多个可用的 Pod Security Policy 时 k8s 的 PSP 选择策略</a></li>
-        <li><a href="https://mozillazg.com/2021/07/introduce-echo-k8s-webhook-project.html">echo-k8s-webhook: 记录 k8s Admission Webhook 的请求内容</a></li>
+        <li><a href="https://mozillazg.com/2020/06/kubernetes-k8s-too-many-service-environment-variables-cause-pod-container-start-bash-too-slow.html">太多的 service 信息环境变量可能会导致容器中执行 bash 命令特别的慢</a></li>
+        <li><a href="https://mozillazg.com/2021/11/security-use-dns-srv-to-get-all-service-info.html">通过向 DNS 服务发送 SRV 查询请求获取 kubernetes 集群内所有 Service 信息</a></li>
         <li><a href="https://mozillazg.com/2020/07/k8s-kubernetes-client-go-list-get-create-update-patch-delete-crd-resource-without-generate-client-code-update-or-create-via-yaml.html">在不生成 crd client 代码的情况下通过 client-go 增删改查 k8s crd 资源</a></li>
-        <li><a href="https://mozillazg.com/2021/07/k8s-kubernetes-what-happen-when-pod-from-create-to-running.html">Pod 从创建到 Running 背后发生了什么</a></li>
+        <li><a href="https://mozillazg.com/2021/07/introduce-echo-k8s-webhook-project.html">echo-k8s-webhook: 记录 k8s Admission Webhook 的请求内容</a></li>
     </ul>
 </section>
     <hr/>
@@ -297,7 +369,7 @@ Huang Huang 的博客            </a>
    <div class="container">
       <hr>
       <div class="row">
-         <div class="col-xs-10">&copy; 2021 mozillazg
+         <div class="col-xs-10">&copy; 2022 mozillazg
             &middot; Powered by <a href="https://github.com/DandyDev/pelican-bootstrap3" target="_blank">pelican-bootstrap3</a>,
             <a href="http://docs.getpelican.com/" target="_blank">Pelican</a>,
             <a href="http://getbootstrap.com" target="_blank">Bootstrap</a>              <p><small>  <a rel="license" href="http://creativecommons.org/licenses/by-sa/4.0/"><img alt="Creative Commons License" style="border-width:0" src="/static/images/by-sa-80x15.png" /></a>

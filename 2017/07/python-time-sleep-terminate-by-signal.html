@@ -18,6 +18,8 @@
         <meta name="author" content="mozillazg" />
         <meta name="keywords" content="signal" />
     <meta name="description" content="如题所述，当 time.sleep 与 signal 一起使用时可能会出现 time.sleep 失效，提前结束 sleep 的问题。 我们先来看一下 time.sleep 的文档: Python 2.7.13: time.sleep(secs) Suspend execution of the current thread for the given number of seconds. The argument may be a floating point number to indicate a more precise sleep time. The actual suspension time may be less than that requested because any caught signal will terminate the sleep() following execution of that signal’s catching routine. Also, the suspension time may be longer than requested by an arbitrary amount because of the scheduling of other activity in the system. Python 3.6.2: time.sleep(secs) Suspend execution of the calling thread for the given number of seconds. The argument may be a floating point number to indicate a more precise sleep time. The actual suspension time may be less than that requested because any caught signal will terminate the sleep() following execution of that signal’s catching routine. Also, the suspension time may be longer than requested by an arbitrary amount because of the scheduling of other activity in the system. Changed in version 3.5: The function now sleeps at least secs even if the sleep is interrupted by a signal, except if the signal handler raises an exception (see PEP 475 for the rationale). 通过文档可以看到，在 Python 2 下，当定义了 signal handler 并接收到 signal 时， time.sleep 会提前返回， 在 Python 3.5+ 下，没有这个问题，只是在 signal handler 抛异常时 sleep 会被终止 。 下面我们就来验证一下这个问题。 测试环境¶ os: mac os python: python2.7, python3.6 Python 2¶ 普通 sleep 程序¶ 先来看一个正常 sleep 的程序: $ cat time_a.py import logging import time logging.basicConfig( level=logging.DEBUG, format=&#39;%(asctime)-15s - %(levelname)s - %(message)s&#39; ) n = 60 logging.info(&#39;start sleep %s seconds&#39;, n) start = time.time() time.sleep(n) logging.info(&#39;end sleep %s seconds, spend %s&#39;, n, time.time() - start) 测试: $ python time_a.py 2017-07-16 15:29:05,323 - INFO - start sleep 60 seconds 2017-07-16 15:30:05,327 - INFO - end sleep 60 seconds, spend 60.0042099953 可以看到确实 sleep 了 60 秒。 signal¶ 给普通的 sleep 程序发个 signal 试试: $ python time_a.py &amp; [1] 6208 $ 2017-07-16 15:44:01,290 - INFO - start sleep 60 seconds $ kill -s SIGHUP 6208 [1]+ Hangup: 1 python time_a.py 因为 SIGHUP 的默认行为就是终止程序，所以程序终止了。 我们下面来测试自定义 signal handler 的影响。 signal handler¶ 测试程序如下： $ cat time_b.py import logging import signal import time logging.basicConfig( level=logging.DEBUG, format=&#39;%(asctime)-15s - %(levelname)s - %(message)s&#39; ) n = 60 def handler(sig, strace): logging.info(&#39;recived %s&#39;, sig) signal.signal(signal.SIGHUP, handler) logging.info(&#39;start sleep %s seconds&#39;, n) start = time.time() time.sleep(n) logging.info(&#39;end sleep %s seconds, spend %s&#39;, n, time.time() - start) 测试: $ python time_b.py &amp; [1] 5910 2017-07-16 15:31:46,448 - INFO - start sleep 60 seconds $ kill -s SIGHUP 5910 2017-07-16 15:31:52,180 - INFO - recived 1 2017-07-16 15:31:52,181 - INFO - end sleep 60 seconds, spend 5.73180794716 [1]+ Done python time_b.py 从测试结果可以看到，当收到 signal 后，sleep 就提前结束了， 60 秒的 sleep 实际只花了 6 秒钟。 下面再看看 Python 3 文档中提到的 handler 抛异常的情况。 signal handler raise exception¶ 测试程序： $ cat time_c.py import logging import signal import time logging.basicConfig( level=logging.DEBUG, format=&#39;%(asctime)-15s - %(levelname)s - %(message)s&#39; ) n = 60 def handler(sig, strace): logging.info(&#39;recived %s&#39;, sig) raise Exception(&#39;test&#39;) signal.signal(signal.SIGHUP, handler) logging.info(&#39;start sleep %s seconds&#39;, n) start = time.time() try: time.sleep(n) except Exception as e: logging.exception(e) logging.info(&#39;end sleep %s seconds, spend %s&#39;, n, time.time() - start) 测试： $ python time_c.py &amp; [1] 6390 2017-07-16 16:09:31,340 - INFO - start sleep 60 seconds $ kill -s SIGHUP 6390 2017-07-16 16:09:35,328 - INFO - recived 1 2017-07-16 16:09:35,329 - ERROR - test Traceback (most recent call last): File &#34;time_c.py&#34;, line 21, in &lt;module&gt; time.sleep(n) File &#34;time_c.py&#34;, line 14, in handler raise Exception(&#39;test&#39;) Exception: test 2017-07-16 16:09:35,329 - INFO - end sleep 60 seconds, spend 3.988664150238037 [1]+ Done python time_c.py 可以看到，当 signal handler 抛异常时， time.sleep 会抛出异常提前终止 sleep 操作。 下面来测试 Python 3.5+ 下这四种情况的行为。 Python 3.5+¶ 普通 sleep 程序¶ 用的还是之前的 time_a.py 文件，测试结果： $ python3.6 time_a.py 2017-07-16 16:12:28,566 - INFO - start sleep 60 seconds 2017-07-16 16:13:28,571 - INFO - end sleep 60 seconds, spend 60.00386714935303 可以看到，跟 Python 2 一样，正常 sleep. signal¶ 同样试试给 time_a.py 进程发送 signal: $ python3.6 time_a.py &amp; [1] 6790 $ 2017-07-16 16:15:53,529 - INFO - start sleep 60 seconds $ kill -s SIGHUP 6790 [1]+ Hangup: 1 python3.6 time_a.py 跟 Python 2 下也是一样，进程终止。 signal handler¶ 按照文档，当 signal handler 不错误的时候，应该可以正常 sleep, 下面我们试试看： $ python3.6 time_b.py &amp; [1] 6848 $ 2017-07-16 16:17:25,144 - INFO - start sleep 60 seconds $ kill -s SIGHUP 6848 2017-07-16 16:17:31,252 - INFO - recived 1 $ jobs [1]+ Running python3.6 time_b.py &amp; $ 2017-07-16 16:18:25,147 - INFO - end sleep 60 seconds, spend 60.00310564041138 [1]+ Done python3.6 time_b.py 确实跟文档中说的一样，就算收到并处理了 signal 还是可以正常 sleep 。👍 下面再看看 signal handler raise exception 的情况。 signal handler raise exception¶ 测试： $ python3.6 time_c.py &amp; [1] 42908 2017-07-16 16:20:00,679 - INFO - start sleep 60 seconds $ kill -s SIGHUP 42908 2017-07-16 16:20:06,126 - INFO - recived 1 2017-07-16 16:20:06,126 - ERROR - test Traceback (most recent call last): File &#34;time_c.py&#34;, line 21, in &lt;module&gt; time.sleep(n) File &#34;time_c.py&#34;, line 14, in handler raise Exception(&#39;test&#39;) Exception: test 2017-07-16 16:20:06,127 - INFO - end sleep 60 seconds, spend 5.4475321769714355 [1]+ Done python3.6 time_c.py 可以看到，跟在 Python 2 下一样，当 signal handler 抛异常时，time.sleep 会抛出异常提前终止 sleep 操作。 原因¶ 那么，为什么 Python 2 下 time.sleep 遇到 signal 时会出现提前返回的情况呢？ 在 gevent 的一个 issue 中 @jamadden 是 这样解释的 : The stdlib time.sleep method is implemented by calling select, passing in a timeout value, and no file descriptors to actually select on. The intended effect is to block in the operating system, sleeping until the timeout has elapsed. However, select is one of those system calls that is vulnerable to signals. When a signal is delivered to the process, select prematurely wakes up and sets errno to EINTR (interrupted). In that case, time.sleep makes no attempt to account for any unelapsed time; it simple returns. Therefore, time.sleep can sometimes return early. This is documented. 查看 python 2.7 的源代码以及 select 的文档可以确认这个解释： python 2.7 源码中 time.sleep 的 实现片段 如下： static int floatsleep(double secs) { /* XXX Should test for MS_WINDOWS first! */ #if defined(HAVE_SELECT) &amp;&amp; !defined(__BEOS__) &amp;&amp; !defined(__EMX__) struct timeval t; double frac; frac = fmod(secs, 1.0); secs = floor(secs); t.tv_sec = (long)secs; t.tv_usec = (long)(frac*1000000.0); Py_BEGIN_ALLOW_THREADS if (select(0, (fd_set *)0, (fd_set *)0, (fd_set *)0, &amp;t) != 0) { #ifdef EINTR if (errno != EINTR) { #else if (1) { #endif Py_BLOCK_THREADS PyErr_SetFromErrno(PyExc_IOError); return -1; } } 可以看到确实是用 select 来实现的 time.sleep 。 select 的 文档 中关于 signal 的说明如下： The timeout argument specifies the interval that select() should block waiting for a file descriptor to become ready. The call will block until either: a file descriptor becomes ready; the call is interrupted by a signal handler; or the timeout expires. 通过文档我们知道， select 的 timeout 的阻塞效果确实会被 signal handler 所中断。 至于 Python 3.5+ 为什么不会提前返回，是因为它的 time.sleep 实现中对于这种情况增加了判断，如果时间没到会用剩下的时间再次 sleep： static int pysleep(_PyTime_t secs) { // ... do { // ... monotonic = _PyTime_GetMonotonicClock(); secs = deadline - monotonic; if (secs &lt; 0) break; /* retry with the recomputed delay */ } while (1); return 0; } 启示¶ 如果想在 Python 2 下实现类似 Python 3.5+ 下的效果，可以仿照 Python 3.5+ 下的实现增加“如果时间没到会用剩下的时间再次 sleep”的逻辑： 参考代码（修改自 time_b.py） $ cat time_d.py import logging import signal import time logging.basicConfig( level=logging.DEBUG, format=&#39;%(asctime)-15s - %(levelname)s - %(message)s&#39; ) n = 60 def handler(sig, strace): logging.info(&#39;recived %s&#39;, sig) signal.signal(signal.SIGHUP, handler) logging.info(&#39;start sleep %s seconds&#39;, n) start = time.time() remain = n while True: time.sleep(remain) remain = (start + n) - time.time() if remain &lt; 0: break else: logging.warn(&#39;retry sleep %s&#39;, remain) logging.info(&#39;end sleep %s seconds, spend %s&#39;, n, time.time() - start) 测试： $ python time_d.py &amp; [1] 14751 $ 2017-07-16 17:10:53,235 - INFO - start sleep 60 seconds $ kill -s SIGHUP 14751 2017-07-16 17:10:59,803 - INFO - recived 1 2017-07-16 17:10:59,803 - WARNING - retry sleep 53.4323399067 $ kill -s SIGHUP 14751 2017-07-16 17:11:44,792 - INFO - recived 1 2017-07-16 17:11:44,792 - WARNING - retry sleep 8.44309687614 $ 2017-07-16 17:11:53,239 - INFO - end sleep 60 seconds, spend 60.0035960674 [1]+ Done python time_d.py 最重要的一点是 ：不要觉得 time.sleep 会非常的精确，它有可能变快也有可能变慢，不要对它有过高的期望，不要依赖这个功能来实现需要精确 sleep 的需求。 目测可能也可以利用 python 2 下的这一行为实现一些特殊的需求。 好了，本文的内容就是这些了，希望这篇文章能对你有所帮助。 参考资料¶ 15.3. time — Time access and conversions — Python 2.7.13 documentation 16.3. time — Time access and conversions — Python 3.6.2rc2 documentation gevent.subprocess.Popen alters the behavior of time.sleep · Issue #280 · gevent/gevent cpython/timemodule.c at 2.7 · python/cpython cpython/timemodule.c at 3.6 · python/cpython" />
+    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-4941850466486001"
+     crossorigin="anonymous"></script>
 
     <style>
       .js-toc {
@@ -93,7 +95,396 @@
         // "dateModified": "",
         "image": "https://mozillazg.com/static/avatar.jpeg",
         "keywords": "signal",
-        "description": "如题所述，当 time.sleep 与 signal 一起使用时可能会出现 time.sleep 失效，提前结束 sleep 的问题。 我们先来看一下 time.sleep 的文档: Python 2.7.13: time.sleep(secs) Suspend execution of the current thread for the given number of seconds. The argument may be a floating point number to indicate a more precise sleep time. The actual suspension time may be less than that requested because any caught signal will terminate the sleep() following execution of that signal’s catching routine. Also, the suspension time may be longer than requested by an arbitrary amount because of the scheduling of other activity in the system. Python 3.6.2: time.sleep(secs) Suspend execution of the calling thread for the given number of seconds. The argument may be a floating point number to indicate a more precise sleep time. The actual suspension time may be less than that requested because any caught signal will terminate the sleep() following execution of that signal’s catching routine. Also, the suspension time may be longer than requested by an arbitrary amount because of the scheduling of other activity in the system. Changed in version 3.5: The function now sleeps at least secs even if the sleep is interrupted by a signal, except if the signal handler raises an exception (see PEP 475 for the rationale). 通过文档可以看到，在 Python 2 下，当定义了 signal handler 并接收到 signal 时， time.sleep 会提前返回， 在 Python 3.5+ 下，没有这个问题，只是在 signal handler 抛异常时 sleep 会被终止 。 下面我们就来验证一下这个问题。 测试环境¶ os: mac os python: python2.7, python3.6 Python 2¶ 普通 sleep 程序¶ 先来看一个正常 sleep 的程序: $ cat time_a.py import logging import time logging.basicConfig( level=logging.DEBUG, format=&#39;%(asctime)-15s - %(levelname)s - %(message)s&#39; ) n = 60 logging.info(&#39;start sleep %s seconds&#39;, n) start = time.time() time.sleep(n) logging.info(&#39;end sleep %s seconds, spend %s&#39;, n, time.time() - start) 测试: $ python time_a.py 2017-07-16 15:29:05,323 - INFO - start sleep 60 seconds 2017-07-16 15:30:05,327 - INFO - end sleep 60 seconds, spend 60.0042099953 可以看到确实 sleep 了 60 秒。 signal¶ 给普通的 sleep 程序发个 signal 试试: $ python time_a.py &amp; [1] 6208 $ 2017-07-16 15:44:01,290 - INFO - start sleep 60 seconds $ kill -s SIGHUP 6208 [1]+ Hangup: 1 python time_a.py 因为 SIGHUP 的默认行为就是终止程序，所以程序终止了。 我们下面来测试自定义 signal handler 的影响。 signal handler¶ 测试程序如下： $ cat time_b.py import logging import signal import time logging.basicConfig( level=logging.DEBUG, format=&#39;%(asctime)-15s - %(levelname)s - %(message)s&#39; ) n = 60 def handler(sig, strace): logging.info(&#39;recived %s&#39;, sig) signal.signal(signal.SIGHUP, handler) logging.info(&#39;start sleep %s seconds&#39;, n) start = time.time() time.sleep(n) logging.info(&#39;end sleep %s seconds, spend %s&#39;, n, time.time() - start) 测试: $ python time_b.py &amp; [1] 5910 2017-07-16 15:31:46,448 - INFO - start sleep 60 seconds $ kill -s SIGHUP 5910 2017-07-16 15:31:52,180 - INFO - recived 1 2017-07-16 15:31:52,181 - INFO - end sleep 60 seconds, spend 5.73180794716 [1]+ Done python time_b.py 从测试结果可以看到，当收到 signal 后，sleep 就提前结束了， 60 秒的 sleep 实际只花了 6 秒钟。 下面再看看 Python 3 文档中提到的 handler 抛异常的情况。 signal handler raise exception¶ 测试程序： $ cat time_c.py import logging import signal import time logging.basicConfig( level=logging.DEBUG, format=&#39;%(asctime)-15s - %(levelname)s - %(message)s&#39; ) n = 60 def handler(sig, strace): logging.info(&#39;recived %s&#39;, sig) raise Exception(&#39;test&#39;) signal.signal(signal.SIGHUP, handler) logging.info(&#39;start sleep %s seconds&#39;, n) start = time.time() try: time.sleep(n) except Exception as e: logging.exception(e) logging.info(&#39;end sleep %s seconds, spend %s&#39;, n, time.time() - start) 测试： $ python time_c.py &amp; [1] 6390 2017-07-16 16:09:31,340 - INFO - start sleep 60 seconds $ kill -s SIGHUP 6390 2017-07-16 16:09:35,328 - INFO - recived 1 2017-07-16 16:09:35,329 - ERROR - test Traceback (most recent call last): File &#34;time_c.py&#34;, line 21, in &lt;module&gt; time.sleep(n) File &#34;time_c.py&#34;, line 14, in handler raise Exception(&#39;test&#39;) Exception: test 2017-07-16 16:09:35,329 - INFO - end sleep 60 seconds, spend 3.988664150238037 [1]+ Done python time_c.py 可以看到，当 signal handler 抛异常时， time.sleep 会抛出异常提前终止 sleep 操作。 下面来测试 Python 3.5+ 下这四种情况的行为。 Python 3.5+¶ 普通 sleep 程序¶ 用的还是之前的 time_a.py 文件，测试结果： $ python3.6 time_a.py 2017-07-16 16:12:28,566 - INFO - start sleep 60 seconds 2017-07-16 16:13:28,571 - INFO - end sleep 60 seconds, spend 60.00386714935303 可以看到，跟 Python 2 一样，正常 sleep. signal¶ 同样试试给 time_a.py 进程发送 signal: $ python3.6 time_a.py &amp; [1] 6790 $ 2017-07-16 16:15:53,529 - INFO - start sleep 60 seconds $ kill -s SIGHUP 6790 [1]+ Hangup: 1 python3.6 time_a.py 跟 Python 2 下也是一样，进程终止。 signal handler¶ 按照文档，当 signal handler 不错误的时候，应该可以正常 sleep, 下面我们试试看： $ python3.6 time_b.py &amp; [1] 6848 $ 2017-07-16 16:17:25,144 - INFO - start sleep 60 seconds $ kill -s SIGHUP 6848 2017-07-16 16:17:31,252 - INFO - recived 1 $ jobs [1]+ Running python3.6 time_b.py &amp; $ 2017-07-16 16:18:25,147 - INFO - end sleep 60 seconds, spend 60.00310564041138 [1]+ Done python3.6 time_b.py 确实跟文档中说的一样，就算收到并处理了 signal 还是可以正常 sleep 。👍 下面再看看 signal handler raise exception 的情况。 signal handler raise exception¶ 测试： $ python3.6 time_c.py &amp; [1] 42908 2017-07-16 16:20:00,679 - INFO - start sleep 60 seconds $ kill -s SIGHUP 42908 2017-07-16 16:20:06,126 - INFO - recived 1 2017-07-16 16:20:06,126 - ERROR - test Traceback (most recent call last): File &#34;time_c.py&#34;, line 21, in &lt;module&gt; time.sleep(n) File &#34;time_c.py&#34;, line 14, in handler raise Exception(&#39;test&#39;) Exception: test 2017-07-16 16:20:06,127 - INFO - end sleep 60 seconds, spend 5.4475321769714355 [1]+ Done python3.6 time_c.py 可以看到，跟在 Python 2 下一样，当 signal handler 抛异常时，time.sleep 会抛出异常提前终止 sleep 操作。 原因¶ 那么，为什么 Python 2 下 time.sleep 遇到 signal 时会出现提前返回的情况呢？ 在 gevent 的一个 issue 中 @jamadden 是 这样解释的 : The stdlib time.sleep method is implemented by calling select, passing in a timeout value, and no file descriptors to actually select on. The intended effect is to block in the operating system, sleeping until the timeout has elapsed. However, select is one of those system calls that is vulnerable to signals. When a signal is delivered to the process, select prematurely wakes up and sets errno to EINTR (interrupted). In that case, time.sleep makes no attempt to account for any unelapsed time; it simple returns. Therefore, time.sleep can sometimes return early. This is documented. 查看 python 2.7 的源代码以及 select 的文档可以确认这个解释： python 2.7 源码中 time.sleep 的 实现片段 如下： static int floatsleep(double secs) { /* XXX Should test for MS_WINDOWS first! */ #if defined(HAVE_SELECT) &amp;&amp; !defined(__BEOS__) &amp;&amp; !defined(__EMX__) struct timeval t; double frac; frac = fmod(secs, 1.0); secs = floor(secs); t.tv_sec = (long)secs; t.tv_usec = (long)(frac*1000000.0); Py_BEGIN_ALLOW_THREADS if (select(0, (fd_set *)0, (fd_set *)0, (fd_set *)0, &amp;t) != 0) { #ifdef EINTR if (errno != EINTR) { #else if (1) { #endif Py_BLOCK_THREADS PyErr_SetFromErrno(PyExc_IOError); return -1; } } 可以看到确实是用 select 来实现的 time.sleep 。 select 的 文档 中关于 signal 的说明如下： The timeout argument specifies the interval that select() should block waiting for a file descriptor to become ready. The call will block until either: a file descriptor becomes ready; the call is interrupted by a signal handler; or the timeout expires. 通过文档我们知道， select 的 timeout 的阻塞效果确实会被 signal handler 所中断。 至于 Python 3.5+ 为什么不会提前返回，是因为它的 time.sleep 实现中对于这种情况增加了判断，如果时间没到会用剩下的时间再次 sleep： static int pysleep(_PyTime_t secs) { // ... do { // ... monotonic = _PyTime_GetMonotonicClock(); secs = deadline - monotonic; if (secs &lt; 0) break; /* retry with the recomputed delay */ } while (1); return 0; } 启示¶ 如果想在 Python 2 下实现类似 Python 3.5+ 下的效果，可以仿照 Python 3.5+ 下的实现增加“如果时间没到会用剩下的时间再次 sleep”的逻辑： 参考代码（修改自 time_b.py） $ cat time_d.py import logging import signal import time logging.basicConfig( level=logging.DEBUG, format=&#39;%(asctime)-15s - %(levelname)s - %(message)s&#39; ) n = 60 def handler(sig, strace): logging.info(&#39;recived %s&#39;, sig) signal.signal(signal.SIGHUP, handler) logging.info(&#39;start sleep %s seconds&#39;, n) start = time.time() remain = n while True: time.sleep(remain) remain = (start + n) - time.time() if remain &lt; 0: break else: logging.warn(&#39;retry sleep %s&#39;, remain) logging.info(&#39;end sleep %s seconds, spend %s&#39;, n, time.time() - start) 测试： $ python time_d.py &amp; [1] 14751 $ 2017-07-16 17:10:53,235 - INFO - start sleep 60 seconds $ kill -s SIGHUP 14751 2017-07-16 17:10:59,803 - INFO - recived 1 2017-07-16 17:10:59,803 - WARNING - retry sleep 53.4323399067 $ kill -s SIGHUP 14751 2017-07-16 17:11:44,792 - INFO - recived 1 2017-07-16 17:11:44,792 - WARNING - retry sleep 8.44309687614 $ 2017-07-16 17:11:53,239 - INFO - end sleep 60 seconds, spend 60.0035960674 [1]+ Done python time_d.py 最重要的一点是 ：不要觉得 time.sleep 会非常的精确，它有可能变快也有可能变慢，不要对它有过高的期望，不要依赖这个功能来实现需要精确 sleep 的需求。 目测可能也可以利用 python 2 下的这一行为实现一些特殊的需求。 好了，本文的内容就是这些了，希望这篇文章能对你有所帮助。 参考资料¶ 15.3. time — Time access and conversions — Python 2.7.13 documentation 16.3. time — Time access and conversions — Python 3.6.2rc2 documentation gevent.subprocess.Popen alters the behavior of time.sleep · Issue #280 · gevent/gevent cpython/timemodule.c at 2.7 · python/cpython cpython/timemodule.c at 3.6 · python/cpython",
+        // "description": "如题所述，当 time.sleep 与 signal 一起使用时可能会出现 time.sleep 失效，提前结束 sleep 的问题。 我们先来看一下 time.sleep 的文档: Python 2.7.13: time.sleep(secs) Suspend execution of the current thread for the given number of seconds. The argument may be a floating point number to indicate a more precise sleep time. The actual suspension time may be less than that requested because any caught signal will terminate the sleep() following execution of that signal’s catching routine. Also, the suspension time may be longer than requested by an arbitrary amount because of the scheduling of other activity in the system. Python 3.6.2: time.sleep(secs) Suspend execution of the calling thread for the given number of seconds. The argument may be a floating point number to indicate a more precise sleep time. The actual suspension time may be less than that requested because any caught signal will terminate the sleep() following execution of that signal’s catching routine. Also, the suspension time may be longer than requested by an arbitrary amount because of the scheduling of other activity in the system. Changed in version 3.5: The function now sleeps at least secs even if the sleep is interrupted by a signal, except if the signal handler raises an exception (see PEP 475 for the rationale). 通过文档可以看到，在 Python 2 下，当定义了 signal handler 并接收到 signal 时， time.sleep 会提前返回， 在 Python 3.5+ 下，没有这个问题，只是在 signal handler 抛异常时 sleep 会被终止 。 下面我们就来验证一下这个问题。 测试环境¶ os: mac os python: python2.7, python3.6 Python 2¶ 普通 sleep 程序¶ 先来看一个正常 sleep 的程序: $ cat time_a.py import logging import time logging.basicConfig( level=logging.DEBUG, format=&#39;%(asctime)-15s - %(levelname)s - %(message)s&#39; ) n = 60 logging.info(&#39;start sleep %s seconds&#39;, n) start = time.time() time.sleep(n) logging.info(&#39;end sleep %s seconds, spend %s&#39;, n, time.time() - start) 测试: $ python time_a.py 2017-07-16 15:29:05,323 - INFO - start sleep 60 seconds 2017-07-16 15:30:05,327 - INFO - end sleep 60 seconds, spend 60.0042099953 可以看到确实 sleep 了 60 秒。 signal¶ 给普通的 sleep 程序发个 signal 试试: $ python time_a.py &amp; [1] 6208 $ 2017-07-16 15:44:01,290 - INFO - start sleep 60 seconds $ kill -s SIGHUP 6208 [1]+ Hangup: 1 python time_a.py 因为 SIGHUP 的默认行为就是终止程序，所以程序终止了。 我们下面来测试自定义 signal handler 的影响。 signal handler¶ 测试程序如下： $ cat time_b.py import logging import signal import time logging.basicConfig( level=logging.DEBUG, format=&#39;%(asctime)-15s - %(levelname)s - %(message)s&#39; ) n = 60 def handler(sig, strace): logging.info(&#39;recived %s&#39;, sig) signal.signal(signal.SIGHUP, handler) logging.info(&#39;start sleep %s seconds&#39;, n) start = time.time() time.sleep(n) logging.info(&#39;end sleep %s seconds, spend %s&#39;, n, time.time() - start) 测试: $ python time_b.py &amp; [1] 5910 2017-07-16 15:31:46,448 - INFO - start sleep 60 seconds $ kill -s SIGHUP 5910 2017-07-16 15:31:52,180 - INFO - recived 1 2017-07-16 15:31:52,181 - INFO - end sleep 60 seconds, spend 5.73180794716 [1]+ Done python time_b.py 从测试结果可以看到，当收到 signal 后，sleep 就提前结束了， 60 秒的 sleep 实际只花了 6 秒钟。 下面再看看 Python 3 文档中提到的 handler 抛异常的情况。 signal handler raise exception¶ 测试程序： $ cat time_c.py import logging import signal import time logging.basicConfig( level=logging.DEBUG, format=&#39;%(asctime)-15s - %(levelname)s - %(message)s&#39; ) n = 60 def handler(sig, strace): logging.info(&#39;recived %s&#39;, sig) raise Exception(&#39;test&#39;) signal.signal(signal.SIGHUP, handler) logging.info(&#39;start sleep %s seconds&#39;, n) start = time.time() try: time.sleep(n) except Exception as e: logging.exception(e) logging.info(&#39;end sleep %s seconds, spend %s&#39;, n, time.time() - start) 测试： $ python time_c.py &amp; [1] 6390 2017-07-16 16:09:31,340 - INFO - start sleep 60 seconds $ kill -s SIGHUP 6390 2017-07-16 16:09:35,328 - INFO - recived 1 2017-07-16 16:09:35,329 - ERROR - test Traceback (most recent call last): File &#34;time_c.py&#34;, line 21, in &lt;module&gt; time.sleep(n) File &#34;time_c.py&#34;, line 14, in handler raise Exception(&#39;test&#39;) Exception: test 2017-07-16 16:09:35,329 - INFO - end sleep 60 seconds, spend 3.988664150238037 [1]+ Done python time_c.py 可以看到，当 signal handler 抛异常时， time.sleep 会抛出异常提前终止 sleep 操作。 下面来测试 Python 3.5+ 下这四种情况的行为。 Python 3.5+¶ 普通 sleep 程序¶ 用的还是之前的 time_a.py 文件，测试结果： $ python3.6 time_a.py 2017-07-16 16:12:28,566 - INFO - start sleep 60 seconds 2017-07-16 16:13:28,571 - INFO - end sleep 60 seconds, spend 60.00386714935303 可以看到，跟 Python 2 一样，正常 sleep. signal¶ 同样试试给 time_a.py 进程发送 signal: $ python3.6 time_a.py &amp; [1] 6790 $ 2017-07-16 16:15:53,529 - INFO - start sleep 60 seconds $ kill -s SIGHUP 6790 [1]+ Hangup: 1 python3.6 time_a.py 跟 Python 2 下也是一样，进程终止。 signal handler¶ 按照文档，当 signal handler 不错误的时候，应该可以正常 sleep, 下面我们试试看： $ python3.6 time_b.py &amp; [1] 6848 $ 2017-07-16 16:17:25,144 - INFO - start sleep 60 seconds $ kill -s SIGHUP 6848 2017-07-16 16:17:31,252 - INFO - recived 1 $ jobs [1]+ Running python3.6 time_b.py &amp; $ 2017-07-16 16:18:25,147 - INFO - end sleep 60 seconds, spend 60.00310564041138 [1]+ Done python3.6 time_b.py 确实跟文档中说的一样，就算收到并处理了 signal 还是可以正常 sleep 。👍 下面再看看 signal handler raise exception 的情况。 signal handler raise exception¶ 测试： $ python3.6 time_c.py &amp; [1] 42908 2017-07-16 16:20:00,679 - INFO - start sleep 60 seconds $ kill -s SIGHUP 42908 2017-07-16 16:20:06,126 - INFO - recived 1 2017-07-16 16:20:06,126 - ERROR - test Traceback (most recent call last): File &#34;time_c.py&#34;, line 21, in &lt;module&gt; time.sleep(n) File &#34;time_c.py&#34;, line 14, in handler raise Exception(&#39;test&#39;) Exception: test 2017-07-16 16:20:06,127 - INFO - end sleep 60 seconds, spend 5.4475321769714355 [1]+ Done python3.6 time_c.py 可以看到，跟在 Python 2 下一样，当 signal handler 抛异常时，time.sleep 会抛出异常提前终止 sleep 操作。 原因¶ 那么，为什么 Python 2 下 time.sleep 遇到 signal 时会出现提前返回的情况呢？ 在 gevent 的一个 issue 中 @jamadden 是 这样解释的 : The stdlib time.sleep method is implemented by calling select, passing in a timeout value, and no file descriptors to actually select on. The intended effect is to block in the operating system, sleeping until the timeout has elapsed. However, select is one of those system calls that is vulnerable to signals. When a signal is delivered to the process, select prematurely wakes up and sets errno to EINTR (interrupted). In that case, time.sleep makes no attempt to account for any unelapsed time; it simple returns. Therefore, time.sleep can sometimes return early. This is documented. 查看 python 2.7 的源代码以及 select 的文档可以确认这个解释： python 2.7 源码中 time.sleep 的 实现片段 如下： static int floatsleep(double secs) { /* XXX Should test for MS_WINDOWS first! */ #if defined(HAVE_SELECT) &amp;&amp; !defined(__BEOS__) &amp;&amp; !defined(__EMX__) struct timeval t; double frac; frac = fmod(secs, 1.0); secs = floor(secs); t.tv_sec = (long)secs; t.tv_usec = (long)(frac*1000000.0); Py_BEGIN_ALLOW_THREADS if (select(0, (fd_set *)0, (fd_set *)0, (fd_set *)0, &amp;t) != 0) { #ifdef EINTR if (errno != EINTR) { #else if (1) { #endif Py_BLOCK_THREADS PyErr_SetFromErrno(PyExc_IOError); return -1; } } 可以看到确实是用 select 来实现的 time.sleep 。 select 的 文档 中关于 signal 的说明如下： The timeout argument specifies the interval that select() should block waiting for a file descriptor to become ready. The call will block until either: a file descriptor becomes ready; the call is interrupted by a signal handler; or the timeout expires. 通过文档我们知道， select 的 timeout 的阻塞效果确实会被 signal handler 所中断。 至于 Python 3.5+ 为什么不会提前返回，是因为它的 time.sleep 实现中对于这种情况增加了判断，如果时间没到会用剩下的时间再次 sleep： static int pysleep(_PyTime_t secs) { // ... do { // ... monotonic = _PyTime_GetMonotonicClock(); secs = deadline - monotonic; if (secs &lt; 0) break; /* retry with the recomputed delay */ } while (1); return 0; } 启示¶ 如果想在 Python 2 下实现类似 Python 3.5+ 下的效果，可以仿照 Python 3.5+ 下的实现增加“如果时间没到会用剩下的时间再次 sleep”的逻辑： 参考代码（修改自 time_b.py） $ cat time_d.py import logging import signal import time logging.basicConfig( level=logging.DEBUG, format=&#39;%(asctime)-15s - %(levelname)s - %(message)s&#39; ) n = 60 def handler(sig, strace): logging.info(&#39;recived %s&#39;, sig) signal.signal(signal.SIGHUP, handler) logging.info(&#39;start sleep %s seconds&#39;, n) start = time.time() remain = n while True: time.sleep(remain) remain = (start + n) - time.time() if remain &lt; 0: break else: logging.warn(&#39;retry sleep %s&#39;, remain) logging.info(&#39;end sleep %s seconds, spend %s&#39;, n, time.time() - start) 测试： $ python time_d.py &amp; [1] 14751 $ 2017-07-16 17:10:53,235 - INFO - start sleep 60 seconds $ kill -s SIGHUP 14751 2017-07-16 17:10:59,803 - INFO - recived 1 2017-07-16 17:10:59,803 - WARNING - retry sleep 53.4323399067 $ kill -s SIGHUP 14751 2017-07-16 17:11:44,792 - INFO - recived 1 2017-07-16 17:11:44,792 - WARNING - retry sleep 8.44309687614 $ 2017-07-16 17:11:53,239 - INFO - end sleep 60 seconds, spend 60.0035960674 [1]+ Done python time_d.py 最重要的一点是 ：不要觉得 time.sleep 会非常的精确，它有可能变快也有可能变慢，不要对它有过高的期望，不要依赖这个功能来实现需要精确 sleep 的需求。 目测可能也可以利用 python 2 下的这一行为实现一些特殊的需求。 好了，本文的内容就是这些了，希望这篇文章能对你有所帮助。 参考资料¶ 15.3. time — Time access and conversions — Python 2.7.13 documentation 16.3. time — Time access and conversions — Python 3.6.2rc2 documentation gevent.subprocess.Popen alters the behavior of time.sleep · Issue #280 · gevent/gevent cpython/timemodule.c at 2.7 · python/cpython cpython/timemodule.c at 3.6 · python/cpython",
+        "description": "<p>如题所述，当 <tt class="docutils literal">time.sleep</tt> 与 <tt class="docutils literal">signal</tt> 一起使用时可能会出现 <tt class="docutils literal">time.sleep</tt>
+失效，提前结束 sleep 的问题。</p>
+<p>我们先来看一下 <tt class="docutils literal">time.sleep</tt> 的文档:</p>
+<p>Python 2.7.13:</p>
+<blockquote>
+<p>time.sleep(secs)</p>
+<blockquote>
+Suspend execution of the current thread for the given number of seconds. The argument may be a floating point number to indicate a more precise sleep time. <strong>The actual suspension time may be less than that requested because any caught signal will terminate the sleep() following execution of that signal’s catching routine.</strong> Also, the suspension time may be longer than requested by an arbitrary amount because of the scheduling of other activity in the system.</blockquote>
+</blockquote>
+<p>Python 3.6.2:</p>
+<blockquote>
+<p>time.sleep(secs)</p>
+<blockquote>
+<p>Suspend execution of the calling thread for the given number of seconds. The argument may be a floating point number to indicate a more precise sleep time. <strong>The actual suspension time may be less than that requested because any caught signal will terminate the sleep() following execution of that signal’s catching routine.</strong> Also, the suspension time may be longer than requested by an arbitrary amount because of the scheduling of other activity in the system.</p>
+<p>Changed in version 3.5: <strong>The function now sleeps at least secs even if the sleep is interrupted by a signal, except if the signal handler raises an exception</strong> (see <a class="reference external" href="https://www.python.org/dev/peps/pep-0475">PEP 475</a> for the rationale).</p>
+</blockquote>
+</blockquote>
+<p>通过文档可以看到，在 Python 2 下，当定义了 signal handler 并接收到
+signal 时， <tt class="docutils literal">time.sleep</tt> 会提前返回， 在 Python 3.5+
+下，没有这个问题，只是在 signal handler 抛异常时 sleep 会被终止 。</p>
+<p>下面我们就来验证一下这个问题。</p>
+<div class="section" id="id1">
+<h2 id="hidid1">测试环境<a class="headerlink" href="#hidid1" title="Permalink to this headline">¶</a></h2>
+<ul class="simple">
+<li>os: mac os</li>
+<li>python: python2.7, python3.6</li>
+</ul>
+</div>
+<div class="section" id="python-2">
+<h2 id="hidpython-2">Python 2<a class="headerlink" href="#hidpython-2" title="Permalink to this headline">¶</a></h2>
+<div class="section" id="sleep">
+<h3 id="hidsleep">普通 sleep 程序<a class="headerlink" href="#hidsleep" title="Permalink to this headline">¶</a></h3>
+<p>先来看一个正常 sleep 的程序:</p>
+<div class="highlight"><pre><span></span><span class="err">$</span> <span class="n">cat</span> <span class="n">time_a</span><span class="o">.</span><span class="n">py</span>
+<span class="kn">import</span> <span class="nn">logging</span>
+<span class="kn">import</span> <span class="nn">time</span>
+
+<span class="n">logging</span><span class="o">.</span><span class="n">basicConfig</span><span class="p">(</span>
+    <span class="n">level</span><span class="o">=</span><span class="n">logging</span><span class="o">.</span><span class="n">DEBUG</span><span class="p">,</span>
+    <span class="n">format</span><span class="o">=</span><span class="s1">&#39;</span><span class="si">%(asctime)-15s</span><span class="s1"> - </span><span class="si">%(levelname)s</span><span class="s1"> - </span><span class="si">%(message)s</span><span class="s1">&#39;</span>
+<span class="p">)</span>
+
+<span class="n">n</span> <span class="o">=</span> <span class="mi">60</span>
+
+<span class="n">logging</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s1">&#39;start sleep </span><span class="si">%s</span><span class="s1"> seconds&#39;</span><span class="p">,</span> <span class="n">n</span><span class="p">)</span>
+<span class="n">start</span> <span class="o">=</span> <span class="n">time</span><span class="o">.</span><span class="n">time</span><span class="p">()</span>
+<span class="n">time</span><span class="o">.</span><span class="n">sleep</span><span class="p">(</span><span class="n">n</span><span class="p">)</span>
+<span class="n">logging</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s1">&#39;end sleep </span><span class="si">%s</span><span class="s1"> seconds, spend </span><span class="si">%s</span><span class="s1">&#39;</span><span class="p">,</span> <span class="n">n</span><span class="p">,</span> <span class="n">time</span><span class="o">.</span><span class="n">time</span><span class="p">()</span> <span class="o">-</span> <span class="n">start</span><span class="p">)</span>
+</pre></div>
+<p>测试:</p>
+<pre class="literal-block">
+$ python time_a.py
+2017-07-16 15:29:05,323 - INFO - start sleep 60 seconds
+2017-07-16 15:30:05,327 - INFO - end sleep 60 seconds, spend 60.0042099953
+</pre>
+<p>可以看到确实 sleep 了 60 秒。</p>
+</div>
+<div class="section" id="signal">
+<h3 id="hidsignal">signal<a class="headerlink" href="#hidsignal" title="Permalink to this headline">¶</a></h3>
+<p>给普通的 sleep 程序发个 signal 试试:</p>
+<pre class="literal-block">
+$ python time_a.py &amp;
+[1] 6208
+$ 2017-07-16 15:44:01,290 - INFO - start sleep 60 seconds
+
+$ kill -s SIGHUP 6208
+[1]+  Hangup: 1               python time_a.py
+</pre>
+<p>因为 <tt class="docutils literal">SIGHUP</tt> 的默认行为就是终止程序，所以程序终止了。</p>
+<p>我们下面来测试自定义 signal handler 的影响。</p>
+</div>
+<div class="section" id="signal-handler">
+<h3 id="hidsignal-handler">signal handler<a class="headerlink" href="#hidsignal-handler" title="Permalink to this headline">¶</a></h3>
+<p>测试程序如下：</p>
+<div class="highlight"><pre><span></span><span class="err">$</span> <span class="n">cat</span> <span class="n">time_b</span><span class="o">.</span><span class="n">py</span>
+<span class="kn">import</span> <span class="nn">logging</span>
+<span class="kn">import</span> <span class="nn">signal</span>
+<span class="kn">import</span> <span class="nn">time</span>
+
+<span class="n">logging</span><span class="o">.</span><span class="n">basicConfig</span><span class="p">(</span>
+    <span class="n">level</span><span class="o">=</span><span class="n">logging</span><span class="o">.</span><span class="n">DEBUG</span><span class="p">,</span>
+    <span class="n">format</span><span class="o">=</span><span class="s1">&#39;</span><span class="si">%(asctime)-15s</span><span class="s1"> - </span><span class="si">%(levelname)s</span><span class="s1"> - </span><span class="si">%(message)s</span><span class="s1">&#39;</span>
+<span class="p">)</span>
+
+<span class="n">n</span> <span class="o">=</span> <span class="mi">60</span>
+
+<span class="k">def</span> <span class="nf">handler</span><span class="p">(</span><span class="n">sig</span><span class="p">,</span> <span class="n">strace</span><span class="p">):</span>
+    <span class="n">logging</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s1">&#39;recived </span><span class="si">%s</span><span class="s1">&#39;</span><span class="p">,</span> <span class="n">sig</span><span class="p">)</span>
+
+<span class="n">signal</span><span class="o">.</span><span class="n">signal</span><span class="p">(</span><span class="n">signal</span><span class="o">.</span><span class="n">SIGHUP</span><span class="p">,</span> <span class="n">handler</span><span class="p">)</span>
+
+<span class="n">logging</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s1">&#39;start sleep </span><span class="si">%s</span><span class="s1"> seconds&#39;</span><span class="p">,</span> <span class="n">n</span><span class="p">)</span>
+<span class="n">start</span> <span class="o">=</span> <span class="n">time</span><span class="o">.</span><span class="n">time</span><span class="p">()</span>
+<span class="n">time</span><span class="o">.</span><span class="n">sleep</span><span class="p">(</span><span class="n">n</span><span class="p">)</span>
+<span class="n">logging</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s1">&#39;end sleep </span><span class="si">%s</span><span class="s1"> seconds, spend </span><span class="si">%s</span><span class="s1">&#39;</span><span class="p">,</span> <span class="n">n</span><span class="p">,</span> <span class="n">time</span><span class="o">.</span><span class="n">time</span><span class="p">()</span> <span class="o">-</span> <span class="n">start</span><span class="p">)</span>
+</pre></div>
+<p>测试:</p>
+<pre class="literal-block">
+$ python time_b.py &amp;
+[1] 5910
+2017-07-16 15:31:46,448 - INFO - start sleep 60 seconds
+$ kill -s SIGHUP 5910
+2017-07-16 15:31:52,180 - INFO - recived 1
+2017-07-16 15:31:52,181 - INFO - end sleep 60 seconds, spend 5.73180794716
+[1]+  Done                    python time_b.py
+</pre>
+<p>从测试结果可以看到，当收到 signal 后，sleep 就提前结束了， 60 秒的 sleep
+实际只花了 6 秒钟。</p>
+<p>下面再看看 Python 3 文档中提到的 handler 抛异常的情况。</p>
+</div>
+<div class="section" id="signal-handler-raise-exception">
+<h3 id="hidsignal-handler-raise-exception">signal handler raise exception<a class="headerlink" href="#hidsignal-handler-raise-exception" title="Permalink to this headline">¶</a></h3>
+<p>测试程序：</p>
+<div class="highlight"><pre><span></span><span class="err">$</span> <span class="n">cat</span> <span class="n">time_c</span><span class="o">.</span><span class="n">py</span>
+<span class="kn">import</span> <span class="nn">logging</span>
+<span class="kn">import</span> <span class="nn">signal</span>
+<span class="kn">import</span> <span class="nn">time</span>
+
+<span class="n">logging</span><span class="o">.</span><span class="n">basicConfig</span><span class="p">(</span>
+    <span class="n">level</span><span class="o">=</span><span class="n">logging</span><span class="o">.</span><span class="n">DEBUG</span><span class="p">,</span>
+    <span class="n">format</span><span class="o">=</span><span class="s1">&#39;</span><span class="si">%(asctime)-15s</span><span class="s1"> - </span><span class="si">%(levelname)s</span><span class="s1"> - </span><span class="si">%(message)s</span><span class="s1">&#39;</span>
+<span class="p">)</span>
+
+<span class="n">n</span> <span class="o">=</span> <span class="mi">60</span>
+
+<span class="k">def</span> <span class="nf">handler</span><span class="p">(</span><span class="n">sig</span><span class="p">,</span> <span class="n">strace</span><span class="p">):</span>
+    <span class="n">logging</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s1">&#39;recived </span><span class="si">%s</span><span class="s1">&#39;</span><span class="p">,</span> <span class="n">sig</span><span class="p">)</span>
+    <span class="k">raise</span> <span class="ne">Exception</span><span class="p">(</span><span class="s1">&#39;test&#39;</span><span class="p">)</span>
+
+<span class="n">signal</span><span class="o">.</span><span class="n">signal</span><span class="p">(</span><span class="n">signal</span><span class="o">.</span><span class="n">SIGHUP</span><span class="p">,</span> <span class="n">handler</span><span class="p">)</span>
+
+<span class="n">logging</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s1">&#39;start sleep </span><span class="si">%s</span><span class="s1"> seconds&#39;</span><span class="p">,</span> <span class="n">n</span><span class="p">)</span>
+<span class="n">start</span> <span class="o">=</span> <span class="n">time</span><span class="o">.</span><span class="n">time</span><span class="p">()</span>
+<span class="k">try</span><span class="p">:</span>
+    <span class="n">time</span><span class="o">.</span><span class="n">sleep</span><span class="p">(</span><span class="n">n</span><span class="p">)</span>
+<span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+    <span class="n">logging</span><span class="o">.</span><span class="n">exception</span><span class="p">(</span><span class="n">e</span><span class="p">)</span>
+<span class="n">logging</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s1">&#39;end sleep </span><span class="si">%s</span><span class="s1"> seconds, spend </span><span class="si">%s</span><span class="s1">&#39;</span><span class="p">,</span> <span class="n">n</span><span class="p">,</span> <span class="n">time</span><span class="o">.</span><span class="n">time</span><span class="p">()</span> <span class="o">-</span> <span class="n">start</span><span class="p">)</span>
+</pre></div>
+<p>测试：</p>
+<pre class="literal-block">
+$ python time_c.py &amp;
+[1] 6390
+2017-07-16 16:09:31,340 - INFO - start sleep 60 seconds
+
+$ kill -s SIGHUP 6390
+2017-07-16 16:09:35,328 - INFO - recived 1
+2017-07-16 16:09:35,329 - ERROR - test
+Traceback (most recent call last):
+  File &quot;time_c.py&quot;, line 21, in &lt;module&gt;
+    time.sleep(n)
+  File &quot;time_c.py&quot;, line 14, in handler
+    raise Exception('test')
+Exception: test
+2017-07-16 16:09:35,329 - INFO - end sleep 60 seconds, spend 3.988664150238037
+[1]+  Done                    python time_c.py
+</pre>
+<p>可以看到，当 signal handler 抛异常时， <tt class="docutils literal">time.sleep</tt> 会抛出异常提前终止 sleep 操作。</p>
+<p>下面来测试 Python 3.5+ 下这四种情况的行为。</p>
+</div>
+</div>
+<div class="section" id="python-3-5">
+<h2 id="hidpython-3-5">Python 3.5+<a class="headerlink" href="#hidpython-3-5" title="Permalink to this headline">¶</a></h2>
+<div class="section" id="id2">
+<h3 id="hidid2">普通 sleep 程序<a class="headerlink" href="#hidid2" title="Permalink to this headline">¶</a></h3>
+<p>用的还是之前的 time_a.py 文件，测试结果：</p>
+<pre class="literal-block">
+$ python3.6 time_a.py
+2017-07-16 16:12:28,566 - INFO - start sleep 60 seconds
+2017-07-16 16:13:28,571 - INFO - end sleep 60 seconds, spend 60.00386714935303
+</pre>
+<p>可以看到，跟 Python 2 一样，正常 sleep.</p>
+</div>
+<div class="section" id="id3">
+<h3 id="hidid3">signal<a class="headerlink" href="#hidid3" title="Permalink to this headline">¶</a></h3>
+<p>同样试试给 time_a.py 进程发送 signal:</p>
+<pre class="literal-block">
+$ python3.6 time_a.py  &amp;
+[1] 6790
+$ 2017-07-16 16:15:53,529 - INFO - start sleep 60 seconds
+
+$ kill -s SIGHUP 6790
+[1]+  Hangup: 1               python3.6 time_a.py
+</pre>
+<p>跟 Python 2 下也是一样，进程终止。</p>
+</div>
+<div class="section" id="id4">
+<h3 id="hidid4">signal handler<a class="headerlink" href="#hidid4" title="Permalink to this headline">¶</a></h3>
+<p>按照文档，当 signal handler 不错误的时候，应该可以正常 sleep,
+下面我们试试看：</p>
+<pre class="literal-block">
+$ python3.6 time_b.py &amp;
+[1] 6848
+$ 2017-07-16 16:17:25,144 - INFO - start sleep 60 seconds
+
+$ kill -s SIGHUP 6848
+2017-07-16 16:17:31,252 - INFO - recived 1
+$ jobs
+[1]+  Running                 python3.6 time_b.py &amp;
+$ 2017-07-16 16:18:25,147 - INFO - end sleep 60 seconds, spend 60.00310564041138
+
+[1]+  Done                    python3.6 time_b.py
+</pre>
+<p>确实跟文档中说的一样，就算收到并处理了 signal 还是可以正常 sleep 。👍</p>
+<p>下面再看看 signal handler raise exception 的情况。</p>
+</div>
+<div class="section" id="id5">
+<h3 id="hidid5">signal handler raise exception<a class="headerlink" href="#hidid5" title="Permalink to this headline">¶</a></h3>
+<p>测试：</p>
+<pre class="literal-block">
+$ python3.6 time_c.py &amp;
+[1] 42908
+2017-07-16 16:20:00,679 - INFO - start sleep 60 seconds
+
+$ kill -s SIGHUP 42908
+2017-07-16 16:20:06,126 - INFO - recived 1
+2017-07-16 16:20:06,126 - ERROR - test
+Traceback (most recent call last):
+  File &quot;time_c.py&quot;, line 21, in &lt;module&gt;
+    time.sleep(n)
+  File &quot;time_c.py&quot;, line 14, in handler
+    raise Exception('test')
+Exception: test
+2017-07-16 16:20:06,127 - INFO - end sleep 60 seconds, spend 5.4475321769714355
+[1]+  Done                    python3.6 time_c.py
+</pre>
+<p>可以看到，跟在 Python 2 下一样，当 signal handler
+抛异常时，<tt class="docutils literal">time.sleep</tt> 会抛出异常提前终止 sleep 操作。</p>
+</div>
+</div>
+<div class="section" id="id6">
+<h2 id="hidid6">原因<a class="headerlink" href="#hidid6" title="Permalink to this headline">¶</a></h2>
+<p>那么，为什么 Python 2 下 <tt class="docutils literal">time.sleep</tt> 遇到 signal
+时会出现提前返回的情况呢？</p>
+<p>在 gevent 的一个 <a class="reference external" href="https://github.com/gevent/gevent/issues/280">issue</a>
+中 <a class="reference external" href="https://github.com/jamadden">&#64;jamadden</a> 是 <a class="reference external" href="https://github.com/gevent/gevent/issues/280#issuecomment-120123286">这样解释的</a> :</p>
+<blockquote>
+<p>The stdlib <strong>time.sleep</strong> method is implemented by calling <strong>select</strong>,
+passing in a timeout value, and no file descriptors to actually
+select on. The intended effect is to block in the operating system,
+sleeping until the timeout has elapsed.</p>
+<p>However, <strong>select</strong> is one of those system calls that is vulnerable to
+signals. When a signal is delivered to the process, <strong>select</strong>
+prematurely wakes up and sets <strong>errno</strong> to <strong>EINTR</strong> (interrupted). In that
+case, <strong>time.sleep</strong> makes no attempt to account for any unelapsed time;
+it simple returns. Therefore, <strong>time.sleep</strong> can sometimes return early.
+<a class="reference external" href="https://docs.python.org/3/library/time.html#time.sleep">This is
+documented</a>.</p>
+</blockquote>
+<p>查看 python 2.7 的源代码以及 <tt class="docutils literal">select</tt> 的文档可以确认这个解释：</p>
+<p>python 2.7 源码中 <tt class="docutils literal">time.sleep</tt> 的
+<a class="reference external" href="https://github.com/python/cpython/blob/2.7/Modules/timemodule.c#L937">实现片段</a>
+如下：</p>
+<div class="highlight"><pre><span></span><span class="k">static</span> <span class="kt">int</span>
+
+<span class="nf">floatsleep</span><span class="p">(</span><span class="kt">double</span> <span class="n">secs</span><span class="p">)</span>
+
+<span class="p">{</span>
+<span class="cm">/* XXX Should test for MS_WINDOWS first! */</span>
+<span class="cp">#if defined(HAVE_SELECT) &amp;&amp; !defined(__BEOS__) &amp;&amp; !defined(__EMX__)</span>
+    <span class="k">struct</span> <span class="n">timeval</span> <span class="n">t</span><span class="p">;</span>
+    <span class="kt">double</span> <span class="n">frac</span><span class="p">;</span>
+    <span class="n">frac</span> <span class="o">=</span> <span class="n">fmod</span><span class="p">(</span><span class="n">secs</span><span class="p">,</span> <span class="mf">1.0</span><span class="p">);</span>
+    <span class="n">secs</span> <span class="o">=</span> <span class="n">floor</span><span class="p">(</span><span class="n">secs</span><span class="p">);</span>
+    <span class="n">t</span><span class="p">.</span><span class="n">tv_sec</span> <span class="o">=</span> <span class="p">(</span><span class="kt">long</span><span class="p">)</span><span class="n">secs</span><span class="p">;</span>
+    <span class="n">t</span><span class="p">.</span><span class="n">tv_usec</span> <span class="o">=</span> <span class="p">(</span><span class="kt">long</span><span class="p">)(</span><span class="n">frac</span><span class="o">*</span><span class="mf">1000000.0</span><span class="p">);</span>
+    <span class="n">Py_BEGIN_ALLOW_THREADS</span>
+    <span class="k">if</span> <span class="p">(</span><span class="n">select</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="p">(</span><span class="n">fd_set</span> <span class="o">*</span><span class="p">)</span><span class="mi">0</span><span class="p">,</span> <span class="p">(</span><span class="n">fd_set</span> <span class="o">*</span><span class="p">)</span><span class="mi">0</span><span class="p">,</span> <span class="p">(</span><span class="n">fd_set</span> <span class="o">*</span><span class="p">)</span><span class="mi">0</span><span class="p">,</span> <span class="o">&amp;</span><span class="n">t</span><span class="p">)</span> <span class="o">!=</span> <span class="mi">0</span><span class="p">)</span> <span class="p">{</span>
+<span class="cp">#ifdef EINTR</span>
+        <span class="k">if</span> <span class="p">(</span><span class="n">errno</span> <span class="o">!=</span> <span class="n">EINTR</span><span class="p">)</span> <span class="p">{</span>
+<span class="cp">#else</span>
+        <span class="k">if</span> <span class="p">(</span><span class="mi">1</span><span class="p">)</span> <span class="p">{</span>
+<span class="cp">#endif</span>
+            <span class="n">Py_BLOCK_THREADS</span>
+            <span class="n">PyErr_SetFromErrno</span><span class="p">(</span><span class="n">PyExc_IOError</span><span class="p">);</span>
+            <span class="k">return</span> <span class="o">-</span><span class="mi">1</span><span class="p">;</span>
+        <span class="p">}</span>
+    <span class="p">}</span>
+</pre></div>
+<p>可以看到确实是用 <tt class="docutils literal">select</tt> 来实现的 <tt class="docutils literal">time.sleep</tt> 。</p>
+<p><tt class="docutils literal">select</tt> 的
+<a class="reference external" href="http://man7.org/linux/man-pages/man2/select.2.html">文档</a> 中关于
+signal 的说明如下：</p>
+<blockquote>
+<p>The <strong>timeout</strong> argument specifies the interval that <strong>select()</strong> should
+block waiting for a file descriptor to become ready.  <strong>The call will
+block until either</strong>:</p>
+<ul class="simple">
+<li>a file descriptor becomes ready;</li>
+<li><strong>the call is interrupted by a signal handler</strong>; or</li>
+<li>the timeout expires.</li>
+</ul>
+</blockquote>
+<p>通过文档我们知道， <tt class="docutils literal">select</tt> 的 <strong>timeout</strong> 的阻塞效果确实会被 signal handler 所中断。</p>
+<p>至于 Python 3.5+ 为什么不会提前返回，是因为它的 <tt class="docutils literal">time.sleep</tt>
+实现中对于这种情况增加了判断，<a class="reference external" href="https://github.com/python/cpython/blob/3.6/Modules/timemodule.c#L1482-L1487">如果时间没到会用剩下的时间再次
+sleep</a>：</p>
+<div class="highlight"><pre><span></span><span class="k">static</span> <span class="kt">int</span>
+<span class="nf">pysleep</span><span class="p">(</span><span class="n">_PyTime_t</span> <span class="n">secs</span><span class="p">)</span>
+<span class="p">{</span>
+     <span class="c1">// ...</span>
+     <span class="k">do</span> <span class="p">{</span>
+        <span class="c1">// ...</span>
+        <span class="n">monotonic</span> <span class="o">=</span> <span class="n">_PyTime_GetMonotonicClock</span><span class="p">();</span>
+        <span class="n">secs</span> <span class="o">=</span> <span class="n">deadline</span> <span class="o">-</span> <span class="n">monotonic</span><span class="p">;</span>
+        <span class="k">if</span> <span class="p">(</span><span class="n">secs</span> <span class="o">&lt;</span> <span class="mi">0</span><span class="p">)</span>
+            <span class="k">break</span><span class="p">;</span>
+        <span class="cm">/* retry with the recomputed delay */</span>
+    <span class="p">}</span> <span class="k">while</span> <span class="p">(</span><span class="mi">1</span><span class="p">);</span>
+
+    <span class="k">return</span> <span class="mi">0</span><span class="p">;</span>
+<span class="p">}</span>
+</pre></div>
+</div>
+<div class="section" id="id7">
+<h2 id="hidid7">启示<a class="headerlink" href="#hidid7" title="Permalink to this headline">¶</a></h2>
+<p>如果想在 Python 2 下实现类似 Python 3.5+ 下的效果，可以仿照 Python 3.5+
+下的实现增加“如果时间没到会用剩下的时间再次 sleep”的逻辑：</p>
+<p>参考代码（修改自 time_b.py）</p>
+<div class="highlight"><pre><span></span><span class="err">$</span> <span class="n">cat</span> <span class="n">time_d</span><span class="o">.</span><span class="n">py</span>
+<span class="kn">import</span> <span class="nn">logging</span>
+<span class="kn">import</span> <span class="nn">signal</span>
+<span class="kn">import</span> <span class="nn">time</span>
+
+<span class="n">logging</span><span class="o">.</span><span class="n">basicConfig</span><span class="p">(</span>
+    <span class="n">level</span><span class="o">=</span><span class="n">logging</span><span class="o">.</span><span class="n">DEBUG</span><span class="p">,</span>
+    <span class="n">format</span><span class="o">=</span><span class="s1">&#39;</span><span class="si">%(asctime)-15s</span><span class="s1"> - </span><span class="si">%(levelname)s</span><span class="s1"> - </span><span class="si">%(message)s</span><span class="s1">&#39;</span>
+<span class="p">)</span>
+
+<span class="n">n</span> <span class="o">=</span> <span class="mi">60</span>
+
+
+<span class="k">def</span> <span class="nf">handler</span><span class="p">(</span><span class="n">sig</span><span class="p">,</span> <span class="n">strace</span><span class="p">):</span>
+    <span class="n">logging</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s1">&#39;recived </span><span class="si">%s</span><span class="s1">&#39;</span><span class="p">,</span> <span class="n">sig</span><span class="p">)</span>
+
+
+<span class="n">signal</span><span class="o">.</span><span class="n">signal</span><span class="p">(</span><span class="n">signal</span><span class="o">.</span><span class="n">SIGHUP</span><span class="p">,</span> <span class="n">handler</span><span class="p">)</span>
+
+<span class="n">logging</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s1">&#39;start sleep </span><span class="si">%s</span><span class="s1"> seconds&#39;</span><span class="p">,</span> <span class="n">n</span><span class="p">)</span>
+<span class="n">start</span> <span class="o">=</span> <span class="n">time</span><span class="o">.</span><span class="n">time</span><span class="p">()</span>
+<span class="n">remain</span> <span class="o">=</span> <span class="n">n</span>
+<span class="k">while</span> <span class="bp">True</span><span class="p">:</span>
+    <span class="n">time</span><span class="o">.</span><span class="n">sleep</span><span class="p">(</span><span class="n">remain</span><span class="p">)</span>
+    <span class="n">remain</span> <span class="o">=</span> <span class="p">(</span><span class="n">start</span> <span class="o">+</span> <span class="n">n</span><span class="p">)</span> <span class="o">-</span> <span class="n">time</span><span class="o">.</span><span class="n">time</span><span class="p">()</span>
+    <span class="k">if</span> <span class="n">remain</span> <span class="o">&lt;</span> <span class="mi">0</span><span class="p">:</span>
+        <span class="k">break</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="n">logging</span><span class="o">.</span><span class="n">warn</span><span class="p">(</span><span class="s1">&#39;retry sleep </span><span class="si">%s</span><span class="s1">&#39;</span><span class="p">,</span> <span class="n">remain</span><span class="p">)</span>
+<span class="n">logging</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s1">&#39;end sleep </span><span class="si">%s</span><span class="s1"> seconds, spend </span><span class="si">%s</span><span class="s1">&#39;</span><span class="p">,</span> <span class="n">n</span><span class="p">,</span> <span class="n">time</span><span class="o">.</span><span class="n">time</span><span class="p">()</span> <span class="o">-</span> <span class="n">start</span><span class="p">)</span>
+</pre></div>
+<p>测试：</p>
+<pre class="literal-block">
+$ python time_d.py &amp;
+[1] 14751
+$ 2017-07-16 17:10:53,235 - INFO - start sleep 60 seconds
+
+$ kill -s SIGHUP 14751
+2017-07-16 17:10:59,803 - INFO - recived 1
+2017-07-16 17:10:59,803 - WARNING - retry sleep 53.4323399067
+
+$ kill -s SIGHUP 14751
+2017-07-16 17:11:44,792 - INFO - recived 1
+2017-07-16 17:11:44,792 - WARNING - retry sleep 8.44309687614
+$ 2017-07-16 17:11:53,239 - INFO - end sleep 60 seconds, spend 60.0035960674
+
+[1]+  Done                    python time_d.py
+</pre>
+<p><strong>最重要的一点是</strong> ：不要觉得 <tt class="docutils literal">time.sleep</tt>
+会非常的精确，它有可能变快也有可能变慢，不要对它有过高的期望，不要依赖这个功能来实现需要精确
+sleep 的需求。</p>
+<p>目测可能也可以利用 python 2 下的这一行为实现一些特殊的需求。</p>
+<p>好了，本文的内容就是这些了，希望这篇文章能对你有所帮助。</p>
+</div>
+<div class="section" id="id8">
+<h2 id="hidid8">参考资料<a class="headerlink" href="#hidid8" title="Permalink to this headline">¶</a></h2>
+<ul class="simple">
+<li><a class="reference external" href="https://docs.python.org/2/library/time.html#time.sleep">15.3. time — Time access and conversions — Python 2.7.13
+documentation</a></li>
+<li><a class="reference external" href="https://docs.python.org/3/library/time.html#time.sleep">16.3. time — Time access and conversions — Python 3.6.2rc2
+documentation</a></li>
+<li><a class="reference external" href="https://github.com/gevent/gevent/issues/280">gevent.subprocess.Popen alters the behavior of time.sleep · Issue
+#280 · gevent/gevent</a></li>
+<li><a class="reference external" href="https://github.com/python/cpython/blob/2.7/Modules/timemodule.c#L937">cpython/timemodule.c at 2.7 ·
+python/cpython</a></li>
+<li><a class="reference external" href="https://github.com/python/cpython/blob/3.6/Modules/timemodule.c#L1482-L1487">cpython/timemodule.c at 3.6 ·
+python/cpython</a></li>
+</ul>
+</div>
+",
         "mainEntityOfPage": {
             "@type": "WebPage",
             "@id": "https://mozillazg.com"
@@ -603,7 +994,7 @@ python/cpython</a></li>
    <div class="container">
       <hr>
       <div class="row">
-         <div class="col-xs-10">&copy; 2021 mozillazg
+         <div class="col-xs-10">&copy; 2022 mozillazg
             &middot; Powered by <a href="https://github.com/DandyDev/pelican-bootstrap3" target="_blank">pelican-bootstrap3</a>,
             <a href="http://docs.getpelican.com/" target="_blank">Pelican</a>,
             <a href="http://getbootstrap.com" target="_blank">Bootstrap</a>              <p><small>  <a rel="license" href="http://creativecommons.org/licenses/by-sa/4.0/"><img alt="Creative Commons License" style="border-width:0" src="/static/images/by-sa-80x15.png" /></a>

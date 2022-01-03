@@ -1,5 +1,486 @@
 <?xml version="1.0" encoding="utf-8"?>
-<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom"><channel><title>Huang Huang 的博客</title><link>https://mozillazg.com/</link><description></description><atom:link href="https://mozillazg.com/feeds/mozillazg.rss.xml" rel="self"></atom:link><lastBuildDate>Thu, 07 Oct 2021 00:00:00 +0000</lastBuildDate><item><title>从编译后的二进制可执行文件中解析 Go 项目的依赖包信息</title><link>https://mozillazg.com/2021/10/go-find-package-info-from-binary-file.html</link><description>&lt;p&gt;本文介绍从编译后的二进制可执行文件中解析原 Go 项目中的依赖包信息的一些方法，
+<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom"><channel><title>Huang Huang 的博客</title><link>https://mozillazg.com/</link><description></description><atom:link href="https://mozillazg.com/feeds/mozillazg.rss.xml" rel="self"></atom:link><lastBuildDate>Sat, 31 Dec 2022 00:00:00 +0000</lastBuildDate><item><title>通过编写自定义内置函数的方式扩展 OPA/Rego 运行时</title><link>https://mozillazg.com/2022/12/opa-openpolicyagent-extend-opa-via-add-new-built-in-functions-to-rego-go-runtime.html</link><description>&lt;div class="section" id="id1"&gt;
+&lt;h2 id="hidid1"&gt;前言&lt;a class="headerlink" href="#hidid1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;本文记录一下如何通过编写自定义内置函数的函数扩展 OPA/Rego 运行时，使得在编写 OPA/Rego 策略语言的时候
+可以直接使用自定义的这个内置函数实现更复杂的策略需求。&lt;/p&gt;
+&lt;div class="section" id="id2"&gt;
+&lt;h3 id="hidid2"&gt;编写自定义内置函数&lt;a class="headerlink" href="#hidid2" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
+&lt;p&gt;我们将要编写的一个自定义内置函数名为 &lt;tt class="docutils literal"&gt;auth.get_user_info&lt;/tt&gt; ，这个函数的作用是，获取自定义 uid 的用户信息：&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+user := auth.get_user_info(uid)
+&lt;/pre&gt;
+&lt;p&gt;并且将使用 &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;github.com/open-policy-agent/opa&amp;#64;v0.35.0&lt;/span&gt;&lt;/tt&gt; 这个 opa 运行时库来编写这个自定义函数，
+我们可以使用这个库提供的 &lt;tt class="docutils literal"&gt;rego.RegisterBuiltin1&lt;/tt&gt; 函数来实现我们的需求：&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="kn"&gt;package&lt;/span&gt; &lt;span class="nx"&gt;main&lt;/span&gt;
+
+&lt;span class="kn"&gt;import&lt;/span&gt; &lt;span class="p"&gt;(&lt;/span&gt;
+        &lt;span class="s"&gt;&amp;quot;fmt&amp;quot;&lt;/span&gt;
+        &lt;span class="s"&gt;&amp;quot;os&amp;quot;&lt;/span&gt;
+
+        &lt;span class="s"&gt;&amp;quot;github.com/open-policy-agent/opa/ast&amp;quot;&lt;/span&gt;
+        &lt;span class="s"&gt;&amp;quot;github.com/open-policy-agent/opa/cmd&amp;quot;&lt;/span&gt;
+        &lt;span class="s"&gt;&amp;quot;github.com/open-policy-agent/opa/rego&amp;quot;&lt;/span&gt;
+        &lt;span class="s"&gt;&amp;quot;github.com/open-policy-agent/opa/types&amp;quot;&lt;/span&gt;
+&lt;span class="p"&gt;)&lt;/span&gt;
+
+&lt;span class="kd"&gt;type&lt;/span&gt; &lt;span class="nx"&gt;User&lt;/span&gt; &lt;span class="kd"&gt;struct&lt;/span&gt; &lt;span class="p"&gt;{&lt;/span&gt;
+        &lt;span class="nx"&gt;Name&lt;/span&gt; &lt;span class="kt"&gt;string&lt;/span&gt;
+        &lt;span class="nx"&gt;Age&lt;/span&gt; &lt;span class="kt"&gt;int&lt;/span&gt;
+&lt;span class="p"&gt;}&lt;/span&gt;
+
+&lt;span class="kd"&gt;func&lt;/span&gt; &lt;span class="nx"&gt;main&lt;/span&gt;&lt;span class="p"&gt;()&lt;/span&gt; &lt;span class="p"&gt;{&lt;/span&gt;
+        &lt;span class="nx"&gt;users&lt;/span&gt; &lt;span class="o"&gt;:=&lt;/span&gt; &lt;span class="kd"&gt;map&lt;/span&gt;&lt;span class="p"&gt;[&lt;/span&gt;&lt;span class="kt"&gt;string&lt;/span&gt;&lt;span class="p"&gt;]&lt;/span&gt;&lt;span class="nx"&gt;User&lt;/span&gt;&lt;span class="p"&gt;{&lt;/span&gt;
+                &lt;span class="s"&gt;&amp;quot;uid-1&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt; &lt;span class="p"&gt;{&lt;/span&gt;
+                        &lt;span class="nx"&gt;Name&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt; &lt;span class="s"&gt;&amp;quot;tom&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;
+                        &lt;span class="nx"&gt;Age&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;  &lt;span class="mi"&gt;25&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;
+                &lt;span class="p"&gt;},&lt;/span&gt;
+                &lt;span class="s"&gt;&amp;quot;uid-2&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt; &lt;span class="p"&gt;{&lt;/span&gt;
+                        &lt;span class="nx"&gt;Name&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt; &lt;span class="s"&gt;&amp;quot;eric&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;
+                        &lt;span class="nx"&gt;Age&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;  &lt;span class="mi"&gt;30&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;
+                &lt;span class="p"&gt;},&lt;/span&gt;
+        &lt;span class="p"&gt;}&lt;/span&gt;
+        &lt;span class="nx"&gt;rego&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;RegisterBuiltin1&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;
+                &lt;span class="o"&gt;&amp;amp;&lt;/span&gt;&lt;span class="nx"&gt;rego&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Function&lt;/span&gt;&lt;span class="p"&gt;{&lt;/span&gt;
+                        &lt;span class="nx"&gt;Name&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;    &lt;span class="s"&gt;&amp;quot;auth.get_user_info&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;
+                        &lt;span class="nx"&gt;Decl&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;    &lt;span class="nx"&gt;types&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;NewFunction&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="nx"&gt;types&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Args&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="nx"&gt;types&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;S&lt;/span&gt;&lt;span class="p"&gt;),&lt;/span&gt; &lt;span class="nx"&gt;types&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;A&lt;/span&gt;&lt;span class="p"&gt;),&lt;/span&gt;
+                        &lt;span class="nx"&gt;Memoize&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt; &lt;span class="kc"&gt;true&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;
+                &lt;span class="p"&gt;},&lt;/span&gt;
+                &lt;span class="kd"&gt;func&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="nx"&gt;bctx&lt;/span&gt; &lt;span class="nx"&gt;rego&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;BuiltinContext&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="nx"&gt;op1&lt;/span&gt; &lt;span class="o"&gt;*&lt;/span&gt;&lt;span class="nx"&gt;ast&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Term&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt; &lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="o"&gt;*&lt;/span&gt;&lt;span class="nx"&gt;ast&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Term&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="kt"&gt;error&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt; &lt;span class="p"&gt;{&lt;/span&gt;
+                        &lt;span class="kd"&gt;var&lt;/span&gt; &lt;span class="nx"&gt;uid&lt;/span&gt; &lt;span class="kt"&gt;string&lt;/span&gt;
+                        &lt;span class="k"&gt;if&lt;/span&gt; &lt;span class="nx"&gt;err&lt;/span&gt; &lt;span class="o"&gt;:=&lt;/span&gt; &lt;span class="nx"&gt;ast&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;As&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="nx"&gt;op1&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Value&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="o"&gt;&amp;amp;&lt;/span&gt;&lt;span class="nx"&gt;uid&lt;/span&gt;&lt;span class="p"&gt;);&lt;/span&gt; &lt;span class="nx"&gt;err&lt;/span&gt; &lt;span class="o"&gt;!=&lt;/span&gt; &lt;span class="kc"&gt;nil&lt;/span&gt; &lt;span class="p"&gt;{&lt;/span&gt;
+                                &lt;span class="k"&gt;return&lt;/span&gt; &lt;span class="kc"&gt;nil&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="nx"&gt;err&lt;/span&gt;
+                        &lt;span class="p"&gt;}&lt;/span&gt;
+                        &lt;span class="nx"&gt;user&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="nx"&gt;ok&lt;/span&gt; &lt;span class="o"&gt;:=&lt;/span&gt; &lt;span class="nx"&gt;users&lt;/span&gt;&lt;span class="p"&gt;[&lt;/span&gt;&lt;span class="nx"&gt;uid&lt;/span&gt;&lt;span class="p"&gt;]&lt;/span&gt;
+                        &lt;span class="k"&gt;if&lt;/span&gt; &lt;span class="p"&gt;!&lt;/span&gt;&lt;span class="nx"&gt;ok&lt;/span&gt; &lt;span class="p"&gt;{&lt;/span&gt;
+                                &lt;span class="k"&gt;return&lt;/span&gt; &lt;span class="kc"&gt;nil&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="nx"&gt;fmt&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Errorf&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="s"&gt;&amp;quot;user %s is not found&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="nx"&gt;uid&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+                        &lt;span class="p"&gt;}&lt;/span&gt;
+                        &lt;span class="nx"&gt;v&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="nx"&gt;err&lt;/span&gt; &lt;span class="o"&gt;:=&lt;/span&gt; &lt;span class="nx"&gt;ast&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;InterfaceToValue&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="nx"&gt;user&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+                        &lt;span class="k"&gt;if&lt;/span&gt; &lt;span class="nx"&gt;err&lt;/span&gt; &lt;span class="o"&gt;!=&lt;/span&gt; &lt;span class="kc"&gt;nil&lt;/span&gt; &lt;span class="p"&gt;{&lt;/span&gt;
+                                &lt;span class="k"&gt;return&lt;/span&gt; &lt;span class="kc"&gt;nil&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="nx"&gt;err&lt;/span&gt;
+                        &lt;span class="p"&gt;}&lt;/span&gt;
+                        &lt;span class="k"&gt;return&lt;/span&gt; &lt;span class="nx"&gt;ast&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;NewTerm&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="nx"&gt;v&lt;/span&gt;&lt;span class="p"&gt;),&lt;/span&gt; &lt;span class="kc"&gt;nil&lt;/span&gt;
+                &lt;span class="p"&gt;},&lt;/span&gt;
+        &lt;span class="p"&gt;)&lt;/span&gt;
+
+        &lt;span class="k"&gt;if&lt;/span&gt; &lt;span class="nx"&gt;err&lt;/span&gt; &lt;span class="o"&gt;:=&lt;/span&gt; &lt;span class="nx"&gt;cmd&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;RootCommand&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Execute&lt;/span&gt;&lt;span class="p"&gt;();&lt;/span&gt; &lt;span class="nx"&gt;err&lt;/span&gt; &lt;span class="o"&gt;!=&lt;/span&gt; &lt;span class="kc"&gt;nil&lt;/span&gt; &lt;span class="p"&gt;{&lt;/span&gt;
+                &lt;span class="nx"&gt;fmt&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Println&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="nx"&gt;err&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+                &lt;span class="nx"&gt;os&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Exit&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="mi"&gt;1&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+        &lt;span class="p"&gt;}&lt;/span&gt;
+&lt;span class="p"&gt;}&lt;/span&gt;
+&lt;/pre&gt;&lt;/div&gt;
+&lt;p&gt;测试：&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;$ go build -o custom-built-functions
+
+$ ./custom-built-functions run
+OPA 0.35.0 &lt;span class="o"&gt;(&lt;/span&gt;commit , built at &lt;span class="o"&gt;)&lt;/span&gt;
+
+Run &lt;span class="s1"&gt;&amp;#39;help&amp;#39;&lt;/span&gt; to see a list of commands and check &lt;span class="k"&gt;for&lt;/span&gt; updates.
+
+&amp;gt; uid :&lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="s2"&gt;&amp;quot;uid-1&amp;quot;&lt;/span&gt;
+Rule &lt;span class="s1"&gt;&amp;#39;uid&amp;#39;&lt;/span&gt; defined in package repl. Type &lt;span class="s1"&gt;&amp;#39;show&amp;#39;&lt;/span&gt; to see rules.
+&amp;gt; uid
+&lt;span class="s2"&gt;&amp;quot;uid-1&amp;quot;&lt;/span&gt;
+&amp;gt; user :&lt;span class="o"&gt;=&lt;/span&gt; auth.get_user_info&lt;span class="o"&gt;(&lt;/span&gt;uid&lt;span class="o"&gt;)&lt;/span&gt;
+Rule &lt;span class="s1"&gt;&amp;#39;user&amp;#39;&lt;/span&gt; defined in package repl. Type &lt;span class="s1"&gt;&amp;#39;show&amp;#39;&lt;/span&gt; to see rules.
+&amp;gt; user
+&lt;span class="o"&gt;{&lt;/span&gt;
+  &lt;span class="s2"&gt;&amp;quot;Age&amp;quot;&lt;/span&gt;: 25,
+  &lt;span class="s2"&gt;&amp;quot;Name&amp;quot;&lt;/span&gt;: &lt;span class="s2"&gt;&amp;quot;tom&amp;quot;&lt;/span&gt;
+&lt;span class="o"&gt;}&lt;/span&gt;
+&amp;gt; user.Age
+25
+&amp;gt; user.Name
+&lt;span class="s2"&gt;&amp;quot;tom&amp;quot;&lt;/span&gt;
+&amp;gt;
+Do you want to &lt;span class="nb"&gt;exit&lt;/span&gt; &lt;span class="o"&gt;([&lt;/span&gt;y&lt;span class="o"&gt;]&lt;/span&gt;/n&lt;span class="o"&gt;)&lt;/span&gt;? y
+&lt;/pre&gt;&lt;/div&gt;
+&lt;p&gt;通过上面的测试可以看到，我们已经实现了自定义内置函数的需求，并且测试结果也符合预期结果。&lt;/p&gt;
+&lt;p&gt;通过上面的示例代码中的 &lt;tt class="docutils literal"&gt;rego.RegisterBuiltin1&lt;/tt&gt; 这个函数名称可能已经猜到了，如果要定义接受两个参数
+的函数的话应该使用 &lt;tt class="docutils literal"&gt;rego.RegisterBuiltin2&lt;/tt&gt; 函数，同理还有 &lt;tt class="docutils literal"&gt;rego.RegisterBuiltin3&lt;/tt&gt; 和 &lt;tt class="docutils literal"&gt;reg.RegisterBuiltin4&lt;/tt&gt; 函数
+可供使用。以及还有一个定义不定长参数的 &lt;tt class="docutils literal"&gt;rego.RegisterBuiltinDyn&lt;/tt&gt; 可以用来满足跟复杂的函数需求。&lt;/p&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;div class="section" id="id3"&gt;
+&lt;h2 id="hidid3"&gt;参考资料&lt;a class="headerlink" href="#hidid3" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;ul class="simple"&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://www.openpolicyagent.org/"&gt;Open Policy Agent&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://github.com/open-policy-agent/opa"&gt;open-policy-agent/opa: An open source, general-purpose policy engine.&lt;/a&gt;&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/div&gt;
+</description><dc:creator xmlns:dc="http://purl.org/dc/elements/1.1/">mozillazg</dc:creator><pubDate>Sat, 31 Dec 2022 00:00:00 +0000</pubDate><guid>tag:mozillazg.com,2022-12-31:2022/12/opa-openpolicyagent-extend-opa-via-add-new-built-in-functions-to-rego-go-runtime.html</guid><category>openpolicyagent</category><category>rego</category></item><item><title>Github Action 的 context 功能容易被攻击者利用实施脚本注入攻击</title><link>https://mozillazg.com/2021/12/security-script-injection-attack-via-github-action-context.html</link><description>&lt;p&gt;Github Action 提供了一个叫 &lt;a class="reference external" href="https://docs.github.com/en/actions/learn-github-actions/contexts"&gt;context&lt;/a&gt; 的功能，通过 context 可以在 workflow 中应用当前仓库、当前 job 等等
+上下文 metadata 信息，其中通过 &lt;a class="reference external" href="https://docs.github.com/en/actions/learn-github-actions/contexts#github-context"&gt;github context&lt;/a&gt; 可以获取当前 workflow 的运行信息，比如分支名称、issue/PR 标题，
+commit id, issue/PR message 等等。&lt;/p&gt;
+&lt;p&gt;github context 获取到的很多信息其实是第三方控制的信息，
+比如贡献者通过 PR 触发 CI 时，github context 中的很多信息就是贡献者提交 PR
+的那个贡献者所控制的分支的相关信息。&lt;/p&gt;
+&lt;p&gt;基于 github context 的这个特点，攻击者可以通过 PR 流程来实施脚本注入攻击。
+比如，攻击者可以通过构造一个 shell 语句作为一个分支的名称，然后提交 PR 以触发 CI，
+如果 CI 中 github action workflow 有直接在 shell 命令中使用分支名的逻辑话，
+就会触发执行攻击者构造的 shell 语句的操作，攻击者就成功实施了脚本注入攻击。&lt;/p&gt;
+&lt;p&gt;下面演示一个在 github action 中会存在脚本注入攻击问题的 workflow 语法的例子：&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+- name: test
+  run: |
+    echo 'show branch name: '
+    echo &amp;quot;${{ github.ref_name }}&amp;quot;
+&lt;/pre&gt;
+&lt;p&gt;上面这个 run 指令中，通过 echo 输出了执行当前 workflow 的分支名称，看起来没啥问题。
+但是，但我创建一个名为 &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;$(ls$IFS$(echo$IFS'UkVBRE1FLm1kCg=='|base64$IFS'-d'))&lt;/span&gt;&lt;/tt&gt; 的分支
+然后在这个分支下触发 workflow 的时候， 结果就会跟预期的不一样了：&lt;/p&gt;
+&lt;p&gt;&lt;img alt="image" src="/static/images/security/github-action-script-injection.png" /&gt;&lt;/p&gt;
+&lt;blockquote&gt;
+&lt;/blockquote&gt;
+&lt;div class="section" id="id1"&gt;
+&lt;h2 id="hidid1"&gt;参考资料&lt;a class="headerlink" href="#hidid1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;ul class="simple"&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://docs.github.com/en/actions/security-guides/security-hardening-for-github-actions#understanding-the-risk-of-script-injections"&gt;Security hardening for GitHub Actions - GitHub Docs&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://python-security.readthedocs.io/pypi-vuln/index-2021-07-27-combine-prs-workflow.html"&gt;Vulnerability in GitHub Actions workflow for PyPI — Python Security 0.0 documentation&lt;/a&gt;&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/div&gt;
+</description><dc:creator xmlns:dc="http://purl.org/dc/elements/1.1/">mozillazg</dc:creator><pubDate>Sun, 12 Dec 2021 00:00:00 +0000</pubDate><guid>tag:mozillazg.com,2021-12-12:2021/12/security-script-injection-attack-via-github-action-context.html</guid></item><item><title>容器特权模式与非特权模式的区别</title><link>https://mozillazg.com/2021/11/docker-container-difference-between-privileged-mode-and-non-privileged-mode.html</link><description>&lt;div class="section" id="id2"&gt;
+&lt;h2 id="hidid2"&gt;前言&lt;a class="headerlink" href="#hidid2" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;本文尝试解答容器特权模式和非特权模式的区别，
+以及通过它们之间的区别找出哪些场景下必需使用特权模式才能实现业务需求。&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class="section" id="id3"&gt;
+&lt;h2 id="hidid3"&gt;特权模式&lt;a class="headerlink" href="#hidid3" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;&lt;a class="reference external" href="https://github.com/kubernetes/cri-api"&gt;CRI(Container Runtime Interface)&lt;/a&gt; 中特权模式的说明如下：&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+// If set, run container in privileged mode.
+// Privileged mode is incompatible with the following options. If
+// privileged is set, the following features MAY have no effect:
+// 1. capabilities
+// 2. selinux_options
+// 4. seccomp
+// 5. apparmor
+//
+// Privileged mode implies the following specific options are applied:
+// 1. All capabilities are added.
+// 2. Sensitive paths, such as kernel module paths within sysfs, are not masked.
+// 3. Any sysfs and procfs mounts are mounted RW.
+// 4. AppArmor confinement is not applied.
+// 5. Seccomp restrictions are not applied.
+// 6. The device cgroup does not restrict access to any devices.
+// 7. All devices from the host's /dev are available within the container.
+// 8. SELinux restrictions are not applied (e.g. label=disabled).
+&lt;/pre&gt;
+&lt;!-- 通过上面的说明，可以得出如下信息： --&gt;
+&lt;!--  --&gt;
+&lt;!-- * 开启特权模式后，linux capabilities、SELinux、Seccomp、AppArmor 等限制容器内进程权限的功能可能不会再生效。 --&gt;
+&lt;!-- * 开启特权模式时，将： --&gt;
+&lt;!--  --&gt;
+&lt;!-- * 启用所有的 `linux capabilities &lt;https://man7.org/linux/man-pages/man7/capabilities.7.html&gt;`__ --&gt;
+&lt;!-- * 将不再对容器内进程屏蔽主机上的敏感目录，比如 sysfs 下的内核模块文件 --&gt;
+&lt;!-- * 任何的 sysfs 和 procfs 挂载目录将以 ``RW`` 读写模式进行挂载 --&gt;
+&lt;!-- * 不再应用 AppArmor 安全配置 --&gt;
+&lt;!-- * 不再应用 Seccomp 安全约束 --&gt;
+&lt;!-- * cgroup 设备将不再禁止访问任何的设备 --&gt;
+&lt;!-- * 容器将可以操作主机上的 /dev 下的设备 --&gt;
+&lt;!-- * 不再应用 SELinux 安全约束 --&gt;
+&lt;p&gt;下面我们将通过示例说明一下每一项的效果。&lt;/p&gt;
+&lt;div class="section" id="all-capabilities-are-added"&gt;
+&lt;h3 id="hidall-capabilities-are-added"&gt;All capabilities are added&lt;a class="headerlink" href="#hidall-capabilities-are-added" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
+&lt;p&gt;普通模式下容器内进程只可以使用有限的一些 linux capabilities:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+$ docker run --rm -it  r.j3ss.co/amicontained bash
+
+Capabilities:
+    BOUNDING -&amp;gt; chown dac_override fowner fsetid kill setgid setuid setpcap net_bind_service net_raw sys_chroot mknod audit_write setfcap
+&lt;/pre&gt;
+&lt;p&gt;但是，特权模式下的容器内进程可以使用所有的 linux capabilities:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+$ docker run --privileged --rm -it  r.j3ss.co/amicontained bash
+
+Capabilities:
+    BOUNDING -&amp;gt; chown dac_override dac_read_search fowner fsetid kill setgid setuid setpcap linux_immutable net_bind_service net_broadcast net_admin net_raw ipc_lock ipc_owner sys_module sys_rawio sys_chroot sys_ptrace sys_pacct sys_admin sys_boot sys_nice sys_resource sys_time sys_tty_config mknod lease audit_write audit_control setfcap mac_override mac_admin syslog wake_alarm block_suspend audit_read
+&lt;/pre&gt;
+&lt;p&gt;也可以通过手动自定义 &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;--cap-add&lt;/span&gt;&lt;/tt&gt; 参数的方式，在普通模式下实现类似的需求:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+$ docker run --cap-add=ALL  --rm -it  r.j3ss.co/amicontained bash
+Capabilities:
+        BOUNDING -&amp;gt; chown dac_override dac_read_search fowner fsetid kill setgid setuid setpcap linux_immutable net_bind_service net_broadcast net_admin net_raw ipc_lock ipc_owner sys_module sys_rawio sys_chroot sys_ptrace sys_pacct sys_admin sys_boot sys_nice sys_resource sys_time sys_tty_config mknod lease audit_write audit_control setfcap mac_override mac_admin syslog wake_alarm block_suspend audit_read
+&lt;/pre&gt;
+&lt;p&gt;BTW，特权模式下，容器内进程拥有使用所有的 linux capabilities 的能力，但是，
+不表示进程就一定有使用某些 linux capabilities 的权限。比如，如果容器是以非 root 用户启动的，
+就算它是以特权模式启动的容器，也不表示它就能够做一些无权限做的事情:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+$ docker run --rm -it debian:buster chown 65534 /var/log/lastlog
+
+$ docker run -u 65534 --rm -it debian:buster chown 65534 /var/log/lastlog
+chown: changing ownership of '/var/log/lastlog': Operation not permitted
+
+$ docker run --privileged -u 65534 --rm -it debian:buster chown 65534 /var/log/lastlog
+chown: changing ownership of '/var/log/lastlog': Operation not permitted
+&lt;/pre&gt;
+&lt;/div&gt;
+&lt;div class="section" id="sensitive-paths-such-as-kernel-module-paths-within-sysfs-are-not-masked"&gt;
+&lt;h3 id="hidsensitive-paths-such-as-kernel-module-paths-within-sysfs-are-not-masked"&gt;Sensitive paths, such as kernel module paths within sysfs, are not masked.&lt;a class="headerlink" href="#hidsensitive-paths-such-as-kernel-module-paths-within-sysfs-are-not-masked" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
+&lt;p&gt;普通模式下，部分内核模块路径比如 /proc 下的一些目录需要阻止写入、有些又需要允许读写，
+这些文件目录将会以 tmpfs 文件系统的方式挂载到容器中，以实现目录 mask 的需求
+（TODO: 待进一步更新说明）:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+$ docker run --rm -it debian:buster mount |grep '/proc.*tmpfs'
+tmpfs on /proc/acpi type tmpfs (ro,relatime)
+tmpfs on /proc/kcore type tmpfs (rw,nosuid,size=65536k,mode=755)
+tmpfs on /proc/keys type tmpfs (rw,nosuid,size=65536k,mode=755)
+tmpfs on /proc/timer_list type tmpfs (rw,nosuid,size=65536k,mode=755)
+tmpfs on /proc/sched_debug type tmpfs (rw,nosuid,size=65536k,mode=755)
+tmpfs on /proc/scsi type tmpfs (ro,relatime)
+&lt;/pre&gt;
+&lt;p&gt;特权模式下，这些目录将不再以 tmpfs 文件系统的方式挂载:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+$ docker run --privileged --rm -it debian:buster mount |grep '/proc.*tmpfs'
+$
+&lt;/pre&gt;
+&lt;/div&gt;
+&lt;div class="section" id="any-sysfs-and-procfs-mounts-are-mounted-rw"&gt;
+&lt;h3 id="hidany-sysfs-and-procfs-mounts-are-mounted-rw"&gt;Any sysfs and procfs mounts are mounted RW.&lt;a class="headerlink" href="#hidany-sysfs-and-procfs-mounts-are-mounted-rw" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
+&lt;p&gt;普通模式下，部分内核文件系统(sysfs、procfs)会被以只读的方式挂载到容器中，以阻止容器内进程随意修改系统内核:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+$ docker run --rm -it debian:buster mount |grep '(ro'
+sysfs on /sys type sysfs (ro,nosuid,nodev,noexec,relatime)
+cgroup on /sys/fs/cgroup/systemd type cgroup (ro,nosuid,nodev,noexec,relatime,xattr,release_agent=/usr/lib/systemd/systemd-cgroups-agent,name=systemd)
+cgroup on /sys/fs/cgroup/memory type cgroup (ro,nosuid,nodev,noexec,relatime,memory)
+cgroup on /sys/fs/cgroup/rdma type cgroup (ro,nosuid,nodev,noexec,relatime,rdma)
+cgroup on /sys/fs/cgroup/cpuset type cgroup (ro,nosuid,nodev,noexec,relatime,cpuset)
+cgroup on /sys/fs/cgroup/net_cls,net_prio type cgroup (ro,nosuid,nodev,noexec,relatime,net_cls,net_prio)
+cgroup on /sys/fs/cgroup/cpu,cpuacct type cgroup (ro,nosuid,nodev,noexec,relatime,cpu,cpuacct)
+cgroup on /sys/fs/cgroup/hugetlb type cgroup (ro,nosuid,nodev,noexec,relatime,hugetlb)
+cgroup on /sys/fs/cgroup/freezer type cgroup (ro,nosuid,nodev,noexec,relatime,freezer)
+cgroup on /sys/fs/cgroup/blkio type cgroup (ro,nosuid,nodev,noexec,relatime,blkio)
+cgroup on /sys/fs/cgroup/perf_event type cgroup (ro,nosuid,nodev,noexec,relatime,perf_event)
+cgroup on /sys/fs/cgroup/devices type cgroup (ro,nosuid,nodev,noexec,relatime,devices)
+cgroup on /sys/fs/cgroup/pids type cgroup (ro,nosuid,nodev,noexec,relatime,pids)
+proc on /proc/bus type proc (ro,nosuid,nodev,noexec,relatime)
+proc on /proc/fs type proc (ro,nosuid,nodev,noexec,relatime)
+proc on /proc/irq type proc (ro,nosuid,nodev,noexec,relatime)
+proc on /proc/sys type proc (ro,nosuid,nodev,noexec,relatime)
+proc on /proc/sysrq-trigger type proc (ro,nosuid,nodev,noexec,relatime)
+tmpfs on /proc/acpi type tmpfs (ro,relatime)
+tmpfs on /proc/scsi type tmpfs (ro,relatime)
+tmpfs on /sys/firmware type tmpfs (ro,relatime)
+&lt;/pre&gt;
+&lt;p&gt;但是在特权模式下，内核文件系统将不再以只读的方式被挂载:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+$ docker run --privileged --rm -it debian:buster mount |grep '(ro'
+$
+&lt;/pre&gt;
+&lt;/div&gt;
+&lt;div class="section" id="apparmor-confinement-is-not-applied"&gt;
+&lt;h3 id="hidapparmor-confinement-is-not-applied"&gt;AppArmor confinement is not applied.&lt;a class="headerlink" href="#hidapparmor-confinement-is-not-applied" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
+&lt;/div&gt;
+&lt;div class="section" id="seccomp-restrictions-are-not-applied"&gt;
+&lt;h3 id="hidseccomp-restrictions-are-not-applied"&gt;Seccomp restrictions are not applied.&lt;a class="headerlink" href="#hidseccomp-restrictions-are-not-applied" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
+&lt;p&gt;普通模式下，可以通过配置 AppArmor 或 Seccomp 相关安全选项
+（如果未配置的话，容器引擎默认也会启用一些对应的默认配置）
+对容器进行加固:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+$ docker run --rm -it  r.j3ss.co/amicontained bash
+AppArmor Profile: unconfined
+Seccomp: filtering
+Blocked Syscalls (63):
+        MSGRCV SYSLOG SETPGID SETSID USELIB USTAT SYSFS VHANGUP PIVOT_ROOT _SYSCTL ACCT SETTIMEOFDAY MOUNT UMOUNT2 SWAPON SWAPOFF REBOOT SETHOSTNAME SETDOMAINNAME IOPL IOPERM CREATE_MODULE INIT_MODULE DELETE_MODULE GET_KERNEL_SYMS QUERY_MODULE QUOTACTL NFSSERVCTL GETPMSG PUTPMSG AFS_SYSCALL TUXCALL SECURITY LOOKUP_DCOOKIE CLOCK_SETTIME VSERVER MBIND SET_MEMPOLICY GET_MEMPOLICY KEXEC_LOAD ADD_KEY REQUEST_KEY KEYCTL MIGRATE_PAGES UNSHARE MOVE_PAGES PERF_EVENT_OPEN FANOTIFY_INIT NAME_TO_HANDLE_AT OPEN_BY_HANDLE_AT SETNS PROCESS_VM_READV PROCESS_VM_WRITEV KCMP FINIT_MODULE KEXEC_FILE_LOAD BPF USERFAULTFD PREADV2 PWRITEV2 PKEY_MPROTECT PKEY_ALLOC PKEY_FREE
+&lt;/pre&gt;
+&lt;p&gt;特权模式下，这些 AppArmor 或 Seccomp 相关配置将不再生效:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+$ docker run --privileged --rm -it  r.j3ss.co/amicontained bash
+AppArmor Profile: unconfined
+Seccomp: disabled
+&lt;/pre&gt;
+&lt;p&gt;普通模式下也可以通过对应的安全选项来禁用 AppArmor 或 Seccomp 特性。&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class="section" id="the-device-cgroup-does-not-restrict-access-to-any-devices"&gt;
+&lt;h3 id="hidthe-device-cgroup-does-not-restrict-access-to-any-devices"&gt;The device cgroup does not restrict access to any devices.&lt;a class="headerlink" href="#hidthe-device-cgroup-does-not-restrict-access-to-any-devices" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
+&lt;p&gt;默认模式下，只能以只读模式操作 cgroup&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+$ docker run --rm -it debian:buster mount | grep 'cgroup'
+tmpfs on /sys/fs/cgroup type tmpfs (rw,nosuid,nodev,noexec,relatime,mode=755)
+cgroup on /sys/fs/cgroup/systemd type cgroup (ro,nosuid,nodev,noexec,relatime,xattr,release_agent=/usr/lib/systemd/systemd-cgroups-agent,name=systemd)
+cgroup on /sys/fs/cgroup/memory type cgroup (ro,nosuid,nodev,noexec,relatime,memory)
+cgroup on /sys/fs/cgroup/rdma type cgroup (ro,nosuid,nodev,noexec,relatime,rdma)
+cgroup on /sys/fs/cgroup/cpuset type cgroup (ro,nosuid,nodev,noexec,relatime,cpuset)
+cgroup on /sys/fs/cgroup/net_cls,net_prio type cgroup (ro,nosuid,nodev,noexec,relatime,net_cls,net_prio)
+cgroup on /sys/fs/cgroup/cpu,cpuacct type cgroup (ro,nosuid,nodev,noexec,relatime,cpu,cpuacct)
+cgroup on /sys/fs/cgroup/hugetlb type cgroup (ro,nosuid,nodev,noexec,relatime,hugetlb)
+cgroup on /sys/fs/cgroup/freezer type cgroup (ro,nosuid,nodev,noexec,relatime,freezer)
+cgroup on /sys/fs/cgroup/blkio type cgroup (ro,nosuid,nodev,noexec,relatime,blkio)
+cgroup on /sys/fs/cgroup/perf_event type cgroup (ro,nosuid,nodev,noexec,relatime,perf_event)
+cgroup on /sys/fs/cgroup/devices type cgroup (ro,nosuid,nodev,noexec,relatime,devices)
+cgroup on /sys/fs/cgroup/pids type cgroup (ro,nosuid,nodev,noexec,relatime,pids)
+&lt;/pre&gt;
+&lt;p&gt;特权模式下，将可以对 cgroup 进行读写操作:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+$ docker run --privileged --rm -it debian:buster mount | grep 'cgroup'
+tmpfs on /sys/fs/cgroup type tmpfs (rw,nosuid,nodev,noexec,relatime,mode=755)
+cgroup on /sys/fs/cgroup/systemd type cgroup (rw,nosuid,nodev,noexec,relatime,xattr,release_agent=/usr/lib/systemd/systemd-cgroups-agent,name=systemd)
+cgroup on /sys/fs/cgroup/memory type cgroup (rw,nosuid,nodev,noexec,relatime,memory)
+cgroup on /sys/fs/cgroup/rdma type cgroup (rw,nosuid,nodev,noexec,relatime,rdma)
+cgroup on /sys/fs/cgroup/cpuset type cgroup (rw,nosuid,nodev,noexec,relatime,cpuset)
+cgroup on /sys/fs/cgroup/net_cls,net_prio type cgroup (rw,nosuid,nodev,noexec,relatime,net_cls,net_prio)
+cgroup on /sys/fs/cgroup/cpu,cpuacct type cgroup (rw,nosuid,nodev,noexec,relatime,cpu,cpuacct)
+cgroup on /sys/fs/cgroup/hugetlb type cgroup (rw,nosuid,nodev,noexec,relatime,hugetlb)
+cgroup on /sys/fs/cgroup/freezer type cgroup (rw,nosuid,nodev,noexec,relatime,freezer)
+cgroup on /sys/fs/cgroup/blkio type cgroup (rw,nosuid,nodev,noexec,relatime,blkio)
+cgroup on /sys/fs/cgroup/perf_event type cgroup (rw,nosuid,nodev,noexec,relatime,perf_event)
+cgroup on /sys/fs/cgroup/devices type cgroup (rw,nosuid,nodev,noexec,relatime,devices)
+cgroup on /sys/fs/cgroup/pids type cgroup (rw,nosuid,nodev,noexec,relatime,pids)
+&lt;/pre&gt;
+&lt;/div&gt;
+&lt;div class="section" id="all-devices-from-the-host-s-dev-are-available-within-the-container"&gt;
+&lt;h3 id="hidall-devices-from-the-host-s-dev-are-available-within-the-container"&gt;All devices from the host's /dev are available within the container.&lt;a class="headerlink" href="#hidall-devices-from-the-host-s-dev-are-available-within-the-container" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
+&lt;p&gt;普通模式下，容器内 /dev 目录下看不到节点 /dev 目录下特有的 devices&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+# docker run --rm -it debian:buster ls /dev
+console  fd    mqueue  ptmx  random  stderr  stdout  urandom
+core     full  null    pts   shm     stdin   tty     zero
+&lt;/pre&gt;
+&lt;p&gt;特权模式下，容器内的 /dev 目录会包含这些来自节点 /dev 目录下的那些内容:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+$ docker run --privileged --rm -it debian:buster ls /dev
+autofs           mapper              stdin   tty25  tty44  tty63    vcsa1
+btrfs-control    mcelog              stdout  tty26  tty45  tty7     vcsa2
+bus              mem                 tty     tty27  tty46  tty8     vcsa3
+console          memory_bandwidth    tty0    tty28  tty47  tty9     vcsa4
+core             mqueue              tty1    tty29  tty48  ttyS0    vcsa5
+cpu              net                 tty10   tty3   tty49  ttyS1    vcsa6
+cpu_dma_latency  network_latency     tty11   tty30  tty5   ttyS2    vcsu
+cuse             network_throughput  tty12   tty31  tty50  ttyS3    vcsu1
+dri              null                tty13   tty32  tty51  uhid     vcsu2
+fb0              nvram               tty14   tty33  tty52  uinput   vcsu3
+fd               port                tty15   tty34  tty53  urandom  vcsu4
+full             ppp                 tty16   tty35  tty54  usbmon0  vcsu5
+fuse             ptmx                tty17   tty36  tty55  usbmon1  vcsu6
+hidraw0          ptp0                tty18   tty37  tty56  vcs      vda
+hpet             pts                 tty19   tty38  tty57  vcs1     vda1
+hwrng            random              tty2    tty39  tty58  vcs2     vfio
+infiniband       raw                 tty20   tty4   tty59  vcs3     vga_arbiter
+input            rtc0                tty21   tty40  tty6   vcs4     vhost-net
+kmsg             shm                 tty22   tty41  tty60  vcs5     vhost-vsock
+lightnvm         snapshot            tty23   tty42  tty61  vcs6     zero
+loop-control     stderr              tty24   tty43  tty62  vcsa
+&lt;/pre&gt;
+&lt;/div&gt;
+&lt;div class="section" id="selinux-restrictions-are-not-applied-e-g-label-disabled"&gt;
+&lt;h3 id="hidselinux-restrictions-are-not-applied-e-g-label-disabled"&gt;SELinux restrictions are not applied (e.g. label=disabled).&lt;a class="headerlink" href="#hidselinux-restrictions-are-not-applied-e-g-label-disabled" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
+&lt;p&gt;特权模式下，SELinux 相关的安全加固配置将被禁用。&lt;/p&gt;
+&lt;p&gt;普通模式下也可以通过对应的安全选项来禁用 SELn 特性。&lt;/p&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;div class="section" id="id4"&gt;
+&lt;h2 id="hidid4"&gt;参考资料&lt;a class="headerlink" href="#hidid4" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;ul class="simple"&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://github.com/kubernetes/cri-api"&gt;kubernetes/cri-api: Container Runtime Interface (CRI) – a plugin interface which enables kubelet to use a wide variety of container runtimes.&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://man7.org/linux/man-pages/man7/capabilities.7.html"&gt;capabilities(7) - Linux manual page&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://docs.docker.com/engine/reference/run/#runtime-privilege-and-linux-capabilities"&gt;Docker run reference | Docker Documentation&lt;/a&gt;&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/div&gt;
+</description><dc:creator xmlns:dc="http://purl.org/dc/elements/1.1/">mozillazg</dc:creator><pubDate>Sun, 21 Nov 2021 00:00:00 +0000</pubDate><guid>tag:mozillazg.com,2021-11-21:2021/11/docker-container-difference-between-privileged-mode-and-non-privileged-mode.html</guid><category>privileged</category><category>security</category></item><item><title>通过向 DNS 服务发送 SRV 查询请求获取 kubernetes 集群内所有 Service 信息</title><link>https://mozillazg.com/2021/11/security-use-dns-srv-to-get-all-service-info.html</link><description>&lt;p&gt;coredns 的 &lt;a class="reference external" href="https://github.com/coredns/coredns/blob/v1.8.6/plugin/kubernetes/README.md#wildcards"&gt;Wildcards&lt;/a&gt; 功能能够让我们通过一个简单的 SRV 查询就可以获取到整个 kubernetes 集群内的所有 service 信息。&lt;/p&gt;
+&lt;p&gt;获取 service 和对应的 service ip 和端口信息（其中 &lt;tt class="docutils literal"&gt;*&lt;/tt&gt; 可以替换为 &lt;tt class="docutils literal"&gt;any&lt;/tt&gt; ）：&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+$ dig srv *.*.svc.cluster.local
+
+; &amp;lt;&amp;lt;&amp;gt;&amp;gt; DiG 9.16.20 &amp;lt;&amp;lt;&amp;gt;&amp;gt; srv *.*.svc.cluster.local
+;; global options: +cmd
+;; Got answer:
+;; WARNING: .local is reserved for Multicast DNS
+;; You are currently testing what happens when an mDNS query is leaked to DNS
+;; -&amp;gt;&amp;gt;HEADER&amp;lt;&amp;lt;- opcode: QUERY, status: NOERROR, id: 41570
+;; flags: qr aa rd; QUERY: 1, ANSWER: 4, AUTHORITY: 0, ADDITIONAL: 4
+;; WARNING: recursion requested but not available
+
+;; OPT PSEUDOSECTION:
+; EDNS: version: 0, flags:; udp: 4096
+; COOKIE: 54380f3a1b0cb590 (echoed)
+;; QUESTION SECTION:
+;*.*.svc.cluster.local.             IN      SRV
+
+;; ANSWER SECTION:
+*.*.svc.cluster.local.      30      IN      SRV     0 20 443 kubernetes.default.svc.cluster.local.
+*.*.svc.cluster.local.      30      IN      SRV     0 20 53 kube-dns.kube-system.svc.cluster.local.
+*.*.svc.cluster.local.      30      IN      SRV     0 20 9153 kube-dns.kube-system.svc.cluster.local.
+*.*.svc.cluster.local.      30      IN      SRV     0 20 80 my-service.ns-1.svc.cluster.local.
+
+;; ADDITIONAL SECTION:
+my-service.ns-1.svc.cluster.local. 30 IN A  10.96.146.96
+kube-dns.kube-system.svc.cluster.local.     30 IN A 10.96.0.10
+kubernetes.default.svc.cluster.local. 30 IN A       10.96.0.1
+
+;; Query time: 2 msec
+;; SERVER: 10.96.0.10#53(10.96.0.10)
+;; WHEN: Sun Nov 14 07:08:27 UTC 2021
+;; MSG SIZE  rcvd: 526
+&lt;/pre&gt;
+&lt;p&gt;上面的 &lt;tt class="docutils literal"&gt;0 20 53 &lt;span class="pre"&gt;kube-dns.kube-system.svc.cluster.local.&lt;/span&gt;&lt;/tt&gt; 记录中，
+&lt;tt class="docutils literal"&gt;53&lt;/tt&gt; 是端口信息， &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;kube-dns.kube-system.svc.cluster.local&lt;/span&gt;&lt;/tt&gt; 是
+service 的域名其中包含了 service 名称、namspace 等信息:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+$ kubectl -n kube-system get svc kube-dns
+NAME       TYPE        CLUSTER-IP   EXTERNAL-IP   PORT(S)                  AGE
+kube-dns   ClusterIP   10.96.0.10   &amp;lt;none&amp;gt;        53/UDP,53/TCP,9153/TCP   92m
+&lt;/pre&gt;
+&lt;p&gt;获取 service 以及对应的 endpoints 信息:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+$ dig srv *.*.*.svc.cluster.local
+
+; &amp;lt;&amp;lt;&amp;gt;&amp;gt; DiG 9.16.20 &amp;lt;&amp;lt;&amp;gt;&amp;gt; srv *.*.*.svc.cluster.local
+;; global options: +cmd
+;; Got answer:
+;; WARNING: .local is reserved for Multicast DNS
+;; You are currently testing what happens when an mDNS query is leaked to DNS
+;; -&amp;gt;&amp;gt;HEADER&amp;lt;&amp;lt;- opcode: QUERY, status: NOERROR, id: 55650
+;; flags: qr aa rd; QUERY: 1, ANSWER: 5, AUTHORITY: 0, ADDITIONAL: 4
+;; WARNING: recursion requested but not available
+
+;; OPT PSEUDOSECTION:
+; EDNS: version: 0, flags:; udp: 4096
+; COOKIE: 8d5836f2b43e3675 (echoed)
+;; QUESTION SECTION:
+;*.*.*.svc.cluster.local.   IN      SRV
+
+;; ANSWER SECTION:
+*.*.*.svc.cluster.local. 30 IN      SRV     0 14 6443 172-18-0-3.kubernetes.default.svc.cluster.local.
+*.*.*.svc.cluster.local. 30 IN      SRV     0 14 53 10-244-0-3.kube-dns.kube-system.svc.cluster.local.
+*.*.*.svc.cluster.local. 30 IN      SRV     0 14 9153 10-244-0-3.kube-dns.kube-system.svc.cluster.local.
+*.*.*.svc.cluster.local. 30 IN      SRV     0 14 53 10-244-0-4.kube-dns.kube-system.svc.cluster.local.
+*.*.*.svc.cluster.local. 30 IN      SRV     0 14 9153 10-244-0-4.kube-dns.kube-system.svc.cluster.local.
+
+;; ADDITIONAL SECTION:
+10-244-0-4.kube-dns.kube-system.svc.cluster.local. 30 IN A 10.244.0.4
+10-244-0-3.kube-dns.kube-system.svc.cluster.local. 30 IN A 10.244.0.3
+172-18-0-3.kubernetes.default.svc.cluster.local. 30 IN A 172.18.0.3
+
+;; Query time: 2 msec
+;; SERVER: 10.96.0.10#53(10.96.0.10)
+;; WHEN: Sun Nov 14 07:09:38 UTC 2021
+;; MSG SIZE  rcvd: 715
+&lt;/pre&gt;
+&lt;p&gt;上面的 &lt;tt class="docutils literal"&gt;0 14 53 &lt;span class="pre"&gt;10-244-0-3.kube-dns.kube-system.svc.cluster.local.&lt;/span&gt;&lt;/tt&gt; 记录中
+&lt;tt class="docutils literal"&gt;53&lt;/tt&gt; 是其中一个 endpoint 的端口信息， &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;10-244-0-3&lt;/span&gt;&lt;/tt&gt; 是 endpoint 的 ip 地址:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+$ kubectl -n kube-system describe svc kube-dns
+Name:              kube-dns
+Namespace:         kube-system
+...
+IP:                10.96.0.10
+Port:              dns  53/UDP
+TargetPort:        53/UDP
+Endpoints:         10.244.0.3:53,10.244.0.4:53
+Port:              dns-tcp  53/TCP
+TargetPort:        53/TCP
+Endpoints:         10.244.0.3:53,10.244.0.4:53
+Port:              metrics  9153/TCP
+TargetPort:        9153/TCP
+Endpoints:         10.244.0.3:9153,10.244.0.4:9153
+...
+&lt;/pre&gt;
+&lt;div class="section" id="id1"&gt;
+&lt;h2 id="hidid1"&gt;参考资料&lt;a class="headerlink" href="#hidid1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;ul class="simple"&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://github.com/coredns/coredns/blob/v1.8.6/plugin/kubernetes/README.md#wildcards"&gt;coredns/README.md at v1.8.6 · coredns/coredns&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://kubernetes.io/docs/concepts/services-networking/dns-pod-service/"&gt;DNS for Services and Pods | Kubernetes&lt;/a&gt;&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/div&gt;
+</description><dc:creator xmlns:dc="http://purl.org/dc/elements/1.1/">mozillazg</dc:creator><pubDate>Sun, 14 Nov 2021 00:00:00 +0000</pubDate><guid>tag:mozillazg.com,2021-11-14:2021/11/security-use-dns-srv-to-get-all-service-info.html</guid><category>kubernetes</category><category>coredns</category><category>dns</category></item><item><title>从编译后的二进制可执行文件中解析 Go 项目的依赖包信息</title><link>https://mozillazg.com/2021/10/go-find-package-info-from-binary-file.html</link><description>&lt;p&gt;本文介绍从编译后的二进制可执行文件中解析原 Go 项目中的依赖包信息的一些方法，
 解决类似：接手一个老项目但是这个老项目中又依赖了另一个老项目的二进制可执行文件，
 导致无法知道这个二进制可执行文件具体是其对应源代码仓库的哪个版本的代码编译出来的尴尬情况，
 通过依赖包信息间接定位源码版本（无法完全实现这个需求，还需要结合代码仓库变更历史等手段）。&lt;/p&gt;
@@ -2004,361 +2485,4 @@ Output: []
 &lt;li&gt;&lt;a class="reference external" href="https://leetcode.com/problems/serialize-and-deserialize-bst/"&gt;https://leetcode.com/problems/serialize-and-deserialize-bst/&lt;/a&gt;&lt;/li&gt;
 &lt;/ul&gt;
 &lt;/div&gt;
-</description><dc:creator xmlns:dc="http://purl.org/dc/elements/1.1/">mozillazg</dc:creator><pubDate>Tue, 16 Feb 2021 00:00:00 +0000</pubDate><guid>tag:mozillazg.com,2021-02-16:2021/02/leetcode-449-serialize-and-deserialize-bst.html</guid><category>BST</category><category>二叉搜索树</category><category>Tree</category><category>树</category></item><item><title>LeetCode: 235. Lowest Common Ancestor of a Binary Search Tree</title><link>https://mozillazg.com/2021/02/leetcode-235-lowest-common-ancestor-of-a-binary-search-tree.html</link><description>&lt;div class="section" id="id1"&gt;
-&lt;h2 id="hidid1"&gt;题目&lt;a class="headerlink" href="#hidid1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
-&lt;p&gt;原题地址：&lt;a class="reference external" href="https://leetcode.com/problems/lowest-common-ancestor-of-a-binary-search-tree/"&gt;https://leetcode.com/problems/lowest-common-ancestor-of-a-binary-search-tree/&lt;/a&gt;&lt;/p&gt;
-&lt;p&gt;Given a binary search tree (BST), find the lowest common ancestor (LCA) of two given nodes in the BST.&lt;/p&gt;
-&lt;p&gt;According to &lt;a class="reference external" href="https://en.wikipedia.org/wiki/Lowest_common_ancestor"&gt;the definition of LCA on Wikipedia&lt;/a&gt; : “The lowest common ancestor is defined between two nodes p and q as the lowest node in T that has both p and q as descendants (where we allow a node to be a descendant of itself).”&lt;/p&gt;
-&lt;p&gt;Example 1:&lt;/p&gt;
-&lt;p&gt;&lt;img alt="image1" src="/static/images/leetcode/binarysearchtree_improved.png" /&gt;&lt;/p&gt;
-&lt;blockquote&gt;
-&lt;/blockquote&gt;
-&lt;pre class="literal-block"&gt;
-Input: root = [6,2,8,0,4,7,9,null,null,3,5], p = 2, q = 8
-Output: 6
-Explanation: The LCA of nodes 2 and 8 is 6.
-&lt;/pre&gt;
-&lt;p&gt;Example 2:&lt;/p&gt;
-&lt;p&gt;&lt;img alt="image2" src="/static/images/leetcode/binarysearchtree_improved.png" /&gt;&lt;/p&gt;
-&lt;blockquote&gt;
-&lt;/blockquote&gt;
-&lt;pre class="literal-block"&gt;
-Input: root = [6,2,8,0,4,7,9,null,null,3,5], p = 2, q = 4
-Output: 2
-
-Explanation: The LCA of nodes 2 and 4 is 2, since a node can be a descendant of itself according to the LCA definition.
-&lt;/pre&gt;
-&lt;p&gt;Example 3:&lt;/p&gt;
-&lt;pre class="literal-block"&gt;
-Input: root = [2,1], p = 2, q = 1
-Output: 2
-&lt;/pre&gt;
-&lt;p&gt;Constraints:&lt;/p&gt;
-&lt;ul class="simple"&gt;
-&lt;li&gt;The number of nodes in the tree is in the range &lt;tt class="docutils literal"&gt;[2, 10^5]&lt;/tt&gt;.&lt;/li&gt;
-&lt;li&gt;&lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;-10^9&lt;/span&gt; &amp;lt;= Node.val &amp;lt;= 10^9&lt;/tt&gt;&lt;/li&gt;
-&lt;li&gt;All Node.val are unique.&lt;/li&gt;
-&lt;li&gt;&lt;tt class="docutils literal"&gt;p != q&lt;/tt&gt;&lt;/li&gt;
-&lt;li&gt;&lt;tt class="docutils literal"&gt;p&lt;/tt&gt; and &lt;tt class="docutils literal"&gt;q&lt;/tt&gt; will exist in the BST.&lt;/li&gt;
-&lt;/ul&gt;
-&lt;p&gt;题目大意是，求二叉搜索树中指定两个节点的最近共同祖先。&lt;/p&gt;
-&lt;/div&gt;
-&lt;div class="section" id="id2"&gt;
-&lt;h2 id="hidid2"&gt;解法&lt;a class="headerlink" href="#hidid2" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
-&lt;p&gt;遍历 BST，如果当前 root 节点：&lt;/p&gt;
-&lt;ul class="simple"&gt;
-&lt;li&gt;为 &lt;tt class="docutils literal"&gt;None&lt;/tt&gt; ，则返回 &lt;tt class="docutils literal"&gt;None&lt;/tt&gt;&lt;/li&gt;
-&lt;li&gt;节点值等于 p 或 q 的值，则当前节点即为要找的 LCA，因为当前节点是 p 或 q 其中一个节点，不会有比它更近的共同祖先了。&lt;/li&gt;
-&lt;li&gt;节点值比 p 和 q 的值都大，根据 BST 的特性，改为从当前节点的左子数中查找&lt;/li&gt;
-&lt;li&gt;节点值比 p 和 q 的值都小，根据 BST 的特性，改为从当前节点的右子数中查找&lt;/li&gt;
-&lt;li&gt;节点值比其中一个大，比另一个小，根据 BST 的特性，p 和 q 分别分布在当前节点的左右子数中，
-当前节点即为要找的 LCA。&lt;/li&gt;
-&lt;/ul&gt;
-&lt;p&gt;这个思路的 Python 代码类似下面这样：&lt;/p&gt;
-&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="c1"&gt;# Definition for a binary tree node.&lt;/span&gt;
-&lt;span class="c1"&gt;# class TreeNode(object):&lt;/span&gt;
-&lt;span class="c1"&gt;#     def __init__(self, x):&lt;/span&gt;
-&lt;span class="c1"&gt;#         self.val = x&lt;/span&gt;
-&lt;span class="c1"&gt;#         self.left = None&lt;/span&gt;
-&lt;span class="c1"&gt;#         self.right = None&lt;/span&gt;
-
-&lt;span class="k"&gt;class&lt;/span&gt; &lt;span class="nc"&gt;Solution&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="nb"&gt;object&lt;/span&gt;&lt;span class="p"&gt;):&lt;/span&gt;
-    &lt;span class="k"&gt;def&lt;/span&gt; &lt;span class="nf"&gt;lowestCommonAncestor&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="bp"&gt;self&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;root&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;p&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;q&lt;/span&gt;&lt;span class="p"&gt;):&lt;/span&gt;
-        &lt;span class="k"&gt;if&lt;/span&gt; &lt;span class="n"&gt;root&lt;/span&gt; &lt;span class="ow"&gt;is&lt;/span&gt; &lt;span class="bp"&gt;None&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;
-            &lt;span class="k"&gt;return&lt;/span&gt; &lt;span class="bp"&gt;None&lt;/span&gt;
-
-        &lt;span class="k"&gt;if&lt;/span&gt; &lt;span class="n"&gt;root&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;val&lt;/span&gt; &lt;span class="o"&gt;==&lt;/span&gt; &lt;span class="n"&gt;p&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;val&lt;/span&gt; &lt;span class="ow"&gt;or&lt;/span&gt; &lt;span class="n"&gt;root&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;val&lt;/span&gt; &lt;span class="o"&gt;==&lt;/span&gt; &lt;span class="n"&gt;q&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;val&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;
-            &lt;span class="k"&gt;return&lt;/span&gt; &lt;span class="n"&gt;root&lt;/span&gt;
-
-        &lt;span class="k"&gt;if&lt;/span&gt; &lt;span class="n"&gt;root&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;val&lt;/span&gt; &lt;span class="o"&gt;&amp;gt;&lt;/span&gt; &lt;span class="n"&gt;p&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;val&lt;/span&gt; &lt;span class="ow"&gt;and&lt;/span&gt; &lt;span class="n"&gt;root&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;val&lt;/span&gt; &lt;span class="o"&gt;&amp;gt;&lt;/span&gt; &lt;span class="n"&gt;q&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;val&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;
-            &lt;span class="k"&gt;return&lt;/span&gt; &lt;span class="bp"&gt;self&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;lowestCommonAncestor&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;root&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;left&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;p&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;q&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
-        &lt;span class="k"&gt;if&lt;/span&gt; &lt;span class="n"&gt;root&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;val&lt;/span&gt; &lt;span class="o"&gt;&amp;lt;&lt;/span&gt; &lt;span class="n"&gt;p&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;val&lt;/span&gt; &lt;span class="ow"&gt;and&lt;/span&gt; &lt;span class="n"&gt;root&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;val&lt;/span&gt; &lt;span class="o"&gt;&amp;lt;&lt;/span&gt; &lt;span class="n"&gt;q&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;val&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;
-            &lt;span class="k"&gt;return&lt;/span&gt; &lt;span class="bp"&gt;self&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;lowestCommonAncestor&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;root&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;right&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;p&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;q&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
-
-        &lt;span class="k"&gt;return&lt;/span&gt; &lt;span class="n"&gt;root&lt;/span&gt;
-&lt;/pre&gt;&lt;/div&gt;
-&lt;/div&gt;
-&lt;div class="section" id="id3"&gt;
-&lt;h2 id="hidid3"&gt;参考资料&lt;a class="headerlink" href="#hidid3" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
-&lt;ul class="simple"&gt;
-&lt;li&gt;&lt;a class="reference external" href="https://leetcode.com/problems/lowest-common-ancestor-of-a-binary-search-tree/"&gt;https://leetcode.com/problems/lowest-common-ancestor-of-a-binary-search-tree/&lt;/a&gt;&lt;/li&gt;
-&lt;/ul&gt;
-&lt;/div&gt;
-</description><dc:creator xmlns:dc="http://purl.org/dc/elements/1.1/">mozillazg</dc:creator><pubDate>Sun, 14 Feb 2021 00:00:00 +0000</pubDate><guid>tag:mozillazg.com,2021-02-14:2021/02/leetcode-235-lowest-common-ancestor-of-a-binary-search-tree.html</guid><category>BST</category><category>二叉搜索树</category><category>Tree</category><category>树</category></item><item><title>LeetCode: 236. Lowest Common Ancestor of a Binary Tree</title><link>https://mozillazg.com/2021/02/leetcode-236-owest-common-ancestor-of-a-binary-tree.html</link><description>&lt;div class="section" id="id1"&gt;
-&lt;h2 id="hidid1"&gt;题目&lt;a class="headerlink" href="#hidid1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
-&lt;p&gt;原题地址：&lt;a class="reference external" href="https://leetcode.com/problems/lowest-common-ancestor-of-a-binary-tree/"&gt;https://leetcode.com/problems/lowest-common-ancestor-of-a-binary-tree/&lt;/a&gt;&lt;/p&gt;
-&lt;p&gt;Given a binary tree, find the lowest common ancestor (LCA) of two given nodes in the tree.&lt;/p&gt;
-&lt;p&gt;According to &lt;a class="reference external" href="https://en.wikipedia.org/wiki/Lowest_common_ancestor"&gt;the definition of LCA on Wikipedia&lt;/a&gt; : “The lowest common ancestor is defined between two nodes p and q as the lowest node in T that has both p and q as descendants (where we allow a node to be a descendant of itself).”&lt;/p&gt;
-&lt;p&gt;Example 1:&lt;/p&gt;
-&lt;p&gt;&lt;img alt="image1" src="/static/images/leetcode/binarytree.png" /&gt;&lt;/p&gt;
-&lt;blockquote&gt;
-&lt;/blockquote&gt;
-&lt;pre class="literal-block"&gt;
-Input: root = [3,5,1,6,2,0,8,null,null,7,4], p = 5, q = 1
-Output: 3
-Explanation: The LCA of nodes 5 and 1 is 3.
-&lt;/pre&gt;
-&lt;p&gt;Example 2:&lt;/p&gt;
-&lt;p&gt;&lt;img alt="image2" src="/static/images/leetcode/binarytree.png" /&gt;&lt;/p&gt;
-&lt;blockquote&gt;
-&lt;/blockquote&gt;
-&lt;pre class="literal-block"&gt;
-Input: root = [3,5,1,6,2,0,8,null,null,7,4], p = 5, q = 4
-Output: 5
-Explanation: The LCA of nodes 5 and 4 is 5, since a node can be a descendant of itself according to the LCA definition.
-&lt;/pre&gt;
-&lt;p&gt;Example 3:&lt;/p&gt;
-&lt;pre class="literal-block"&gt;
-Input: root = [1,2], p = 1, q = 2
-Output: 1
-&lt;/pre&gt;
-&lt;p&gt;Constraints:&lt;/p&gt;
-&lt;ul class="simple"&gt;
-&lt;li&gt;The number of nodes in the tree is in the range &lt;tt class="docutils literal"&gt;[2, 10^5]&lt;/tt&gt;.&lt;/li&gt;
-&lt;li&gt;&lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;-10^9&lt;/span&gt; &amp;lt;= Node.val &amp;lt;= 10^9&lt;/tt&gt;&lt;/li&gt;
-&lt;li&gt;All Node.val are unique.&lt;/li&gt;
-&lt;li&gt;&lt;tt class="docutils literal"&gt;p != q&lt;/tt&gt;&lt;/li&gt;
-&lt;li&gt;&lt;tt class="docutils literal"&gt;p&lt;/tt&gt; and &lt;tt class="docutils literal"&gt;q&lt;/tt&gt; will exist in the tree.&lt;/li&gt;
-&lt;/ul&gt;
-&lt;p&gt;题目大意是，求二叉树中指定两个节点的最近共同祖先。&lt;/p&gt;
-&lt;/div&gt;
-&lt;div class="section" id="id2"&gt;
-&lt;h2 id="hidid2"&gt;解法&lt;a class="headerlink" href="#hidid2" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
-&lt;p&gt;遍历二叉树：&lt;/p&gt;
-&lt;ul class="simple"&gt;
-&lt;li&gt;如果当前 root 节点为 &lt;tt class="docutils literal"&gt;None&lt;/tt&gt; ，则返回 &lt;tt class="docutils literal"&gt;None&lt;/tt&gt;&lt;/li&gt;
-&lt;li&gt;如果当前 root 节点节点值等于 p 或 q 的值，则当前节点即为要找的 LCA，因为当前节点是 p 或 q
-其中一个节点，不会有比它更近的共同祖先了。&lt;/li&gt;
-&lt;li&gt;在左子树中查找，假设结果为 left&lt;/li&gt;
-&lt;li&gt;在右子树中查找，假设结果为 right&lt;/li&gt;
-&lt;li&gt;如果 left 和 right 都不为 None，说明 left 和 right 刚好就是 p 和 q 这两个节点，
-那么当前 root 节点即为要找的 LCA&lt;/li&gt;
-&lt;li&gt;否则的话，left 和 right 中哪个不为 None，哪个就是要找的 LCA&lt;/li&gt;
-&lt;/ul&gt;
-&lt;p&gt;这个思路的 Python 代码类似下面这样：&lt;/p&gt;
-&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="c1"&gt;# Definition for a binary tree node.&lt;/span&gt;
-&lt;span class="c1"&gt;# class TreeNode(object):&lt;/span&gt;
-&lt;span class="c1"&gt;#     def __init__(self, x):&lt;/span&gt;
-&lt;span class="c1"&gt;#         self.val = x&lt;/span&gt;
-&lt;span class="c1"&gt;#         self.left = None&lt;/span&gt;
-&lt;span class="c1"&gt;#         self.right = None&lt;/span&gt;
-
-&lt;span class="k"&gt;class&lt;/span&gt; &lt;span class="nc"&gt;Solution&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="nb"&gt;object&lt;/span&gt;&lt;span class="p"&gt;):&lt;/span&gt;
-    &lt;span class="k"&gt;def&lt;/span&gt; &lt;span class="nf"&gt;lowestCommonAncestor&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="bp"&gt;self&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;root&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;p&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;q&lt;/span&gt;&lt;span class="p"&gt;):&lt;/span&gt;
-        &lt;span class="k"&gt;if&lt;/span&gt; &lt;span class="n"&gt;root&lt;/span&gt; &lt;span class="ow"&gt;is&lt;/span&gt; &lt;span class="bp"&gt;None&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;
-            &lt;span class="k"&gt;return&lt;/span&gt; &lt;span class="bp"&gt;None&lt;/span&gt;
-
-        &lt;span class="k"&gt;if&lt;/span&gt; &lt;span class="n"&gt;root&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;val&lt;/span&gt; &lt;span class="o"&gt;==&lt;/span&gt; &lt;span class="n"&gt;p&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;val&lt;/span&gt; &lt;span class="ow"&gt;or&lt;/span&gt; &lt;span class="n"&gt;root&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;val&lt;/span&gt; &lt;span class="o"&gt;==&lt;/span&gt; &lt;span class="n"&gt;q&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;val&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;
-            &lt;span class="k"&gt;return&lt;/span&gt; &lt;span class="n"&gt;root&lt;/span&gt;
-
-        &lt;span class="n"&gt;left&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="bp"&gt;self&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;lowestCommonAncestor&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;root&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;left&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;p&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;q&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
-        &lt;span class="n"&gt;right&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="bp"&gt;self&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;lowestCommonAncestor&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;root&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;right&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;p&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;q&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
-
-        &lt;span class="k"&gt;if&lt;/span&gt; &lt;span class="n"&gt;left&lt;/span&gt; &lt;span class="ow"&gt;is&lt;/span&gt; &lt;span class="ow"&gt;not&lt;/span&gt; &lt;span class="bp"&gt;None&lt;/span&gt; &lt;span class="ow"&gt;and&lt;/span&gt; &lt;span class="n"&gt;right&lt;/span&gt; &lt;span class="ow"&gt;is&lt;/span&gt; &lt;span class="ow"&gt;not&lt;/span&gt; &lt;span class="bp"&gt;None&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;
-            &lt;span class="k"&gt;return&lt;/span&gt; &lt;span class="n"&gt;root&lt;/span&gt;
-
-        &lt;span class="k"&gt;if&lt;/span&gt; &lt;span class="n"&gt;left&lt;/span&gt; &lt;span class="ow"&gt;is&lt;/span&gt; &lt;span class="ow"&gt;not&lt;/span&gt; &lt;span class="bp"&gt;None&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;
-            &lt;span class="k"&gt;return&lt;/span&gt; &lt;span class="n"&gt;left&lt;/span&gt;
-        &lt;span class="k"&gt;if&lt;/span&gt; &lt;span class="n"&gt;right&lt;/span&gt; &lt;span class="ow"&gt;is&lt;/span&gt; &lt;span class="ow"&gt;not&lt;/span&gt; &lt;span class="bp"&gt;None&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;
-            &lt;span class="k"&gt;return&lt;/span&gt; &lt;span class="n"&gt;right&lt;/span&gt;
-&lt;/pre&gt;&lt;/div&gt;
-&lt;/div&gt;
-&lt;div class="section" id="id3"&gt;
-&lt;h2 id="hidid3"&gt;参考资料&lt;a class="headerlink" href="#hidid3" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
-&lt;ul class="simple"&gt;
-&lt;li&gt;&lt;a class="reference external" href="https://leetcode.com/problems/lowest-common-ancestor-of-a-binary-tree/"&gt;https://leetcode.com/problems/lowest-common-ancestor-of-a-binary-tree/&lt;/a&gt;&lt;/li&gt;
-&lt;/ul&gt;
-&lt;/div&gt;
-</description><dc:creator xmlns:dc="http://purl.org/dc/elements/1.1/">mozillazg</dc:creator><pubDate>Sun, 14 Feb 2021 00:00:00 +0000</pubDate><guid>tag:mozillazg.com,2021-02-14:2021/02/leetcode-236-owest-common-ancestor-of-a-binary-tree.html</guid><category>binary-tree</category><category>二叉树</category><category>Tree</category><category>树</category></item><item><title>LeetCode: 129. Sum Root to Leaf Numbers</title><link>https://mozillazg.com/2021/02/leetcode-129-sum-root-to-leaf-numbers.html</link><description>&lt;div class="section" id="id1"&gt;
-&lt;h2 id="hidid1"&gt;题目&lt;a class="headerlink" href="#hidid1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
-&lt;p&gt;原题地址：&lt;a class="reference external" href="https://leetcode.com/problems/sum-root-to-leaf-numbers/"&gt;https://leetcode.com/problems/sum-root-to-leaf-numbers/&lt;/a&gt;&lt;/p&gt;
-&lt;p&gt;You are given a binary tree in which each node contains an integer value.&lt;/p&gt;
-&lt;p&gt;Find the number of paths that sum to a given value.&lt;/p&gt;
-&lt;p&gt;The path does not need to start or end at the root or a leaf, but it must go downwards (traveling only from parent nodes to child nodes).&lt;/p&gt;
-&lt;p&gt;The tree has no more than 1,000 nodes and the values are in the range -1,000,000 to 1,000,000.&lt;/p&gt;
-&lt;p&gt;Example:&lt;/p&gt;
-&lt;pre class="literal-block"&gt;
-root = [10,5,-3,3,2,null,11,3,-2,null,1], sum = 8
-
-      10
-     /  \
-    5   -3
-   / \    \
-  3   2   11
- / \   \
-3  -2   1
-&lt;/pre&gt;
-&lt;p&gt;Return 3. The paths that sum to 8 are:&lt;/p&gt;
-&lt;pre class="literal-block"&gt;
-1.  5 -&amp;gt; 3
-2.  5 -&amp;gt; 2 -&amp;gt; 1
-3. -3 -&amp;gt; 11
-&lt;/pre&gt;
-&lt;/div&gt;
-&lt;div class="section" id="id2"&gt;
-&lt;h2 id="hidid2"&gt;解法&lt;a class="headerlink" href="#hidid2" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
-&lt;div class="section" id="path"&gt;
-&lt;h3 id="hidpath"&gt;收集所有的 path 上节点的值，然后按照规则计算总和&lt;a class="headerlink" href="#hidpath" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
-&lt;p&gt;最简单的办法就是收集所有的 root-to-leaf path，然后按照题目里的计算规则求出总和。
-收集 root-to-leaf path 的方法可以参考前面 &lt;a class="reference external" href="http://mozillazg.com/2021/01/leetcode-113-path-sum-ii.html"&gt;113. Path Sum II&lt;/a&gt;
-的方法。&lt;/p&gt;
-&lt;p&gt;注意：根据计算规则，每个 root-to-leaf path 都需要转换为十进制数字后再求和：&lt;/p&gt;
-&lt;pre class="literal-block"&gt;
-1 -&amp;gt; 2 -&amp;gt; 3 需要转换为数字 123：
-
-1 * 10^2 + 2 * 10^1 + 3 * 10^0 = 123
-&lt;/pre&gt;
-&lt;p&gt;这个思路的 Python 代码类似下面这样：&lt;/p&gt;
-&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="c1"&gt;# Definition for a binary tree node.&lt;/span&gt;
-&lt;span class="c1"&gt;# class TreeNode:&lt;/span&gt;
-&lt;span class="c1"&gt;#     def __init__(self, val=0, left=None, right=None):&lt;/span&gt;
-&lt;span class="c1"&gt;#         self.val = val&lt;/span&gt;
-&lt;span class="c1"&gt;#         self.left = left&lt;/span&gt;
-&lt;span class="c1"&gt;#         self.right = right&lt;/span&gt;
-&lt;span class="k"&gt;class&lt;/span&gt; &lt;span class="nc"&gt;Solution&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;
-    &lt;span class="k"&gt;def&lt;/span&gt; &lt;span class="nf"&gt;sumNumbers&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="bp"&gt;self&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;root&lt;/span&gt;&lt;span class="p"&gt;):&lt;/span&gt;
-        &lt;span class="bp"&gt;self&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;_numbers&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="p"&gt;[]&lt;/span&gt;
-        &lt;span class="bp"&gt;self&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;_curr&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="p"&gt;[]&lt;/span&gt;
-        &lt;span class="n"&gt;total&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="mi"&gt;0&lt;/span&gt;
-
-        &lt;span class="bp"&gt;self&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;_collect_numbers&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;root&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
-        &lt;span class="k"&gt;for&lt;/span&gt; &lt;span class="n"&gt;numbers&lt;/span&gt; &lt;span class="ow"&gt;in&lt;/span&gt; &lt;span class="bp"&gt;self&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;_numbers&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;
-            &lt;span class="n"&gt;n&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="nb"&gt;len&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;numbers&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt; &lt;span class="o"&gt;-&lt;/span&gt; &lt;span class="mi"&gt;1&lt;/span&gt;
-            &lt;span class="c1"&gt;# [1, 2, 3] 需要转换为数字 123：&lt;/span&gt;
-            &lt;span class="c1"&gt;# 1 * 10^2 + 2 * 10^1 + 3 * 10^0&lt;/span&gt;
-            &lt;span class="k"&gt;for&lt;/span&gt; &lt;span class="n"&gt;number&lt;/span&gt; &lt;span class="ow"&gt;in&lt;/span&gt; &lt;span class="n"&gt;numbers&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;
-                &lt;span class="n"&gt;total&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;total&lt;/span&gt; &lt;span class="o"&gt;+&lt;/span&gt; &lt;span class="n"&gt;number&lt;/span&gt; &lt;span class="o"&gt;*&lt;/span&gt; &lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="mi"&gt;10&lt;/span&gt; &lt;span class="o"&gt;**&lt;/span&gt; &lt;span class="n"&gt;n&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
-                &lt;span class="n"&gt;n&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;n&lt;/span&gt; &lt;span class="o"&gt;-&lt;/span&gt; &lt;span class="mi"&gt;1&lt;/span&gt;
-
-        &lt;span class="k"&gt;return&lt;/span&gt; &lt;span class="n"&gt;total&lt;/span&gt;
-
-    &lt;span class="k"&gt;def&lt;/span&gt; &lt;span class="nf"&gt;_collect_numbers&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="bp"&gt;self&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;root&lt;/span&gt;&lt;span class="p"&gt;):&lt;/span&gt;
-        &lt;span class="k"&gt;if&lt;/span&gt; &lt;span class="n"&gt;root&lt;/span&gt; &lt;span class="ow"&gt;is&lt;/span&gt; &lt;span class="bp"&gt;None&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;
-            &lt;span class="k"&gt;return&lt;/span&gt;
-
-        &lt;span class="k"&gt;if&lt;/span&gt; &lt;span class="n"&gt;root&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;left&lt;/span&gt; &lt;span class="ow"&gt;is&lt;/span&gt; &lt;span class="bp"&gt;None&lt;/span&gt; &lt;span class="ow"&gt;and&lt;/span&gt; &lt;span class="n"&gt;root&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;right&lt;/span&gt; &lt;span class="ow"&gt;is&lt;/span&gt; &lt;span class="bp"&gt;None&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;
-            &lt;span class="n"&gt;curr&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="bp"&gt;self&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;_curr&lt;/span&gt;&lt;span class="p"&gt;[:]&lt;/span&gt;
-            &lt;span class="n"&gt;curr&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;append&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;root&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;val&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
-            &lt;span class="bp"&gt;self&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;_numbers&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;append&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;curr&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
-            &lt;span class="k"&gt;return&lt;/span&gt;
-
-        &lt;span class="bp"&gt;self&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;_curr&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;append&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;root&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;val&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
-
-        &lt;span class="bp"&gt;self&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;_collect_numbers&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;root&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;left&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
-        &lt;span class="bp"&gt;self&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;_collect_numbers&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;root&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;right&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
-
-        &lt;span class="bp"&gt;self&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;_curr&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;pop&lt;/span&gt;&lt;span class="p"&gt;()&lt;/span&gt;
-&lt;/pre&gt;&lt;/div&gt;
-&lt;/div&gt;
-&lt;div class="section" id="root-to-leaf-path"&gt;
-&lt;h3 id="hidroot-to-leaf-path"&gt;在收集 root-to-leaf path 的过程中直接求和&lt;a class="headerlink" href="#hidroot-to-leaf-path" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
-&lt;p&gt;还可以直接在收集 root-to-leaf path 的过程中直接求和，省去收集后再做一次求和操作的步骤。&lt;/p&gt;
-&lt;p&gt;主要思路是：&lt;/p&gt;
-&lt;ul class="simple"&gt;
-&lt;li&gt;&lt;tt class="docutils literal"&gt;1 &lt;span class="pre"&gt;-&amp;gt;&lt;/span&gt; 2 &lt;span class="pre"&gt;-&amp;gt;&lt;/span&gt; 3&lt;/tt&gt; 转换为 &lt;tt class="docutils literal"&gt;123&lt;/tt&gt; 的过程可以看成是，从上到下遍历的过程中每层都将上一层的结果乘 10 然后再加上当前节点的值：
-&lt;tt class="docutils literal"&gt;1 &lt;span class="pre"&gt;-&amp;gt;&lt;/span&gt; 2 &lt;span class="pre"&gt;-&amp;gt;&lt;/span&gt; 3&lt;/tt&gt; -&amp;gt; &lt;tt class="docutils literal"&gt;1 &lt;span class="pre"&gt;-&amp;gt;&lt;/span&gt; 1 * 10 + 2 &lt;span class="pre"&gt;-&amp;gt;&lt;/span&gt; (1 * 10 + 2) * 10 + 3 = 123&lt;/tt&gt;&lt;/li&gt;
-&lt;li&gt;同时如果是一层一层的往下计算的话，还可以省去一些重复的计算步骤，把上层的结果传递给下层这样如果下层刚好有 leaf 节点就不需要从头到尾再重复计算一遍了。&lt;/li&gt;
-&lt;/ul&gt;
-&lt;p&gt;这个思路的 Python 代码类似下面这样：&lt;/p&gt;
-&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="c1"&gt;# Definition for a binary tree node.&lt;/span&gt;
-&lt;span class="c1"&gt;# class TreeNode(object):&lt;/span&gt;
-&lt;span class="c1"&gt;#     def __init__(self, val=0, left=None, right=None):&lt;/span&gt;
-&lt;span class="c1"&gt;#         self.val = val&lt;/span&gt;
-&lt;span class="c1"&gt;#         self.left = left&lt;/span&gt;
-&lt;span class="c1"&gt;#         self.right = right&lt;/span&gt;
-&lt;span class="k"&gt;class&lt;/span&gt; &lt;span class="nc"&gt;Solution&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="nb"&gt;object&lt;/span&gt;&lt;span class="p"&gt;):&lt;/span&gt;
-    &lt;span class="k"&gt;def&lt;/span&gt; &lt;span class="nf"&gt;sumNumbers&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="bp"&gt;self&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;root&lt;/span&gt;&lt;span class="p"&gt;):&lt;/span&gt;
-        &lt;span class="bp"&gt;self&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;_total&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="mi"&gt;0&lt;/span&gt;
-
-        &lt;span class="bp"&gt;self&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;_collect&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;root&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="mi"&gt;0&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
-
-        &lt;span class="k"&gt;return&lt;/span&gt; &lt;span class="bp"&gt;self&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;_total&lt;/span&gt;
-
-    &lt;span class="k"&gt;def&lt;/span&gt; &lt;span class="nf"&gt;_collect&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="bp"&gt;self&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;root&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;pre_deepth_sum&lt;/span&gt;&lt;span class="p"&gt;):&lt;/span&gt;
-        &lt;span class="k"&gt;if&lt;/span&gt; &lt;span class="n"&gt;root&lt;/span&gt; &lt;span class="ow"&gt;is&lt;/span&gt; &lt;span class="bp"&gt;None&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;
-            &lt;span class="k"&gt;return&lt;/span&gt;
-
-        &lt;span class="n"&gt;new_deepth_sum&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;pre_deepth_sum&lt;/span&gt; &lt;span class="o"&gt;*&lt;/span&gt; &lt;span class="mi"&gt;10&lt;/span&gt; &lt;span class="o"&gt;+&lt;/span&gt; &lt;span class="n"&gt;root&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;val&lt;/span&gt;
-
-        &lt;span class="k"&gt;if&lt;/span&gt; &lt;span class="n"&gt;root&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;left&lt;/span&gt; &lt;span class="ow"&gt;is&lt;/span&gt; &lt;span class="bp"&gt;None&lt;/span&gt; &lt;span class="ow"&gt;and&lt;/span&gt; &lt;span class="n"&gt;root&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;right&lt;/span&gt; &lt;span class="ow"&gt;is&lt;/span&gt; &lt;span class="bp"&gt;None&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;
-            &lt;span class="bp"&gt;self&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;_total&lt;/span&gt; &lt;span class="o"&gt;+=&lt;/span&gt; &lt;span class="n"&gt;new_deepth_sum&lt;/span&gt;
-            &lt;span class="k"&gt;return&lt;/span&gt;
-
-        &lt;span class="c1"&gt;# 将上层计算结果传递给下层&lt;/span&gt;
-        &lt;span class="bp"&gt;self&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;_collect&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;root&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;left&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;new_deepth_sum&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
-        &lt;span class="bp"&gt;self&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;_collect&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;root&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;right&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;new_deepth_sum&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
-&lt;/pre&gt;&lt;/div&gt;
-&lt;/div&gt;
-&lt;/div&gt;
-&lt;div class="section" id="id3"&gt;
-&lt;h2 id="hidid3"&gt;参考资料&lt;a class="headerlink" href="#hidid3" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
-&lt;ul class="simple"&gt;
-&lt;li&gt;&lt;a class="reference external" href="https://leetcode.com/problems/sum-root-to-leaf-numbers/"&gt;https://leetcode.com/problems/sum-root-to-leaf-numbers/&lt;/a&gt;&lt;/li&gt;
-&lt;/ul&gt;
-&lt;/div&gt;
-</description><dc:creator xmlns:dc="http://purl.org/dc/elements/1.1/">mozillazg</dc:creator><pubDate>Sat, 06 Feb 2021 00:00:00 +0000</pubDate><guid>tag:mozillazg.com,2021-02-06:2021/02/leetcode-129-sum-root-to-leaf-numbers.html</guid><category>Binary-Tree</category><category>二叉树</category><category>Tree</category><category>树</category></item><item><title>LeetCode: 257. Binary Tree Paths</title><link>https://mozillazg.com/2021/02/leetcode-257-binary-tree-paths.html</link><description>&lt;div class="section" id="id1"&gt;
-&lt;h2 id="hidid1"&gt;题目&lt;a class="headerlink" href="#hidid1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
-&lt;p&gt;原题地址：&lt;a class="reference external" href="https://leetcode.com/problems/binary-tree-paths/"&gt;https://leetcode.com/problems/binary-tree-paths/&lt;/a&gt;&lt;/p&gt;
-&lt;p&gt;Given a binary tree, return all root-to-leaf paths.&lt;/p&gt;
-&lt;p&gt;Note: A leaf is a node with no children.&lt;/p&gt;
-&lt;p&gt;Example:&lt;/p&gt;
-&lt;pre class="literal-block"&gt;
-Input:
-
-   1
- /   \
-2     3
- \
-  5
-
-Output: [&amp;quot;1-&amp;gt;2-&amp;gt;5&amp;quot;, &amp;quot;1-&amp;gt;3&amp;quot;]
-
-Explanation: All root-to-leaf paths are: 1-&amp;gt;2-&amp;gt;5, 1-&amp;gt;3
-&lt;/pre&gt;
-&lt;/div&gt;
-&lt;div class="section" id="id2"&gt;
-&lt;h2 id="hidid2"&gt;解法&lt;a class="headerlink" href="#hidid2" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
-&lt;p&gt;参考前面 &lt;a class="reference external" href="http://mozillazg.com/2021/01/leetcode-113-path-sum-ii.html"&gt;113. Path Sum II&lt;/a&gt;
-的方法收集 root-to-leaf path 即可。&lt;/p&gt;
-&lt;p&gt;这个思路的 Python 代码类似下面这样：&lt;/p&gt;
-&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="c1"&gt;# Definition for a binary tree node.&lt;/span&gt;
-&lt;span class="c1"&gt;# class TreeNode(object):&lt;/span&gt;
-&lt;span class="c1"&gt;#     def __init__(self, val=0, left=None, right=None):&lt;/span&gt;
-&lt;span class="c1"&gt;#         self.val = val&lt;/span&gt;
-&lt;span class="c1"&gt;#         self.left = left&lt;/span&gt;
-&lt;span class="c1"&gt;#         self.right = right&lt;/span&gt;
-&lt;span class="k"&gt;class&lt;/span&gt; &lt;span class="nc"&gt;Solution&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="nb"&gt;object&lt;/span&gt;&lt;span class="p"&gt;):&lt;/span&gt;
-    &lt;span class="k"&gt;def&lt;/span&gt; &lt;span class="nf"&gt;binaryTreePaths&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="bp"&gt;self&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;root&lt;/span&gt;&lt;span class="p"&gt;):&lt;/span&gt;
-        &lt;span class="bp"&gt;self&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;_paths&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="p"&gt;[]&lt;/span&gt;
-        &lt;span class="bp"&gt;self&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;_curr&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="p"&gt;[]&lt;/span&gt;
-
-        &lt;span class="bp"&gt;self&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;_collect&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;root&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
-
-        &lt;span class="k"&gt;return&lt;/span&gt; &lt;span class="bp"&gt;self&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;_paths&lt;/span&gt;
-
-    &lt;span class="k"&gt;def&lt;/span&gt; &lt;span class="nf"&gt;_collect&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="bp"&gt;self&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;root&lt;/span&gt;&lt;span class="p"&gt;):&lt;/span&gt;
-        &lt;span class="k"&gt;if&lt;/span&gt; &lt;span class="n"&gt;root&lt;/span&gt; &lt;span class="ow"&gt;is&lt;/span&gt; &lt;span class="bp"&gt;None&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;
-            &lt;span class="k"&gt;return&lt;/span&gt;
-
-        &lt;span class="k"&gt;if&lt;/span&gt; &lt;span class="n"&gt;root&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;left&lt;/span&gt; &lt;span class="ow"&gt;is&lt;/span&gt; &lt;span class="bp"&gt;None&lt;/span&gt; &lt;span class="ow"&gt;and&lt;/span&gt; &lt;span class="n"&gt;root&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;right&lt;/span&gt; &lt;span class="ow"&gt;is&lt;/span&gt; &lt;span class="bp"&gt;None&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;
-            &lt;span class="n"&gt;curr&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="bp"&gt;self&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;_curr&lt;/span&gt;&lt;span class="p"&gt;[:]&lt;/span&gt;
-            &lt;span class="n"&gt;curr&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;append&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="nb"&gt;str&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;root&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;val&lt;/span&gt;&lt;span class="p"&gt;))&lt;/span&gt;
-            &lt;span class="n"&gt;path&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="s1"&gt;&amp;#39;-&amp;gt;&amp;#39;&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;join&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;curr&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
-            &lt;span class="bp"&gt;self&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;_paths&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;append&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;path&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
-            &lt;span class="k"&gt;return&lt;/span&gt;
-
-        &lt;span class="bp"&gt;self&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;_curr&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;append&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="nb"&gt;str&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;root&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;val&lt;/span&gt;&lt;span class="p"&gt;))&lt;/span&gt;
-
-        &lt;span class="bp"&gt;self&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;_collect&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;root&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;left&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
-        &lt;span class="bp"&gt;self&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;_collect&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;root&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;right&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
-
-        &lt;span class="bp"&gt;self&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;_curr&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;pop&lt;/span&gt;&lt;span class="p"&gt;()&lt;/span&gt;
-&lt;/pre&gt;&lt;/div&gt;
-&lt;/div&gt;
-&lt;div class="section" id="id3"&gt;
-&lt;h2 id="hidid3"&gt;参考资料&lt;a class="headerlink" href="#hidid3" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
-&lt;ul class="simple"&gt;
-&lt;li&gt;&lt;a class="reference external" href="https://leetcode.com/problems/binary-tree-paths/"&gt;https://leetcode.com/problems/binary-tree-paths/&lt;/a&gt;&lt;/li&gt;
-&lt;/ul&gt;
-&lt;/div&gt;
-</description><dc:creator xmlns:dc="http://purl.org/dc/elements/1.1/">mozillazg</dc:creator><pubDate>Sat, 06 Feb 2021 00:00:00 +0000</pubDate><guid>tag:mozillazg.com,2021-02-06:2021/02/leetcode-257-binary-tree-paths.html</guid><category>Binary-Tree</category><category>二叉树</category><category>Tree</category><category>树</category></item></channel></rss>
+</description><dc:creator xmlns:dc="http://purl.org/dc/elements/1.1/">mozillazg</dc:creator><pubDate>Tue, 16 Feb 2021 00:00:00 +0000</pubDate><guid>tag:mozillazg.com,2021-02-16:2021/02/leetcode-449-serialize-and-deserialize-bst.html</guid><category>BST</category><category>二叉搜索树</category><category>Tree</category><category>树</category></item></channel></rss>

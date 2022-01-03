@@ -18,6 +18,8 @@
         <meta name="author" content="mozillazg" />
         <meta name="keywords" content="python 3,Function Annotations" />
     <meta name="description" content="函数注解（Function Annotations） 函数注解语法 可以让你在定义函数的时候对参数和返回值添加注解： def foobar(a: int, b: &#34;it&#39;s b&#34;, c: str = 5) -&gt; tuple: return a, b, c a: int 这种是注解参数 c: str = 5 是注解有默认值的参数 -&gt; tuple 是注解返回值。 注解的内容既可以是个类型也可以是个字符串，甚至表达式： def foobar(a: 1+1) -&gt; 2 * 2: return a 那么如何获取我们定义的函数注解呢？至少有两种办法： __annotations__: &gt;&gt;&gt; foobar.__annotations__ {&#39;a&#39;: int, &#39;b&#39;: &#34;it&#39;s b&#34;, &#39;c&#39;: str, &#39;return&#39;: tuple} inspect.signature: &gt;&gt;&gt; import inspect &gt;&gt;&gt; sig = inspect.signature(foobar) &gt;&gt;&gt; # 获取函数参数 &gt;&gt;&gt; sig.paraments mappingproxy(OrderedDict([(&#39;a&#39;, &lt;Parameter &#34;a:int&#34;&gt;), (&#39;b&#39;, &lt;Parameter &#34;b:&#34;it&#39;s b&#34;&#34;&gt;), (&#39;c&#39;, &lt;Parameter &#34;c:str=5&#34;&gt;)])) &gt;&gt;&gt; # 获取函数参数注解 &gt;&gt;&gt; for k, v in sig.parameters.items(): print(&#39;{k}: {a!r}&#39;.format(k=k, a=v.annotation)) a: &lt;class &#39;int&#39;&gt; b: &#34;it&#39;s b&#34; c: &lt;class &#39;str&#39;&gt; &gt;&gt;&gt; # 返回值注解 &gt;&gt; sig.return_annotation tuple 既然可以得到函数中定义的注解，那么我们就可以用它进行参数类型检查了。 类型检查 Python 解释器并不会基于函数注解来自动进行类型检查，需要我们自己去实现类型检查功能： &gt;&gt;&gt; foobar.__annotations__ {&#39;a&#39;: int, &#39;b&#39;: &#34;it&#39;s b&#34;, &#39;c&#39;: str, &#39;return&#39;: tuple} &gt;&gt;&gt; foobar(a=&#39;a&#39;, b=2, c=3) (&#39;a&#39;, 2, 3) 既然通过 inspect.signature 我们可以获取函数定义的参数的顺序以及函数注解， 那么我们就可以通过定义一个装饰器来检查传入函数的参数的类型是否跟函数注解相符， 这里实现的装饰器函数（check_type.py）如下： # coding: utf8 import collections import functools import inspect def check(func): msg = (&#39;Expected type {expected!r} for argument {argument}, &#39; &#39;but got type {got!r} with value {value!r}&#39;) # 获取函数定义的参数 sig = inspect.signature(func) parameters = sig.parameters # 参数有序字典 arg_keys = tuple(parameters.keys()) # 参数名称 @functools.wraps(func) def wrapper(*args, **kwargs): CheckItem = collections.namedtuple(&#39;CheckItem&#39;, (&#39;anno&#39;, &#39;arg_name&#39;, &#39;value&#39;)) check_list = [] # collect args *args 传入的参数以及对应的函数参数注解 for i, value in enumerate(args): arg_name = arg_keys[i] anno = parameters[arg_name].annotation check_list.append(CheckItem(anno, arg_name, value)) # collect kwargs **kwargs 传入的参数以及对应的函数参数注解 for arg_name, value in kwargs.items(): anno = parameters[arg_name].annotation check_list.append(CheckItem(anno, arg_name, value)) # check type for item in check_list: if not isinstance(item.value, item.anno): error = msg.format(expected=item.anno, argument=item.arg_name, got=type(item.value), value=item.value) raise TypeError(error) return func(*args, **kwargs) return wrapper 下面来测试一下我们的装饰器: @check def foobar(a: int, b: str, c: float = 3.2) -&gt; tuple: return a, b, c 顺序传参测试: &gt;&gt;&gt; foobar(1, &#39;b&#39;) (1, &#39;b&#39;, 3.2) &gt;&gt;&gt; foobar(1, &#39;b&#39;, 3.5) (1, &#39;b&#39;, 3.5) &gt;&gt;&gt; foobar(&#39;a&#39;, &#39;b&#39;) ... TypeError: Expected type &lt;class &#39;int&#39;&gt; for argument a, but got type &lt;class &#39;str&#39;&gt; with value &#39;a &gt;&gt;&gt; foobar(1, 2) ... TypeError: Expected type &lt;class &#39;str&#39;&gt; for argument b, but got type &lt;class &#39;int&#39;&gt; with value 2 &gt;&gt;&gt; foobar(1, &#39;b&#39;, 3) ... TypeError: Expected type &lt;class &#39;float&#39;&gt; for argument c, but got type &lt;class &#39;int&#39;&gt; with value 关键字传参: &gt;&gt;&gt; foobar(b=&#39;b&#39;, a=2) (2, &#39;b&#39;, 3.2) &gt;&gt;&gt; foobar(b=&#39;b&#39;, a=2, c=3.5) (2, &#39;b&#39;, 3.5) &gt;&gt;&gt;foobar(a=&#39;foo&#39;, b=&#39;bar&#39;) ... TypeError: Expected type &lt;class &#39;int&#39;&gt; for argument a, but got type &lt;class &#39;str&#39;&gt; with value &#39;foo&#39; &gt;&gt;&gt; foobar(b=3, a=2) ... TypeError: Expected type &lt;class &#39;str&#39;&gt; for argument b, but got type &lt;class &#39;int&#39;&gt; with value 3 &gt;&gt;&gt; foobar(a=2, b=&#39;bar&#39;, c=3) ... TypeError: Expected type &lt;class &#39;float&#39;&gt; for argument c, but got type &lt;class &#39;int&#39;&gt; with value 借助于 Function Annotations 一个简单的参数类型检查的装饰器就这样实现了。 参考资料 PEP 3107 -- Function Annotations | Python.org" />
+    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-4941850466486001"
+     crossorigin="anonymous"></script>
 
     <style>
       .js-toc {
@@ -94,7 +96,166 @@
         // "dateModified": "",
         "image": "https://mozillazg.com/static/avatar.jpeg",
         "keywords": "python 3, Function Annotations",
-        "description": "函数注解（Function Annotations） 函数注解语法 可以让你在定义函数的时候对参数和返回值添加注解： def foobar(a: int, b: &#34;it&#39;s b&#34;, c: str = 5) -&gt; tuple: return a, b, c a: int 这种是注解参数 c: str = 5 是注解有默认值的参数 -&gt; tuple 是注解返回值。 注解的内容既可以是个类型也可以是个字符串，甚至表达式： def foobar(a: 1+1) -&gt; 2 * 2: return a 那么如何获取我们定义的函数注解呢？至少有两种办法： __annotations__: &gt;&gt;&gt; foobar.__annotations__ {&#39;a&#39;: int, &#39;b&#39;: &#34;it&#39;s b&#34;, &#39;c&#39;: str, &#39;return&#39;: tuple} inspect.signature: &gt;&gt;&gt; import inspect &gt;&gt;&gt; sig = inspect.signature(foobar) &gt;&gt;&gt; # 获取函数参数 &gt;&gt;&gt; sig.paraments mappingproxy(OrderedDict([(&#39;a&#39;, &lt;Parameter &#34;a:int&#34;&gt;), (&#39;b&#39;, &lt;Parameter &#34;b:&#34;it&#39;s b&#34;&#34;&gt;), (&#39;c&#39;, &lt;Parameter &#34;c:str=5&#34;&gt;)])) &gt;&gt;&gt; # 获取函数参数注解 &gt;&gt;&gt; for k, v in sig.parameters.items(): print(&#39;{k}: {a!r}&#39;.format(k=k, a=v.annotation)) a: &lt;class &#39;int&#39;&gt; b: &#34;it&#39;s b&#34; c: &lt;class &#39;str&#39;&gt; &gt;&gt;&gt; # 返回值注解 &gt;&gt; sig.return_annotation tuple 既然可以得到函数中定义的注解，那么我们就可以用它进行参数类型检查了。 类型检查 Python 解释器并不会基于函数注解来自动进行类型检查，需要我们自己去实现类型检查功能： &gt;&gt;&gt; foobar.__annotations__ {&#39;a&#39;: int, &#39;b&#39;: &#34;it&#39;s b&#34;, &#39;c&#39;: str, &#39;return&#39;: tuple} &gt;&gt;&gt; foobar(a=&#39;a&#39;, b=2, c=3) (&#39;a&#39;, 2, 3) 既然通过 inspect.signature 我们可以获取函数定义的参数的顺序以及函数注解， 那么我们就可以通过定义一个装饰器来检查传入函数的参数的类型是否跟函数注解相符， 这里实现的装饰器函数（check_type.py）如下： # coding: utf8 import collections import functools import inspect def check(func): msg = (&#39;Expected type {expected!r} for argument {argument}, &#39; &#39;but got type {got!r} with value {value!r}&#39;) # 获取函数定义的参数 sig = inspect.signature(func) parameters = sig.parameters # 参数有序字典 arg_keys = tuple(parameters.keys()) # 参数名称 @functools.wraps(func) def wrapper(*args, **kwargs): CheckItem = collections.namedtuple(&#39;CheckItem&#39;, (&#39;anno&#39;, &#39;arg_name&#39;, &#39;value&#39;)) check_list = [] # collect args *args 传入的参数以及对应的函数参数注解 for i, value in enumerate(args): arg_name = arg_keys[i] anno = parameters[arg_name].annotation check_list.append(CheckItem(anno, arg_name, value)) # collect kwargs **kwargs 传入的参数以及对应的函数参数注解 for arg_name, value in kwargs.items(): anno = parameters[arg_name].annotation check_list.append(CheckItem(anno, arg_name, value)) # check type for item in check_list: if not isinstance(item.value, item.anno): error = msg.format(expected=item.anno, argument=item.arg_name, got=type(item.value), value=item.value) raise TypeError(error) return func(*args, **kwargs) return wrapper 下面来测试一下我们的装饰器: @check def foobar(a: int, b: str, c: float = 3.2) -&gt; tuple: return a, b, c 顺序传参测试: &gt;&gt;&gt; foobar(1, &#39;b&#39;) (1, &#39;b&#39;, 3.2) &gt;&gt;&gt; foobar(1, &#39;b&#39;, 3.5) (1, &#39;b&#39;, 3.5) &gt;&gt;&gt; foobar(&#39;a&#39;, &#39;b&#39;) ... TypeError: Expected type &lt;class &#39;int&#39;&gt; for argument a, but got type &lt;class &#39;str&#39;&gt; with value &#39;a &gt;&gt;&gt; foobar(1, 2) ... TypeError: Expected type &lt;class &#39;str&#39;&gt; for argument b, but got type &lt;class &#39;int&#39;&gt; with value 2 &gt;&gt;&gt; foobar(1, &#39;b&#39;, 3) ... TypeError: Expected type &lt;class &#39;float&#39;&gt; for argument c, but got type &lt;class &#39;int&#39;&gt; with value 关键字传参: &gt;&gt;&gt; foobar(b=&#39;b&#39;, a=2) (2, &#39;b&#39;, 3.2) &gt;&gt;&gt; foobar(b=&#39;b&#39;, a=2, c=3.5) (2, &#39;b&#39;, 3.5) &gt;&gt;&gt;foobar(a=&#39;foo&#39;, b=&#39;bar&#39;) ... TypeError: Expected type &lt;class &#39;int&#39;&gt; for argument a, but got type &lt;class &#39;str&#39;&gt; with value &#39;foo&#39; &gt;&gt;&gt; foobar(b=3, a=2) ... TypeError: Expected type &lt;class &#39;str&#39;&gt; for argument b, but got type &lt;class &#39;int&#39;&gt; with value 3 &gt;&gt;&gt; foobar(a=2, b=&#39;bar&#39;, c=3) ... TypeError: Expected type &lt;class &#39;float&#39;&gt; for argument c, but got type &lt;class &#39;int&#39;&gt; with value 借助于 Function Annotations 一个简单的参数类型检查的装饰器就这样实现了。 参考资料 PEP 3107 -- Function Annotations | Python.org",
+        // "description": "函数注解（Function Annotations） 函数注解语法 可以让你在定义函数的时候对参数和返回值添加注解： def foobar(a: int, b: &#34;it&#39;s b&#34;, c: str = 5) -&gt; tuple: return a, b, c a: int 这种是注解参数 c: str = 5 是注解有默认值的参数 -&gt; tuple 是注解返回值。 注解的内容既可以是个类型也可以是个字符串，甚至表达式： def foobar(a: 1+1) -&gt; 2 * 2: return a 那么如何获取我们定义的函数注解呢？至少有两种办法： __annotations__: &gt;&gt;&gt; foobar.__annotations__ {&#39;a&#39;: int, &#39;b&#39;: &#34;it&#39;s b&#34;, &#39;c&#39;: str, &#39;return&#39;: tuple} inspect.signature: &gt;&gt;&gt; import inspect &gt;&gt;&gt; sig = inspect.signature(foobar) &gt;&gt;&gt; # 获取函数参数 &gt;&gt;&gt; sig.paraments mappingproxy(OrderedDict([(&#39;a&#39;, &lt;Parameter &#34;a:int&#34;&gt;), (&#39;b&#39;, &lt;Parameter &#34;b:&#34;it&#39;s b&#34;&#34;&gt;), (&#39;c&#39;, &lt;Parameter &#34;c:str=5&#34;&gt;)])) &gt;&gt;&gt; # 获取函数参数注解 &gt;&gt;&gt; for k, v in sig.parameters.items(): print(&#39;{k}: {a!r}&#39;.format(k=k, a=v.annotation)) a: &lt;class &#39;int&#39;&gt; b: &#34;it&#39;s b&#34; c: &lt;class &#39;str&#39;&gt; &gt;&gt;&gt; # 返回值注解 &gt;&gt; sig.return_annotation tuple 既然可以得到函数中定义的注解，那么我们就可以用它进行参数类型检查了。 类型检查 Python 解释器并不会基于函数注解来自动进行类型检查，需要我们自己去实现类型检查功能： &gt;&gt;&gt; foobar.__annotations__ {&#39;a&#39;: int, &#39;b&#39;: &#34;it&#39;s b&#34;, &#39;c&#39;: str, &#39;return&#39;: tuple} &gt;&gt;&gt; foobar(a=&#39;a&#39;, b=2, c=3) (&#39;a&#39;, 2, 3) 既然通过 inspect.signature 我们可以获取函数定义的参数的顺序以及函数注解， 那么我们就可以通过定义一个装饰器来检查传入函数的参数的类型是否跟函数注解相符， 这里实现的装饰器函数（check_type.py）如下： # coding: utf8 import collections import functools import inspect def check(func): msg = (&#39;Expected type {expected!r} for argument {argument}, &#39; &#39;but got type {got!r} with value {value!r}&#39;) # 获取函数定义的参数 sig = inspect.signature(func) parameters = sig.parameters # 参数有序字典 arg_keys = tuple(parameters.keys()) # 参数名称 @functools.wraps(func) def wrapper(*args, **kwargs): CheckItem = collections.namedtuple(&#39;CheckItem&#39;, (&#39;anno&#39;, &#39;arg_name&#39;, &#39;value&#39;)) check_list = [] # collect args *args 传入的参数以及对应的函数参数注解 for i, value in enumerate(args): arg_name = arg_keys[i] anno = parameters[arg_name].annotation check_list.append(CheckItem(anno, arg_name, value)) # collect kwargs **kwargs 传入的参数以及对应的函数参数注解 for arg_name, value in kwargs.items(): anno = parameters[arg_name].annotation check_list.append(CheckItem(anno, arg_name, value)) # check type for item in check_list: if not isinstance(item.value, item.anno): error = msg.format(expected=item.anno, argument=item.arg_name, got=type(item.value), value=item.value) raise TypeError(error) return func(*args, **kwargs) return wrapper 下面来测试一下我们的装饰器: @check def foobar(a: int, b: str, c: float = 3.2) -&gt; tuple: return a, b, c 顺序传参测试: &gt;&gt;&gt; foobar(1, &#39;b&#39;) (1, &#39;b&#39;, 3.2) &gt;&gt;&gt; foobar(1, &#39;b&#39;, 3.5) (1, &#39;b&#39;, 3.5) &gt;&gt;&gt; foobar(&#39;a&#39;, &#39;b&#39;) ... TypeError: Expected type &lt;class &#39;int&#39;&gt; for argument a, but got type &lt;class &#39;str&#39;&gt; with value &#39;a &gt;&gt;&gt; foobar(1, 2) ... TypeError: Expected type &lt;class &#39;str&#39;&gt; for argument b, but got type &lt;class &#39;int&#39;&gt; with value 2 &gt;&gt;&gt; foobar(1, &#39;b&#39;, 3) ... TypeError: Expected type &lt;class &#39;float&#39;&gt; for argument c, but got type &lt;class &#39;int&#39;&gt; with value 关键字传参: &gt;&gt;&gt; foobar(b=&#39;b&#39;, a=2) (2, &#39;b&#39;, 3.2) &gt;&gt;&gt; foobar(b=&#39;b&#39;, a=2, c=3.5) (2, &#39;b&#39;, 3.5) &gt;&gt;&gt;foobar(a=&#39;foo&#39;, b=&#39;bar&#39;) ... TypeError: Expected type &lt;class &#39;int&#39;&gt; for argument a, but got type &lt;class &#39;str&#39;&gt; with value &#39;foo&#39; &gt;&gt;&gt; foobar(b=3, a=2) ... TypeError: Expected type &lt;class &#39;str&#39;&gt; for argument b, but got type &lt;class &#39;int&#39;&gt; with value 3 &gt;&gt;&gt; foobar(a=2, b=&#39;bar&#39;, c=3) ... TypeError: Expected type &lt;class &#39;float&#39;&gt; for argument c, but got type &lt;class &#39;int&#39;&gt; with value 借助于 Function Annotations 一个简单的参数类型检查的装饰器就这样实现了。 参考资料 PEP 3107 -- Function Annotations | Python.org",
+        "description": "<h2>函数注解（Function Annotations）</h2>
+<p><a href="https://www.python.org/dev/peps/pep-3107/">函数注解语法</a> 可以让你在定义函数的时候对参数和返回值添加注解：</p>
+<div class="highlight"><pre><span></span>def foobar(a: int, b: &quot;it&#39;s b&quot;, c: str = 5) -&gt; tuple:
+    return a, b, c
+</pre></div>
+
+
+<ul>
+<li><code>a: int</code> 这种是注解参数</li>
+<li><code>c: str = 5</code> 是注解有默认值的参数</li>
+<li><code>-&gt; tuple</code> 是注解返回值。</li>
+</ul>
+<p>注解的内容既可以是个类型也可以是个字符串，甚至表达式：</p>
+<div class="highlight"><pre><span></span>def foobar(a: 1+1) -&gt; 2 * 2:
+    return a
+</pre></div>
+
+
+<p>那么如何获取我们定义的函数注解呢？至少有两种办法：</p>
+<ul>
+<li>
+<p><code>__annotations__</code>:</p>
+<div class="highlight"><pre><span></span>&gt;&gt;&gt; foobar.__annotations__
+{&#39;a&#39;: int, &#39;b&#39;: &quot;it&#39;s b&quot;, &#39;c&#39;: str, &#39;return&#39;: tuple}
+</pre></div>
+
+
+</li>
+<li>
+<p><code>inspect.signature</code>:</p>
+<div class="highlight"><pre><span></span><span class="o">&gt;&gt;&gt;</span> <span class="kn">import</span> <span class="nn">inspect</span>
+<span class="o">&gt;&gt;&gt;</span> <span class="n">sig</span> <span class="o">=</span> <span class="n">inspect</span><span class="o">.</span><span class="n">signature</span><span class="p">(</span><span class="n">foobar</span><span class="p">)</span>
+<span class="o">&gt;&gt;&gt;</span> <span class="c1"># 获取函数参数</span>
+<span class="o">&gt;&gt;&gt;</span> <span class="n">sig</span><span class="o">.</span><span class="n">paraments</span>
+<span class="n">mappingproxy</span><span class="p">(</span><span class="n">OrderedDict</span><span class="p">([(</span><span class="s1">&#39;a&#39;</span><span class="p">,</span> <span class="o">&lt;</span><span class="n">Parameter</span> <span class="s2">&quot;a:int&quot;</span><span class="o">&gt;</span><span class="p">),</span> <span class="p">(</span><span class="s1">&#39;b&#39;</span><span class="p">,</span> <span class="o">&lt;</span><span class="n">Parameter</span> <span class="s2">&quot;b:&quot;</span><span class="n">it</span><span class="s1">&#39;s b&quot;&quot;&gt;), (&#39;</span><span class="n">c</span><span class="s1">&#39;, &lt;Parameter &quot;c:str=5&quot;&gt;)]))</span>
+<span class="o">&gt;&gt;&gt;</span> <span class="c1"># 获取函数参数注解</span>
+<span class="o">&gt;&gt;&gt;</span> <span class="k">for</span> <span class="n">k</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">sig</span><span class="o">.</span><span class="n">parameters</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+        <span class="k">print</span><span class="p">(</span><span class="s1">&#39;{k}: {a!r}&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">k</span><span class="o">=</span><span class="n">k</span><span class="p">,</span> <span class="n">a</span><span class="o">=</span><span class="n">v</span><span class="o">.</span><span class="n">annotation</span><span class="p">))</span>     
+<span class="n">a</span><span class="p">:</span> <span class="o">&lt;</span><span class="k">class</span> <span class="err">&#39;</span><span class="nc">int</span><span class="s1">&#39;&gt;</span>
+<span class="n">b</span><span class="p">:</span> <span class="s2">&quot;it&#39;s b&quot;</span>
+<span class="n">c</span><span class="p">:</span> <span class="o">&lt;</span><span class="k">class</span> <span class="err">&#39;</span><span class="nc">str</span><span class="s1">&#39;&gt;</span>
+<span class="o">&gt;&gt;&gt;</span> <span class="c1"># 返回值注解</span>
+<span class="o">&gt;&gt;</span> <span class="n">sig</span><span class="o">.</span><span class="n">return_annotation</span>
+<span class="nb">tuple</span>
+</pre></div>
+
+
+</li>
+</ul>
+<p>既然可以得到函数中定义的注解，那么我们就可以用它进行参数类型检查了。</p>
+<h2>类型检查</h2>
+<p>Python 解释器并不会基于函数注解来自动进行类型检查，需要我们自己去实现类型检查功能：</p>
+<div class="highlight"><pre><span></span>&gt;&gt;&gt; foobar.__annotations__
+{&#39;a&#39;: int, &#39;b&#39;: &quot;it&#39;s b&quot;, &#39;c&#39;: str, &#39;return&#39;: tuple}
+
+&gt;&gt;&gt; foobar(a=&#39;a&#39;, b=2, c=3)
+(&#39;a&#39;, 2, 3)
+</pre></div>
+
+
+<p>既然通过 <code>inspect.signature</code> 我们可以获取函数定义的参数的顺序以及函数注解，
+那么我们就可以通过定义一个装饰器来检查传入函数的参数的类型是否跟函数注解相符，
+这里实现的装饰器函数（check_type.py）如下：</p>
+<div class="highlight"><pre><span></span><span class="c1"># coding: utf8</span>
+<span class="kn">import</span> <span class="nn">collections</span>
+<span class="kn">import</span> <span class="nn">functools</span>
+<span class="kn">import</span> <span class="nn">inspect</span>
+
+
+<span class="k">def</span> <span class="nf">check</span><span class="p">(</span><span class="n">func</span><span class="p">):</span>
+    <span class="n">msg</span> <span class="o">=</span> <span class="p">(</span><span class="s1">&#39;Expected type {expected!r} for argument {argument}, &#39;</span>
+           <span class="s1">&#39;but got type {got!r} with value {value!r}&#39;</span><span class="p">)</span>
+    <span class="c1"># 获取函数定义的参数</span>
+    <span class="n">sig</span> <span class="o">=</span> <span class="n">inspect</span><span class="o">.</span><span class="n">signature</span><span class="p">(</span><span class="n">func</span><span class="p">)</span>
+    <span class="n">parameters</span> <span class="o">=</span> <span class="n">sig</span><span class="o">.</span><span class="n">parameters</span>          <span class="c1"># 参数有序字典</span>
+    <span class="n">arg_keys</span> <span class="o">=</span> <span class="nb">tuple</span><span class="p">(</span><span class="n">parameters</span><span class="o">.</span><span class="n">keys</span><span class="p">())</span>   <span class="c1"># 参数名称</span>
+
+    <span class="nd">@functools.wraps</span><span class="p">(</span><span class="n">func</span><span class="p">)</span>
+    <span class="k">def</span> <span class="nf">wrapper</span><span class="p">(</span><span class="o">*</span><span class="n">args</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+        <span class="n">CheckItem</span> <span class="o">=</span> <span class="n">collections</span><span class="o">.</span><span class="n">namedtuple</span><span class="p">(</span><span class="s1">&#39;CheckItem&#39;</span><span class="p">,</span> <span class="p">(</span><span class="s1">&#39;anno&#39;</span><span class="p">,</span> <span class="s1">&#39;arg_name&#39;</span><span class="p">,</span> <span class="s1">&#39;value&#39;</span><span class="p">))</span>
+        <span class="n">check_list</span> <span class="o">=</span> <span class="p">[]</span>
+
+        <span class="c1"># collect args   *args 传入的参数以及对应的函数参数注解</span>
+        <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="n">value</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">args</span><span class="p">):</span>
+            <span class="n">arg_name</span> <span class="o">=</span> <span class="n">arg_keys</span><span class="p">[</span><span class="n">i</span><span class="p">]</span>
+            <span class="n">anno</span> <span class="o">=</span> <span class="n">parameters</span><span class="p">[</span><span class="n">arg_name</span><span class="p">]</span><span class="o">.</span><span class="n">annotation</span>
+            <span class="n">check_list</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">CheckItem</span><span class="p">(</span><span class="n">anno</span><span class="p">,</span> <span class="n">arg_name</span><span class="p">,</span> <span class="n">value</span><span class="p">))</span>
+
+        <span class="c1"># collect kwargs  **kwargs 传入的参数以及对应的函数参数注解</span>
+        <span class="k">for</span> <span class="n">arg_name</span><span class="p">,</span> <span class="n">value</span> <span class="ow">in</span> <span class="n">kwargs</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+           <span class="n">anno</span> <span class="o">=</span> <span class="n">parameters</span><span class="p">[</span><span class="n">arg_name</span><span class="p">]</span><span class="o">.</span><span class="n">annotation</span>
+           <span class="n">check_list</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">CheckItem</span><span class="p">(</span><span class="n">anno</span><span class="p">,</span> <span class="n">arg_name</span><span class="p">,</span> <span class="n">value</span><span class="p">))</span>
+
+        <span class="c1"># check type</span>
+        <span class="k">for</span> <span class="n">item</span> <span class="ow">in</span> <span class="n">check_list</span><span class="p">:</span>
+            <span class="k">if</span> <span class="ow">not</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">item</span><span class="o">.</span><span class="n">value</span><span class="p">,</span> <span class="n">item</span><span class="o">.</span><span class="n">anno</span><span class="p">):</span>
+                <span class="n">error</span> <span class="o">=</span> <span class="n">msg</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">expected</span><span class="o">=</span><span class="n">item</span><span class="o">.</span><span class="n">anno</span><span class="p">,</span> <span class="n">argument</span><span class="o">=</span><span class="n">item</span><span class="o">.</span><span class="n">arg_name</span><span class="p">,</span>
+                                   <span class="n">got</span><span class="o">=</span><span class="nb">type</span><span class="p">(</span><span class="n">item</span><span class="o">.</span><span class="n">value</span><span class="p">),</span> <span class="n">value</span><span class="o">=</span><span class="n">item</span><span class="o">.</span><span class="n">value</span><span class="p">)</span>
+                <span class="k">raise</span> <span class="ne">TypeError</span><span class="p">(</span><span class="n">error</span><span class="p">)</span>
+
+        <span class="k">return</span> <span class="n">func</span><span class="p">(</span><span class="o">*</span><span class="n">args</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span>
+
+    <span class="k">return</span> <span class="n">wrapper</span>
+</pre></div>
+
+
+<p>下面来测试一下我们的装饰器:</p>
+<div class="highlight"><pre><span></span>@check
+def foobar(a: int, b: str, c: float = 3.2) -&gt; tuple:
+    return a, b, c
+</pre></div>
+
+
+<p>顺序传参测试:</p>
+<div class="highlight"><pre><span></span>&gt;&gt;&gt; foobar(1, &#39;b&#39;)
+(1, &#39;b&#39;, 3.2)
+
+&gt;&gt;&gt; foobar(1, &#39;b&#39;, 3.5)
+(1, &#39;b&#39;, 3.5)
+
+&gt;&gt;&gt; foobar(&#39;a&#39;, &#39;b&#39;)
+...
+TypeError: Expected type &lt;class &#39;int&#39;&gt; for argument a, but got type &lt;class &#39;str&#39;&gt; with value &#39;a
+
+&gt;&gt;&gt; foobar(1, 2)
+...
+TypeError: Expected type &lt;class &#39;str&#39;&gt; for argument b, but got type &lt;class &#39;int&#39;&gt; with value 2
+
+&gt;&gt;&gt; foobar(1, &#39;b&#39;, 3)
+...
+TypeError: Expected type &lt;class &#39;float&#39;&gt; for argument c, but got type &lt;class &#39;int&#39;&gt; with value
+</pre></div>
+
+
+<p>关键字传参:</p>
+<div class="highlight"><pre><span></span>&gt;&gt;&gt; foobar(b=&#39;b&#39;, a=2)
+(2, &#39;b&#39;, 3.2)
+&gt;&gt;&gt; foobar(b=&#39;b&#39;, a=2, c=3.5)
+(2, &#39;b&#39;, 3.5)
+
+&gt;&gt;&gt;foobar(a=&#39;foo&#39;, b=&#39;bar&#39;)
+...
+TypeError: Expected type &lt;class &#39;int&#39;&gt; for argument a, but got type &lt;class &#39;str&#39;&gt; with value &#39;foo&#39;
+
+&gt;&gt;&gt; foobar(b=3, a=2)
+...
+TypeError: Expected type &lt;class &#39;str&#39;&gt; for argument b, but got type &lt;class &#39;int&#39;&gt; with value 3
+
+&gt;&gt;&gt; foobar(a=2, b=&#39;bar&#39;, c=3)
+...
+TypeError: Expected type &lt;class &#39;float&#39;&gt; for argument c, but got type &lt;class &#39;int&#39;&gt; with value
+</pre></div>
+
+
+<p>借助于 Function Annotations 一个简单的参数类型检查的装饰器就这样实现了。</p>
+<h2>参考资料</h2>
+<ul>
+<li><a href="https://www.python.org/dev/peps/pep-3107/">PEP 3107 -- Function Annotations | Python.org</a></li>
+</ul>",
         "mainEntityOfPage": {
             "@type": "WebPage",
             "@id": "https://mozillazg.com"
@@ -376,7 +537,7 @@ TypeError: Expected type &lt;class &#39;float&#39;&gt; for argument c, but got t
    <div class="container">
       <hr>
       <div class="row">
-         <div class="col-xs-10">&copy; 2021 mozillazg
+         <div class="col-xs-10">&copy; 2022 mozillazg
             &middot; Powered by <a href="https://github.com/DandyDev/pelican-bootstrap3" target="_blank">pelican-bootstrap3</a>,
             <a href="http://docs.getpelican.com/" target="_blank">Pelican</a>,
             <a href="http://getbootstrap.com" target="_blank">Bootstrap</a>              <p><small>  <a rel="license" href="http://creativecommons.org/licenses/by-sa/4.0/"><img alt="Creative Commons License" style="border-width:0" src="/static/images/by-sa-80x15.png" /></a>

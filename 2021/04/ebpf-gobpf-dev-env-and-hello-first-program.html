@@ -18,6 +18,8 @@
         <meta name="author" content="mozillazg" />
         <meta name="keywords" content="eBPF,gobpf,Go,gobpf 使用示例" />
     <meta name="description" content="前言¶ gobpf 使用示例系列记录使用 gobpf 编写 eBPF 程序的一些例子。 搭建开发环境¶ 所有示例程序都基于 Ubuntu 20.04 和 Go 1.6 进行编写，同时所有示例使用的 github.com/iovisor/gobpf 版本为 v0.1.1 可以通过各种方式安装 Ubuntu 20.04 同样可以通过各种方式安装 Go 1.6 安装完 Ubuntu 和 Go 后，还需要安装编译 eBPF 程序所需的编译工具和内核源码： $ sudo apt update $ sudo apt install build-essential git make libelf-dev libelf1 \ clang llvm strace tar make bpfcc-tools linux-headers-$(uname -r) gcc-multilib $ cd /tmp/ &amp;&amp; \ git clone --depth 1 git://kernel.ubuntu.com/ubuntu/ubuntu-focal.git &amp;&amp; \ sudo mv ubuntu-focal /kernel-src &amp;&amp; \ cd /kernel-src/tools/lib/bpf &amp;&amp; \ sudo make &amp;&amp; sudo make install prefix=/usr/local &amp;&amp; \ sudo mv /usr/local/lib64/libbpf.* /lib/x86_64-linux-gnu/ 第一个 eBPF 程序¶ 第一个 eBPF 程序将 trace 所有的 open 系统调用，显示 open 系统调用调用时的文件路径参数 eBPF C 代码如下（hello.c）: #include &lt;linux/bpf.h&gt; #include &lt;linux/ptrace.h&gt; #include &lt;linux/version.h&gt; #include &lt;bpf_helpers.h&gt; SEC(&#34;kprobe/do_sys_open&#34;) int kprobe__do_sys_open(struct pt_regs *ctx) { char file_name[256]; bpf_probe_read(file_name, sizeof(file_name), PT_REGS_PARM2(ctx)); char fmt[] = &#34;open file %s\n&#34;; bpf_trace_printk(fmt, sizeof(fmt), &amp;file_name); return 0; } char _license[] SEC(&#34;license&#34;) = &#34;GPL&#34;; 通过下面的方法编译出最终的 hello.o 文件: $ clang -O2 -emit-llvm -I/kernel-src/tools/testing/selftests/bpf -c hello.c -o hello.ll hello.c:11:48: warning: incompatible integer to pointer conversion passing &#39;unsigned long&#39; to parameter of type &#39;const void *&#39; [-Wint-conversion] bpf_probe_read(file_name, sizeof(file_name), PT_REGS_PARM2(ctx)); ^~~~~~~~~~~~~~~~~~ /kernel-src/tools/testing/selftests/bpf/bpf_helpers.h:398:26: note: expanded from macro &#39;PT_REGS_PARM2&#39; #define PT_REGS_PARM2(x) ((x)-&gt;rsi) ^~~~~~~~~~ 1 warning generated. $ llc -march=bpf -filetype=obj -o hello.o hello.ll $ ls hello.o hello.o 然后在 Go 中使用 gobpf 加载的方法如下(hello.go): package main import ( &#34;fmt&#34; &#34;time&#34; &#34;github.com/iovisor/gobpf/elf&#34; ) func main() { mod := elf.NewModule(&#34;hello.o&#34;) err := mod.Load(nil) if err != nil { panic(err) } err = mod.EnableKprobes(0) if err != nil { panic(err) } for { fmt.Println(&#34;Waiting...&#34;) time.Sleep(10 * time.Second) } } 编译运行: $ go mod init $ go get github.com/iovisor/gobpf $ go build hello.go $ sudo ./hello Waiting... 新开一个 shell 窗口，然后在窗口内执行下面的命令可以看到被 trace 的 open 系统调用: $ sudo cat /sys/kernel/debug/tracing/trace_pipe ... systemd-journal-364 [000] .... 16819.802559: 0: open file /proc/492/attr/current systemd-journal-364 [000] .... 16819.802573: 0: open file /proc/492/sessionid systemd-journal-364 [000] .... 16819.802583: 0: open file /proc/492/loginuid systemd-journal-364 [000] .... 16819.802594: 0: open file /proc/492/cgroup ... 备注： 多次运行 hello 程序会出现如下错误: $ sudo ./hello panic: cannot write &#34;p:pdo_sys_open do_sys_open\n&#34; to kprobe_events: write /sys/kernel/debug/tracing/kprobe_events: file exists 可以通过下面的方法清理上次运行的遗留信息: $ echo &#34;&#34; |sudo tee /sys/kernel/debug/tracing/kprobe_events 然后再运行 sudo ./hello 就不会有问题了。 P.S. 本文的所有代码在 Github 上都有一份完整版：https://github.com/mozillazg/gobpf-examples/tree/master/1-helloword 参考资料¶ bpftools/linux-observability-with-bpf: Code snippets from the O&#39;Reilly book iovisor/gobpf: Go bindings for creating BPF programs. iovisor/bcc: BCC - Tools for BPF-based Linux IO analysis, networking, monitoring, and more GO BPF libraries: cilium ebpf vs iovisor gobpf" />
+    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-4941850466486001"
+     crossorigin="anonymous"></script>
 
     <style>
       .js-toc {
@@ -96,7 +98,138 @@
         // "dateModified": "",
         "image": "https://mozillazg.com/static/avatar.jpeg",
         "keywords": "eBPF, gobpf, Go, gobpf 使用示例",
-        "description": "前言¶ gobpf 使用示例系列记录使用 gobpf 编写 eBPF 程序的一些例子。 搭建开发环境¶ 所有示例程序都基于 Ubuntu 20.04 和 Go 1.6 进行编写，同时所有示例使用的 github.com/iovisor/gobpf 版本为 v0.1.1 可以通过各种方式安装 Ubuntu 20.04 同样可以通过各种方式安装 Go 1.6 安装完 Ubuntu 和 Go 后，还需要安装编译 eBPF 程序所需的编译工具和内核源码： $ sudo apt update $ sudo apt install build-essential git make libelf-dev libelf1 \ clang llvm strace tar make bpfcc-tools linux-headers-$(uname -r) gcc-multilib $ cd /tmp/ &amp;&amp; \ git clone --depth 1 git://kernel.ubuntu.com/ubuntu/ubuntu-focal.git &amp;&amp; \ sudo mv ubuntu-focal /kernel-src &amp;&amp; \ cd /kernel-src/tools/lib/bpf &amp;&amp; \ sudo make &amp;&amp; sudo make install prefix=/usr/local &amp;&amp; \ sudo mv /usr/local/lib64/libbpf.* /lib/x86_64-linux-gnu/ 第一个 eBPF 程序¶ 第一个 eBPF 程序将 trace 所有的 open 系统调用，显示 open 系统调用调用时的文件路径参数 eBPF C 代码如下（hello.c）: #include &lt;linux/bpf.h&gt; #include &lt;linux/ptrace.h&gt; #include &lt;linux/version.h&gt; #include &lt;bpf_helpers.h&gt; SEC(&#34;kprobe/do_sys_open&#34;) int kprobe__do_sys_open(struct pt_regs *ctx) { char file_name[256]; bpf_probe_read(file_name, sizeof(file_name), PT_REGS_PARM2(ctx)); char fmt[] = &#34;open file %s\n&#34;; bpf_trace_printk(fmt, sizeof(fmt), &amp;file_name); return 0; } char _license[] SEC(&#34;license&#34;) = &#34;GPL&#34;; 通过下面的方法编译出最终的 hello.o 文件: $ clang -O2 -emit-llvm -I/kernel-src/tools/testing/selftests/bpf -c hello.c -o hello.ll hello.c:11:48: warning: incompatible integer to pointer conversion passing &#39;unsigned long&#39; to parameter of type &#39;const void *&#39; [-Wint-conversion] bpf_probe_read(file_name, sizeof(file_name), PT_REGS_PARM2(ctx)); ^~~~~~~~~~~~~~~~~~ /kernel-src/tools/testing/selftests/bpf/bpf_helpers.h:398:26: note: expanded from macro &#39;PT_REGS_PARM2&#39; #define PT_REGS_PARM2(x) ((x)-&gt;rsi) ^~~~~~~~~~ 1 warning generated. $ llc -march=bpf -filetype=obj -o hello.o hello.ll $ ls hello.o hello.o 然后在 Go 中使用 gobpf 加载的方法如下(hello.go): package main import ( &#34;fmt&#34; &#34;time&#34; &#34;github.com/iovisor/gobpf/elf&#34; ) func main() { mod := elf.NewModule(&#34;hello.o&#34;) err := mod.Load(nil) if err != nil { panic(err) } err = mod.EnableKprobes(0) if err != nil { panic(err) } for { fmt.Println(&#34;Waiting...&#34;) time.Sleep(10 * time.Second) } } 编译运行: $ go mod init $ go get github.com/iovisor/gobpf $ go build hello.go $ sudo ./hello Waiting... 新开一个 shell 窗口，然后在窗口内执行下面的命令可以看到被 trace 的 open 系统调用: $ sudo cat /sys/kernel/debug/tracing/trace_pipe ... systemd-journal-364 [000] .... 16819.802559: 0: open file /proc/492/attr/current systemd-journal-364 [000] .... 16819.802573: 0: open file /proc/492/sessionid systemd-journal-364 [000] .... 16819.802583: 0: open file /proc/492/loginuid systemd-journal-364 [000] .... 16819.802594: 0: open file /proc/492/cgroup ... 备注： 多次运行 hello 程序会出现如下错误: $ sudo ./hello panic: cannot write &#34;p:pdo_sys_open do_sys_open\n&#34; to kprobe_events: write /sys/kernel/debug/tracing/kprobe_events: file exists 可以通过下面的方法清理上次运行的遗留信息: $ echo &#34;&#34; |sudo tee /sys/kernel/debug/tracing/kprobe_events 然后再运行 sudo ./hello 就不会有问题了。 P.S. 本文的所有代码在 Github 上都有一份完整版：https://github.com/mozillazg/gobpf-examples/tree/master/1-helloword 参考资料¶ bpftools/linux-observability-with-bpf: Code snippets from the O&#39;Reilly book iovisor/gobpf: Go bindings for creating BPF programs. iovisor/bcc: BCC - Tools for BPF-based Linux IO analysis, networking, monitoring, and more GO BPF libraries: cilium ebpf vs iovisor gobpf",
+        // "description": "前言¶ gobpf 使用示例系列记录使用 gobpf 编写 eBPF 程序的一些例子。 搭建开发环境¶ 所有示例程序都基于 Ubuntu 20.04 和 Go 1.6 进行编写，同时所有示例使用的 github.com/iovisor/gobpf 版本为 v0.1.1 可以通过各种方式安装 Ubuntu 20.04 同样可以通过各种方式安装 Go 1.6 安装完 Ubuntu 和 Go 后，还需要安装编译 eBPF 程序所需的编译工具和内核源码： $ sudo apt update $ sudo apt install build-essential git make libelf-dev libelf1 \ clang llvm strace tar make bpfcc-tools linux-headers-$(uname -r) gcc-multilib $ cd /tmp/ &amp;&amp; \ git clone --depth 1 git://kernel.ubuntu.com/ubuntu/ubuntu-focal.git &amp;&amp; \ sudo mv ubuntu-focal /kernel-src &amp;&amp; \ cd /kernel-src/tools/lib/bpf &amp;&amp; \ sudo make &amp;&amp; sudo make install prefix=/usr/local &amp;&amp; \ sudo mv /usr/local/lib64/libbpf.* /lib/x86_64-linux-gnu/ 第一个 eBPF 程序¶ 第一个 eBPF 程序将 trace 所有的 open 系统调用，显示 open 系统调用调用时的文件路径参数 eBPF C 代码如下（hello.c）: #include &lt;linux/bpf.h&gt; #include &lt;linux/ptrace.h&gt; #include &lt;linux/version.h&gt; #include &lt;bpf_helpers.h&gt; SEC(&#34;kprobe/do_sys_open&#34;) int kprobe__do_sys_open(struct pt_regs *ctx) { char file_name[256]; bpf_probe_read(file_name, sizeof(file_name), PT_REGS_PARM2(ctx)); char fmt[] = &#34;open file %s\n&#34;; bpf_trace_printk(fmt, sizeof(fmt), &amp;file_name); return 0; } char _license[] SEC(&#34;license&#34;) = &#34;GPL&#34;; 通过下面的方法编译出最终的 hello.o 文件: $ clang -O2 -emit-llvm -I/kernel-src/tools/testing/selftests/bpf -c hello.c -o hello.ll hello.c:11:48: warning: incompatible integer to pointer conversion passing &#39;unsigned long&#39; to parameter of type &#39;const void *&#39; [-Wint-conversion] bpf_probe_read(file_name, sizeof(file_name), PT_REGS_PARM2(ctx)); ^~~~~~~~~~~~~~~~~~ /kernel-src/tools/testing/selftests/bpf/bpf_helpers.h:398:26: note: expanded from macro &#39;PT_REGS_PARM2&#39; #define PT_REGS_PARM2(x) ((x)-&gt;rsi) ^~~~~~~~~~ 1 warning generated. $ llc -march=bpf -filetype=obj -o hello.o hello.ll $ ls hello.o hello.o 然后在 Go 中使用 gobpf 加载的方法如下(hello.go): package main import ( &#34;fmt&#34; &#34;time&#34; &#34;github.com/iovisor/gobpf/elf&#34; ) func main() { mod := elf.NewModule(&#34;hello.o&#34;) err := mod.Load(nil) if err != nil { panic(err) } err = mod.EnableKprobes(0) if err != nil { panic(err) } for { fmt.Println(&#34;Waiting...&#34;) time.Sleep(10 * time.Second) } } 编译运行: $ go mod init $ go get github.com/iovisor/gobpf $ go build hello.go $ sudo ./hello Waiting... 新开一个 shell 窗口，然后在窗口内执行下面的命令可以看到被 trace 的 open 系统调用: $ sudo cat /sys/kernel/debug/tracing/trace_pipe ... systemd-journal-364 [000] .... 16819.802559: 0: open file /proc/492/attr/current systemd-journal-364 [000] .... 16819.802573: 0: open file /proc/492/sessionid systemd-journal-364 [000] .... 16819.802583: 0: open file /proc/492/loginuid systemd-journal-364 [000] .... 16819.802594: 0: open file /proc/492/cgroup ... 备注： 多次运行 hello 程序会出现如下错误: $ sudo ./hello panic: cannot write &#34;p:pdo_sys_open do_sys_open\n&#34; to kprobe_events: write /sys/kernel/debug/tracing/kprobe_events: file exists 可以通过下面的方法清理上次运行的遗留信息: $ echo &#34;&#34; |sudo tee /sys/kernel/debug/tracing/kprobe_events 然后再运行 sudo ./hello 就不会有问题了。 P.S. 本文的所有代码在 Github 上都有一份完整版：https://github.com/mozillazg/gobpf-examples/tree/master/1-helloword 参考资料¶ bpftools/linux-observability-with-bpf: Code snippets from the O&#39;Reilly book iovisor/gobpf: Go bindings for creating BPF programs. iovisor/bcc: BCC - Tools for BPF-based Linux IO analysis, networking, monitoring, and more GO BPF libraries: cilium ebpf vs iovisor gobpf",
+        "description": "<div class="section" id="id1">
+<h2 id="hidid1">前言<a class="headerlink" href="#hidid1" title="Permalink to this headline">¶</a></h2>
+<p>gobpf 使用示例系列记录使用 <a class="reference external" href="https://github.com/iovisor/gobpf">gobpf</a> 编写 eBPF 程序的一些例子。</p>
+</div>
+<div class="section" id="id2">
+<h2 id="hidid2">搭建开发环境<a class="headerlink" href="#hidid2" title="Permalink to this headline">¶</a></h2>
+<p>所有示例程序都基于 Ubuntu 20.04 和 Go 1.6 进行编写，同时所有示例使用的 github.com/iovisor/gobpf 版本为 v0.1.1</p>
+<ul class="simple">
+<li>可以通过各种方式安装 Ubuntu 20.04</li>
+<li>同样可以通过各种方式安装 Go 1.6</li>
+</ul>
+<p>安装完 Ubuntu 和 Go 后，还需要安装编译 eBPF 程序所需的编译工具和内核源码：</p>
+<div class="highlight"><pre><span></span>$ sudo apt update
+$ sudo apt install build-essential git make libelf-dev libelf1 <span class="se">\</span>
+clang llvm strace tar make bpfcc-tools linux-headers-<span class="k">$(</span>uname -r<span class="k">)</span> gcc-multilib
+
+$ <span class="nb">cd</span> /tmp/ <span class="o">&amp;&amp;</span> <span class="se">\</span>
+    git clone --depth <span class="m">1</span> git://kernel.ubuntu.com/ubuntu/ubuntu-focal.git <span class="o">&amp;&amp;</span> <span class="se">\</span>
+    sudo mv ubuntu-focal  /kernel-src <span class="o">&amp;&amp;</span> <span class="se">\</span>
+    <span class="nb">cd</span> /kernel-src/tools/lib/bpf <span class="o">&amp;&amp;</span> <span class="se">\</span>
+    sudo make <span class="o">&amp;&amp;</span> sudo make install <span class="nv">prefix</span><span class="o">=</span>/usr/local <span class="o">&amp;&amp;</span> <span class="se">\</span>
+    sudo mv /usr/local/lib64/libbpf.* /lib/x86_64-linux-gnu/
+</pre></div>
+</div>
+<div class="section" id="ebpf">
+<h2 id="hidebpf">第一个 eBPF 程序<a class="headerlink" href="#hidebpf" title="Permalink to this headline">¶</a></h2>
+<p>第一个 eBPF 程序将 trace 所有的 <tt class="docutils literal">open</tt> 系统调用，显示 <tt class="docutils literal">open</tt> 系统调用调用时的文件路径参数</p>
+<p>eBPF C 代码如下（hello.c）:</p>
+<div class="highlight"><pre><span></span><span class="cp">#include</span> <span class="cpf">&lt;linux/bpf.h&gt;</span><span class="cp"></span>
+<span class="cp">#include</span> <span class="cpf">&lt;linux/ptrace.h&gt;</span><span class="cp"></span>
+<span class="cp">#include</span> <span class="cpf">&lt;linux/version.h&gt;</span><span class="cp"></span>
+<span class="cp">#include</span> <span class="cpf">&lt;bpf_helpers.h&gt;</span><span class="cp"></span>
+
+<span class="n">SEC</span><span class="p">(</span><span class="s">&quot;kprobe/do_sys_open&quot;</span><span class="p">)</span>
+<span class="kt">int</span> <span class="n">kprobe__do_sys_open</span><span class="p">(</span><span class="k">struct</span> <span class="n">pt_regs</span> <span class="o">*</span><span class="n">ctx</span><span class="p">)</span>
+<span class="p">{</span>
+        <span class="kt">char</span> <span class="n">file_name</span><span class="p">[</span><span class="mi">256</span><span class="p">];</span>
+
+        <span class="n">bpf_probe_read</span><span class="p">(</span><span class="n">file_name</span><span class="p">,</span> <span class="k">sizeof</span><span class="p">(</span><span class="n">file_name</span><span class="p">),</span> <span class="n">PT_REGS_PARM2</span><span class="p">(</span><span class="n">ctx</span><span class="p">));</span>
+
+        <span class="kt">char</span> <span class="n">fmt</span><span class="p">[]</span> <span class="o">=</span> <span class="s">&quot;open file %s</span><span class="se">\n</span><span class="s">&quot;</span><span class="p">;</span>
+        <span class="n">bpf_trace_printk</span><span class="p">(</span><span class="n">fmt</span><span class="p">,</span> <span class="k">sizeof</span><span class="p">(</span><span class="n">fmt</span><span class="p">),</span> <span class="o">&amp;</span><span class="n">file_name</span><span class="p">);</span>
+
+        <span class="k">return</span> <span class="mi">0</span><span class="p">;</span>
+<span class="p">}</span>
+
+<span class="kt">char</span> <span class="n">_license</span><span class="p">[]</span> <span class="n">SEC</span><span class="p">(</span><span class="s">&quot;license&quot;</span><span class="p">)</span> <span class="o">=</span> <span class="s">&quot;GPL&quot;</span><span class="p">;</span>
+</pre></div>
+<p>通过下面的方法编译出最终的 hello.o 文件:</p>
+<div class="highlight"><pre><span></span>$ clang -O2 -emit-llvm -I/kernel-src/tools/testing/selftests/bpf -c hello.c -o hello.ll
+hello.c:11:48: warning: incompatible integer to pointer conversion passing <span class="s1">&#39;unsigned long&#39;</span> to parameter of <span class="nb">type</span> <span class="s1">&#39;const void *&#39;</span> <span class="o">[</span>-Wint-conversion<span class="o">]</span>
+                bpf_probe_read<span class="o">(</span>file_name, sizeof<span class="o">(</span>file_name<span class="o">)</span>, PT_REGS_PARM2<span class="o">(</span>ctx<span class="o">))</span><span class="p">;</span>
+                                                             ^~~~~~~~~~~~~~~~~~
+/kernel-src/tools/testing/selftests/bpf/bpf_helpers.h:398:26: note: expanded from macro <span class="s1">&#39;PT_REGS_PARM2&#39;</span>
+<span class="c1">#define PT_REGS_PARM2(x) ((x)-&gt;rsi)</span>
+                         ^~~~~~~~~~
+<span class="m">1</span> warning generated.
+$ llc -march<span class="o">=</span>bpf -filetype<span class="o">=</span>obj -o hello.o hello.ll
+
+$ ls hello.o
+hello.o
+</pre></div>
+<p>然后在 Go 中使用 gobpf 加载的方法如下(hello.go):</p>
+<div class="highlight"><pre><span></span><span class="kn">package</span> <span class="nx">main</span>
+
+<span class="kn">import</span> <span class="p">(</span>
+    <span class="s">&quot;fmt&quot;</span>
+    <span class="s">&quot;time&quot;</span>
+    <span class="s">&quot;github.com/iovisor/gobpf/elf&quot;</span>
+<span class="p">)</span>
+
+<span class="kd">func</span> <span class="nx">main</span><span class="p">()</span> <span class="p">{</span>
+    <span class="nx">mod</span> <span class="o">:=</span> <span class="nx">elf</span><span class="p">.</span><span class="nx">NewModule</span><span class="p">(</span><span class="s">&quot;hello.o&quot;</span><span class="p">)</span>
+
+    <span class="nx">err</span> <span class="o">:=</span> <span class="nx">mod</span><span class="p">.</span><span class="nx">Load</span><span class="p">(</span><span class="kc">nil</span><span class="p">)</span>
+    <span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+            <span class="nb">panic</span><span class="p">(</span><span class="nx">err</span><span class="p">)</span>
+    <span class="p">}</span>
+
+    <span class="nx">err</span> <span class="p">=</span> <span class="nx">mod</span><span class="p">.</span><span class="nx">EnableKprobes</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span>
+    <span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+            <span class="nb">panic</span><span class="p">(</span><span class="nx">err</span><span class="p">)</span>
+    <span class="p">}</span>
+
+    <span class="k">for</span> <span class="p">{</span>
+            <span class="nx">fmt</span><span class="p">.</span><span class="nx">Println</span><span class="p">(</span><span class="s">&quot;Waiting...&quot;</span><span class="p">)</span>
+            <span class="nx">time</span><span class="p">.</span><span class="nx">Sleep</span><span class="p">(</span><span class="mi">10</span> <span class="o">*</span> <span class="nx">time</span><span class="p">.</span><span class="nx">Second</span><span class="p">)</span>
+    <span class="p">}</span>
+<span class="p">}</span>
+</pre></div>
+<p>编译运行:</p>
+<pre class="literal-block">
+$ go mod init
+$ go get github.com/iovisor/gobpf
+$ go build hello.go
+$ sudo ./hello
+Waiting...
+</pre>
+<p>新开一个 shell 窗口，然后在窗口内执行下面的命令可以看到被 trace 的 <tt class="docutils literal">open</tt> 系统调用:</p>
+<pre class="literal-block">
+$ sudo cat  /sys/kernel/debug/tracing/trace_pipe
+...
+systemd-journal-364     [000] .... 16819.802559: 0: open file /proc/492/attr/current
+systemd-journal-364     [000] .... 16819.802573: 0: open file /proc/492/sessionid
+systemd-journal-364     [000] .... 16819.802583: 0: open file /proc/492/loginuid
+systemd-journal-364     [000] .... 16819.802594: 0: open file /proc/492/cgroup
+...
+</pre>
+<p>备注：</p>
+<p>多次运行 hello 程序会出现如下错误:</p>
+<pre class="literal-block">
+$ sudo ./hello
+panic: cannot write &quot;p:pdo_sys_open do_sys_open\n&quot; to kprobe_events: write /sys/kernel/debug/tracing/kprobe_events: file exists
+</pre>
+<p>可以通过下面的方法清理上次运行的遗留信息:</p>
+<pre class="literal-block">
+$ echo &quot;&quot; |sudo tee /sys/kernel/debug/tracing/kprobe_events
+</pre>
+<p>然后再运行 <tt class="docutils literal">sudo ./hello</tt> 就不会有问题了。</p>
+<p>P.S. 本文的所有代码在 Github 上都有一份完整版：<a class="reference external" href="https://github.com/mozillazg/gobpf-examples/tree/master/1-helloword">https://github.com/mozillazg/gobpf-examples/tree/master/1-helloword</a></p>
+</div>
+<div class="section" id="id3">
+<h2 id="hidid3">参考资料<a class="headerlink" href="#hidid3" title="Permalink to this headline">¶</a></h2>
+<ul class="simple">
+<li><a class="reference external" href="https://github.com/bpftools/linux-observability-with-bpf">bpftools/linux-observability-with-bpf: Code snippets from the O'Reilly book</a></li>
+<li><a class="reference external" href="https://github.com/iovisor/gobpf">iovisor/gobpf: Go bindings for creating BPF programs.</a></li>
+<li><a class="reference external" href="https://github.com/iovisor/bcc">iovisor/bcc: BCC - Tools for BPF-based Linux IO analysis, networking, monitoring, and more</a></li>
+<li><a class="reference external" href="https://est357.github.io/posts/cilium_iovisor/">GO BPF libraries: cilium ebpf vs iovisor gobpf</a></li>
+</ul>
+</div>
+",
         "mainEntityOfPage": {
             "@type": "WebPage",
             "@id": "https://mozillazg.com"
@@ -318,8 +451,8 @@ $ echo &quot;&quot; |sudo tee /sys/kernel/debug/tracing/kprobe_events
     <p>Related Posts:</p>
     <ul>
         <li><a href="https://mozillazg.com/2021/05/ebpf-gobpf-get-function-argument-values-from-pt_regs.html">gobpf 使用示例：从 pt_regs 中获取内核函数的参数的值</a></li>
-        <li><a href="https://mozillazg.com/2021/04/ebpf-gobpf-store-and-read-data-use-perf-event.html">gobpf 使用示例：使用 perf event 保存数据</a></li>
         <li><a href="https://mozillazg.com/2021/05/ebpf-gobpf-how-to-find-system-call-kernel-function-for-kprobe-elf-section.html">gobpf 使用示例：如何找到一个系统调用对应的可用于 kprobe SEC 的内核函数</a></li>
+        <li><a href="https://mozillazg.com/2021/04/ebpf-gobpf-store-and-read-data-use-perf-event.html">gobpf 使用示例：使用 perf event 保存数据</a></li>
     </ul>
 </section>
     <hr/>
@@ -362,7 +495,7 @@ $ echo &quot;&quot; |sudo tee /sys/kernel/debug/tracing/kprobe_events
    <div class="container">
       <hr>
       <div class="row">
-         <div class="col-xs-10">&copy; 2021 mozillazg
+         <div class="col-xs-10">&copy; 2022 mozillazg
             &middot; Powered by <a href="https://github.com/DandyDev/pelican-bootstrap3" target="_blank">pelican-bootstrap3</a>,
             <a href="http://docs.getpelican.com/" target="_blank">Pelican</a>,
             <a href="http://getbootstrap.com" target="_blank">Bootstrap</a>              <p><small>  <a rel="license" href="http://creativecommons.org/licenses/by-sa/4.0/"><img alt="Creative Commons License" style="border-width:0" src="/static/images/by-sa-80x15.png" /></a>

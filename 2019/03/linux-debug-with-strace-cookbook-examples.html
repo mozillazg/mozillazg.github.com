@@ -18,6 +18,8 @@
         <meta name="author" content="mozillazg" />
         <meta name="keywords" content="strace,debug" />
     <meta name="description" content="前言¶ strace 可以用来查看/记录程序运行过程中调用的 系统调用 以及接收到的进程信号（signal）， 对于我们日常 debug 疑难杂症非常的有帮助，是一个非常好的 debug 工具。本文简单记录一下 strace 的常用功能和操作。 输出的含义¶ 我们通过一个简单的命令来查看 strace 程序的典型输出： $ strace ls /tmp/trace execve(&#34;/bin/ls&#34;, [&#34;ls&#34;, &#34;/tmp/trace&#34;], [/* 41 vars */]) = 0 brk(0) = 0x11af000 mmap(NULL, 4096, PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0) = 0x7f0738c16000 access(&#34;/etc/ld.so.preload&#34;, R_OK) = -1 ENOENT (No such file or directory) open(&#34;/etc/ld.so.cache&#34;, O_RDONLY) = 3 fstat(3, {st_mode=S_IFREG|0644, st_size=35759, ...}) = 0 mmap(NULL, 35759, PROT_READ, MAP_PRIVATE, 3, 0) = 0x7f0738c0a000 close(3) = 0 open(&#34;/lib64/libselinux.so.1&#34;, O_RDONLY) = 3 read(3, &#34;\177ELF\2\1\1\0\0\0\0\0\0\0\0\0\3\0&gt;\0\1\0\0\0PX\0\0\0\0\0\0&#34;..., 832) = 832 fstat(3, {st_mode=S_IFREG|0755, st_size=122040, ...}) = 0 .... fstat(1, {st_mode=S_IFCHR|0620, st_rdev=makedev(136, 0), ...}) = 0 mmap(NULL, 4096, PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0) = 0x7fb97a060000 write(1, &#34;test_dir test.txt\n&#34;, 19test_dir test.txt ) = 19 close(1) = 0 munmap(0x7fb97a060000, 4096) = 0 close(2) = 0 exit_group(0) = ? +++ exited with 0 +++ 比如下面的这个输出: execve(&#34;/bin/ls&#34;, [&#34;ls&#34;, &#34;/tmp/trace&#34;], [/* 41 vars */]) = 0 的含义如下： execve: 系统调用的名称。 (&#34;/bin/ls&#34;, [&#34;ls&#34;, &#34;/tmp/trace&#34;], [/* 41 vars */]): 这个括号里是系统调用的参数。 = 0 : 这个 0 是系统调用的返回值，不一定是数字看具体的系统调用返回啥结果就是啥值。 上面有些系统调用的返回值比较特殊，比如: access(&#34;/etc/ld.so.preload&#34;, R_OK) = -1 ENOENT (No such file or directory) 后面这个 ENOENT (No such file or directory) 中的 ENOENT 是错误码， (No such file or directory) 是错误码的解释。 上面是系统调用相关的输出格式和含义，下面再看一个进程信号(signal)的输出格式： $ strace -p 15718 Process 15718 attached select(1, [0], NULL, NULL, NULL) = ? ERESTARTNOHAND (To be restarted if no handler) --- SIGTERM {si_signo=SIGTERM, si_code=SI_USER, si_pid=15757, si_uid=500} --- +++ killed by SIGTERM +++ 其中: --- SIGTERM {si_signo=SIGTERM, si_code=SI_USER, si_pid=15757, si_uid=500} --- 这一句就是进程接收到的具体 signal 的信息。 常用命令行参数¶ 常用的参数组合: strace -f -s 1024 -tt -T -yy -p &lt;pid&gt; strace -f -s 1024 -tt -T -yy -p &lt;pid&gt; -o &lt;filename&gt; strace -c -p &lt;pid&gt; strace -f -s 1024 -tt -T -yy -C -p &lt;pid&gt; -p &lt;pid&gt;: 附加到进程中，记录某个进程的系统调用和进程信号信息。多个 -p &lt;pid&gt; 可以实现同时追踪多个进程。 -f: 同时追踪子进程的系统调用情况（如果是多线程程序的话，会同时追踪所有线程）。如果不加 -f 参数的话默认只追踪指定的单个进程。 -o &lt;filename&gt;: 把输出结果保存到文件中（默认是输出到标准错误）。 -ff: 与 -o &lt;filename&gt; 一起使用，会把每个 pid (进程 pid 或线程 id) 的 strace 数据保存到 &lt;filename&gt;.&lt;pid&gt; 的文件中。 -e &lt;expr&gt;: 过滤事件，只输出符合规则的事件，可以用来指定只看某些系统调用的情况，比如： -e open,read 。 或者不看某些系统调用： -e &#39;!open,read&#39; ，更强大的过滤功能可以查看 strace(1) 。 -s &lt;size&gt;: 指定字符串数据的大小，默认 32。可以通过 -s 来显示更详细的信息或精简信息（比如很多系统调用的参数的值会被截断，可以通过 -s 配置更大的 size 来查看更详细的参数值）。 -tt: 显示系统调用是在哪个时刻调用的，包含微秒（ -t 参数一样的效果就是时间不包含微秒）: $ strace -e open,read -s 2 -tt ls 14:32:18.877470 read(3, &#34;\177E&#34;..., 832) = 832 14:32:18.878249 read(3, &#34;\177E&#34;..., 832) = 832 14:32:18.878867 read(3, &#34;\177E&#34;..., 832) = 832 14:32:18.879386 read(3, &#34;\177E&#34;..., 832) = 832 14:32:18.879871 read(3, &#34;\177E&#34;..., 832) = 832 14:32:18.880923 read(3, &#34;no&#34;..., 1024) = 420 14:32:18.881255 read(3, &#34;&#34;, 1024) = 0 上面的第一列时间信息即为 -tt 的效果。 -T: 显示执行系统调用所花费的时间，单位是秒 $ strace -e read -s 2 -T pwd read(3, &#34;\177E&#34;..., 832) = 832 &lt;0.000012&gt; 上面行末的 &lt;0.000012&gt; 即为 -T 的效果。 -y: 输出文件描述符所对应的文件路径 $ strace -e read -s 10 cat test.txt read(3, &#34;\177ELF\2\1\1\3\0\0&#34;..., 832) = 832 read(3, &#34;hello\n&#34;, 131072) = 6 hello read(3, &#34;&#34;, 131072) = 0 $ strace -e read -s 10 -y cat test.txt read(3&lt;/lib/x86_64-linux-gnu/libc-2.27.so&gt;, &#34;\177ELF\2\1\1\3\0\0&#34;..., 832) = 832 read(3&lt;/path/to/test.txt&gt;, &#34;hello\n&#34;, 131072) = 6 hello read(3&lt;/path/to/test.txt&gt;, &#34;&#34;, 131072) = 0 可以看到加了 -y 后文件描述符后面会跟它所对应的文件的路径 -yy: 输出文件描述更详细的信息，比如 socket 文件描述符输出所对应的协议信息。 $ strace -e connect -s 3 nc baidu.com 80 ... connect(3, {sa_family=AF_INET, sin_port=htons(53), sin_addr=inet_addr(&#34;127.0.0.53&#34;)}, 16) = 0 ... $ strace -e connect -s 3 -y nc baidu.com 80 ... connect(3&lt;socket:[22180]&gt;, {sa_family=AF_INET, sin_port=htons(53), sin_addr=inet_addr(&#34;127.0.0.53&#34;)}, 16) = 0 $ strace -e connect -s 3 -yy nc baidu.com 80 ... connect(3&lt;UDP:[22202]&gt;, {sa_family=AF_INET, sin_port=htons(53), sin_addr=inet_addr(&#34;127.0.0.53&#34;)}, 16) = 0 可以看到 -yy 会显示上面的 UDP 这个协议信息。 -c: 统计系统调用的次数、种类以及错误信息，会隐藏详细的追踪信息（前面的 -e 过滤参数也可以用于这个）: $ strace -c cat test.txt hello % time seconds usecs/call calls errors syscall ------ ----------- ----------- --------- --------- ---------------- 18.45 0.000019 3 7 mmap 18.45 0.000019 5 4 mprotect 17.48 0.000018 9 2 munmap 13.59 0.000014 4 4 openat 9.71 0.000010 10 1 write 6.80 0.000007 2 3 read 5.83 0.000006 2 3 3 access 3.88 0.000004 1 5 fstat 2.91 0.000003 1 6 close 1.94 0.000002 1 3 brk 0.97 0.000001 1 1 execve 0.00 0.000000 0 1 arch_prctl 0.00 0.000000 0 1 fadvise64 ------ ----------- ----------- --------- --------- ---------------- 100.00 0.000103 41 3 total -C: 跟 -c 类似，只是增加了会输出详细的追踪信息 $ strace -e read -C -s 3 cat test.txt read(3, &#34;\177EL&#34;..., 832) = 832 read(3, &#34;hel&#34;..., 131072) = 6 hello read(3, &#34;&#34;, 131072) = 0 +++ exited with 0 +++ % time seconds usecs/call calls errors syscall ------ ----------- ----------- --------- --------- ---------------- 0.00 0.000000 0 3 read ------ ----------- ----------- --------- --------- ---------------- 100.00 0.000000 3 total -v: 显示系统调用时传入的参数变量的具体内容，而不是默认显示为 /* 8 vars */ 常用过滤表达式¶ -e &lt;expr&gt; 这个参数可以用来指定需要 trace 哪些事件，格式如下: [qualifier=][!][?]value1[,[?]value2]... 其中 qualifier 的值是 trace, abbrev, verbose, raw, signal, read, write, fault, inject, or kvm 。默认是 trace value 就是各种过滤条件了。 -e trace=&lt;set&gt; : &lt;set&gt; 是系统调用名称（默认是 trace=all ），比如 trace=open,close,read,write -e trace=/&lt;regex&gt;: 可以通过这种方式来用正则表达式指定系统调用名称，支持的正则语法可以参考 regex(7) 。 -e trace=%file: 文件相关系统调用。 -e trace=%desc: 文件描述符相关。 -e trace=%process: 进程管理相关系统调用。 -e trace=%network: 网络相关。 -e trace=%signal: 信号相关。 -e trace=%ipc: IPC 相关。 -e trace=%memory: 内存 mapping 相关。 -e signal=&lt;set&gt;: &lt;set&gt; 是进程信号的名称（默认是 signal=all ），比如 -e signal=SIGTERM -e read=&lt;set&gt;: 追踪指定 fd 上的数据并打印 hex 和 ascii 格式的数据， &lt;set&gt; 是 fd 比如:read=3,5 常见系统调用¶ open() : 用于打开或创建一个文件。 read() : 用于读取一个文件。 write() : 写文件。 connect() : 建立网络连接。 sendto() : 发送网络数据。 recvfrom() : 接收网络数据。 futex() : 锁相关操作。 更多关于某个系统调用的含义/用途可以通过 man 2 &lt;syscall&gt; （把 &lt;syscall&gt; 替换为实际的系统调用名称，比如 man 2 open ）命令行查看或者访问 http://man7.org/linux/man-pages/man2/&lt;syscall&gt;.2.html 这个网址（把 &lt;syscall&gt; 替换为实际的系统调用名称, 比如 http://man7.org/linux/man-pages/man2/open.2.html）亦或是 Google 一下。 总结¶ 更多关于 strace 的信息可以从参考资料的 strace(1) 中获取，如果对输出中系统调用不了解的话可以参考参考资料中的 syscalls(2) 中的信息，同时也别忘了搜索引擎是你的好朋友，有啥不明白的记得 Google 一下。 参考资料¶ strace(1) - Linux manual page syscalls(2) - Linux manual page regex(7) - Linux manual page" />
+    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-4941850466486001"
+     crossorigin="anonymous"></script>
 
     <style>
       .js-toc {
@@ -94,7 +96,242 @@
         // "dateModified": "",
         "image": "https://mozillazg.com/static/avatar.jpeg",
         "keywords": "strace, debug",
-        "description": "前言¶ strace 可以用来查看/记录程序运行过程中调用的 系统调用 以及接收到的进程信号（signal）， 对于我们日常 debug 疑难杂症非常的有帮助，是一个非常好的 debug 工具。本文简单记录一下 strace 的常用功能和操作。 输出的含义¶ 我们通过一个简单的命令来查看 strace 程序的典型输出： $ strace ls /tmp/trace execve(&#34;/bin/ls&#34;, [&#34;ls&#34;, &#34;/tmp/trace&#34;], [/* 41 vars */]) = 0 brk(0) = 0x11af000 mmap(NULL, 4096, PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0) = 0x7f0738c16000 access(&#34;/etc/ld.so.preload&#34;, R_OK) = -1 ENOENT (No such file or directory) open(&#34;/etc/ld.so.cache&#34;, O_RDONLY) = 3 fstat(3, {st_mode=S_IFREG|0644, st_size=35759, ...}) = 0 mmap(NULL, 35759, PROT_READ, MAP_PRIVATE, 3, 0) = 0x7f0738c0a000 close(3) = 0 open(&#34;/lib64/libselinux.so.1&#34;, O_RDONLY) = 3 read(3, &#34;\177ELF\2\1\1\0\0\0\0\0\0\0\0\0\3\0&gt;\0\1\0\0\0PX\0\0\0\0\0\0&#34;..., 832) = 832 fstat(3, {st_mode=S_IFREG|0755, st_size=122040, ...}) = 0 .... fstat(1, {st_mode=S_IFCHR|0620, st_rdev=makedev(136, 0), ...}) = 0 mmap(NULL, 4096, PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0) = 0x7fb97a060000 write(1, &#34;test_dir test.txt\n&#34;, 19test_dir test.txt ) = 19 close(1) = 0 munmap(0x7fb97a060000, 4096) = 0 close(2) = 0 exit_group(0) = ? +++ exited with 0 +++ 比如下面的这个输出: execve(&#34;/bin/ls&#34;, [&#34;ls&#34;, &#34;/tmp/trace&#34;], [/* 41 vars */]) = 0 的含义如下： execve: 系统调用的名称。 (&#34;/bin/ls&#34;, [&#34;ls&#34;, &#34;/tmp/trace&#34;], [/* 41 vars */]): 这个括号里是系统调用的参数。 = 0 : 这个 0 是系统调用的返回值，不一定是数字看具体的系统调用返回啥结果就是啥值。 上面有些系统调用的返回值比较特殊，比如: access(&#34;/etc/ld.so.preload&#34;, R_OK) = -1 ENOENT (No such file or directory) 后面这个 ENOENT (No such file or directory) 中的 ENOENT 是错误码， (No such file or directory) 是错误码的解释。 上面是系统调用相关的输出格式和含义，下面再看一个进程信号(signal)的输出格式： $ strace -p 15718 Process 15718 attached select(1, [0], NULL, NULL, NULL) = ? ERESTARTNOHAND (To be restarted if no handler) --- SIGTERM {si_signo=SIGTERM, si_code=SI_USER, si_pid=15757, si_uid=500} --- +++ killed by SIGTERM +++ 其中: --- SIGTERM {si_signo=SIGTERM, si_code=SI_USER, si_pid=15757, si_uid=500} --- 这一句就是进程接收到的具体 signal 的信息。 常用命令行参数¶ 常用的参数组合: strace -f -s 1024 -tt -T -yy -p &lt;pid&gt; strace -f -s 1024 -tt -T -yy -p &lt;pid&gt; -o &lt;filename&gt; strace -c -p &lt;pid&gt; strace -f -s 1024 -tt -T -yy -C -p &lt;pid&gt; -p &lt;pid&gt;: 附加到进程中，记录某个进程的系统调用和进程信号信息。多个 -p &lt;pid&gt; 可以实现同时追踪多个进程。 -f: 同时追踪子进程的系统调用情况（如果是多线程程序的话，会同时追踪所有线程）。如果不加 -f 参数的话默认只追踪指定的单个进程。 -o &lt;filename&gt;: 把输出结果保存到文件中（默认是输出到标准错误）。 -ff: 与 -o &lt;filename&gt; 一起使用，会把每个 pid (进程 pid 或线程 id) 的 strace 数据保存到 &lt;filename&gt;.&lt;pid&gt; 的文件中。 -e &lt;expr&gt;: 过滤事件，只输出符合规则的事件，可以用来指定只看某些系统调用的情况，比如： -e open,read 。 或者不看某些系统调用： -e &#39;!open,read&#39; ，更强大的过滤功能可以查看 strace(1) 。 -s &lt;size&gt;: 指定字符串数据的大小，默认 32。可以通过 -s 来显示更详细的信息或精简信息（比如很多系统调用的参数的值会被截断，可以通过 -s 配置更大的 size 来查看更详细的参数值）。 -tt: 显示系统调用是在哪个时刻调用的，包含微秒（ -t 参数一样的效果就是时间不包含微秒）: $ strace -e open,read -s 2 -tt ls 14:32:18.877470 read(3, &#34;\177E&#34;..., 832) = 832 14:32:18.878249 read(3, &#34;\177E&#34;..., 832) = 832 14:32:18.878867 read(3, &#34;\177E&#34;..., 832) = 832 14:32:18.879386 read(3, &#34;\177E&#34;..., 832) = 832 14:32:18.879871 read(3, &#34;\177E&#34;..., 832) = 832 14:32:18.880923 read(3, &#34;no&#34;..., 1024) = 420 14:32:18.881255 read(3, &#34;&#34;, 1024) = 0 上面的第一列时间信息即为 -tt 的效果。 -T: 显示执行系统调用所花费的时间，单位是秒 $ strace -e read -s 2 -T pwd read(3, &#34;\177E&#34;..., 832) = 832 &lt;0.000012&gt; 上面行末的 &lt;0.000012&gt; 即为 -T 的效果。 -y: 输出文件描述符所对应的文件路径 $ strace -e read -s 10 cat test.txt read(3, &#34;\177ELF\2\1\1\3\0\0&#34;..., 832) = 832 read(3, &#34;hello\n&#34;, 131072) = 6 hello read(3, &#34;&#34;, 131072) = 0 $ strace -e read -s 10 -y cat test.txt read(3&lt;/lib/x86_64-linux-gnu/libc-2.27.so&gt;, &#34;\177ELF\2\1\1\3\0\0&#34;..., 832) = 832 read(3&lt;/path/to/test.txt&gt;, &#34;hello\n&#34;, 131072) = 6 hello read(3&lt;/path/to/test.txt&gt;, &#34;&#34;, 131072) = 0 可以看到加了 -y 后文件描述符后面会跟它所对应的文件的路径 -yy: 输出文件描述更详细的信息，比如 socket 文件描述符输出所对应的协议信息。 $ strace -e connect -s 3 nc baidu.com 80 ... connect(3, {sa_family=AF_INET, sin_port=htons(53), sin_addr=inet_addr(&#34;127.0.0.53&#34;)}, 16) = 0 ... $ strace -e connect -s 3 -y nc baidu.com 80 ... connect(3&lt;socket:[22180]&gt;, {sa_family=AF_INET, sin_port=htons(53), sin_addr=inet_addr(&#34;127.0.0.53&#34;)}, 16) = 0 $ strace -e connect -s 3 -yy nc baidu.com 80 ... connect(3&lt;UDP:[22202]&gt;, {sa_family=AF_INET, sin_port=htons(53), sin_addr=inet_addr(&#34;127.0.0.53&#34;)}, 16) = 0 可以看到 -yy 会显示上面的 UDP 这个协议信息。 -c: 统计系统调用的次数、种类以及错误信息，会隐藏详细的追踪信息（前面的 -e 过滤参数也可以用于这个）: $ strace -c cat test.txt hello % time seconds usecs/call calls errors syscall ------ ----------- ----------- --------- --------- ---------------- 18.45 0.000019 3 7 mmap 18.45 0.000019 5 4 mprotect 17.48 0.000018 9 2 munmap 13.59 0.000014 4 4 openat 9.71 0.000010 10 1 write 6.80 0.000007 2 3 read 5.83 0.000006 2 3 3 access 3.88 0.000004 1 5 fstat 2.91 0.000003 1 6 close 1.94 0.000002 1 3 brk 0.97 0.000001 1 1 execve 0.00 0.000000 0 1 arch_prctl 0.00 0.000000 0 1 fadvise64 ------ ----------- ----------- --------- --------- ---------------- 100.00 0.000103 41 3 total -C: 跟 -c 类似，只是增加了会输出详细的追踪信息 $ strace -e read -C -s 3 cat test.txt read(3, &#34;\177EL&#34;..., 832) = 832 read(3, &#34;hel&#34;..., 131072) = 6 hello read(3, &#34;&#34;, 131072) = 0 +++ exited with 0 +++ % time seconds usecs/call calls errors syscall ------ ----------- ----------- --------- --------- ---------------- 0.00 0.000000 0 3 read ------ ----------- ----------- --------- --------- ---------------- 100.00 0.000000 3 total -v: 显示系统调用时传入的参数变量的具体内容，而不是默认显示为 /* 8 vars */ 常用过滤表达式¶ -e &lt;expr&gt; 这个参数可以用来指定需要 trace 哪些事件，格式如下: [qualifier=][!][?]value1[,[?]value2]... 其中 qualifier 的值是 trace, abbrev, verbose, raw, signal, read, write, fault, inject, or kvm 。默认是 trace value 就是各种过滤条件了。 -e trace=&lt;set&gt; : &lt;set&gt; 是系统调用名称（默认是 trace=all ），比如 trace=open,close,read,write -e trace=/&lt;regex&gt;: 可以通过这种方式来用正则表达式指定系统调用名称，支持的正则语法可以参考 regex(7) 。 -e trace=%file: 文件相关系统调用。 -e trace=%desc: 文件描述符相关。 -e trace=%process: 进程管理相关系统调用。 -e trace=%network: 网络相关。 -e trace=%signal: 信号相关。 -e trace=%ipc: IPC 相关。 -e trace=%memory: 内存 mapping 相关。 -e signal=&lt;set&gt;: &lt;set&gt; 是进程信号的名称（默认是 signal=all ），比如 -e signal=SIGTERM -e read=&lt;set&gt;: 追踪指定 fd 上的数据并打印 hex 和 ascii 格式的数据， &lt;set&gt; 是 fd 比如:read=3,5 常见系统调用¶ open() : 用于打开或创建一个文件。 read() : 用于读取一个文件。 write() : 写文件。 connect() : 建立网络连接。 sendto() : 发送网络数据。 recvfrom() : 接收网络数据。 futex() : 锁相关操作。 更多关于某个系统调用的含义/用途可以通过 man 2 &lt;syscall&gt; （把 &lt;syscall&gt; 替换为实际的系统调用名称，比如 man 2 open ）命令行查看或者访问 http://man7.org/linux/man-pages/man2/&lt;syscall&gt;.2.html 这个网址（把 &lt;syscall&gt; 替换为实际的系统调用名称, 比如 http://man7.org/linux/man-pages/man2/open.2.html）亦或是 Google 一下。 总结¶ 更多关于 strace 的信息可以从参考资料的 strace(1) 中获取，如果对输出中系统调用不了解的话可以参考参考资料中的 syscalls(2) 中的信息，同时也别忘了搜索引擎是你的好朋友，有啥不明白的记得 Google 一下。 参考资料¶ strace(1) - Linux manual page syscalls(2) - Linux manual page regex(7) - Linux manual page",
+        // "description": "前言¶ strace 可以用来查看/记录程序运行过程中调用的 系统调用 以及接收到的进程信号（signal）， 对于我们日常 debug 疑难杂症非常的有帮助，是一个非常好的 debug 工具。本文简单记录一下 strace 的常用功能和操作。 输出的含义¶ 我们通过一个简单的命令来查看 strace 程序的典型输出： $ strace ls /tmp/trace execve(&#34;/bin/ls&#34;, [&#34;ls&#34;, &#34;/tmp/trace&#34;], [/* 41 vars */]) = 0 brk(0) = 0x11af000 mmap(NULL, 4096, PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0) = 0x7f0738c16000 access(&#34;/etc/ld.so.preload&#34;, R_OK) = -1 ENOENT (No such file or directory) open(&#34;/etc/ld.so.cache&#34;, O_RDONLY) = 3 fstat(3, {st_mode=S_IFREG|0644, st_size=35759, ...}) = 0 mmap(NULL, 35759, PROT_READ, MAP_PRIVATE, 3, 0) = 0x7f0738c0a000 close(3) = 0 open(&#34;/lib64/libselinux.so.1&#34;, O_RDONLY) = 3 read(3, &#34;\177ELF\2\1\1\0\0\0\0\0\0\0\0\0\3\0&gt;\0\1\0\0\0PX\0\0\0\0\0\0&#34;..., 832) = 832 fstat(3, {st_mode=S_IFREG|0755, st_size=122040, ...}) = 0 .... fstat(1, {st_mode=S_IFCHR|0620, st_rdev=makedev(136, 0), ...}) = 0 mmap(NULL, 4096, PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0) = 0x7fb97a060000 write(1, &#34;test_dir test.txt\n&#34;, 19test_dir test.txt ) = 19 close(1) = 0 munmap(0x7fb97a060000, 4096) = 0 close(2) = 0 exit_group(0) = ? +++ exited with 0 +++ 比如下面的这个输出: execve(&#34;/bin/ls&#34;, [&#34;ls&#34;, &#34;/tmp/trace&#34;], [/* 41 vars */]) = 0 的含义如下： execve: 系统调用的名称。 (&#34;/bin/ls&#34;, [&#34;ls&#34;, &#34;/tmp/trace&#34;], [/* 41 vars */]): 这个括号里是系统调用的参数。 = 0 : 这个 0 是系统调用的返回值，不一定是数字看具体的系统调用返回啥结果就是啥值。 上面有些系统调用的返回值比较特殊，比如: access(&#34;/etc/ld.so.preload&#34;, R_OK) = -1 ENOENT (No such file or directory) 后面这个 ENOENT (No such file or directory) 中的 ENOENT 是错误码， (No such file or directory) 是错误码的解释。 上面是系统调用相关的输出格式和含义，下面再看一个进程信号(signal)的输出格式： $ strace -p 15718 Process 15718 attached select(1, [0], NULL, NULL, NULL) = ? ERESTARTNOHAND (To be restarted if no handler) --- SIGTERM {si_signo=SIGTERM, si_code=SI_USER, si_pid=15757, si_uid=500} --- +++ killed by SIGTERM +++ 其中: --- SIGTERM {si_signo=SIGTERM, si_code=SI_USER, si_pid=15757, si_uid=500} --- 这一句就是进程接收到的具体 signal 的信息。 常用命令行参数¶ 常用的参数组合: strace -f -s 1024 -tt -T -yy -p &lt;pid&gt; strace -f -s 1024 -tt -T -yy -p &lt;pid&gt; -o &lt;filename&gt; strace -c -p &lt;pid&gt; strace -f -s 1024 -tt -T -yy -C -p &lt;pid&gt; -p &lt;pid&gt;: 附加到进程中，记录某个进程的系统调用和进程信号信息。多个 -p &lt;pid&gt; 可以实现同时追踪多个进程。 -f: 同时追踪子进程的系统调用情况（如果是多线程程序的话，会同时追踪所有线程）。如果不加 -f 参数的话默认只追踪指定的单个进程。 -o &lt;filename&gt;: 把输出结果保存到文件中（默认是输出到标准错误）。 -ff: 与 -o &lt;filename&gt; 一起使用，会把每个 pid (进程 pid 或线程 id) 的 strace 数据保存到 &lt;filename&gt;.&lt;pid&gt; 的文件中。 -e &lt;expr&gt;: 过滤事件，只输出符合规则的事件，可以用来指定只看某些系统调用的情况，比如： -e open,read 。 或者不看某些系统调用： -e &#39;!open,read&#39; ，更强大的过滤功能可以查看 strace(1) 。 -s &lt;size&gt;: 指定字符串数据的大小，默认 32。可以通过 -s 来显示更详细的信息或精简信息（比如很多系统调用的参数的值会被截断，可以通过 -s 配置更大的 size 来查看更详细的参数值）。 -tt: 显示系统调用是在哪个时刻调用的，包含微秒（ -t 参数一样的效果就是时间不包含微秒）: $ strace -e open,read -s 2 -tt ls 14:32:18.877470 read(3, &#34;\177E&#34;..., 832) = 832 14:32:18.878249 read(3, &#34;\177E&#34;..., 832) = 832 14:32:18.878867 read(3, &#34;\177E&#34;..., 832) = 832 14:32:18.879386 read(3, &#34;\177E&#34;..., 832) = 832 14:32:18.879871 read(3, &#34;\177E&#34;..., 832) = 832 14:32:18.880923 read(3, &#34;no&#34;..., 1024) = 420 14:32:18.881255 read(3, &#34;&#34;, 1024) = 0 上面的第一列时间信息即为 -tt 的效果。 -T: 显示执行系统调用所花费的时间，单位是秒 $ strace -e read -s 2 -T pwd read(3, &#34;\177E&#34;..., 832) = 832 &lt;0.000012&gt; 上面行末的 &lt;0.000012&gt; 即为 -T 的效果。 -y: 输出文件描述符所对应的文件路径 $ strace -e read -s 10 cat test.txt read(3, &#34;\177ELF\2\1\1\3\0\0&#34;..., 832) = 832 read(3, &#34;hello\n&#34;, 131072) = 6 hello read(3, &#34;&#34;, 131072) = 0 $ strace -e read -s 10 -y cat test.txt read(3&lt;/lib/x86_64-linux-gnu/libc-2.27.so&gt;, &#34;\177ELF\2\1\1\3\0\0&#34;..., 832) = 832 read(3&lt;/path/to/test.txt&gt;, &#34;hello\n&#34;, 131072) = 6 hello read(3&lt;/path/to/test.txt&gt;, &#34;&#34;, 131072) = 0 可以看到加了 -y 后文件描述符后面会跟它所对应的文件的路径 -yy: 输出文件描述更详细的信息，比如 socket 文件描述符输出所对应的协议信息。 $ strace -e connect -s 3 nc baidu.com 80 ... connect(3, {sa_family=AF_INET, sin_port=htons(53), sin_addr=inet_addr(&#34;127.0.0.53&#34;)}, 16) = 0 ... $ strace -e connect -s 3 -y nc baidu.com 80 ... connect(3&lt;socket:[22180]&gt;, {sa_family=AF_INET, sin_port=htons(53), sin_addr=inet_addr(&#34;127.0.0.53&#34;)}, 16) = 0 $ strace -e connect -s 3 -yy nc baidu.com 80 ... connect(3&lt;UDP:[22202]&gt;, {sa_family=AF_INET, sin_port=htons(53), sin_addr=inet_addr(&#34;127.0.0.53&#34;)}, 16) = 0 可以看到 -yy 会显示上面的 UDP 这个协议信息。 -c: 统计系统调用的次数、种类以及错误信息，会隐藏详细的追踪信息（前面的 -e 过滤参数也可以用于这个）: $ strace -c cat test.txt hello % time seconds usecs/call calls errors syscall ------ ----------- ----------- --------- --------- ---------------- 18.45 0.000019 3 7 mmap 18.45 0.000019 5 4 mprotect 17.48 0.000018 9 2 munmap 13.59 0.000014 4 4 openat 9.71 0.000010 10 1 write 6.80 0.000007 2 3 read 5.83 0.000006 2 3 3 access 3.88 0.000004 1 5 fstat 2.91 0.000003 1 6 close 1.94 0.000002 1 3 brk 0.97 0.000001 1 1 execve 0.00 0.000000 0 1 arch_prctl 0.00 0.000000 0 1 fadvise64 ------ ----------- ----------- --------- --------- ---------------- 100.00 0.000103 41 3 total -C: 跟 -c 类似，只是增加了会输出详细的追踪信息 $ strace -e read -C -s 3 cat test.txt read(3, &#34;\177EL&#34;..., 832) = 832 read(3, &#34;hel&#34;..., 131072) = 6 hello read(3, &#34;&#34;, 131072) = 0 +++ exited with 0 +++ % time seconds usecs/call calls errors syscall ------ ----------- ----------- --------- --------- ---------------- 0.00 0.000000 0 3 read ------ ----------- ----------- --------- --------- ---------------- 100.00 0.000000 3 total -v: 显示系统调用时传入的参数变量的具体内容，而不是默认显示为 /* 8 vars */ 常用过滤表达式¶ -e &lt;expr&gt; 这个参数可以用来指定需要 trace 哪些事件，格式如下: [qualifier=][!][?]value1[,[?]value2]... 其中 qualifier 的值是 trace, abbrev, verbose, raw, signal, read, write, fault, inject, or kvm 。默认是 trace value 就是各种过滤条件了。 -e trace=&lt;set&gt; : &lt;set&gt; 是系统调用名称（默认是 trace=all ），比如 trace=open,close,read,write -e trace=/&lt;regex&gt;: 可以通过这种方式来用正则表达式指定系统调用名称，支持的正则语法可以参考 regex(7) 。 -e trace=%file: 文件相关系统调用。 -e trace=%desc: 文件描述符相关。 -e trace=%process: 进程管理相关系统调用。 -e trace=%network: 网络相关。 -e trace=%signal: 信号相关。 -e trace=%ipc: IPC 相关。 -e trace=%memory: 内存 mapping 相关。 -e signal=&lt;set&gt;: &lt;set&gt; 是进程信号的名称（默认是 signal=all ），比如 -e signal=SIGTERM -e read=&lt;set&gt;: 追踪指定 fd 上的数据并打印 hex 和 ascii 格式的数据， &lt;set&gt; 是 fd 比如:read=3,5 常见系统调用¶ open() : 用于打开或创建一个文件。 read() : 用于读取一个文件。 write() : 写文件。 connect() : 建立网络连接。 sendto() : 发送网络数据。 recvfrom() : 接收网络数据。 futex() : 锁相关操作。 更多关于某个系统调用的含义/用途可以通过 man 2 &lt;syscall&gt; （把 &lt;syscall&gt; 替换为实际的系统调用名称，比如 man 2 open ）命令行查看或者访问 http://man7.org/linux/man-pages/man2/&lt;syscall&gt;.2.html 这个网址（把 &lt;syscall&gt; 替换为实际的系统调用名称, 比如 http://man7.org/linux/man-pages/man2/open.2.html）亦或是 Google 一下。 总结¶ 更多关于 strace 的信息可以从参考资料的 strace(1) 中获取，如果对输出中系统调用不了解的话可以参考参考资料中的 syscalls(2) 中的信息，同时也别忘了搜索引擎是你的好朋友，有啥不明白的记得 Google 一下。 参考资料¶ strace(1) - Linux manual page syscalls(2) - Linux manual page regex(7) - Linux manual page",
+        "description": "<div class="section" id="id1">
+<h2 id="hidid1">前言<a class="headerlink" href="#hidid1" title="Permalink to this headline">¶</a></h2>
+<p><a class="reference external" href="http://man7.org/linux/man-pages/man1/strace.1.html">strace</a> 可以用来查看/记录程序运行过程中调用的
+<a class="reference external" href="http://man7.org/linux/man-pages/man2/syscalls.2.html">系统调用</a> 以及接收到的进程信号（signal），
+对于我们日常 debug 疑难杂症非常的有帮助，是一个非常好的 debug 工具。本文简单记录一下 strace 的常用功能和操作。</p>
+</div>
+<div class="section" id="id2">
+<h2 id="hidid2">输出的含义<a class="headerlink" href="#hidid2" title="Permalink to this headline">¶</a></h2>
+<p>我们通过一个简单的命令来查看 strace 程序的典型输出：</p>
+<div class="highlight"><pre><span></span>$ strace ls /tmp/trace
+execve<span class="o">(</span><span class="s2">&quot;/bin/ls&quot;</span>, <span class="o">[</span><span class="s2">&quot;ls&quot;</span>, <span class="s2">&quot;/tmp/trace&quot;</span><span class="o">]</span>, <span class="o">[</span>/* <span class="m">41</span> vars */<span class="o">])</span> <span class="o">=</span> 0
+brk<span class="o">(</span>0<span class="o">)</span>                                  <span class="o">=</span> 0x11af000
+mmap<span class="o">(</span>NULL, 4096, PROT_READ<span class="p">|</span>PROT_WRITE, MAP_PRIVATE<span class="p">|</span>MAP_ANONYMOUS, -1, 0<span class="o">)</span> <span class="o">=</span> 0x7f0738c16000
+access<span class="o">(</span><span class="s2">&quot;/etc/ld.so.preload&quot;</span>, R_OK<span class="o">)</span>      <span class="o">=</span> -1 ENOENT <span class="o">(</span>No such file or directory<span class="o">)</span>
+open<span class="o">(</span><span class="s2">&quot;/etc/ld.so.cache&quot;</span>, O_RDONLY<span class="o">)</span>      <span class="o">=</span> 3
+fstat<span class="o">(</span>3, <span class="o">{</span><span class="nv">st_mode</span><span class="o">=</span>S_IFREG<span class="p">|</span>0644, <span class="nv">st_size</span><span class="o">=</span>35759, ...<span class="o">})</span> <span class="o">=</span> 0
+mmap<span class="o">(</span>NULL, 35759, PROT_READ, MAP_PRIVATE, 3, 0<span class="o">)</span> <span class="o">=</span> 0x7f0738c0a000
+close<span class="o">(</span>3<span class="o">)</span>                                <span class="o">=</span> 0
+open<span class="o">(</span><span class="s2">&quot;/lib64/libselinux.so.1&quot;</span>, O_RDONLY<span class="o">)</span> <span class="o">=</span> 3
+read<span class="o">(</span>3, <span class="s2">&quot;\177ELF\2\1\1\0\0\0\0\0\0\0\0\0\3\0&gt;\0\1\0\0\0PX\0\0\0\0\0\0&quot;</span>..., 832<span class="o">)</span> <span class="o">=</span> 832
+fstat<span class="o">(</span>3, <span class="o">{</span><span class="nv">st_mode</span><span class="o">=</span>S_IFREG<span class="p">|</span>0755, <span class="nv">st_size</span><span class="o">=</span>122040, ...<span class="o">})</span> <span class="o">=</span> 0
+....
+fstat<span class="o">(</span>1, <span class="o">{</span><span class="nv">st_mode</span><span class="o">=</span>S_IFCHR<span class="p">|</span>0620, <span class="nv">st_rdev</span><span class="o">=</span>makedev<span class="o">(</span>136, 0<span class="o">)</span>, ...<span class="o">})</span> <span class="o">=</span> 0
+mmap<span class="o">(</span>NULL, 4096, PROT_READ<span class="p">|</span>PROT_WRITE, MAP_PRIVATE<span class="p">|</span>MAP_ANONYMOUS, -1, 0<span class="o">)</span> <span class="o">=</span> 0x7fb97a060000
+write<span class="o">(</span>1, <span class="s2">&quot;test_dir  test.txt\n&quot;</span>, 19test_dir  test.txt
+<span class="o">)</span>    <span class="o">=</span> 19
+close<span class="o">(</span>1<span class="o">)</span>                                <span class="o">=</span> 0
+munmap<span class="o">(</span>0x7fb97a060000, 4096<span class="o">)</span>            <span class="o">=</span> 0
+close<span class="o">(</span>2<span class="o">)</span>                                <span class="o">=</span> 0
+exit_group<span class="o">(</span>0<span class="o">)</span>                           <span class="o">=</span> ?
++++ exited with <span class="m">0</span> +++
+</pre></div>
+<p>比如下面的这个输出:</p>
+<pre class="literal-block">
+execve(&quot;/bin/ls&quot;, [&quot;ls&quot;, &quot;/tmp/trace&quot;], [/* 41 vars */]) = 0
+</pre>
+<p>的含义如下：</p>
+<ul class="simple">
+<li><tt class="docutils literal">execve</tt>: 系统调用的名称。</li>
+<li><tt class="docutils literal"><span class="pre">(&quot;/bin/ls&quot;,</span> [&quot;ls&quot;, <span class="pre">&quot;/tmp/trace&quot;],</span> [/* 41 vars <span class="pre">*/])</span></tt>: 这个括号里是系统调用的参数。</li>
+<li><tt class="docutils literal">= 0</tt> : 这个 0 是系统调用的返回值，不一定是数字看具体的系统调用返回啥结果就是啥值。</li>
+</ul>
+<p>上面有些系统调用的返回值比较特殊，比如:</p>
+<pre class="literal-block">
+access(&quot;/etc/ld.so.preload&quot;, R_OK)      = -1 ENOENT (No such file or directory)
+</pre>
+<p>后面这个 <tt class="docutils literal">ENOENT (No such file or directory)</tt> 中的 <tt class="docutils literal">ENOENT</tt> 是错误码，
+<tt class="docutils literal">(No such file or directory)</tt> 是错误码的解释。</p>
+<p>上面是系统调用相关的输出格式和含义，下面再看一个进程信号(signal)的输出格式：</p>
+<div class="highlight"><pre><span></span>$ strace -p 15718
+Process <span class="m">15718</span> attached
+<span class="k">select</span><span class="o">(</span>1, <span class="o">[</span>0<span class="o">]</span>, NULL, NULL, NULL<span class="o">)</span>        <span class="o">=</span> ? ERESTARTNOHAND <span class="o">(</span>To be restarted <span class="k">if</span> no handler<span class="o">)</span>
+--- SIGTERM <span class="o">{</span><span class="nv">si_signo</span><span class="o">=</span>SIGTERM, <span class="nv">si_code</span><span class="o">=</span>SI_USER, <span class="nv">si_pid</span><span class="o">=</span>15757, <span class="nv">si_uid</span><span class="o">=</span>500<span class="o">}</span> ---
++++ killed by SIGTERM +++
+</pre></div>
+<p>其中:</p>
+<pre class="literal-block">
+--- SIGTERM {si_signo=SIGTERM, si_code=SI_USER, si_pid=15757, si_uid=500} ---
+</pre>
+<p>这一句就是进程接收到的具体 signal 的信息。</p>
+</div>
+<div class="section" id="id3">
+<h2 id="hidid3">常用命令行参数<a class="headerlink" href="#hidid3" title="Permalink to this headline">¶</a></h2>
+<p>常用的参数组合:</p>
+<pre class="literal-block">
+strace -f -s 1024 -tt -T -yy -p &lt;pid&gt;
+strace -f -s 1024 -tt -T -yy -p &lt;pid&gt; -o &lt;filename&gt;
+strace -c -p &lt;pid&gt;
+strace -f -s 1024 -tt -T -yy -C -p &lt;pid&gt;
+</pre>
+<ul>
+<li><p class="first"><tt class="docutils literal"><span class="pre">-p</span> &lt;pid&gt;</tt>: 附加到进程中，记录某个进程的系统调用和进程信号信息。多个 <tt class="docutils literal"><span class="pre">-p</span> &lt;pid&gt;</tt> 可以实现同时追踪多个进程。</p>
+</li>
+<li><p class="first"><tt class="docutils literal"><span class="pre">-f</span></tt>: 同时追踪子进程的系统调用情况（如果是多线程程序的话，会同时追踪所有线程）。如果不加 <tt class="docutils literal"><span class="pre">-f</span></tt> 参数的话默认只追踪指定的单个进程。</p>
+</li>
+<li><p class="first"><tt class="docutils literal"><span class="pre">-o</span> &lt;filename&gt;</tt>: 把输出结果保存到文件中（默认是输出到标准错误）。</p>
+</li>
+<li><p class="first"><tt class="docutils literal"><span class="pre">-ff</span></tt>: 与 <tt class="docutils literal"><span class="pre">-o</span> &lt;filename&gt;</tt> 一起使用，会把每个 pid (进程 pid 或线程 id) 的 strace 数据保存到 <tt class="docutils literal"><span class="pre">&lt;filename&gt;.&lt;pid&gt;</span></tt> 的文件中。</p>
+</li>
+<li><p class="first"><tt class="docutils literal"><span class="pre">-e</span> &lt;expr&gt;</tt>: 过滤事件，只输出符合规则的事件，可以用来指定只看某些系统调用的情况，比如： <tt class="docutils literal"><span class="pre">-e</span> open,read</tt> 。
+或者不看某些系统调用： <tt class="docutils literal"><span class="pre">-e</span> '!open,read'</tt> ，更强大的过滤功能可以查看 <a class="reference external" href="http://man7.org/linux/man-pages/man1/strace.1.html">strace(1)</a> 。</p>
+</li>
+<li><p class="first"><tt class="docutils literal"><span class="pre">-s</span> &lt;size&gt;</tt>: 指定字符串数据的大小，默认 32。可以通过 -s 来显示更详细的信息或精简信息（比如很多系统调用的参数的值会被截断，可以通过 -s 配置更大的 size 来查看更详细的参数值）。</p>
+</li>
+<li><p class="first"><tt class="docutils literal"><span class="pre">-tt</span></tt>: 显示系统调用是在哪个时刻调用的，包含微秒（ <tt class="docutils literal"><span class="pre">-t</span></tt> 参数一样的效果就是时间不包含微秒）:</p>
+<pre class="literal-block">
+$ strace -e open,read -s 2 -tt ls
+14:32:18.877470 read(3, &quot;\177E&quot;..., 832) = 832
+14:32:18.878249 read(3, &quot;\177E&quot;..., 832) = 832
+14:32:18.878867 read(3, &quot;\177E&quot;..., 832) = 832
+14:32:18.879386 read(3, &quot;\177E&quot;..., 832) = 832
+14:32:18.879871 read(3, &quot;\177E&quot;..., 832) = 832
+14:32:18.880923 read(3, &quot;no&quot;..., 1024)  = 420
+14:32:18.881255 read(3, &quot;&quot;, 1024)       = 0
+
+上面的第一列时间信息即为 -tt 的效果。
+</pre>
+</li>
+<li><p class="first"><tt class="docutils literal"><span class="pre">-T</span></tt>: 显示执行系统调用所花费的时间，单位是秒</p>
+<pre class="literal-block">
+$ strace -e read -s 2 -T pwd
+read(3, &quot;\177E&quot;..., 832)                = 832 &lt;0.000012&gt;
+
+上面行末的 &lt;0.000012&gt; 即为 -T 的效果。
+</pre>
+</li>
+<li><p class="first"><tt class="docutils literal"><span class="pre">-y</span></tt>: 输出文件描述符所对应的文件路径</p>
+<pre class="literal-block">
+$ strace -e read -s 10  cat test.txt
+read(3, &quot;\177ELF\2\1\1\3\0\0&quot;..., 832)  = 832
+read(3, &quot;hello\n&quot;, 131072)              = 6
+hello
+read(3, &quot;&quot;, 131072)                     = 0
+
+$ strace -e read -s 10 -y  cat test.txt
+read(3&lt;/lib/x86_64-linux-gnu/libc-2.27.so&gt;, &quot;\177ELF\2\1\1\3\0\0&quot;..., 832) = 832
+read(3&lt;/path/to/test.txt&gt;, &quot;hello\n&quot;, 131072) = 6
+hello
+read(3&lt;/path/to/test.txt&gt;, &quot;&quot;, 131072) = 0
+
+可以看到加了 -y 后文件描述符后面会跟它所对应的文件的路径
+</pre>
+</li>
+<li><p class="first"><tt class="docutils literal"><span class="pre">-yy</span></tt>: 输出文件描述更详细的信息，比如 socket 文件描述符输出所对应的协议信息。</p>
+<pre class="literal-block">
+$ strace -e connect -s 3  nc baidu.com 80
+...
+connect(3, {sa_family=AF_INET, sin_port=htons(53), sin_addr=inet_addr(&quot;127.0.0.53&quot;)}, 16) = 0
+...
+
+$ strace -e connect -s 3 -y  nc baidu.com 80
+...
+connect(3&lt;socket:[22180]&gt;, {sa_family=AF_INET, sin_port=htons(53), sin_addr=inet_addr(&quot;127.0.0.53&quot;)}, 16) = 0
+
+$ strace -e connect -s 3 -yy  nc baidu.com 80
+...
+connect(3&lt;UDP:[22202]&gt;, {sa_family=AF_INET, sin_port=htons(53), sin_addr=inet_addr(&quot;127.0.0.53&quot;)}, 16) = 0
+
+可以看到 -yy 会显示上面的 UDP 这个协议信息。
+</pre>
+</li>
+<li><p class="first"><tt class="docutils literal"><span class="pre">-c</span></tt>: 统计系统调用的次数、种类以及错误信息，会隐藏详细的追踪信息（前面的 -e 过滤参数也可以用于这个）:</p>
+<pre class="literal-block">
+$ strace -c cat test.txt
+hello
+% time     seconds  usecs/call     calls    errors syscall
+------ ----------- ----------- --------- --------- ----------------
+ 18.45    0.000019           3         7           mmap
+ 18.45    0.000019           5         4           mprotect
+ 17.48    0.000018           9         2           munmap
+ 13.59    0.000014           4         4           openat
+  9.71    0.000010          10         1           write
+  6.80    0.000007           2         3           read
+  5.83    0.000006           2         3         3 access
+  3.88    0.000004           1         5           fstat
+  2.91    0.000003           1         6           close
+  1.94    0.000002           1         3           brk
+  0.97    0.000001           1         1           execve
+  0.00    0.000000           0         1           arch_prctl
+  0.00    0.000000           0         1           fadvise64
+------ ----------- ----------- --------- --------- ----------------
+100.00    0.000103                    41         3 total
+</pre>
+</li>
+<li><p class="first"><tt class="docutils literal"><span class="pre">-C</span></tt>: 跟 <tt class="docutils literal"><span class="pre">-c</span></tt> 类似，只是增加了会输出详细的追踪信息</p>
+<pre class="literal-block">
+$ strace -e read -C -s 3 cat test.txt
+read(3, &quot;\177EL&quot;..., 832)               = 832
+read(3, &quot;hel&quot;..., 131072)               = 6
+hello
+read(3, &quot;&quot;, 131072)                     = 0
++++ exited with 0 +++
+% time     seconds  usecs/call     calls    errors syscall
+------ ----------- ----------- --------- --------- ----------------
+  0.00    0.000000           0         3           read
+------ ----------- ----------- --------- --------- ----------------
+100.00    0.000000                     3           total
+</pre>
+</li>
+<li><p class="first"><tt class="docutils literal"><span class="pre">-v</span></tt>: 显示系统调用时传入的参数变量的具体内容，而不是默认显示为 <tt class="docutils literal">/* 8 vars */</tt></p>
+</li>
+</ul>
+<div class="section" id="id4">
+<h3 id="hidid4">常用过滤表达式<a class="headerlink" href="#hidid4" title="Permalink to this headline">¶</a></h3>
+<p><tt class="docutils literal"><span class="pre">-e</span> &lt;expr&gt;</tt> 这个参数可以用来指定需要 trace 哪些事件，格式如下:</p>
+<pre class="literal-block">
+[qualifier=][!][?]value1[,[?]value2]...
+
+其中 qualifier 的值是 trace, abbrev, verbose, raw,
+signal, read, write, fault, inject, or kvm 。默认是 trace
+
+value 就是各种过滤条件了。
+</pre>
+<ul class="simple">
+<li><tt class="docutils literal"><span class="pre">-e</span> <span class="pre">trace=&lt;set&gt;</span></tt> : <tt class="docutils literal">&lt;set&gt;</tt> 是系统调用名称（默认是 <tt class="docutils literal">trace=all</tt> ），比如 <tt class="docutils literal">trace=open,close,read,write</tt></li>
+<li><tt class="docutils literal"><span class="pre">-e</span> <span class="pre">trace=/&lt;regex&gt;</span></tt>: 可以通过这种方式来用正则表达式指定系统调用名称，支持的正则语法可以参考 <a class="reference external" href="http://man7.org/linux/man-pages/man7/regex.7.html">regex(7)</a> 。</li>
+<li><tt class="docutils literal"><span class="pre">-e</span> <span class="pre">trace=%file</span></tt>: 文件相关系统调用。</li>
+<li><tt class="docutils literal"><span class="pre">-e</span> <span class="pre">trace=%desc</span></tt>: 文件描述符相关。</li>
+<li><tt class="docutils literal"><span class="pre">-e</span> <span class="pre">trace=%process</span></tt>: 进程管理相关系统调用。</li>
+<li><tt class="docutils literal"><span class="pre">-e</span> <span class="pre">trace=%network</span></tt>: 网络相关。</li>
+<li><tt class="docutils literal"><span class="pre">-e</span> <span class="pre">trace=%signal</span></tt>: 信号相关。</li>
+<li><tt class="docutils literal"><span class="pre">-e</span> <span class="pre">trace=%ipc</span></tt>: IPC 相关。</li>
+<li><tt class="docutils literal"><span class="pre">-e</span> <span class="pre">trace=%memory</span></tt>: 内存 mapping 相关。</li>
+<li><tt class="docutils literal"><span class="pre">-e</span> <span class="pre">signal=&lt;set&gt;</span></tt>: <tt class="docutils literal">&lt;set&gt;</tt> 是进程信号的名称（默认是 <tt class="docutils literal">signal=all</tt> ），比如 <tt class="docutils literal"><span class="pre">-e</span> signal=SIGTERM</tt></li>
+<li><tt class="docutils literal"><span class="pre">-e</span> <span class="pre">read=&lt;set&gt;</span></tt>: 追踪指定 fd 上的数据并打印 hex 和 ascii 格式的数据， <tt class="docutils literal">&lt;set&gt;</tt> 是 fd 比如:<tt class="docutils literal">read=3,5</tt></li>
+</ul>
+</div>
+</div>
+<div class="section" id="id5">
+<h2 id="hidid5">常见系统调用<a class="headerlink" href="#hidid5" title="Permalink to this headline">¶</a></h2>
+<ul class="simple">
+<li><a class="reference external" href="http://man7.org/linux/man-pages/man2/open.2.html">open()</a> : 用于打开或创建一个文件。</li>
+<li><a class="reference external" href="http://man7.org/linux/man-pages/man2/read.2.html">read()</a> : 用于读取一个文件。</li>
+<li><a class="reference external" href="http://man7.org/linux/man-pages/man2/write.2.html">write()</a> : 写文件。</li>
+<li><a class="reference external" href="http://man7.org/linux/man-pages/man2/connect.2.html">connect()</a> : 建立网络连接。</li>
+<li><a class="reference external" href="http://man7.org/linux/man-pages/man2/sendto.2.html">sendto()</a> : 发送网络数据。</li>
+<li><a class="reference external" href="http://man7.org/linux/man-pages/man2/recvfrom.2.html">recvfrom()</a> : 接收网络数据。</li>
+<li><a class="reference external" href="http://man7.org/linux/man-pages/man2/futex.2.html">futex()</a> : 锁相关操作。</li>
+</ul>
+<p>更多关于某个系统调用的含义/用途可以通过 <tt class="docutils literal">man 2 &lt;syscall&gt;</tt> （把 <tt class="docutils literal">&lt;syscall&gt;</tt> 替换为实际的系统调用名称，比如 <tt class="docutils literal">man 2 open</tt> ）命令行查看或者访问
+<tt class="docutils literal"><span class="pre">http://man7.org/linux/man-pages/man2/&lt;syscall&gt;.2.html</span></tt> 这个网址（把 <tt class="docutils literal">&lt;syscall&gt;</tt> 替换为实际的系统调用名称, 比如 <a class="reference external" href="http://man7.org/linux/man-pages/man2/open.2.html">http://man7.org/linux/man-pages/man2/open.2.html</a>）亦或是 Google 一下。</p>
+</div>
+<div class="section" id="id6">
+<h2 id="hidid6">总结<a class="headerlink" href="#hidid6" title="Permalink to this headline">¶</a></h2>
+<p>更多关于 strace 的信息可以从参考资料的 strace(1) 中获取，如果对输出中系统调用不了解的话可以参考参考资料中的 syscalls(2) 中的信息，同时也别忘了搜索引擎是你的好朋友，有啥不明白的记得 Google 一下。</p>
+</div>
+<div class="section" id="id7">
+<h2 id="hidid7">参考资料<a class="headerlink" href="#hidid7" title="Permalink to this headline">¶</a></h2>
+<ul class="simple">
+<li><a class="reference external" href="http://man7.org/linux/man-pages/man1/strace.1.html">strace(1) - Linux manual page</a></li>
+<li><a class="reference external" href="http://man7.org/linux/man-pages/man2/syscalls.2.html">syscalls(2) - Linux manual page</a></li>
+<li><a class="reference external" href="http://man7.org/linux/man-pages/man7/regex.7.html">regex(7) - Linux manual page</a></li>
+</ul>
+</div>
+",
         "mainEntityOfPage": {
             "@type": "WebPage",
             "@id": "https://mozillazg.com"
@@ -415,11 +652,11 @@ value 就是各种过滤条件了。
 <section class="well" id="related-posts">
     <p>Related Posts:</p>
     <ul>
-        <li><a href="https://mozillazg.com/2017/07/debug-running-python-process-with-gdb.html">使用 gdb 调试运行中的 Python 进程</a></li>
-        <li><a href="https://mozillazg.com/2020/04/nsenter-usage.html">nsenter 常用操作</a></li>
-        <li><a href="https://mozillazg.com/2017/12/python-get-concurrency-programm-all-tracebacks-threading-gevent-asyncio-etc.html">Python: 获取并发程序的 traceback 信息（threading/gevent/asyncio）</a></li>
-        <li><a href="https://mozillazg.com/2019/05/go-read-and-understand-info-from-stack-trace-traceback.html">Go: traceback 中包含的信息</a></li>
         <li><a href="https://mozillazg.com/2018/07/python-some-ways-to-debug-running-process.html">Python: 调试运行中进程的几种方法（总结）</a></li>
+        <li><a href="https://mozillazg.com/2020/04/use-tcpdump-for-a-container-but-outside-container.html">一个在容器外用 tcpdump 命令对容器内的网络请求抓包的方法</a></li>
+        <li><a href="https://mozillazg.com/2019/05/go-read-and-understand-info-from-stack-trace-traceback.html">Go: traceback 中包含的信息</a></li>
+        <li><a href="https://mozillazg.com/2017/12/python-get-concurrency-programm-all-tracebacks-threading-gevent-asyncio-etc.html">Python: 获取并发程序的 traceback 信息（threading/gevent/asyncio）</a></li>
+        <li><a href="https://mozillazg.com/2017/12/python-use-faulthandler-to-debug-running-process-with-dumping-traceback.html">Python: 使用 faulthandler 模块获取运行中进程的 traceback 信息</a></li>
     </ul>
 </section>
     <hr/>
@@ -462,7 +699,7 @@ value 就是各种过滤条件了。
    <div class="container">
       <hr>
       <div class="row">
-         <div class="col-xs-10">&copy; 2021 mozillazg
+         <div class="col-xs-10">&copy; 2022 mozillazg
             &middot; Powered by <a href="https://github.com/DandyDev/pelican-bootstrap3" target="_blank">pelican-bootstrap3</a>,
             <a href="http://docs.getpelican.com/" target="_blank">Pelican</a>,
             <a href="http://getbootstrap.com" target="_blank">Bootstrap</a>              <p><small>  <a rel="license" href="http://creativecommons.org/licenses/by-sa/4.0/"><img alt="Creative Commons License" style="border-width:0" src="/static/images/by-sa-80x15.png" /></a>
