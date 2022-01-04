@@ -11,9 +11,9 @@
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/social-share.js@1.0.16/dist/css/share.min.css">
 
 
-    <link href="https://mozillazg.com/favicon.ico" rel="icon">
+    <link href="http://127.0.0.1:8000/favicon.ico" rel="icon">
 
-<link rel="canonical" href="https://mozillazg.com/2019/02/load-balancing-strategy-algorithm-weighted-round-robin.html">
+<link rel="canonical" href="http://127.0.0.1:8000/2019/02/load-balancing-strategy-algorithm-weighted-round-robin.html">
 
         <meta name="author" content="mozillazg" />
         <meta name="keywords" content="load-balancing,load-balancer,round-robin" />
@@ -37,7 +37,7 @@
         <meta property="og:site_name" content="Huang Huang 的博客" />
         <meta property="og:type" content="article"/>
         <meta property="og:title" content="负载均衡策略之轮询策略"/>
-        <meta property="og:url" content="https://mozillazg.com/2019/02/load-balancing-strategy-algorithm-weighted-round-robin.html"/>
+        <meta property="og:url" content="http://127.0.0.1:8000/2019/02/load-balancing-strategy-algorithm-weighted-round-robin.html"/>
         <meta property="og:description" content="前言¶ 本文简单介绍一下轮询(Round Robin)这个负载均衡策略。 轮询选择 (Round Robin)¶ 轮询选择指的是从已有的后端节点列表中按顺序依次选择一个节点出来提供服务。 一种轮询选择的方法是把所有的节点看做一个一个的点，并把这些点连起来组成一个圆， 轮询选择就是在这个圆上按顺时针选择一个点。 可以通过用请求次数取模来实现这个顺时针选择的功能，比如用 python 来表示就是： &gt;&gt;&gt; nodes = [&#39;A&#39;, &#39;B&#39;, &#39;C&#39;] &gt;&gt;&gt; choices = [] &gt;&gt;&gt; n = 0 &gt;&gt;&gt; for _ in range(10): ... index = n % len(nodes) ... choices.append(nodes[index]) ... n += 1 ... &gt;&gt;&gt; choices [&#39;A&#39;, &#39;B&#39;, &#39;C&#39;, &#39;A&#39;, &#39;B&#39;, &#39;C&#39;, &#39;A&#39;, &#39;B&#39;, &#39;C&#39;, &#39;A&#39;] 带权重的轮询选择 (Weighted Round Robin)¶ 实际使用中各个节点往往都带有不同的权重，所以一般都需要实现带权重的轮询选择。 权重高的被选中的次数多，权重低的被选中的次数少。 我们还是可以把带权重信息的节点排成一个圆，不过这一次根据不同的权重把对应的节点重复不同的次数。 然后还是顺时针选择一个点，因为每个节点根据权重重复了相应的次数，所以不同权重的节点被选中的次数也不一样并且选中的次数跟它本身的权重有关，这样就就简单实现了带权重的轮询选择。 同样的 python 表示（假设 A、B、C 的权重分别是 3、2、1）： &gt;&gt;&gt; nodes = [&#39;A&#39;, &#39;A&#39;, &#39;A&#39;, &#39;B&#39;, &#39;B&#39;, &#39;C&#39;] &gt;&gt;&gt; choices = [] &gt;&gt;&gt; n = 0 &gt;&gt;&gt; for _ in range(10): ... index = n % len(nodes) ... choices.append(nodes[index]) ... n += 1 ... &gt;&gt;&gt; choices [&#39;A&#39;, &#39;A&#39;, &#39;A&#39;, &#39;B&#39;, &#39;B&#39;, &#39;C&#39;, &#39;A&#39;, &#39;A&#39;, &#39;A&#39;, &#39;B&#39;] 改进¶ 上面的按权重重复节点的方式有一个明显的问题就是不够平滑： 权重高的节点会先被选中直至达到权重次数才会选择下一个节点或者说会出现请求连续的打在同一个节点上的情况，导致权重低的节点可能会处于空闲状态，没有平滑分配请求。 一种改进方法是：使用 nginx 中实现的一种平滑的带权重轮询的方法 [1] A: 3, B: 2, C: 1 # 普通带权重轮询结果示例： [&#39;A&#39;, &#39;A&#39;, &#39;A&#39;, &#39;B&#39;, &#39;B&#39;, &#39;C&#39;, &#39;A&#39;, &#39;A&#39;, &#39;A&#39;, &#39;B&#39;, &#39;B&#39;, &#39;C&#39;, ...] # nginx 实现的平滑的带权重轮询的结果示例： [&#39;A&#39;, &#39;B&#39;, &#39;A&#39;, &#39;C&#39;, &#39;B&#39;, &#39;A&#39;, &#39;A&#39;, &#39;B&#39;, &#39;A&#39;, &#39;C&#39;, &#39;B&#39;, &#39;A&#39;, ...] 这个方法的原文描述如下 [1] : For edge case weights like { 5, 1, 1 } we now produce { a, a, b, a, c, a, a } sequence instead of { c, b, a, a, a, a, a } produced previously. Algorithm is as follows: on each peer selection we increase current_weight of each eligible peer by its weight, select peer with greatest current_weight and reduce its current_weight by total number of weight points distributed among peers. ... To preserve weight reduction in case of failures the effective_weight variable was introduced, which usually matches peer&#39;s weight, but is reduced temporarily on peer failures. 每个节点有三个属性，这三个属性的含义如下： weight: 节点权重值，这个值固定不变。 effective_weight: 节点的有效权重。初始值等于 weight 。之所以有个 effective_weight 是为了 在发现后端节点异常次数过多时（比如响应完成时发现选择的节点有问题，错误次数有点多）临时降低节点的权重。 在轮询遍历选择节点时这个 effective_weight 的值会逐步增加恢复到 weight 的值，所以只是为了在异常时临时降低权重不会永久影响节点的权重（节点正常时会逐步恢复到原有的权重）。 current_weight: 节点当前权重。初始值为 0，后面会动态调整： 每次选取节点时，遍历可用节点，遍历时把当前节点的 current_weight 的值加上它的 effective_weight ， 同时累加所有节点的 effective_weight 值为 total 。 如果当前节点的 current_weight 值最大，那么这个节点就是被选中的节点，同时把它的 current_weight 减去 total 没有被选中的节点的 current_weight 不用减少。 整个过程用 python 简单的表示就是（也可以直接看 nginx 的实现 [2] ）： class Node: def __init__(self, name, weight): self.name = name self.weight = weight self.effect_weight = weight self.current_weight = 0 self.failed_number = 0 def __repr__(self): return &#39;&lt;Node: {}&gt;&#39;.format(self.name) class RB: max_fails = 10 def __init__(self, nodes): self.nodes = nodes def select(self): best = None total = 0 for node in self.nodes: node.current_weight += node.effect_weight total += node.effect_weight if node.effect_weight &lt; node.weight: node.effect_weight += 1 if best is None or node.current_weight &gt; best.current_weight: best = node best.current_weight -= total return best def release(self, node, state): if state == &#39;failed&#39;: node.failed_number += 1 if node.failed_number &gt; self.max_faile: node.effect_weight -= node.weight / self.max_fails + 1 else: node.failed_number = 0 if node.effect_weight &lt; 0: node.effect_weight = 0 效果: &gt;&gt;&gt; nodes = [Node(&#39;A&#39;, 3), Node(&#39;B&#39;, 2), Node(&#39;C&#39;, 1)] &gt;&gt;&gt; rb = RB(nodes) &gt;&gt;&gt; choices = [] &gt;&gt;&gt; for _ in range(12): ... choices.append(rb.select()) ... &gt;&gt;&gt; choices [&lt;Node: A&gt;, &lt;Node: B&gt;, &lt;Node: A&gt;, &lt;Node: C&gt;, &lt;Node: B&gt;, &lt;Node: A&gt;, &lt;Node: A&gt;, &lt;Node: B&gt;, &lt;Node: A&gt;, &lt;Node: C&gt;, &lt;Node: B&gt;, &lt;Node: A&gt;] 可以看到确实是比之前的 [&#39;A&#39;, &#39;A&#39;, &#39;A&#39;, &#39;B&#39;, &#39;B&#39;, &#39;C&#39;, &#39;A&#39;, &#39;A&#39;, &#39;A&#39;, &#39;B&#39;, ...] 要平滑一些。 上面在介绍 effective_weight 时说这个属性主要用来临时降低节点权重，如果没有这个需求的话可以省去 effective_weight 直接用 weight 就好: def select(self): best = None total = 0 for node in self.nodes: node.current_weight += node.weight total += node.weight if best is None or node.current_weight &gt; best.current_weight: best = node best.current_weight -= total return best 关于这个 nginx 实现的平滑的带权重轮询的方法的更多细节可以阅读参考资料中列出的一些资料。 总结¶ 本文简单记录了一下轮询选择以及带权重的轮询选择这两个负载均衡策略的实现方法， 当然还有其他的实现方法欢迎一起探讨。 参考资料¶ Upstream: smooth weighted round-robin balancing. · nginx/nginx@52327e0 Nginx的负载均衡 - 加权轮询 (Weighted Round Robin) 上篇 - zhangskd的专栏 - CSDN博客 关于平滑加权算法的思考以及证明 | 盒饭编程 nginx平滑的基于权重轮询算法分析 | tenfy&#39; blog Weighted Round-Robin Scheduling - LVSKB [1](1, 2) Upstream: smooth weighted round-robin balancing. · nginx/nginx@52327e0 [2]Upstream: smooth weighted round-robin balancing. · nginx/nginx@52327e0"/>
         <meta property="article:published_time" content="2019-02-17" />
             <meta property="article:section" content="others" />
@@ -46,32 +46,32 @@
             <meta property="article:tag" content="round-robin" />
             <meta property="article:author" content="mozillazg" />
             <meta property="og:image"
-                  content="https://mozillazg.com/static/avatar.jpeg"/>
+                  content="http://127.0.0.1:8000/static/avatar.jpeg"/>
 
 
     <meta name="twitter:card" content="summary">
         <meta name="twitter:site" content="@mozillazg">
         <meta name="twitter:creator" content="@mozillazg">
-    <meta name="twitter:domain" content="https://mozillazg.com">
+    <meta name="twitter:domain" content="http://127.0.0.1:8000">
             <meta property="twitter:image"
-                  content="https://mozillazg.com/static/avatar.jpeg"/>
+                  content="http://127.0.0.1:8000/static/avatar.jpeg"/>
 
     <!-- Bootstrap -->
         <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@3.3.4/dist/css/bootstrap.min.css" type="text/css"/>
     <link href="https://cdn.jsdelivr.net/npm/font-awesome@4.3.0/css/font-awesome.min.css" rel="stylesheet">
 
     <link href="https://cdn.jsdelivr.net/npm/pygments-css@1.0.0/github.css" rel="stylesheet">
-    <link rel="stylesheet" href="https://mozillazg.com/theme/css/style.css" type="text/css"/>
-            <link href="https://mozillazg.com/static/custom.css" rel="stylesheet">
+    <link rel="stylesheet" href="http://127.0.0.1:8000/theme/css/style.css" type="text/css"/>
+            <link href="http://127.0.0.1:8000/static/custom.css" rel="stylesheet">
 
-        <link href="https://mozillazg.com/feeds/all.atom.xml" type="application/atom+xml" rel="alternate"
+        <link href="http://127.0.0.1:8000/feeds/all.atom.xml" type="application/atom+xml" rel="alternate"
               title="Huang Huang 的博客 ATOM Feed"/>
 
-        <link href="https://mozillazg.com/feeds/all.rss.xml" type="application/rss+xml" rel="alternate"
+        <link href="http://127.0.0.1:8000/feeds/all.rss.xml" type="application/rss+xml" rel="alternate"
               title="Huang Huang 的博客 RSS Feed"/>
 
 
-        <link href="https://mozillazg.com/feeds/others.atom.xml" type="application/atom+xml" rel="alternate"
+        <link href="http://127.0.0.1:8000/feeds/others.atom.xml" type="application/atom+xml" rel="alternate"
               title="Huang Huang 的博客 others ATOM Feed"/>
 
 
@@ -82,20 +82,20 @@
         "publisher": {
             "@type": "Person",
             "name": "mozillazg",
-            "logo": "https://mozillazg.com/static/avatar.jpeg"
+            "logo": "http://127.0.0.1:8000/static/avatar.jpeg"
         },
         "author": {
             "@type": "Person",
             "name": "mozillazg",
-            "image": "https://mozillazg.com/static/avatar.jpeg",
-            "url": "https://mozillazg.com",
+            "image": "http://127.0.0.1:8000/static/avatar.jpeg",
+            "url": "http://127.0.0.1:8000",
             "sameAs": []
         },
         // "headline": "",
-        "url": "https://mozillazg.com/2019/02/load-balancing-strategy-algorithm-weighted-round-robin.html",
+        "url": "http://127.0.0.1:8000/2019/02/load-balancing-strategy-algorithm-weighted-round-robin.html",
         "datePublished": "2019-02-17",
         // "dateModified": "",
-        "image": "https://mozillazg.com/static/avatar.jpeg",
+        "image": "http://127.0.0.1:8000/static/avatar.jpeg",
         "keywords": "load-balancing, load-balancer, round-robin",
         // "description": "前言¶ 本文简单介绍一下轮询(Round Robin)这个负载均衡策略。 轮询选择 (Round Robin)¶ 轮询选择指的是从已有的后端节点列表中按顺序依次选择一个节点出来提供服务。 一种轮询选择的方法是把所有的节点看做一个一个的点，并把这些点连起来组成一个圆， 轮询选择就是在这个圆上按顺时针选择一个点。 可以通过用请求次数取模来实现这个顺时针选择的功能，比如用 python 来表示就是： &gt;&gt;&gt; nodes = [&#39;A&#39;, &#39;B&#39;, &#39;C&#39;] &gt;&gt;&gt; choices = [] &gt;&gt;&gt; n = 0 &gt;&gt;&gt; for _ in range(10): ... index = n % len(nodes) ... choices.append(nodes[index]) ... n += 1 ... &gt;&gt;&gt; choices [&#39;A&#39;, &#39;B&#39;, &#39;C&#39;, &#39;A&#39;, &#39;B&#39;, &#39;C&#39;, &#39;A&#39;, &#39;B&#39;, &#39;C&#39;, &#39;A&#39;] 带权重的轮询选择 (Weighted Round Robin)¶ 实际使用中各个节点往往都带有不同的权重，所以一般都需要实现带权重的轮询选择。 权重高的被选中的次数多，权重低的被选中的次数少。 我们还是可以把带权重信息的节点排成一个圆，不过这一次根据不同的权重把对应的节点重复不同的次数。 然后还是顺时针选择一个点，因为每个节点根据权重重复了相应的次数，所以不同权重的节点被选中的次数也不一样并且选中的次数跟它本身的权重有关，这样就就简单实现了带权重的轮询选择。 同样的 python 表示（假设 A、B、C 的权重分别是 3、2、1）： &gt;&gt;&gt; nodes = [&#39;A&#39;, &#39;A&#39;, &#39;A&#39;, &#39;B&#39;, &#39;B&#39;, &#39;C&#39;] &gt;&gt;&gt; choices = [] &gt;&gt;&gt; n = 0 &gt;&gt;&gt; for _ in range(10): ... index = n % len(nodes) ... choices.append(nodes[index]) ... n += 1 ... &gt;&gt;&gt; choices [&#39;A&#39;, &#39;A&#39;, &#39;A&#39;, &#39;B&#39;, &#39;B&#39;, &#39;C&#39;, &#39;A&#39;, &#39;A&#39;, &#39;A&#39;, &#39;B&#39;] 改进¶ 上面的按权重重复节点的方式有一个明显的问题就是不够平滑： 权重高的节点会先被选中直至达到权重次数才会选择下一个节点或者说会出现请求连续的打在同一个节点上的情况，导致权重低的节点可能会处于空闲状态，没有平滑分配请求。 一种改进方法是：使用 nginx 中实现的一种平滑的带权重轮询的方法 [1] A: 3, B: 2, C: 1 # 普通带权重轮询结果示例： [&#39;A&#39;, &#39;A&#39;, &#39;A&#39;, &#39;B&#39;, &#39;B&#39;, &#39;C&#39;, &#39;A&#39;, &#39;A&#39;, &#39;A&#39;, &#39;B&#39;, &#39;B&#39;, &#39;C&#39;, ...] # nginx 实现的平滑的带权重轮询的结果示例： [&#39;A&#39;, &#39;B&#39;, &#39;A&#39;, &#39;C&#39;, &#39;B&#39;, &#39;A&#39;, &#39;A&#39;, &#39;B&#39;, &#39;A&#39;, &#39;C&#39;, &#39;B&#39;, &#39;A&#39;, ...] 这个方法的原文描述如下 [1] : For edge case weights like { 5, 1, 1 } we now produce { a, a, b, a, c, a, a } sequence instead of { c, b, a, a, a, a, a } produced previously. Algorithm is as follows: on each peer selection we increase current_weight of each eligible peer by its weight, select peer with greatest current_weight and reduce its current_weight by total number of weight points distributed among peers. ... To preserve weight reduction in case of failures the effective_weight variable was introduced, which usually matches peer&#39;s weight, but is reduced temporarily on peer failures. 每个节点有三个属性，这三个属性的含义如下： weight: 节点权重值，这个值固定不变。 effective_weight: 节点的有效权重。初始值等于 weight 。之所以有个 effective_weight 是为了 在发现后端节点异常次数过多时（比如响应完成时发现选择的节点有问题，错误次数有点多）临时降低节点的权重。 在轮询遍历选择节点时这个 effective_weight 的值会逐步增加恢复到 weight 的值，所以只是为了在异常时临时降低权重不会永久影响节点的权重（节点正常时会逐步恢复到原有的权重）。 current_weight: 节点当前权重。初始值为 0，后面会动态调整： 每次选取节点时，遍历可用节点，遍历时把当前节点的 current_weight 的值加上它的 effective_weight ， 同时累加所有节点的 effective_weight 值为 total 。 如果当前节点的 current_weight 值最大，那么这个节点就是被选中的节点，同时把它的 current_weight 减去 total 没有被选中的节点的 current_weight 不用减少。 整个过程用 python 简单的表示就是（也可以直接看 nginx 的实现 [2] ）： class Node: def __init__(self, name, weight): self.name = name self.weight = weight self.effect_weight = weight self.current_weight = 0 self.failed_number = 0 def __repr__(self): return &#39;&lt;Node: {}&gt;&#39;.format(self.name) class RB: max_fails = 10 def __init__(self, nodes): self.nodes = nodes def select(self): best = None total = 0 for node in self.nodes: node.current_weight += node.effect_weight total += node.effect_weight if node.effect_weight &lt; node.weight: node.effect_weight += 1 if best is None or node.current_weight &gt; best.current_weight: best = node best.current_weight -= total return best def release(self, node, state): if state == &#39;failed&#39;: node.failed_number += 1 if node.failed_number &gt; self.max_faile: node.effect_weight -= node.weight / self.max_fails + 1 else: node.failed_number = 0 if node.effect_weight &lt; 0: node.effect_weight = 0 效果: &gt;&gt;&gt; nodes = [Node(&#39;A&#39;, 3), Node(&#39;B&#39;, 2), Node(&#39;C&#39;, 1)] &gt;&gt;&gt; rb = RB(nodes) &gt;&gt;&gt; choices = [] &gt;&gt;&gt; for _ in range(12): ... choices.append(rb.select()) ... &gt;&gt;&gt; choices [&lt;Node: A&gt;, &lt;Node: B&gt;, &lt;Node: A&gt;, &lt;Node: C&gt;, &lt;Node: B&gt;, &lt;Node: A&gt;, &lt;Node: A&gt;, &lt;Node: B&gt;, &lt;Node: A&gt;, &lt;Node: C&gt;, &lt;Node: B&gt;, &lt;Node: A&gt;] 可以看到确实是比之前的 [&#39;A&#39;, &#39;A&#39;, &#39;A&#39;, &#39;B&#39;, &#39;B&#39;, &#39;C&#39;, &#39;A&#39;, &#39;A&#39;, &#39;A&#39;, &#39;B&#39;, ...] 要平滑一些。 上面在介绍 effective_weight 时说这个属性主要用来临时降低节点权重，如果没有这个需求的话可以省去 effective_weight 直接用 weight 就好: def select(self): best = None total = 0 for node in self.nodes: node.current_weight += node.weight total += node.weight if best is None or node.current_weight &gt; best.current_weight: best = node best.current_weight -= total return best 关于这个 nginx 实现的平滑的带权重轮询的方法的更多细节可以阅读参考资料中列出的一些资料。 总结¶ 本文简单记录了一下轮询选择以及带权重的轮询选择这两个负载均衡策略的实现方法， 当然还有其他的实现方法欢迎一起探讨。 参考资料¶ Upstream: smooth weighted round-robin balancing. · nginx/nginx@52327e0 Nginx的负载均衡 - 加权轮询 (Weighted Round Robin) 上篇 - zhangskd的专栏 - CSDN博客 关于平滑加权算法的思考以及证明 | 盒饭编程 nginx平滑的基于权重轮询算法分析 | tenfy&#39; blog Weighted Round-Robin Scheduling - LVSKB [1](1, 2) Upstream: smooth weighted round-robin balancing. · nginx/nginx@52327e0 [2]Upstream: smooth weighted round-robin balancing. · nginx/nginx@52327e0",
         "description": "<div class="section" id="id2">
@@ -283,7 +283,7 @@ reduced temporarily on peer failures.</p>
 ",
         "mainEntityOfPage": {
             "@type": "WebPage",
-            "@id": "https://mozillazg.com"
+            "@id": "http://127.0.0.1:8000"
         }
     }
     </script>
@@ -300,16 +300,16 @@ reduced temporarily on peer failures.</p>
                 <span class="icon-bar"></span>
                 <span class="icon-bar"></span>
             </button>
-            <a href="https://mozillazg.com/" class="navbar-brand">
+            <a href="http://127.0.0.1:8000/" class="navbar-brand">
 Huang Huang 的博客            </a>
         </div>
         <div class="collapse navbar-collapse navbar-ex1-collapse">
             <ul class="nav navbar-nav">
-                    <li><a href="https://mozillazg.com/feeds/all.atom.xml">Feed</a></li>
+                    <li><a href="http://127.0.0.1:8000/feeds/all.atom.xml">Feed</a></li>
                     <li><a href="/2014/10/pages/about-me.html">About</a></li>
             </ul>
             <ul class="nav navbar-nav navbar-right">
-              <li><a href="https://mozillazg.com/archives.html"><i class="fa fa-th-list"></i><span class="icon-label">Archives</span></a></li>
+              <li><a href="http://127.0.0.1:8000/archives.html"><i class="fa fa-th-list"></i><span class="icon-label">Archives</span></a></li>
             </ul>
         </div>
         <!-- /.navbar-collapse -->
@@ -324,7 +324,7 @@ Huang Huang 的博客            </a>
         <article>
             <header class="text-center">
                 <h1>
-                    <a href="https://mozillazg.com/2019/02/load-balancing-strategy-algorithm-weighted-round-robin.html"
+                    <a href="http://127.0.0.1:8000/2019/02/load-balancing-strategy-algorithm-weighted-round-robin.html"
                        rel="bookmark"
                        title="Permalink to 负载均衡策略之轮询策略">
                         负载均衡策略之轮询策略
@@ -339,15 +339,15 @@ Huang Huang 的博客            </a>
             <div class="entry-content">
                 <div class="well-sm article-info">
 <footer class="post-info">
-        <a href="https://mozillazg.com/category/others.html">others</a>
+        <a href="http://127.0.0.1:8000/category/others.html">others</a>
 
 
 <span class="label label-default hide">Tags</span>
-	<a href="https://mozillazg.com/tag/load-balancing.html">load-balancing</a>
+	<a href="http://127.0.0.1:8000/tag/load-balancing.html">load-balancing</a>
         /
-	<a href="https://mozillazg.com/tag/load-balancer.html">load-balancer</a>
+	<a href="http://127.0.0.1:8000/tag/load-balancer.html">load-balancer</a>
         /
-	<a href="https://mozillazg.com/tag/round-robin.html">round-robin</a>
+	<a href="http://127.0.0.1:8000/tag/round-robin.html">round-robin</a>
     
 </footer><!-- /.post-info -->                </div>
                 <div class="js-toc"></div>
@@ -551,11 +551,11 @@ reduced temporarily on peer failures.</p>
 <section class="well" id="related-posts">
     <p>Related Posts:</p>
     <ul>
-        <li><a href="https://mozillazg.com/2019/02/load-balancing-strategy-algorithm-weighted-least-connection.html">负载均衡策略之最少连接</a></li>
-        <li><a href="https://mozillazg.com/2019/03/load-balancer-load-balancing-dynamic-weight-max-connections-slow-start-mode.html">网络负载均衡器中的动态权重功能</a></li>
-        <li><a href="https://mozillazg.com/2019/04/load-balancing-strategy-algorithm-Consistent-Hashing-with-Bounded-Loads.html">负载均衡策略之有限负载一致性哈希</a></li>
-        <li><a href="https://mozillazg.com/2019/03/load-balancing-strategy-algorithm-Consistent-hashing.html">负载均衡策略之一致性哈希</a></li>
-        <li><a href="https://mozillazg.com/2019/01/load-balancing-strategy-algorithm-weighted-random.html">负载均衡策略之随机选择</a></li>
+        <li><a href="http://127.0.0.1:8000/2019/03/load-balancing-strategy-algorithm-Consistent-hashing.html">负载均衡策略之一致性哈希</a></li>
+        <li><a href="http://127.0.0.1:8000/2019/02/load-balancing-strategy-algorithm-weighted-least-connection.html">负载均衡策略之最少连接</a></li>
+        <li><a href="http://127.0.0.1:8000/2019/03/load-balancer-load-balancing-dynamic-weight-max-connections-slow-start-mode.html">网络负载均衡器中的动态权重功能</a></li>
+        <li><a href="http://127.0.0.1:8000/2019/03/load-balancing-strategy-algorithm-the-power-of-two-random-choices.html">负载均衡策略之两次随机选择策略</a></li>
+        <li><a href="http://127.0.0.1:8000/2019/01/load-balancing-strategy-algorithm-weighted-random.html">负载均衡策略之随机选择</a></li>
     </ul>
 </section>
     <hr/>
@@ -568,7 +568,7 @@ reduced temporarily on peer failures.</p>
             var disqus_shortname = 'my-github-blog'; // required: replace example with your forum shortname
 
                     var disqus_identifier = 'load-balancing-strategy-algorithm-weighted-round-robin';
-                var disqus_url = 'https://mozillazg.com/2019/02/load-balancing-strategy-algorithm-weighted-round-robin.html';
+                var disqus_url = 'http://127.0.0.1:8000/2019/02/load-balancing-strategy-algorithm-weighted-round-robin.html';
 
             var disqus_config = function () {
                 this.language = "zh-hans";
@@ -598,12 +598,12 @@ reduced temporarily on peer failures.</p>
    <div class="container">
       <hr>
       <div class="row">
-         <div class="col-xs-10">&copy; 2022 mozillazg
+         <div class="col-xs-10">&copy; 2021 mozillazg
             &middot; Powered by <a href="https://github.com/DandyDev/pelican-bootstrap3" target="_blank">pelican-bootstrap3</a>,
             <a href="http://docs.getpelican.com/" target="_blank">Pelican</a>,
             <a href="http://getbootstrap.com" target="_blank">Bootstrap</a>
             &middot; <a href="/privacy-policy.html" target="_blank">Privacy</a>              <p><small>  <a rel="license" href="http://creativecommons.org/licenses/by-sa/4.0/"><img alt="Creative Commons License" style="border-width:0" src="/static/images/by-sa-80x15.png" /></a>
-    &quot;<span xmlns:dct="http://purl.org/dc/terms/" property="dct:title">Huang Huang 的博客</span>&quot; by <a xmlns:cc="http://creativecommons.org/ns#" href="https://mozillazg.com" property="cc:attributionName" rel="cc:attributionURL">mozillazg</a> is
+    &quot;<span xmlns:dct="http://purl.org/dc/terms/" property="dct:title">Huang Huang 的博客</span>&quot; by <a xmlns:cc="http://creativecommons.org/ns#" href="http://127.0.0.1:8000" property="cc:attributionName" rel="cc:attributionURL">mozillazg</a> is
   licensed under a <a rel="license" href="http://creativecommons.org/licenses/by-sa/4.0/">Creative Commons Attribution-ShareAlike 4.0 International License</a>, except where indicated otherwise.
 </small></p>
          </div>

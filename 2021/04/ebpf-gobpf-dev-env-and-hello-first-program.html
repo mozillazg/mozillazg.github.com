@@ -11,9 +11,9 @@
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/social-share.js@1.0.16/dist/css/share.min.css">
 
 
-    <link href="https://mozillazg.com/favicon.ico" rel="icon">
+    <link href="http://127.0.0.1:8000/favicon.ico" rel="icon">
 
-<link rel="canonical" href="https://mozillazg.com/2021/04/ebpf-gobpf-dev-env-and-hello-first-program.html">
+<link rel="canonical" href="http://127.0.0.1:8000/2021/04/ebpf-gobpf-dev-env-and-hello-first-program.html">
 
         <meta name="author" content="mozillazg" />
         <meta name="keywords" content="eBPF,gobpf,Go,gobpf 使用示例" />
@@ -37,7 +37,7 @@
         <meta property="og:site_name" content="Huang Huang 的博客" />
         <meta property="og:type" content="article"/>
         <meta property="og:title" content="gobpf 使用示例：开发环境及 Hello World"/>
-        <meta property="og:url" content="https://mozillazg.com/2021/04/ebpf-gobpf-dev-env-and-hello-first-program.html"/>
+        <meta property="og:url" content="http://127.0.0.1:8000/2021/04/ebpf-gobpf-dev-env-and-hello-first-program.html"/>
         <meta property="og:description" content="前言¶ gobpf 使用示例系列记录使用 gobpf 编写 eBPF 程序的一些例子。 搭建开发环境¶ 所有示例程序都基于 Ubuntu 20.04 和 Go 1.6 进行编写，同时所有示例使用的 github.com/iovisor/gobpf 版本为 v0.1.1 可以通过各种方式安装 Ubuntu 20.04 同样可以通过各种方式安装 Go 1.6 安装完 Ubuntu 和 Go 后，还需要安装编译 eBPF 程序所需的编译工具和内核源码： $ sudo apt update $ sudo apt install build-essential git make libelf-dev libelf1 \ clang llvm strace tar make bpfcc-tools linux-headers-$(uname -r) gcc-multilib $ cd /tmp/ &amp;&amp; \ git clone --depth 1 git://kernel.ubuntu.com/ubuntu/ubuntu-focal.git &amp;&amp; \ sudo mv ubuntu-focal /kernel-src &amp;&amp; \ cd /kernel-src/tools/lib/bpf &amp;&amp; \ sudo make &amp;&amp; sudo make install prefix=/usr/local &amp;&amp; \ sudo mv /usr/local/lib64/libbpf.* /lib/x86_64-linux-gnu/ 第一个 eBPF 程序¶ 第一个 eBPF 程序将 trace 所有的 open 系统调用，显示 open 系统调用调用时的文件路径参数 eBPF C 代码如下（hello.c）: #include &lt;linux/bpf.h&gt; #include &lt;linux/ptrace.h&gt; #include &lt;linux/version.h&gt; #include &lt;bpf_helpers.h&gt; SEC(&#34;kprobe/do_sys_open&#34;) int kprobe__do_sys_open(struct pt_regs *ctx) { char file_name[256]; bpf_probe_read(file_name, sizeof(file_name), PT_REGS_PARM2(ctx)); char fmt[] = &#34;open file %s\n&#34;; bpf_trace_printk(fmt, sizeof(fmt), &amp;file_name); return 0; } char _license[] SEC(&#34;license&#34;) = &#34;GPL&#34;; 通过下面的方法编译出最终的 hello.o 文件: $ clang -O2 -emit-llvm -I/kernel-src/tools/testing/selftests/bpf -c hello.c -o hello.ll hello.c:11:48: warning: incompatible integer to pointer conversion passing &#39;unsigned long&#39; to parameter of type &#39;const void *&#39; [-Wint-conversion] bpf_probe_read(file_name, sizeof(file_name), PT_REGS_PARM2(ctx)); ^~~~~~~~~~~~~~~~~~ /kernel-src/tools/testing/selftests/bpf/bpf_helpers.h:398:26: note: expanded from macro &#39;PT_REGS_PARM2&#39; #define PT_REGS_PARM2(x) ((x)-&gt;rsi) ^~~~~~~~~~ 1 warning generated. $ llc -march=bpf -filetype=obj -o hello.o hello.ll $ ls hello.o hello.o 然后在 Go 中使用 gobpf 加载的方法如下(hello.go): package main import ( &#34;fmt&#34; &#34;time&#34; &#34;github.com/iovisor/gobpf/elf&#34; ) func main() { mod := elf.NewModule(&#34;hello.o&#34;) err := mod.Load(nil) if err != nil { panic(err) } err = mod.EnableKprobes(0) if err != nil { panic(err) } for { fmt.Println(&#34;Waiting...&#34;) time.Sleep(10 * time.Second) } } 编译运行: $ go mod init $ go get github.com/iovisor/gobpf $ go build hello.go $ sudo ./hello Waiting... 新开一个 shell 窗口，然后在窗口内执行下面的命令可以看到被 trace 的 open 系统调用: $ sudo cat /sys/kernel/debug/tracing/trace_pipe ... systemd-journal-364 [000] .... 16819.802559: 0: open file /proc/492/attr/current systemd-journal-364 [000] .... 16819.802573: 0: open file /proc/492/sessionid systemd-journal-364 [000] .... 16819.802583: 0: open file /proc/492/loginuid systemd-journal-364 [000] .... 16819.802594: 0: open file /proc/492/cgroup ... 备注： 多次运行 hello 程序会出现如下错误: $ sudo ./hello panic: cannot write &#34;p:pdo_sys_open do_sys_open\n&#34; to kprobe_events: write /sys/kernel/debug/tracing/kprobe_events: file exists 可以通过下面的方法清理上次运行的遗留信息: $ echo &#34;&#34; |sudo tee /sys/kernel/debug/tracing/kprobe_events 然后再运行 sudo ./hello 就不会有问题了。 P.S. 本文的所有代码在 Github 上都有一份完整版：https://github.com/mozillazg/gobpf-examples/tree/master/1-helloword 参考资料¶ bpftools/linux-observability-with-bpf: Code snippets from the O&#39;Reilly book iovisor/gobpf: Go bindings for creating BPF programs. iovisor/bcc: BCC - Tools for BPF-based Linux IO analysis, networking, monitoring, and more GO BPF libraries: cilium ebpf vs iovisor gobpf"/>
         <meta property="article:published_time" content="2021-04-11" />
             <meta property="article:section" content="ebpf" />
@@ -47,32 +47,32 @@
             <meta property="article:tag" content="gobpf 使用示例" />
             <meta property="article:author" content="mozillazg" />
             <meta property="og:image"
-                  content="https://mozillazg.com/static/avatar.jpeg"/>
+                  content="http://127.0.0.1:8000/static/avatar.jpeg"/>
 
 
     <meta name="twitter:card" content="summary">
         <meta name="twitter:site" content="@mozillazg">
         <meta name="twitter:creator" content="@mozillazg">
-    <meta name="twitter:domain" content="https://mozillazg.com">
+    <meta name="twitter:domain" content="http://127.0.0.1:8000">
             <meta property="twitter:image"
-                  content="https://mozillazg.com/static/avatar.jpeg"/>
+                  content="http://127.0.0.1:8000/static/avatar.jpeg"/>
 
     <!-- Bootstrap -->
         <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@3.3.4/dist/css/bootstrap.min.css" type="text/css"/>
     <link href="https://cdn.jsdelivr.net/npm/font-awesome@4.3.0/css/font-awesome.min.css" rel="stylesheet">
 
     <link href="https://cdn.jsdelivr.net/npm/pygments-css@1.0.0/github.css" rel="stylesheet">
-    <link rel="stylesheet" href="https://mozillazg.com/theme/css/style.css" type="text/css"/>
-            <link href="https://mozillazg.com/static/custom.css" rel="stylesheet">
+    <link rel="stylesheet" href="http://127.0.0.1:8000/theme/css/style.css" type="text/css"/>
+            <link href="http://127.0.0.1:8000/static/custom.css" rel="stylesheet">
 
-        <link href="https://mozillazg.com/feeds/all.atom.xml" type="application/atom+xml" rel="alternate"
+        <link href="http://127.0.0.1:8000/feeds/all.atom.xml" type="application/atom+xml" rel="alternate"
               title="Huang Huang 的博客 ATOM Feed"/>
 
-        <link href="https://mozillazg.com/feeds/all.rss.xml" type="application/rss+xml" rel="alternate"
+        <link href="http://127.0.0.1:8000/feeds/all.rss.xml" type="application/rss+xml" rel="alternate"
               title="Huang Huang 的博客 RSS Feed"/>
 
 
-        <link href="https://mozillazg.com/feeds/ebpf.atom.xml" type="application/atom+xml" rel="alternate"
+        <link href="http://127.0.0.1:8000/feeds/ebpf.atom.xml" type="application/atom+xml" rel="alternate"
               title="Huang Huang 的博客 ebpf ATOM Feed"/>
 
 
@@ -83,20 +83,20 @@
         "publisher": {
             "@type": "Person",
             "name": "mozillazg",
-            "logo": "https://mozillazg.com/static/avatar.jpeg"
+            "logo": "http://127.0.0.1:8000/static/avatar.jpeg"
         },
         "author": {
             "@type": "Person",
             "name": "mozillazg",
-            "image": "https://mozillazg.com/static/avatar.jpeg",
-            "url": "https://mozillazg.com",
+            "image": "http://127.0.0.1:8000/static/avatar.jpeg",
+            "url": "http://127.0.0.1:8000",
             "sameAs": []
         },
         // "headline": "",
-        "url": "https://mozillazg.com/2021/04/ebpf-gobpf-dev-env-and-hello-first-program.html",
+        "url": "http://127.0.0.1:8000/2021/04/ebpf-gobpf-dev-env-and-hello-first-program.html",
         "datePublished": "2021-04-11",
         // "dateModified": "",
-        "image": "https://mozillazg.com/static/avatar.jpeg",
+        "image": "http://127.0.0.1:8000/static/avatar.jpeg",
         "keywords": "eBPF, gobpf, Go, gobpf 使用示例",
         // "description": "前言¶ gobpf 使用示例系列记录使用 gobpf 编写 eBPF 程序的一些例子。 搭建开发环境¶ 所有示例程序都基于 Ubuntu 20.04 和 Go 1.6 进行编写，同时所有示例使用的 github.com/iovisor/gobpf 版本为 v0.1.1 可以通过各种方式安装 Ubuntu 20.04 同样可以通过各种方式安装 Go 1.6 安装完 Ubuntu 和 Go 后，还需要安装编译 eBPF 程序所需的编译工具和内核源码： $ sudo apt update $ sudo apt install build-essential git make libelf-dev libelf1 \ clang llvm strace tar make bpfcc-tools linux-headers-$(uname -r) gcc-multilib $ cd /tmp/ &amp;&amp; \ git clone --depth 1 git://kernel.ubuntu.com/ubuntu/ubuntu-focal.git &amp;&amp; \ sudo mv ubuntu-focal /kernel-src &amp;&amp; \ cd /kernel-src/tools/lib/bpf &amp;&amp; \ sudo make &amp;&amp; sudo make install prefix=/usr/local &amp;&amp; \ sudo mv /usr/local/lib64/libbpf.* /lib/x86_64-linux-gnu/ 第一个 eBPF 程序¶ 第一个 eBPF 程序将 trace 所有的 open 系统调用，显示 open 系统调用调用时的文件路径参数 eBPF C 代码如下（hello.c）: #include &lt;linux/bpf.h&gt; #include &lt;linux/ptrace.h&gt; #include &lt;linux/version.h&gt; #include &lt;bpf_helpers.h&gt; SEC(&#34;kprobe/do_sys_open&#34;) int kprobe__do_sys_open(struct pt_regs *ctx) { char file_name[256]; bpf_probe_read(file_name, sizeof(file_name), PT_REGS_PARM2(ctx)); char fmt[] = &#34;open file %s\n&#34;; bpf_trace_printk(fmt, sizeof(fmt), &amp;file_name); return 0; } char _license[] SEC(&#34;license&#34;) = &#34;GPL&#34;; 通过下面的方法编译出最终的 hello.o 文件: $ clang -O2 -emit-llvm -I/kernel-src/tools/testing/selftests/bpf -c hello.c -o hello.ll hello.c:11:48: warning: incompatible integer to pointer conversion passing &#39;unsigned long&#39; to parameter of type &#39;const void *&#39; [-Wint-conversion] bpf_probe_read(file_name, sizeof(file_name), PT_REGS_PARM2(ctx)); ^~~~~~~~~~~~~~~~~~ /kernel-src/tools/testing/selftests/bpf/bpf_helpers.h:398:26: note: expanded from macro &#39;PT_REGS_PARM2&#39; #define PT_REGS_PARM2(x) ((x)-&gt;rsi) ^~~~~~~~~~ 1 warning generated. $ llc -march=bpf -filetype=obj -o hello.o hello.ll $ ls hello.o hello.o 然后在 Go 中使用 gobpf 加载的方法如下(hello.go): package main import ( &#34;fmt&#34; &#34;time&#34; &#34;github.com/iovisor/gobpf/elf&#34; ) func main() { mod := elf.NewModule(&#34;hello.o&#34;) err := mod.Load(nil) if err != nil { panic(err) } err = mod.EnableKprobes(0) if err != nil { panic(err) } for { fmt.Println(&#34;Waiting...&#34;) time.Sleep(10 * time.Second) } } 编译运行: $ go mod init $ go get github.com/iovisor/gobpf $ go build hello.go $ sudo ./hello Waiting... 新开一个 shell 窗口，然后在窗口内执行下面的命令可以看到被 trace 的 open 系统调用: $ sudo cat /sys/kernel/debug/tracing/trace_pipe ... systemd-journal-364 [000] .... 16819.802559: 0: open file /proc/492/attr/current systemd-journal-364 [000] .... 16819.802573: 0: open file /proc/492/sessionid systemd-journal-364 [000] .... 16819.802583: 0: open file /proc/492/loginuid systemd-journal-364 [000] .... 16819.802594: 0: open file /proc/492/cgroup ... 备注： 多次运行 hello 程序会出现如下错误: $ sudo ./hello panic: cannot write &#34;p:pdo_sys_open do_sys_open\n&#34; to kprobe_events: write /sys/kernel/debug/tracing/kprobe_events: file exists 可以通过下面的方法清理上次运行的遗留信息: $ echo &#34;&#34; |sudo tee /sys/kernel/debug/tracing/kprobe_events 然后再运行 sudo ./hello 就不会有问题了。 P.S. 本文的所有代码在 Github 上都有一份完整版：https://github.com/mozillazg/gobpf-examples/tree/master/1-helloword 参考资料¶ bpftools/linux-observability-with-bpf: Code snippets from the O&#39;Reilly book iovisor/gobpf: Go bindings for creating BPF programs. iovisor/bcc: BCC - Tools for BPF-based Linux IO analysis, networking, monitoring, and more GO BPF libraries: cilium ebpf vs iovisor gobpf",
         "description": "<div class="section" id="id1">
@@ -232,7 +232,7 @@ $ echo &quot;&quot; |sudo tee /sys/kernel/debug/tracing/kprobe_events
 ",
         "mainEntityOfPage": {
             "@type": "WebPage",
-            "@id": "https://mozillazg.com"
+            "@id": "http://127.0.0.1:8000"
         }
     }
     </script>
@@ -249,16 +249,16 @@ $ echo &quot;&quot; |sudo tee /sys/kernel/debug/tracing/kprobe_events
                 <span class="icon-bar"></span>
                 <span class="icon-bar"></span>
             </button>
-            <a href="https://mozillazg.com/" class="navbar-brand">
+            <a href="http://127.0.0.1:8000/" class="navbar-brand">
 Huang Huang 的博客            </a>
         </div>
         <div class="collapse navbar-collapse navbar-ex1-collapse">
             <ul class="nav navbar-nav">
-                    <li><a href="https://mozillazg.com/feeds/all.atom.xml">Feed</a></li>
+                    <li><a href="http://127.0.0.1:8000/feeds/all.atom.xml">Feed</a></li>
                     <li><a href="/2014/10/pages/about-me.html">About</a></li>
             </ul>
             <ul class="nav navbar-nav navbar-right">
-              <li><a href="https://mozillazg.com/archives.html"><i class="fa fa-th-list"></i><span class="icon-label">Archives</span></a></li>
+              <li><a href="http://127.0.0.1:8000/archives.html"><i class="fa fa-th-list"></i><span class="icon-label">Archives</span></a></li>
             </ul>
         </div>
         <!-- /.navbar-collapse -->
@@ -273,7 +273,7 @@ Huang Huang 的博客            </a>
         <article>
             <header class="text-center">
                 <h1>
-                    <a href="https://mozillazg.com/2021/04/ebpf-gobpf-dev-env-and-hello-first-program.html"
+                    <a href="http://127.0.0.1:8000/2021/04/ebpf-gobpf-dev-env-and-hello-first-program.html"
                        rel="bookmark"
                        title="Permalink to gobpf 使用示例：开发环境及 Hello World">
                         gobpf 使用示例：开发环境及 Hello World
@@ -288,17 +288,17 @@ Huang Huang 的博客            </a>
             <div class="entry-content">
                 <div class="well-sm article-info">
 <footer class="post-info">
-        <a href="https://mozillazg.com/category/ebpf.html">ebpf</a>
+        <a href="http://127.0.0.1:8000/category/ebpf.html">ebpf</a>
 
 
 <span class="label label-default hide">Tags</span>
-	<a href="https://mozillazg.com/tag/ebpf.html">eBPF</a>
+	<a href="http://127.0.0.1:8000/tag/ebpf.html">eBPF</a>
         /
-	<a href="https://mozillazg.com/tag/gobpf.html">gobpf</a>
+	<a href="http://127.0.0.1:8000/tag/gobpf.html">gobpf</a>
         /
-	<a href="https://mozillazg.com/tag/go.html">Go</a>
+	<a href="http://127.0.0.1:8000/tag/go.html">Go</a>
         /
-	<a href="https://mozillazg.com/tag/gobpf-shi-yong-shi-li.html">gobpf 使用示例</a>
+	<a href="http://127.0.0.1:8000/tag/gobpf-shi-yong-shi-li.html">gobpf 使用示例</a>
     
 </footer><!-- /.post-info -->                </div>
                 <div class="js-toc"></div>
@@ -450,9 +450,9 @@ $ echo &quot;&quot; |sudo tee /sys/kernel/debug/tracing/kprobe_events
 <section class="well" id="related-posts">
     <p>Related Posts:</p>
     <ul>
-        <li><a href="https://mozillazg.com/2021/04/ebpf-gobpf-store-and-read-data-use-perf-event.html">gobpf 使用示例：使用 perf event 保存数据</a></li>
-        <li><a href="https://mozillazg.com/2021/05/ebpf-gobpf-how-to-find-system-call-kernel-function-for-kprobe-elf-section.html">gobpf 使用示例：如何找到一个系统调用对应的可用于 kprobe SEC 的内核函数</a></li>
-        <li><a href="https://mozillazg.com/2021/05/ebpf-gobpf-get-function-argument-values-from-pt_regs.html">gobpf 使用示例：从 pt_regs 中获取内核函数的参数的值</a></li>
+        <li><a href="http://127.0.0.1:8000/2021/05/ebpf-gobpf-how-to-find-system-call-kernel-function-for-kprobe-elf-section.html">gobpf 使用示例：如何找到一个系统调用对应的可用于 kprobe SEC 的内核函数</a></li>
+        <li><a href="http://127.0.0.1:8000/2021/05/ebpf-gobpf-get-function-argument-values-from-pt_regs.html">gobpf 使用示例：从 pt_regs 中获取内核函数的参数的值</a></li>
+        <li><a href="http://127.0.0.1:8000/2021/04/ebpf-gobpf-store-and-read-data-use-perf-event.html">gobpf 使用示例：使用 perf event 保存数据</a></li>
     </ul>
 </section>
     <hr/>
@@ -465,7 +465,7 @@ $ echo &quot;&quot; |sudo tee /sys/kernel/debug/tracing/kprobe_events
             var disqus_shortname = 'my-github-blog'; // required: replace example with your forum shortname
 
                     var disqus_identifier = 'ebpf-gobpf-dev-env-and-hello-first-program';
-                var disqus_url = 'https://mozillazg.com/2021/04/ebpf-gobpf-dev-env-and-hello-first-program.html';
+                var disqus_url = 'http://127.0.0.1:8000/2021/04/ebpf-gobpf-dev-env-and-hello-first-program.html';
 
             var disqus_config = function () {
                 this.language = "zh-hans";
@@ -495,12 +495,12 @@ $ echo &quot;&quot; |sudo tee /sys/kernel/debug/tracing/kprobe_events
    <div class="container">
       <hr>
       <div class="row">
-         <div class="col-xs-10">&copy; 2022 mozillazg
+         <div class="col-xs-10">&copy; 2021 mozillazg
             &middot; Powered by <a href="https://github.com/DandyDev/pelican-bootstrap3" target="_blank">pelican-bootstrap3</a>,
             <a href="http://docs.getpelican.com/" target="_blank">Pelican</a>,
             <a href="http://getbootstrap.com" target="_blank">Bootstrap</a>
             &middot; <a href="/privacy-policy.html" target="_blank">Privacy</a>              <p><small>  <a rel="license" href="http://creativecommons.org/licenses/by-sa/4.0/"><img alt="Creative Commons License" style="border-width:0" src="/static/images/by-sa-80x15.png" /></a>
-    &quot;<span xmlns:dct="http://purl.org/dc/terms/" property="dct:title">Huang Huang 的博客</span>&quot; by <a xmlns:cc="http://creativecommons.org/ns#" href="https://mozillazg.com" property="cc:attributionName" rel="cc:attributionURL">mozillazg</a> is
+    &quot;<span xmlns:dct="http://purl.org/dc/terms/" property="dct:title">Huang Huang 的博客</span>&quot; by <a xmlns:cc="http://creativecommons.org/ns#" href="http://127.0.0.1:8000" property="cc:attributionName" rel="cc:attributionURL">mozillazg</a> is
   licensed under a <a rel="license" href="http://creativecommons.org/licenses/by-sa/4.0/">Creative Commons Attribution-ShareAlike 4.0 International License</a>, except where indicated otherwise.
 </small></p>
          </div>

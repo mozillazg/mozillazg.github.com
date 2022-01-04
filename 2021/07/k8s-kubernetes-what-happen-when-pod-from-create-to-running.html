@@ -11,9 +11,9 @@
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/social-share.js@1.0.16/dist/css/share.min.css">
 
 
-    <link href="https://mozillazg.com/favicon.ico" rel="icon">
+    <link href="http://127.0.0.1:8000/favicon.ico" rel="icon">
 
-<link rel="canonical" href="https://mozillazg.com/2021/07/k8s-kubernetes-what-happen-when-pod-from-create-to-running.html">
+<link rel="canonical" href="http://127.0.0.1:8000/2021/07/k8s-kubernetes-what-happen-when-pod-from-create-to-running.html">
 
         <meta name="author" content="mozillazg" />
         <meta name="keywords" content="kubernetes" />
@@ -37,39 +37,39 @@
         <meta property="og:site_name" content="Huang Huang 的博客" />
         <meta property="og:type" content="article"/>
         <meta property="og:title" content="Pod 从创建到 Running 背后发生了什么"/>
-        <meta property="og:url" content="https://mozillazg.com/2021/07/k8s-kubernetes-what-happen-when-pod-from-create-to-running.html"/>
+        <meta property="og:url" content="http://127.0.0.1:8000/2021/07/k8s-kubernetes-what-happen-when-pod-from-create-to-running.html"/>
         <meta property="og:description" content="前言¶ 简单记录一下 Pod 从创建到最终 Running 背后发生的事情， 以便对 k8s 的一些工作机制有一个更深入一点的了解。 本文内容所针对的 Kubernetes 版本为 v1.21.3 从发送创建 Pod 的请求到 Pod 信息存入 etcd¶ 先讲一下从客户端发送创建 Pod 的请求到 apiserver 然后 apiserver 把数据存入 etcd 过程中发生的事情： 客户端向 apiserver 发送创建 Pod 的请求: POST /api/v1/namespaces/{namespace}/pods apiserver 收到请求后 首先会对请求做 认证（authentication） ，解析请求所携带的认证信息得到 User 信息，然后将 User 信息写入请求的 Context 中。 支持的认证方法详见 官方文档 认证通过后，再对 User 做 鉴权（Authorization） ，检查当前 User 对这个请求所操作的资源是否有相应的操作权限。 支持的鉴权方法详见 官方文档 认证和鉴权都通过后，请求的 body 将会被反序列化为 runtime.Object 对象。 在 存入 etcd 之前 ， 反序列化后的对象会 先被 填充默认值 和进行 字段校验 然后这个请求和对象还会被 Admission Controllers 处理一遍。 Admission Controllers 即包括 kube-apiserver 内置的 admission controllers 也包括用户自行实现的 admission webhooks 。 Admission Controllers 既可以实现对请求做进一步的校验（比如按一定策略对请求校验，拦截未使用指定 docker registory 的 Pod）（ validating admission ）） 也可以实现修改请求创建/修改的对象的属性的需求（比如给 Pod 注入 sidecar 容器）（ mutating admission ））。 先处理 mutating admission 然后 再处理 validating admission ) 只要有一个 Admission Controller 返回失败，请求就会失败。 多个 Admission Controller 串行执行 ， 每个 Admission Controller 内部都有自己的逻辑，比如， ValidatingAdmissionWebhook Controller 内部会 并发执行 定义的多个 validating admission webhook ，执行完成后只返回 第一个错误 （未被忽略的那个错误，因为 webhook 可以配置忽略错误） MutatingAdmissionWebhook Controller 内部会 串行执行 定义的多个 mutating webhook ，出错（未被忽略的错误，因为 webhook 可以配置忽略错误）就 返回 Admission controllers 处理完以后， 对象被存入到 etcd 中 最后根据执行结果方法相应的 Response。 此时 Pod 就创建成功了，但是还没有被调度到某个节点并且状态是 Pending。 Pod 调度¶ kube-scheduler 组件负责 Pod 的调度工作，具体过程如下： kube-scheduler 通过 Informer 机制 监控 Pod 等资源的变更事件并注册相应的回调函数 当上面的 Pod 创建成功后， 触发了 Pod 的变更事件 ，因为此时这个 Pod 满足 nodeName 的值为空并且 schedulerName 中指定的是已知的 Scheduler Framework Name，所以这个 Pod 对象会被放入到 SchedulingQueue 队列中等待处理。 kube-scheduler 中 SchedulingQueue 中的待调度 Pod 会由 scheduleOne 函数进行处理，Pod 调度逻辑就在这个函数里: 根据 Pod 的 schedulerName 字段的值找到 Pod 指定要使用的 Scheduler Framework (fwk) 根据调度算法（内置的策略加 fwk 实现的策略）得出适合这个 Pod 的最佳节点（调度算法的详细说明以后再单独细说） 如果调度算法失败了： 执行 fwk.RunPostFilterPlugins 函数，获取可能的 nominatedNode 产生一个 FailedScheduling Event、 更新 Pod 的 status.conditions 字段增加一个 type 为 PodScheduled status 为 False 的 PodCondition 以及更新 status.nominatedNodeName 字段的值为前面获取的 nominatedNode 如果调度算法成功返回了节点信息，首先执行 fwk.RunReservePluginsReserve 如果失败了执行 fwk.RunReservePluginsUnreserve 然后按上面 3.2 的操作记录调度失败 然后再执行 fwk.RunPermitPlugins `` 如果失败了执行 ``fwk.RunReservePluginsUnreserve 然后按上面 3.2 的操作记录调度失败 最后执行 binding 操作 执行 fwk.WaitOnPermit 如果失败了执行 fwk.RunReservePluginsUnreserve 然后按上面 3.2 的操作记录调度失败 执行 fwk.RunPreBindPlugins 如果失败了执行 fwk.RunReservePluginsUnreserve 然后按上面 3.2 的操作记录调度失败 执行真正的 binding 操作 sched.bind ， 默认的 Bind 实现 会去 post 当前 Pod 的 binding 子资源 记录 Pod 被调度到哪个节点上了， 如果失败了执行 fwk.RunReservePluginsUnreserve 然后按上面 3.2 的操作记录调度失败 执行 fwk.RunPostBindPlugins 当 apiserver 收到对 Pod binding 子资源的 post 请求的时候，会触发 binding 的 create 逻辑， 更新 Pod 的 nodeName 字段为请求中包含的 NodeName 以及 更新 Pod 的 status.conditions 字段增加一个 type 为 PodScheduled status 为 True 的 pod condition 。 此时 Pod 就被调度到一个节点上了，但是 Pod 的还是 Pending 因为 Pod 内的容器还没有在被调度的节点上运行。 节点上运行 Pod 中的容器¶ kubelet 组件负责在节点上运行 Pod 中定义的容器，具体的过程如下： kubelet 组件启动后会 watch 所有 nodeName 字段的值是当前节点名称的 Pod 的 变更事件 当 Pod 经过调度后，它的 nodeName 字段会被设置为被选中的节点的名称，此时会触发 kubelet 中 pod ADD 事件（因为之前没在这个节点上处理过）: 触发 Pod 更新 的 处理 逻 辑 : 首先执行 canRunPod 检查（ 检查 AppArmor 、 NoNewPrivs 以及 ProcMount 这三个特性），如果检查不通过的话，不会进行后续的操作 如果网络插件未就绪并且当前 Pod 未使用 Host 网络的话，返回 network is not ready 的错误以及产生一个 NetworkNotReady 的 Event 如果启用了 cgroups-per-qos 功能，将为 Pod 创建 Cgroups 创建存放 Pod 容器数据的目录： Pod 目录，比如 /var/run/kubelet/pods/{PodUID} PodVolumes 目录，比如 {PodDir}/volumes PodPlugins 目录，比如 {PodDir}/plugins 通过 volumeManager.WaitForAttachAndMount 等待 Pod 中所有容器的 volumeMounts 和 volumeDevices 中使用的 volume 被成功 attatch 和 mount （关于 volumeManager 相关内容以后再单独细说）。 如果失败的话，返回 mount 失败的 event 和错误 获取 Pod 中指定的 imagePullSecrets 所使用的那些 secret 数据的内容。 容器运行时创建容器 : 执行 createPodSandbox 方法创建一个 pod sandbox 内部 会通过 gRPC 调用不同 CRI（Container Runtime Interface） 所实现的 RunPodSandbox 接口 不同 CRI 实现 RunPodSandbox 接口的方法可能会不尽相同。以 Docker 为例，dockershim 中实现的 RunPodSandbox 接口的 内部操作 如下： pull sandbox 容器（pause 容器）所用的镜像（默认是 k8s.gcr.io/pause:3.4.1 ，） 调用 docker client api 创建 sandbox 容器 创建 sandbox checkpoint 启动 sandbox 容器 更新容器内的 resolv.conf 文件的内容 如果 Pod 使用的是 Host 网络，直接返回, 如果不是用的 Host 网络的话，继续 通过 CNI 插件 配置容器网络 : 实际上是调用 CNI 插件的二进制可执行文件， 执行 一个 ADD 指令 如果网络配置失败 清理网络资源：执行 CNI 插件的 DEL 指令 停止前面启动的容器 然后再通过调用 CRI 的 PodSandboxStatus 接口查询一下创建的 pod sandbox 的状态，确保创建的 pod sandbox 无异常，同时获取 status 中包含的 pod IP 信息。 启动 ephemeral 容器， 启动容器 的步骤如下： 使用前面 6 获取的 secret 数据 pull image 调用 CRI 的 CreateContainer 接口创建容器 调用 CRI 的 StartContainer 接口启动容器 执行 container 中定义的 lifecycle.postStart hook 启动 init 容器 启动剩下的容器 容器启动完成后，将当前 Pod 注册 到 probeManager 中。 probeManager 负责异步执行容器中定义的 startupProbe 、 readinessProbe 以及 livenessProbe 操作。 这些 probe 操作的结果会发送到 startupManager 、 readinessManager 以及 livenessManager 中，从而触发响应的 事件响应逻辑 比如 readinessProbe 执行成功了会触发更新 statusManager 中记录的 Pod 的 status 信息，更新 ContainersReady 和 Ready 信息，以及 触发 Pod 信息同步操作（这里会有更新 statusManager 把 statusManager 中的Pod 状态 更新 为 Running 的 逻辑 ）。 statusManager 里有个 协程 会定期把待更新的 pod 状态通过 apiserver 进行 更新 。 经过 kubelet 中一些列的处理后，此时 Pod 的状态就变成 Running 了。 总结¶ 简单记录了一下 Pod 从创建到最终 Running 背后发生的事情，其中有些细节没有展开， 后面再补充或者另写一些文章说一下那些没展开的内容。 参考资料¶ kubernetes/kubernetes at v1.21.3 Kubernetes Documentation | Kubernetes"/>
         <meta property="article:published_time" content="2021-07-25" />
             <meta property="article:section" content="k8s" />
             <meta property="article:tag" content="kubernetes" />
             <meta property="article:author" content="mozillazg" />
             <meta property="og:image"
-                  content="https://mozillazg.com/static/avatar.jpeg"/>
+                  content="http://127.0.0.1:8000/static/avatar.jpeg"/>
 
 
     <meta name="twitter:card" content="summary">
         <meta name="twitter:site" content="@mozillazg">
         <meta name="twitter:creator" content="@mozillazg">
-    <meta name="twitter:domain" content="https://mozillazg.com">
+    <meta name="twitter:domain" content="http://127.0.0.1:8000">
             <meta property="twitter:image"
-                  content="https://mozillazg.com/static/avatar.jpeg"/>
+                  content="http://127.0.0.1:8000/static/avatar.jpeg"/>
 
     <!-- Bootstrap -->
         <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@3.3.4/dist/css/bootstrap.min.css" type="text/css"/>
     <link href="https://cdn.jsdelivr.net/npm/font-awesome@4.3.0/css/font-awesome.min.css" rel="stylesheet">
 
     <link href="https://cdn.jsdelivr.net/npm/pygments-css@1.0.0/github.css" rel="stylesheet">
-    <link rel="stylesheet" href="https://mozillazg.com/theme/css/style.css" type="text/css"/>
-            <link href="https://mozillazg.com/static/custom.css" rel="stylesheet">
+    <link rel="stylesheet" href="http://127.0.0.1:8000/theme/css/style.css" type="text/css"/>
+            <link href="http://127.0.0.1:8000/static/custom.css" rel="stylesheet">
 
-        <link href="https://mozillazg.com/feeds/all.atom.xml" type="application/atom+xml" rel="alternate"
+        <link href="http://127.0.0.1:8000/feeds/all.atom.xml" type="application/atom+xml" rel="alternate"
               title="Huang Huang 的博客 ATOM Feed"/>
 
-        <link href="https://mozillazg.com/feeds/all.rss.xml" type="application/rss+xml" rel="alternate"
+        <link href="http://127.0.0.1:8000/feeds/all.rss.xml" type="application/rss+xml" rel="alternate"
               title="Huang Huang 的博客 RSS Feed"/>
 
 
-        <link href="https://mozillazg.com/feeds/k8s.atom.xml" type="application/atom+xml" rel="alternate"
+        <link href="http://127.0.0.1:8000/feeds/k8s.atom.xml" type="application/atom+xml" rel="alternate"
               title="Huang Huang 的博客 k8s ATOM Feed"/>
 
 
@@ -80,20 +80,20 @@
         "publisher": {
             "@type": "Person",
             "name": "mozillazg",
-            "logo": "https://mozillazg.com/static/avatar.jpeg"
+            "logo": "http://127.0.0.1:8000/static/avatar.jpeg"
         },
         "author": {
             "@type": "Person",
             "name": "mozillazg",
-            "image": "https://mozillazg.com/static/avatar.jpeg",
-            "url": "https://mozillazg.com",
+            "image": "http://127.0.0.1:8000/static/avatar.jpeg",
+            "url": "http://127.0.0.1:8000",
             "sameAs": []
         },
         // "headline": "",
-        "url": "https://mozillazg.com/2021/07/k8s-kubernetes-what-happen-when-pod-from-create-to-running.html",
+        "url": "http://127.0.0.1:8000/2021/07/k8s-kubernetes-what-happen-when-pod-from-create-to-running.html",
         "datePublished": "2021-07-25",
         // "dateModified": "",
-        "image": "https://mozillazg.com/static/avatar.jpeg",
+        "image": "http://127.0.0.1:8000/static/avatar.jpeg",
         "keywords": "kubernetes",
         // "description": "前言¶ 简单记录一下 Pod 从创建到最终 Running 背后发生的事情， 以便对 k8s 的一些工作机制有一个更深入一点的了解。 本文内容所针对的 Kubernetes 版本为 v1.21.3 从发送创建 Pod 的请求到 Pod 信息存入 etcd¶ 先讲一下从客户端发送创建 Pod 的请求到 apiserver 然后 apiserver 把数据存入 etcd 过程中发生的事情： 客户端向 apiserver 发送创建 Pod 的请求: POST /api/v1/namespaces/{namespace}/pods apiserver 收到请求后 首先会对请求做 认证（authentication） ，解析请求所携带的认证信息得到 User 信息，然后将 User 信息写入请求的 Context 中。 支持的认证方法详见 官方文档 认证通过后，再对 User 做 鉴权（Authorization） ，检查当前 User 对这个请求所操作的资源是否有相应的操作权限。 支持的鉴权方法详见 官方文档 认证和鉴权都通过后，请求的 body 将会被反序列化为 runtime.Object 对象。 在 存入 etcd 之前 ， 反序列化后的对象会 先被 填充默认值 和进行 字段校验 然后这个请求和对象还会被 Admission Controllers 处理一遍。 Admission Controllers 即包括 kube-apiserver 内置的 admission controllers 也包括用户自行实现的 admission webhooks 。 Admission Controllers 既可以实现对请求做进一步的校验（比如按一定策略对请求校验，拦截未使用指定 docker registory 的 Pod）（ validating admission ）） 也可以实现修改请求创建/修改的对象的属性的需求（比如给 Pod 注入 sidecar 容器）（ mutating admission ））。 先处理 mutating admission 然后 再处理 validating admission ) 只要有一个 Admission Controller 返回失败，请求就会失败。 多个 Admission Controller 串行执行 ， 每个 Admission Controller 内部都有自己的逻辑，比如， ValidatingAdmissionWebhook Controller 内部会 并发执行 定义的多个 validating admission webhook ，执行完成后只返回 第一个错误 （未被忽略的那个错误，因为 webhook 可以配置忽略错误） MutatingAdmissionWebhook Controller 内部会 串行执行 定义的多个 mutating webhook ，出错（未被忽略的错误，因为 webhook 可以配置忽略错误）就 返回 Admission controllers 处理完以后， 对象被存入到 etcd 中 最后根据执行结果方法相应的 Response。 此时 Pod 就创建成功了，但是还没有被调度到某个节点并且状态是 Pending。 Pod 调度¶ kube-scheduler 组件负责 Pod 的调度工作，具体过程如下： kube-scheduler 通过 Informer 机制 监控 Pod 等资源的变更事件并注册相应的回调函数 当上面的 Pod 创建成功后， 触发了 Pod 的变更事件 ，因为此时这个 Pod 满足 nodeName 的值为空并且 schedulerName 中指定的是已知的 Scheduler Framework Name，所以这个 Pod 对象会被放入到 SchedulingQueue 队列中等待处理。 kube-scheduler 中 SchedulingQueue 中的待调度 Pod 会由 scheduleOne 函数进行处理，Pod 调度逻辑就在这个函数里: 根据 Pod 的 schedulerName 字段的值找到 Pod 指定要使用的 Scheduler Framework (fwk) 根据调度算法（内置的策略加 fwk 实现的策略）得出适合这个 Pod 的最佳节点（调度算法的详细说明以后再单独细说） 如果调度算法失败了： 执行 fwk.RunPostFilterPlugins 函数，获取可能的 nominatedNode 产生一个 FailedScheduling Event、 更新 Pod 的 status.conditions 字段增加一个 type 为 PodScheduled status 为 False 的 PodCondition 以及更新 status.nominatedNodeName 字段的值为前面获取的 nominatedNode 如果调度算法成功返回了节点信息，首先执行 fwk.RunReservePluginsReserve 如果失败了执行 fwk.RunReservePluginsUnreserve 然后按上面 3.2 的操作记录调度失败 然后再执行 fwk.RunPermitPlugins `` 如果失败了执行 ``fwk.RunReservePluginsUnreserve 然后按上面 3.2 的操作记录调度失败 最后执行 binding 操作 执行 fwk.WaitOnPermit 如果失败了执行 fwk.RunReservePluginsUnreserve 然后按上面 3.2 的操作记录调度失败 执行 fwk.RunPreBindPlugins 如果失败了执行 fwk.RunReservePluginsUnreserve 然后按上面 3.2 的操作记录调度失败 执行真正的 binding 操作 sched.bind ， 默认的 Bind 实现 会去 post 当前 Pod 的 binding 子资源 记录 Pod 被调度到哪个节点上了， 如果失败了执行 fwk.RunReservePluginsUnreserve 然后按上面 3.2 的操作记录调度失败 执行 fwk.RunPostBindPlugins 当 apiserver 收到对 Pod binding 子资源的 post 请求的时候，会触发 binding 的 create 逻辑， 更新 Pod 的 nodeName 字段为请求中包含的 NodeName 以及 更新 Pod 的 status.conditions 字段增加一个 type 为 PodScheduled status 为 True 的 pod condition 。 此时 Pod 就被调度到一个节点上了，但是 Pod 的还是 Pending 因为 Pod 内的容器还没有在被调度的节点上运行。 节点上运行 Pod 中的容器¶ kubelet 组件负责在节点上运行 Pod 中定义的容器，具体的过程如下： kubelet 组件启动后会 watch 所有 nodeName 字段的值是当前节点名称的 Pod 的 变更事件 当 Pod 经过调度后，它的 nodeName 字段会被设置为被选中的节点的名称，此时会触发 kubelet 中 pod ADD 事件（因为之前没在这个节点上处理过）: 触发 Pod 更新 的 处理 逻 辑 : 首先执行 canRunPod 检查（ 检查 AppArmor 、 NoNewPrivs 以及 ProcMount 这三个特性），如果检查不通过的话，不会进行后续的操作 如果网络插件未就绪并且当前 Pod 未使用 Host 网络的话，返回 network is not ready 的错误以及产生一个 NetworkNotReady 的 Event 如果启用了 cgroups-per-qos 功能，将为 Pod 创建 Cgroups 创建存放 Pod 容器数据的目录： Pod 目录，比如 /var/run/kubelet/pods/{PodUID} PodVolumes 目录，比如 {PodDir}/volumes PodPlugins 目录，比如 {PodDir}/plugins 通过 volumeManager.WaitForAttachAndMount 等待 Pod 中所有容器的 volumeMounts 和 volumeDevices 中使用的 volume 被成功 attatch 和 mount （关于 volumeManager 相关内容以后再单独细说）。 如果失败的话，返回 mount 失败的 event 和错误 获取 Pod 中指定的 imagePullSecrets 所使用的那些 secret 数据的内容。 容器运行时创建容器 : 执行 createPodSandbox 方法创建一个 pod sandbox 内部 会通过 gRPC 调用不同 CRI（Container Runtime Interface） 所实现的 RunPodSandbox 接口 不同 CRI 实现 RunPodSandbox 接口的方法可能会不尽相同。以 Docker 为例，dockershim 中实现的 RunPodSandbox 接口的 内部操作 如下： pull sandbox 容器（pause 容器）所用的镜像（默认是 k8s.gcr.io/pause:3.4.1 ，） 调用 docker client api 创建 sandbox 容器 创建 sandbox checkpoint 启动 sandbox 容器 更新容器内的 resolv.conf 文件的内容 如果 Pod 使用的是 Host 网络，直接返回, 如果不是用的 Host 网络的话，继续 通过 CNI 插件 配置容器网络 : 实际上是调用 CNI 插件的二进制可执行文件， 执行 一个 ADD 指令 如果网络配置失败 清理网络资源：执行 CNI 插件的 DEL 指令 停止前面启动的容器 然后再通过调用 CRI 的 PodSandboxStatus 接口查询一下创建的 pod sandbox 的状态，确保创建的 pod sandbox 无异常，同时获取 status 中包含的 pod IP 信息。 启动 ephemeral 容器， 启动容器 的步骤如下： 使用前面 6 获取的 secret 数据 pull image 调用 CRI 的 CreateContainer 接口创建容器 调用 CRI 的 StartContainer 接口启动容器 执行 container 中定义的 lifecycle.postStart hook 启动 init 容器 启动剩下的容器 容器启动完成后，将当前 Pod 注册 到 probeManager 中。 probeManager 负责异步执行容器中定义的 startupProbe 、 readinessProbe 以及 livenessProbe 操作。 这些 probe 操作的结果会发送到 startupManager 、 readinessManager 以及 livenessManager 中，从而触发响应的 事件响应逻辑 比如 readinessProbe 执行成功了会触发更新 statusManager 中记录的 Pod 的 status 信息，更新 ContainersReady 和 Ready 信息，以及 触发 Pod 信息同步操作（这里会有更新 statusManager 把 statusManager 中的Pod 状态 更新 为 Running 的 逻辑 ）。 statusManager 里有个 协程 会定期把待更新的 pod 状态通过 apiserver 进行 更新 。 经过 kubelet 中一些列的处理后，此时 Pod 的状态就变成 Running 了。 总结¶ 简单记录了一下 Pod 从创建到最终 Running 背后发生的事情，其中有些细节没有展开， 后面再补充或者另写一些文章说一下那些没展开的内容。 参考资料¶ kubernetes/kubernetes at v1.21.3 Kubernetes Documentation | Kubernetes",
         "description": "<div class="section" id="id1">
@@ -245,7 +245,7 @@ Admission Controllers 即包括 kube-apiserver 内置的 <a class="reference ext
 ",
         "mainEntityOfPage": {
             "@type": "WebPage",
-            "@id": "https://mozillazg.com"
+            "@id": "http://127.0.0.1:8000"
         }
     }
     </script>
@@ -262,16 +262,16 @@ Admission Controllers 即包括 kube-apiserver 内置的 <a class="reference ext
                 <span class="icon-bar"></span>
                 <span class="icon-bar"></span>
             </button>
-            <a href="https://mozillazg.com/" class="navbar-brand">
+            <a href="http://127.0.0.1:8000/" class="navbar-brand">
 Huang Huang 的博客            </a>
         </div>
         <div class="collapse navbar-collapse navbar-ex1-collapse">
             <ul class="nav navbar-nav">
-                    <li><a href="https://mozillazg.com/feeds/all.atom.xml">Feed</a></li>
+                    <li><a href="http://127.0.0.1:8000/feeds/all.atom.xml">Feed</a></li>
                     <li><a href="/2014/10/pages/about-me.html">About</a></li>
             </ul>
             <ul class="nav navbar-nav navbar-right">
-              <li><a href="https://mozillazg.com/archives.html"><i class="fa fa-th-list"></i><span class="icon-label">Archives</span></a></li>
+              <li><a href="http://127.0.0.1:8000/archives.html"><i class="fa fa-th-list"></i><span class="icon-label">Archives</span></a></li>
             </ul>
         </div>
         <!-- /.navbar-collapse -->
@@ -286,7 +286,7 @@ Huang Huang 的博客            </a>
         <article>
             <header class="text-center">
                 <h1>
-                    <a href="https://mozillazg.com/2021/07/k8s-kubernetes-what-happen-when-pod-from-create-to-running.html"
+                    <a href="http://127.0.0.1:8000/2021/07/k8s-kubernetes-what-happen-when-pod-from-create-to-running.html"
                        rel="bookmark"
                        title="Permalink to Pod 从创建到 Running 背后发生了什么">
                         Pod 从创建到 Running 背后发生了什么
@@ -301,11 +301,11 @@ Huang Huang 的博客            </a>
             <div class="entry-content">
                 <div class="well-sm article-info">
 <footer class="post-info">
-        <a href="https://mozillazg.com/category/k8s.html">k8s</a>
+        <a href="http://127.0.0.1:8000/category/k8s.html">k8s</a>
 
 
 <span class="label label-default hide">Tags</span>
-	<a href="https://mozillazg.com/tag/kubernetes.html">kubernetes</a>
+	<a href="http://127.0.0.1:8000/tag/kubernetes.html">kubernetes</a>
     
 </footer><!-- /.post-info -->                </div>
                 <div class="js-toc"></div>
@@ -473,11 +473,11 @@ Admission Controllers 即包括 kube-apiserver 内置的 <a class="reference ext
 <section class="well" id="related-posts">
     <p>Related Posts:</p>
     <ul>
-        <li><a href="https://mozillazg.com/2021/06/k8s-kubernetes-rbac-rules-use-star-wildcard.html">在 Kubernetes RBAC Role/ClusterRole 规则中使用通配符 *</a></li>
-        <li><a href="https://mozillazg.com/2021/07/introduce-echo-k8s-webhook-project.html">echo-k8s-webhook: 记录 k8s Admission Webhook 的请求内容</a></li>
-        <li><a href="https://mozillazg.com/2020/07/k8s-kubernetes-client-go-list-get-create-update-patch-delete-crd-resource-without-generate-client-code-update-or-create-via-yaml.html">在不生成 crd client 代码的情况下通过 client-go 增删改查 k8s crd 资源</a></li>
-        <li><a href="https://mozillazg.com/2020/05/k8s-kubernetes-use-which-psp-when-there-are-multiple-pod-security-policies.html">当有多个可用的 Pod Security Policy 时 k8s 的 PSP 选择策略</a></li>
-        <li><a href="https://mozillazg.com/2020/06/k8s-kubernetes-kubectl-syntax-of-impersonate-as-user-or-serviceaccount-or-group.html">kubernetes 用户扮演 API</a></li>
+        <li><a href="http://127.0.0.1:8000/2021/07/introduce-echo-k8s-webhook-project.html">echo-k8s-webhook: 记录 k8s Admission Webhook 的请求内容</a></li>
+        <li><a href="http://127.0.0.1:8000/2020/06/kubernetes-k8s-too-many-service-environment-variables-cause-pod-container-start-bash-too-slow.html">太多的 service 信息环境变量可能会导致容器中执行 bash 命令特别的慢</a></li>
+        <li><a href="http://127.0.0.1:8000/2021/11/security-use-dns-srv-to-get-all-service-info.html">通过向 DNS 服务发送 SRV 查询请求获取 kubernetes 集群内所有 Service 信息</a></li>
+        <li><a href="http://127.0.0.1:8000/2021/06/k8s-kubernetes-rbac-rules-use-star-wildcard.html">在 Kubernetes RBAC Role/ClusterRole 规则中使用通配符 *</a></li>
+        <li><a href="http://127.0.0.1:8000/2020/06/k8s-kubernetes-kubectl-syntax-of-impersonate-as-user-or-serviceaccount-or-group.html">kubernetes 用户扮演 API</a></li>
     </ul>
 </section>
     <hr/>
@@ -490,7 +490,7 @@ Admission Controllers 即包括 kube-apiserver 内置的 <a class="reference ext
             var disqus_shortname = 'my-github-blog'; // required: replace example with your forum shortname
 
                     var disqus_identifier = 'k8s-kubernetes-what-happen-when-pod-from-create-to-running';
-                var disqus_url = 'https://mozillazg.com/2021/07/k8s-kubernetes-what-happen-when-pod-from-create-to-running.html';
+                var disqus_url = 'http://127.0.0.1:8000/2021/07/k8s-kubernetes-what-happen-when-pod-from-create-to-running.html';
 
             var disqus_config = function () {
                 this.language = "zh-hans";
@@ -520,12 +520,12 @@ Admission Controllers 即包括 kube-apiserver 内置的 <a class="reference ext
    <div class="container">
       <hr>
       <div class="row">
-         <div class="col-xs-10">&copy; 2022 mozillazg
+         <div class="col-xs-10">&copy; 2021 mozillazg
             &middot; Powered by <a href="https://github.com/DandyDev/pelican-bootstrap3" target="_blank">pelican-bootstrap3</a>,
             <a href="http://docs.getpelican.com/" target="_blank">Pelican</a>,
             <a href="http://getbootstrap.com" target="_blank">Bootstrap</a>
             &middot; <a href="/privacy-policy.html" target="_blank">Privacy</a>              <p><small>  <a rel="license" href="http://creativecommons.org/licenses/by-sa/4.0/"><img alt="Creative Commons License" style="border-width:0" src="/static/images/by-sa-80x15.png" /></a>
-    &quot;<span xmlns:dct="http://purl.org/dc/terms/" property="dct:title">Huang Huang 的博客</span>&quot; by <a xmlns:cc="http://creativecommons.org/ns#" href="https://mozillazg.com" property="cc:attributionName" rel="cc:attributionURL">mozillazg</a> is
+    &quot;<span xmlns:dct="http://purl.org/dc/terms/" property="dct:title">Huang Huang 的博客</span>&quot; by <a xmlns:cc="http://creativecommons.org/ns#" href="http://127.0.0.1:8000" property="cc:attributionName" rel="cc:attributionURL">mozillazg</a> is
   licensed under a <a rel="license" href="http://creativecommons.org/licenses/by-sa/4.0/">Creative Commons Attribution-ShareAlike 4.0 International License</a>, except where indicated otherwise.
 </small></p>
          </div>

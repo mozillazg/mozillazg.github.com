@@ -11,9 +11,9 @@
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/social-share.js@1.0.16/dist/css/share.min.css">
 
 
-    <link href="https://mozillazg.com/favicon.ico" rel="icon">
+    <link href="http://127.0.0.1:8000/favicon.ico" rel="icon">
 
-<link rel="canonical" href="https://mozillazg.com/2018/08/call-remote-service-checklist.html">
+<link rel="canonical" href="http://127.0.0.1:8000/2018/08/call-remote-service-checklist.html">
 
         <meta name="author" content="mozillazg" />
         <meta name="keywords" content="checklist,client" />
@@ -37,7 +37,7 @@
         <meta property="og:site_name" content="Huang Huang 的博客" />
         <meta property="og:type" content="article"/>
         <meta property="og:title" content="调用远程服务的一些备忘录"/>
-        <meta property="og:url" content="https://mozillazg.com/2018/08/call-remote-service-checklist.html"/>
+        <meta property="og:url" content="http://127.0.0.1:8000/2018/08/call-remote-service-checklist.html"/>
         <meta property="og:description" content="前言¶ 大部分程序或多或少都会调用其他远程服务，比如访问 HTTP API、操作数据等各种远程操作。 因为是调用其他服务所以会有很多不可控的因素，在编写相关代码的时候需要有一些注意事项或者说是备忘录。 本文就列一些常见的备忘录（主要针对调用网络服务）。 超时¶ 为了防止对方服务响应时间太长或者因为网络等各种因素导致响应时间变长，导致拖慢我们自己的程序， 在调用远程服务的时候记得配置或实现合适的超时机制。 如果设置的超时时间不合理或者没有实现超时功能的话， 就会出现对方服务故障或与对方服务通信故障拖垮我们自己服务的尴尬情况。 重试¶ 当调用远程服务失败的时候，就涉及到是否需要重试的问题。是否需要重试设计到各种情况： 连接未到达对方服务，可以安全重试 连接到达对方服务，对方服务故障，无法处理请求，可以安全重试 连接到达对方服务，对方处理了请求，看情况重试: 虽然处理了请求，但是响应信息提示请求的参数有问题，无需重试，因为是我们自己代码的问题，重试也是一样的结果 对方处理请求时间过长导致超时，根据实际情况，酌情重试 操作是幂等的，可以安全重试 其他场景，主要是要考虑重试是否会产生非预期的副作用 重试的时候所使用的重试策略也需要精心考虑，不能无脑重试、无限重试： 限制重试次数，增加重试间隔 重试间隔一般不要是固定间隔，间隔时间可以是指数递增，也可以加上在一定区间内波动的随机数， 防止出现雪崩效应，打垮对方服务 关于重试及重试策略可以参考： Retry general guidance | Microsoft Docs 熔断/断路器（Circuit Breaker）¶ 为了处理调用远程服务短时间内失败率很高或者总是失败的场景，程序可以考虑实现自动熔断/断路器的功能。 即：如果发现失败率比较高的时候，自动在后续一段时间内逐步减少对对方服务的调用 （限制请求，对部分操作直接报错不访问远程服务）， 当发现成功率上去后逐步放开限制直至恢复正常访问。 关于熔断/断路器可以参考： Circuit Breaker | Microsoft Docs Preventing system failure with the Circuit Breaker pattern - IBM Cloud Garage Method 降级¶ 上面的熔断是调用方程序实现在失败率很高时减少请求数，降级的话就是可以外部介入程序的功能。 比如当通过监控发现调用远程服务故障率特别高，或者收到通知对方服务在某个时间不可用， 可以直接降级到这个功能，彻底不发送任何请求。 比如，我们有个服务同时支持微信支付收款和支付宝支付收款，当发现微信支付大面积故障的时候， 可以人工/第三方程序自动降级掉程序里的微信支付功能，此时用户付款的时候就只会看到一个支付宝支付的功能， 微信支付的功能会被临时下掉。 关于降级的另一种应用是: fallback，即：调用主服务失败时，改为调用备用服务。 比如上传图片，平时都把图片上传到阿里云 oss，这次调用是发现 oss 故障，然后程序就尝试改为 调用腾讯云 cos，把图片上传到 cos。 日志¶ 当程序正常运行或出现故障时我们可能都需要借助日志来提供有用的信息。 比如当调用远程服务故障时，可能需要记录一些有用的信息: 调用的服务信息，比如请求的 url、ip、端口之类的 请求参数，可以用于复现或 debug 的相关请求参数 失败原因，比如异常信息，根据需要区分不同的异常 如果有响应返回的话，响应中包含的有用信息，比如 http 响应码、http response 中的有用信息等 当时在记日志的时候也需要注意一些问题： 日志数量问题，有些场景下日志量太大会影响程序性能，不要随意记无用的日志 不要记录敏感数据，记得对日志内容脱密，比如：不要记密码、token 等敏感信息 单条日志大小问题，需要考虑控制单条日志大小，比如上面说的 http response 之类的无法预料到大小的信息 需要考虑对大的信息进行截断处理或者干脆不记录（比如调用上传文件接口之类的不记录文件内容） 异常处理¶ 调用失败时往往伴随着各种异常，比如上面的超时的功能，一般超时的时候都会以异常的方式体现。 对于调用时出现的各种异常要根据实际情况进行区别，对不同的异常采取不同的措施： 判断异常是系统异常还是用户异常，针对不同的异常可能需要不同的处理方法 判断异常是否是表示特定功能的某种状态的异常，比如上面的超时/重试/熔断 之类的功能 都会有特定的异常用来对应某种状态 判断异常是否是可重试解决的异常 慎重考虑忽略异常的情况，不要一股脑的忽略所有异常同时还不记日志 （将来进行 debug 的人会喷死你，这个人还有可能会是你自己）。 监控¶ 通过监控我们可以掌握程序的各种运行指标/状况，这样就可以及时/提前发现问题。 常见的针对远程调用的监控指标如下： 响应时间 调用失败计数 特定错误计数 告警¶ 虽然有了监控数据，但是我们不可能 24 小时不眠不休的盯着监控数据，此时就需要有告警程序来帮助我们 自动发现可能的异常和已经出现的问题。 这样即可以及时发现问题也可以解放生产力， 在没有异常的时候去做更有创造力的事情。 根据告警数据的不同有一些常见的针对远程调用的告警： 响应时间阈值告警 一段时间内特定错误/失败数告警 连接池¶ 补充一个忘了说的一项，那就是连接池。少量的远程调用可能不需要关心连接池的事情，如果 是大量调用某个服务的话，就需要使用连接池技术了，如果不用连接池的话， 一方面新建连接需要时间另一方面服务端维护大量连接也需要消耗资源。 使用连接池既可以通过复用已有的连接来加快调用时间，也可以节省服务端的资源防止资源浪费。 一般常见的应用层协议的通用客户端库都实现了连接池，所以很少需要去操心实现连接池的问题， 但是如果你用的客户端库没有实现连接池功能的话， 就需要考虑实现连接池功能或者使用其他支持连接池的客户端库。 总结¶ 本文罗列了一些编写调用远程服务相关代码时需要注意的一下注意事项。 其中有几个功能在进行远程调用时建议最好都实现，就算是写一个临时 debug 或 临时运维用的小脚本也要考虑实现这几个功能： 超时：必需要实现/配置合适的超时时间 重试：酌情重试，不是说一定要重新发送请求，而是说要对某些可以重试的异常进行重试处理 异常处理：酌情处理，如果程序中会多次进行远程调用的话，就必须要考虑异常处理， 至少要防止因为异常导致的非预期的程序提前退出 日志：最好是有，就算是用 print 代替也好过没有记录任何信息 至于是否实现 熔断/降级/监控/告警 需要看实际情况： 临时的/一次性的运维脚本之类的可能就没必要实现了 基础设施不完善或者没有对应的基础设施的话，实现这些功能可能就不适合了。 欢迎大家在评论里一起讨论/补充其他的注意事项。 参考资料¶ Retry general guidance | Microsoft Docs Circuit Breaker | Microsoft Docs Preventing system failure with the Circuit Breaker pattern - IBM Cloud Garage Method Release It! Second Edition: Design and Deploy Production-Ready Software by Michael Nygard | The Pragmatic Bookshelf"/>
         <meta property="article:published_time" content="2018-08-16" />
             <meta property="article:section" content="others" />
@@ -45,32 +45,32 @@
             <meta property="article:tag" content="client" />
             <meta property="article:author" content="mozillazg" />
             <meta property="og:image"
-                  content="https://mozillazg.com/static/avatar.jpeg"/>
+                  content="http://127.0.0.1:8000/static/avatar.jpeg"/>
 
 
     <meta name="twitter:card" content="summary">
         <meta name="twitter:site" content="@mozillazg">
         <meta name="twitter:creator" content="@mozillazg">
-    <meta name="twitter:domain" content="https://mozillazg.com">
+    <meta name="twitter:domain" content="http://127.0.0.1:8000">
             <meta property="twitter:image"
-                  content="https://mozillazg.com/static/avatar.jpeg"/>
+                  content="http://127.0.0.1:8000/static/avatar.jpeg"/>
 
     <!-- Bootstrap -->
         <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@3.3.4/dist/css/bootstrap.min.css" type="text/css"/>
     <link href="https://cdn.jsdelivr.net/npm/font-awesome@4.3.0/css/font-awesome.min.css" rel="stylesheet">
 
     <link href="https://cdn.jsdelivr.net/npm/pygments-css@1.0.0/github.css" rel="stylesheet">
-    <link rel="stylesheet" href="https://mozillazg.com/theme/css/style.css" type="text/css"/>
-            <link href="https://mozillazg.com/static/custom.css" rel="stylesheet">
+    <link rel="stylesheet" href="http://127.0.0.1:8000/theme/css/style.css" type="text/css"/>
+            <link href="http://127.0.0.1:8000/static/custom.css" rel="stylesheet">
 
-        <link href="https://mozillazg.com/feeds/all.atom.xml" type="application/atom+xml" rel="alternate"
+        <link href="http://127.0.0.1:8000/feeds/all.atom.xml" type="application/atom+xml" rel="alternate"
               title="Huang Huang 的博客 ATOM Feed"/>
 
-        <link href="https://mozillazg.com/feeds/all.rss.xml" type="application/rss+xml" rel="alternate"
+        <link href="http://127.0.0.1:8000/feeds/all.rss.xml" type="application/rss+xml" rel="alternate"
               title="Huang Huang 的博客 RSS Feed"/>
 
 
-        <link href="https://mozillazg.com/feeds/others.atom.xml" type="application/atom+xml" rel="alternate"
+        <link href="http://127.0.0.1:8000/feeds/others.atom.xml" type="application/atom+xml" rel="alternate"
               title="Huang Huang 的博客 others ATOM Feed"/>
 
 
@@ -81,20 +81,20 @@
         "publisher": {
             "@type": "Person",
             "name": "mozillazg",
-            "logo": "https://mozillazg.com/static/avatar.jpeg"
+            "logo": "http://127.0.0.1:8000/static/avatar.jpeg"
         },
         "author": {
             "@type": "Person",
             "name": "mozillazg",
-            "image": "https://mozillazg.com/static/avatar.jpeg",
-            "url": "https://mozillazg.com",
+            "image": "http://127.0.0.1:8000/static/avatar.jpeg",
+            "url": "http://127.0.0.1:8000",
             "sameAs": []
         },
         // "headline": "",
-        "url": "https://mozillazg.com/2018/08/call-remote-service-checklist.html",
+        "url": "http://127.0.0.1:8000/2018/08/call-remote-service-checklist.html",
         "datePublished": "2018-08-16",
         // "dateModified": "",
-        "image": "https://mozillazg.com/static/avatar.jpeg",
+        "image": "http://127.0.0.1:8000/static/avatar.jpeg",
         "keywords": "checklist, client",
         // "description": "前言¶ 大部分程序或多或少都会调用其他远程服务，比如访问 HTTP API、操作数据等各种远程操作。 因为是调用其他服务所以会有很多不可控的因素，在编写相关代码的时候需要有一些注意事项或者说是备忘录。 本文就列一些常见的备忘录（主要针对调用网络服务）。 超时¶ 为了防止对方服务响应时间太长或者因为网络等各种因素导致响应时间变长，导致拖慢我们自己的程序， 在调用远程服务的时候记得配置或实现合适的超时机制。 如果设置的超时时间不合理或者没有实现超时功能的话， 就会出现对方服务故障或与对方服务通信故障拖垮我们自己服务的尴尬情况。 重试¶ 当调用远程服务失败的时候，就涉及到是否需要重试的问题。是否需要重试设计到各种情况： 连接未到达对方服务，可以安全重试 连接到达对方服务，对方服务故障，无法处理请求，可以安全重试 连接到达对方服务，对方处理了请求，看情况重试: 虽然处理了请求，但是响应信息提示请求的参数有问题，无需重试，因为是我们自己代码的问题，重试也是一样的结果 对方处理请求时间过长导致超时，根据实际情况，酌情重试 操作是幂等的，可以安全重试 其他场景，主要是要考虑重试是否会产生非预期的副作用 重试的时候所使用的重试策略也需要精心考虑，不能无脑重试、无限重试： 限制重试次数，增加重试间隔 重试间隔一般不要是固定间隔，间隔时间可以是指数递增，也可以加上在一定区间内波动的随机数， 防止出现雪崩效应，打垮对方服务 关于重试及重试策略可以参考： Retry general guidance | Microsoft Docs 熔断/断路器（Circuit Breaker）¶ 为了处理调用远程服务短时间内失败率很高或者总是失败的场景，程序可以考虑实现自动熔断/断路器的功能。 即：如果发现失败率比较高的时候，自动在后续一段时间内逐步减少对对方服务的调用 （限制请求，对部分操作直接报错不访问远程服务）， 当发现成功率上去后逐步放开限制直至恢复正常访问。 关于熔断/断路器可以参考： Circuit Breaker | Microsoft Docs Preventing system failure with the Circuit Breaker pattern - IBM Cloud Garage Method 降级¶ 上面的熔断是调用方程序实现在失败率很高时减少请求数，降级的话就是可以外部介入程序的功能。 比如当通过监控发现调用远程服务故障率特别高，或者收到通知对方服务在某个时间不可用， 可以直接降级到这个功能，彻底不发送任何请求。 比如，我们有个服务同时支持微信支付收款和支付宝支付收款，当发现微信支付大面积故障的时候， 可以人工/第三方程序自动降级掉程序里的微信支付功能，此时用户付款的时候就只会看到一个支付宝支付的功能， 微信支付的功能会被临时下掉。 关于降级的另一种应用是: fallback，即：调用主服务失败时，改为调用备用服务。 比如上传图片，平时都把图片上传到阿里云 oss，这次调用是发现 oss 故障，然后程序就尝试改为 调用腾讯云 cos，把图片上传到 cos。 日志¶ 当程序正常运行或出现故障时我们可能都需要借助日志来提供有用的信息。 比如当调用远程服务故障时，可能需要记录一些有用的信息: 调用的服务信息，比如请求的 url、ip、端口之类的 请求参数，可以用于复现或 debug 的相关请求参数 失败原因，比如异常信息，根据需要区分不同的异常 如果有响应返回的话，响应中包含的有用信息，比如 http 响应码、http response 中的有用信息等 当时在记日志的时候也需要注意一些问题： 日志数量问题，有些场景下日志量太大会影响程序性能，不要随意记无用的日志 不要记录敏感数据，记得对日志内容脱密，比如：不要记密码、token 等敏感信息 单条日志大小问题，需要考虑控制单条日志大小，比如上面说的 http response 之类的无法预料到大小的信息 需要考虑对大的信息进行截断处理或者干脆不记录（比如调用上传文件接口之类的不记录文件内容） 异常处理¶ 调用失败时往往伴随着各种异常，比如上面的超时的功能，一般超时的时候都会以异常的方式体现。 对于调用时出现的各种异常要根据实际情况进行区别，对不同的异常采取不同的措施： 判断异常是系统异常还是用户异常，针对不同的异常可能需要不同的处理方法 判断异常是否是表示特定功能的某种状态的异常，比如上面的超时/重试/熔断 之类的功能 都会有特定的异常用来对应某种状态 判断异常是否是可重试解决的异常 慎重考虑忽略异常的情况，不要一股脑的忽略所有异常同时还不记日志 （将来进行 debug 的人会喷死你，这个人还有可能会是你自己）。 监控¶ 通过监控我们可以掌握程序的各种运行指标/状况，这样就可以及时/提前发现问题。 常见的针对远程调用的监控指标如下： 响应时间 调用失败计数 特定错误计数 告警¶ 虽然有了监控数据，但是我们不可能 24 小时不眠不休的盯着监控数据，此时就需要有告警程序来帮助我们 自动发现可能的异常和已经出现的问题。 这样即可以及时发现问题也可以解放生产力， 在没有异常的时候去做更有创造力的事情。 根据告警数据的不同有一些常见的针对远程调用的告警： 响应时间阈值告警 一段时间内特定错误/失败数告警 连接池¶ 补充一个忘了说的一项，那就是连接池。少量的远程调用可能不需要关心连接池的事情，如果 是大量调用某个服务的话，就需要使用连接池技术了，如果不用连接池的话， 一方面新建连接需要时间另一方面服务端维护大量连接也需要消耗资源。 使用连接池既可以通过复用已有的连接来加快调用时间，也可以节省服务端的资源防止资源浪费。 一般常见的应用层协议的通用客户端库都实现了连接池，所以很少需要去操心实现连接池的问题， 但是如果你用的客户端库没有实现连接池功能的话， 就需要考虑实现连接池功能或者使用其他支持连接池的客户端库。 总结¶ 本文罗列了一些编写调用远程服务相关代码时需要注意的一下注意事项。 其中有几个功能在进行远程调用时建议最好都实现，就算是写一个临时 debug 或 临时运维用的小脚本也要考虑实现这几个功能： 超时：必需要实现/配置合适的超时时间 重试：酌情重试，不是说一定要重新发送请求，而是说要对某些可以重试的异常进行重试处理 异常处理：酌情处理，如果程序中会多次进行远程调用的话，就必须要考虑异常处理， 至少要防止因为异常导致的非预期的程序提前退出 日志：最好是有，就算是用 print 代替也好过没有记录任何信息 至于是否实现 熔断/降级/监控/告警 需要看实际情况： 临时的/一次性的运维脚本之类的可能就没必要实现了 基础设施不完善或者没有对应的基础设施的话，实现这些功能可能就不适合了。 欢迎大家在评论里一起讨论/补充其他的注意事项。 参考资料¶ Retry general guidance | Microsoft Docs Circuit Breaker | Microsoft Docs Preventing system failure with the Circuit Breaker pattern - IBM Cloud Garage Method Release It! Second Edition: Design and Deploy Production-Ready Software by Michael Nygard | The Pragmatic Bookshelf",
         "description": "<div class="section" id="id2">
@@ -252,7 +252,7 @@
 ",
         "mainEntityOfPage": {
             "@type": "WebPage",
-            "@id": "https://mozillazg.com"
+            "@id": "http://127.0.0.1:8000"
         }
     }
     </script>
@@ -269,16 +269,16 @@
                 <span class="icon-bar"></span>
                 <span class="icon-bar"></span>
             </button>
-            <a href="https://mozillazg.com/" class="navbar-brand">
+            <a href="http://127.0.0.1:8000/" class="navbar-brand">
 Huang Huang 的博客            </a>
         </div>
         <div class="collapse navbar-collapse navbar-ex1-collapse">
             <ul class="nav navbar-nav">
-                    <li><a href="https://mozillazg.com/feeds/all.atom.xml">Feed</a></li>
+                    <li><a href="http://127.0.0.1:8000/feeds/all.atom.xml">Feed</a></li>
                     <li><a href="/2014/10/pages/about-me.html">About</a></li>
             </ul>
             <ul class="nav navbar-nav navbar-right">
-              <li><a href="https://mozillazg.com/archives.html"><i class="fa fa-th-list"></i><span class="icon-label">Archives</span></a></li>
+              <li><a href="http://127.0.0.1:8000/archives.html"><i class="fa fa-th-list"></i><span class="icon-label">Archives</span></a></li>
             </ul>
         </div>
         <!-- /.navbar-collapse -->
@@ -293,7 +293,7 @@ Huang Huang 的博客            </a>
         <article>
             <header class="text-center">
                 <h1>
-                    <a href="https://mozillazg.com/2018/08/call-remote-service-checklist.html"
+                    <a href="http://127.0.0.1:8000/2018/08/call-remote-service-checklist.html"
                        rel="bookmark"
                        title="Permalink to 调用远程服务的一些备忘录">
                         调用远程服务的一些备忘录
@@ -308,13 +308,13 @@ Huang Huang 的博客            </a>
             <div class="entry-content">
                 <div class="well-sm article-info">
 <footer class="post-info">
-        <a href="https://mozillazg.com/category/others.html">others</a>
+        <a href="http://127.0.0.1:8000/category/others.html">others</a>
 
 
 <span class="label label-default hide">Tags</span>
-	<a href="https://mozillazg.com/tag/checklist.html">checklist</a>
+	<a href="http://127.0.0.1:8000/tag/checklist.html">checklist</a>
         /
-	<a href="https://mozillazg.com/tag/client.html">client</a>
+	<a href="http://127.0.0.1:8000/tag/client.html">client</a>
     
 </footer><!-- /.post-info -->                </div>
                 <div class="js-toc"></div>
@@ -488,7 +488,7 @@ Huang Huang 的博客            </a>
 <section class="well" id="related-posts">
     <p>Related Posts:</p>
     <ul>
-        <li><a href="https://mozillazg.com/2019/03/safe-client-behaviour-notes-retry-jitter-back-off-more.html">安全友好的客户端行为</a></li>
+        <li><a href="http://127.0.0.1:8000/2019/03/safe-client-behaviour-notes-retry-jitter-back-off-more.html">安全友好的客户端行为</a></li>
     </ul>
 </section>
     <hr/>
@@ -501,7 +501,7 @@ Huang Huang 的博客            </a>
             var disqus_shortname = 'my-github-blog'; // required: replace example with your forum shortname
 
                     var disqus_identifier = 'call-remote-service-checklist';
-                var disqus_url = 'https://mozillazg.com/2018/08/call-remote-service-checklist.html';
+                var disqus_url = 'http://127.0.0.1:8000/2018/08/call-remote-service-checklist.html';
 
             var disqus_config = function () {
                 this.language = "zh-hans";
@@ -531,12 +531,12 @@ Huang Huang 的博客            </a>
    <div class="container">
       <hr>
       <div class="row">
-         <div class="col-xs-10">&copy; 2022 mozillazg
+         <div class="col-xs-10">&copy; 2021 mozillazg
             &middot; Powered by <a href="https://github.com/DandyDev/pelican-bootstrap3" target="_blank">pelican-bootstrap3</a>,
             <a href="http://docs.getpelican.com/" target="_blank">Pelican</a>,
             <a href="http://getbootstrap.com" target="_blank">Bootstrap</a>
             &middot; <a href="/privacy-policy.html" target="_blank">Privacy</a>              <p><small>  <a rel="license" href="http://creativecommons.org/licenses/by-sa/4.0/"><img alt="Creative Commons License" style="border-width:0" src="/static/images/by-sa-80x15.png" /></a>
-    &quot;<span xmlns:dct="http://purl.org/dc/terms/" property="dct:title">Huang Huang 的博客</span>&quot; by <a xmlns:cc="http://creativecommons.org/ns#" href="https://mozillazg.com" property="cc:attributionName" rel="cc:attributionURL">mozillazg</a> is
+    &quot;<span xmlns:dct="http://purl.org/dc/terms/" property="dct:title">Huang Huang 的博客</span>&quot; by <a xmlns:cc="http://creativecommons.org/ns#" href="http://127.0.0.1:8000" property="cc:attributionName" rel="cc:attributionURL">mozillazg</a> is
   licensed under a <a rel="license" href="http://creativecommons.org/licenses/by-sa/4.0/">Creative Commons Attribution-ShareAlike 4.0 International License</a>, except where indicated otherwise.
 </small></p>
          </div>

@@ -11,9 +11,9 @@
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/social-share.js@1.0.16/dist/css/share.min.css">
 
 
-    <link href="https://mozillazg.com/favicon.ico" rel="icon">
+    <link href="http://127.0.0.1:8000/favicon.ico" rel="icon">
 
-<link rel="canonical" href="https://mozillazg.com/2019/05/linux-what-net.ipv4.ip_local_port_range-effect-or-mean.html">
+<link rel="canonical" href="http://127.0.0.1:8000/2019/05/linux-what-net.ipv4.ip_local_port_range-effect-or-mean.html">
 
         <meta name="author" content="mozillazg" />
         <meta name="keywords" content="sysctl" />
@@ -37,39 +37,39 @@
         <meta property="og:site_name" content="Huang Huang 的博客" />
         <meta property="og:type" content="article"/>
         <meta property="og:title" content="net.ipv4.ip_local_port_range 的值究竟影响了啥"/>
-        <meta property="og:url" content="https://mozillazg.com/2019/05/linux-what-net.ipv4.ip_local_port_range-effect-or-mean.html"/>
+        <meta property="og:url" content="http://127.0.0.1:8000/2019/05/linux-what-net.ipv4.ip_local_port_range-effect-or-mean.html"/>
         <meta property="og:description" content="前言¶ 网上关于 net.ipv4.ip_local_port_range 的值的效果众说纷纭（下面所说的连接都假定使用的是相同的协议(都是 TCP 或 UDP)）: 大部分文章都说这个值决定了客户端的一个 ip 可用的端口数量，即一个 ip 最多只能创建 60K 多一点的连接（1025-65535），如果要突破这个限制需要客户端机器绑定多个 ip。 还有部分文章说的是这个值决定的是 socket 四元组中的本地端口数量，即一个 ip 对同一个目标 ip+port 最多可以创建 60K 多一点连接，只要目标 ip 或端口不一样就可以使用相同的本地端口，不一定需要多个客户端 ip 就可以突破端口数量限制。 文档 中的介绍也很模糊: ip_local_port_range - 2 INTEGERS Defines the local port range that is used by TCP and UDP to choose the local port. The first number is the first, the second the last local port number. If possible, it is better these numbers have different parity. (one even and one odd values) The default values are 32768 and 60999 respectively. 下面就来做一些实验来确认这个选项的实际效果。 实验环境: $ uname -a Linux vagrant 4.15.0-29-generic #31-Ubuntu SMP Tue Jul 17 15:39:52 UTC 2018 x86_64 x86_64 x86_64 GNU/Linux 相同目标 ip 和相同目标端口下的端口数量限制¶ 先设置 ip_local_port_range 的值为非常小的范围: $ echo &#34;61000 61001&#34; | sudo tee /proc/sys/net/ipv4/ip_local_port_range 61000 61001 $ cat /proc/sys/net/ipv4/ip_local_port_range 61000 61001 然后对相同 ip 和端口发送 tcp 请求。创建两个连接，达到最大端口数量限制: $ nohup nc 123.125.114.144 80 -v &amp; [1] 16196 $ nohup: ignoring input and appending output to &#39;nohup.out&#39; $ nohup nc 123.125.114.144 80 -v &amp; [2] 16197 $ nohup: ignoring input and appending output to &#39;nohup.out&#39; $ ss -ant |grep 10.0.2.15:61 ESTAB 0 0 10.0.2.15:61001 123.125.114.144:80 ESTAB 0 0 10.0.2.15:61000 123.125.114.144:80 然后再创建第三个连接，此时预期应该会失败，因为超出的端口数量现在: vagrant@vagrant:~$ nc 123.125.114.144 80 -v nc: connect to 123.125.114.144 port 80 (tcp) failed: Cannot assign requested address 可以看到确实如预期的失败了。 相同目标 ip 不同目标端口¶ 下面看看相同目标 ip 不同目标端口是否可以突破这个端口限制: $ nohup nc 123.125.114.144 443 -v &amp; [3] 16215 $ nohup: ignoring input and appending output to &#39;nohup.out&#39; $ nohup nc 123.125.114.144 443 -v &amp; [4] 16216 $ nohup: ignoring input and appending output to &#39;nohup.out&#39; $ ss -ant |grep 10.0.2.15:61 ESTAB 0 0 10.0.2.15:61001 123.125.114.144:443 ESTAB 0 0 10.0.2.15:61001 123.125.114.144:80 ESTAB 0 0 10.0.2.15:61000 123.125.114.144:443 ESTAB 0 0 10.0.2.15:61000 123.125.114.144:80 可以看到相同目标 ip 不同目标端口下，每个目标端口都有一个独立的端口限制，即，相同源 ip 的源端口是可以相同的。 按照推测这两个目标端口应该只能创建四个连接，下面试试看: $ ss -ant |grep 10.0.2.15:61 ESTAB 0 0 10.0.2.15:61001 123.125.114.144:443 ESTAB 0 0 10.0.2.15:61001 123.125.114.144:80 ESTAB 0 0 10.0.2.15:61000 123.125.114.144:443 ESTAB 0 0 10.0.2.15:61000 123.125.114.144:80 $ nc 123.125.114.144 443 -v nc: connect to 123.125.114.144 port 443 (tcp) failed: Cannot assign requested address 确实是不能再创建连接了，因为每个目标端口都达到了 ip_local_port_range 的限制。 多个目标 ip 相同目标端口¶ 下面看一下多个目标 ip 相同目标端口下的情况: $ nohup nc 220.181.57.216 80 -v &amp; [5] 16222 $ nohup: ignoring input and appending output to &#39;nohup.out&#39; $ nohup nc 220.181.57.216 80 -v &amp; [6] 16223 $ nohup: ignoring input and appending output to &#39;nohup.out&#39; $ nc 220.181.57.216 80 -v nc: connect to 220.181.57.216 port 80 (tcp) failed: Cannot assign requested address $ ss -ant |grep :80 SYN-SENT 0 1 10.0.2.15:61001 220.181.57.216:80 SYN-SENT 0 1 10.0.2.15:61000 220.181.57.216:80 SYN-SENT 0 1 10.0.2.15:61001 123.125.114.144:80 SYN-SENT 0 1 10.0.2.15:61000 123.125.114.144:80 可以看到，每个目标 ip 都有独立的 ip_local_port_range 限制。 多个目标 ip 不同目标端口¶ 下面看一下多个目标 ip 相同不同端口下的情况，按照前面的经验两个 ip 加两个端口应该只能创建 8 个连接 $ nohup nc 123.125.114.144 80 -v &amp; $ nohup nc 123.125.114.144 80 -v &amp; $ nc 123.125.114.144 80 -v nc: connect to 123.125.114.144 port 80 (tcp) failed: Cannot assign requested address $ nohup nc 123.125.114.144 443 -v &amp; $ nohup nc 123.125.114.144 443 -v &amp; $ nc 123.125.114.144 443 -v nc: connect to 123.125.114.144 port 443 (tcp) failed: Cannot assign requested address $ nohup nc 220.181.57.216 80 -v &amp; $ nohup nc 220.181.57.216 80 -v &amp; $ nc 220.181.57.216 80 -v nc: connect to 220.181.57.216 port 80 (tcp) failed: Cannot assign requested address $ nohup nc 220.181.57.216 443 -v &amp; $ nohup nc 220.181.57.216 443 -v &amp; $ nc 220.181.57.216 443 -v nc: connect to 220.181.57.216 port 443 (tcp) failed: Cannot assign requested address $ ss -ant |grep 10.0.2.15:61 SYN-SENT 0 1 10.0.2.15:61001 220.181.57.216:80 ESTAB 0 0 10.0.2.15:61001 123.125.114.144:443 ESTAB 0 0 10.0.2.15:61000 220.181.57.216:443 SYN-SENT 0 1 10.0.2.15:61000 220.181.57.216:80 SYN-SENT 0 1 10.0.2.15:61001 123.125.114.144:80 ESTAB 0 0 10.0.2.15:61000 123.125.114.144:443 SYN-SENT 0 1 10.0.2.15:61000 123.125.114.144:80 ESTAB 0 0 10.0.2.15:61001 220.181.57.216:443 可以看到确实如预期的只能创建8个连接。 总结¶ 那么是否就可以说前言中的第一种说法就是错的呢，查了一下资料其实也不能说第一种说法是错误的： 当系统的内核版本小于 3.2 时，第一种说法是正确的 当系统的内核版本大于等于 3.2 时，第二种说法是正确的 参考资料¶ kernel.org/doc/Documentation/networking/ip-sysctl.txt Tuning your Linux kernel and HAProxy instance for high loads Load Testing HAProxy (Part 2) – freeCodeCamp.org What is the theoretical maximum number of open TCP connections that a modern Linux box can have - Stack Overflow Coping with the TCP TIME-WAIT state on busy Linux servers | Vincent Bernat &#39;Re: Fix for rare EADDRNOTAVAIL error&#39; - MARC"/>
         <meta property="article:published_time" content="2019-05-04" />
             <meta property="article:section" content="linux" />
             <meta property="article:tag" content="sysctl" />
             <meta property="article:author" content="mozillazg" />
             <meta property="og:image"
-                  content="https://mozillazg.com/static/avatar.jpeg"/>
+                  content="http://127.0.0.1:8000/static/avatar.jpeg"/>
 
 
     <meta name="twitter:card" content="summary">
         <meta name="twitter:site" content="@mozillazg">
         <meta name="twitter:creator" content="@mozillazg">
-    <meta name="twitter:domain" content="https://mozillazg.com">
+    <meta name="twitter:domain" content="http://127.0.0.1:8000">
             <meta property="twitter:image"
-                  content="https://mozillazg.com/static/avatar.jpeg"/>
+                  content="http://127.0.0.1:8000/static/avatar.jpeg"/>
 
     <!-- Bootstrap -->
         <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@3.3.4/dist/css/bootstrap.min.css" type="text/css"/>
     <link href="https://cdn.jsdelivr.net/npm/font-awesome@4.3.0/css/font-awesome.min.css" rel="stylesheet">
 
     <link href="https://cdn.jsdelivr.net/npm/pygments-css@1.0.0/github.css" rel="stylesheet">
-    <link rel="stylesheet" href="https://mozillazg.com/theme/css/style.css" type="text/css"/>
-            <link href="https://mozillazg.com/static/custom.css" rel="stylesheet">
+    <link rel="stylesheet" href="http://127.0.0.1:8000/theme/css/style.css" type="text/css"/>
+            <link href="http://127.0.0.1:8000/static/custom.css" rel="stylesheet">
 
-        <link href="https://mozillazg.com/feeds/all.atom.xml" type="application/atom+xml" rel="alternate"
+        <link href="http://127.0.0.1:8000/feeds/all.atom.xml" type="application/atom+xml" rel="alternate"
               title="Huang Huang 的博客 ATOM Feed"/>
 
-        <link href="https://mozillazg.com/feeds/all.rss.xml" type="application/rss+xml" rel="alternate"
+        <link href="http://127.0.0.1:8000/feeds/all.rss.xml" type="application/rss+xml" rel="alternate"
               title="Huang Huang 的博客 RSS Feed"/>
 
 
-        <link href="https://mozillazg.com/feeds/linux.atom.xml" type="application/atom+xml" rel="alternate"
+        <link href="http://127.0.0.1:8000/feeds/linux.atom.xml" type="application/atom+xml" rel="alternate"
               title="Huang Huang 的博客 linux ATOM Feed"/>
 
 
@@ -80,20 +80,20 @@
         "publisher": {
             "@type": "Person",
             "name": "mozillazg",
-            "logo": "https://mozillazg.com/static/avatar.jpeg"
+            "logo": "http://127.0.0.1:8000/static/avatar.jpeg"
         },
         "author": {
             "@type": "Person",
             "name": "mozillazg",
-            "image": "https://mozillazg.com/static/avatar.jpeg",
-            "url": "https://mozillazg.com",
+            "image": "http://127.0.0.1:8000/static/avatar.jpeg",
+            "url": "http://127.0.0.1:8000",
             "sameAs": []
         },
         // "headline": "",
-        "url": "https://mozillazg.com/2019/05/linux-what-net.ipv4.ip_local_port_range-effect-or-mean.html",
+        "url": "http://127.0.0.1:8000/2019/05/linux-what-net.ipv4.ip_local_port_range-effect-or-mean.html",
         "datePublished": "2019-05-04",
         // "dateModified": "",
-        "image": "https://mozillazg.com/static/avatar.jpeg",
+        "image": "http://127.0.0.1:8000/static/avatar.jpeg",
         "keywords": "sysctl",
         // "description": "前言¶ 网上关于 net.ipv4.ip_local_port_range 的值的效果众说纷纭（下面所说的连接都假定使用的是相同的协议(都是 TCP 或 UDP)）: 大部分文章都说这个值决定了客户端的一个 ip 可用的端口数量，即一个 ip 最多只能创建 60K 多一点的连接（1025-65535），如果要突破这个限制需要客户端机器绑定多个 ip。 还有部分文章说的是这个值决定的是 socket 四元组中的本地端口数量，即一个 ip 对同一个目标 ip+port 最多可以创建 60K 多一点连接，只要目标 ip 或端口不一样就可以使用相同的本地端口，不一定需要多个客户端 ip 就可以突破端口数量限制。 文档 中的介绍也很模糊: ip_local_port_range - 2 INTEGERS Defines the local port range that is used by TCP and UDP to choose the local port. The first number is the first, the second the last local port number. If possible, it is better these numbers have different parity. (one even and one odd values) The default values are 32768 and 60999 respectively. 下面就来做一些实验来确认这个选项的实际效果。 实验环境: $ uname -a Linux vagrant 4.15.0-29-generic #31-Ubuntu SMP Tue Jul 17 15:39:52 UTC 2018 x86_64 x86_64 x86_64 GNU/Linux 相同目标 ip 和相同目标端口下的端口数量限制¶ 先设置 ip_local_port_range 的值为非常小的范围: $ echo &#34;61000 61001&#34; | sudo tee /proc/sys/net/ipv4/ip_local_port_range 61000 61001 $ cat /proc/sys/net/ipv4/ip_local_port_range 61000 61001 然后对相同 ip 和端口发送 tcp 请求。创建两个连接，达到最大端口数量限制: $ nohup nc 123.125.114.144 80 -v &amp; [1] 16196 $ nohup: ignoring input and appending output to &#39;nohup.out&#39; $ nohup nc 123.125.114.144 80 -v &amp; [2] 16197 $ nohup: ignoring input and appending output to &#39;nohup.out&#39; $ ss -ant |grep 10.0.2.15:61 ESTAB 0 0 10.0.2.15:61001 123.125.114.144:80 ESTAB 0 0 10.0.2.15:61000 123.125.114.144:80 然后再创建第三个连接，此时预期应该会失败，因为超出的端口数量现在: vagrant@vagrant:~$ nc 123.125.114.144 80 -v nc: connect to 123.125.114.144 port 80 (tcp) failed: Cannot assign requested address 可以看到确实如预期的失败了。 相同目标 ip 不同目标端口¶ 下面看看相同目标 ip 不同目标端口是否可以突破这个端口限制: $ nohup nc 123.125.114.144 443 -v &amp; [3] 16215 $ nohup: ignoring input and appending output to &#39;nohup.out&#39; $ nohup nc 123.125.114.144 443 -v &amp; [4] 16216 $ nohup: ignoring input and appending output to &#39;nohup.out&#39; $ ss -ant |grep 10.0.2.15:61 ESTAB 0 0 10.0.2.15:61001 123.125.114.144:443 ESTAB 0 0 10.0.2.15:61001 123.125.114.144:80 ESTAB 0 0 10.0.2.15:61000 123.125.114.144:443 ESTAB 0 0 10.0.2.15:61000 123.125.114.144:80 可以看到相同目标 ip 不同目标端口下，每个目标端口都有一个独立的端口限制，即，相同源 ip 的源端口是可以相同的。 按照推测这两个目标端口应该只能创建四个连接，下面试试看: $ ss -ant |grep 10.0.2.15:61 ESTAB 0 0 10.0.2.15:61001 123.125.114.144:443 ESTAB 0 0 10.0.2.15:61001 123.125.114.144:80 ESTAB 0 0 10.0.2.15:61000 123.125.114.144:443 ESTAB 0 0 10.0.2.15:61000 123.125.114.144:80 $ nc 123.125.114.144 443 -v nc: connect to 123.125.114.144 port 443 (tcp) failed: Cannot assign requested address 确实是不能再创建连接了，因为每个目标端口都达到了 ip_local_port_range 的限制。 多个目标 ip 相同目标端口¶ 下面看一下多个目标 ip 相同目标端口下的情况: $ nohup nc 220.181.57.216 80 -v &amp; [5] 16222 $ nohup: ignoring input and appending output to &#39;nohup.out&#39; $ nohup nc 220.181.57.216 80 -v &amp; [6] 16223 $ nohup: ignoring input and appending output to &#39;nohup.out&#39; $ nc 220.181.57.216 80 -v nc: connect to 220.181.57.216 port 80 (tcp) failed: Cannot assign requested address $ ss -ant |grep :80 SYN-SENT 0 1 10.0.2.15:61001 220.181.57.216:80 SYN-SENT 0 1 10.0.2.15:61000 220.181.57.216:80 SYN-SENT 0 1 10.0.2.15:61001 123.125.114.144:80 SYN-SENT 0 1 10.0.2.15:61000 123.125.114.144:80 可以看到，每个目标 ip 都有独立的 ip_local_port_range 限制。 多个目标 ip 不同目标端口¶ 下面看一下多个目标 ip 相同不同端口下的情况，按照前面的经验两个 ip 加两个端口应该只能创建 8 个连接 $ nohup nc 123.125.114.144 80 -v &amp; $ nohup nc 123.125.114.144 80 -v &amp; $ nc 123.125.114.144 80 -v nc: connect to 123.125.114.144 port 80 (tcp) failed: Cannot assign requested address $ nohup nc 123.125.114.144 443 -v &amp; $ nohup nc 123.125.114.144 443 -v &amp; $ nc 123.125.114.144 443 -v nc: connect to 123.125.114.144 port 443 (tcp) failed: Cannot assign requested address $ nohup nc 220.181.57.216 80 -v &amp; $ nohup nc 220.181.57.216 80 -v &amp; $ nc 220.181.57.216 80 -v nc: connect to 220.181.57.216 port 80 (tcp) failed: Cannot assign requested address $ nohup nc 220.181.57.216 443 -v &amp; $ nohup nc 220.181.57.216 443 -v &amp; $ nc 220.181.57.216 443 -v nc: connect to 220.181.57.216 port 443 (tcp) failed: Cannot assign requested address $ ss -ant |grep 10.0.2.15:61 SYN-SENT 0 1 10.0.2.15:61001 220.181.57.216:80 ESTAB 0 0 10.0.2.15:61001 123.125.114.144:443 ESTAB 0 0 10.0.2.15:61000 220.181.57.216:443 SYN-SENT 0 1 10.0.2.15:61000 220.181.57.216:80 SYN-SENT 0 1 10.0.2.15:61001 123.125.114.144:80 ESTAB 0 0 10.0.2.15:61000 123.125.114.144:443 SYN-SENT 0 1 10.0.2.15:61000 123.125.114.144:80 ESTAB 0 0 10.0.2.15:61001 220.181.57.216:443 可以看到确实如预期的只能创建8个连接。 总结¶ 那么是否就可以说前言中的第一种说法就是错的呢，查了一下资料其实也不能说第一种说法是错误的： 当系统的内核版本小于 3.2 时，第一种说法是正确的 当系统的内核版本大于等于 3.2 时，第二种说法是正确的 参考资料¶ kernel.org/doc/Documentation/networking/ip-sysctl.txt Tuning your Linux kernel and HAProxy instance for high loads Load Testing HAProxy (Part 2) – freeCodeCamp.org What is the theoretical maximum number of open TCP connections that a modern Linux box can have - Stack Overflow Coping with the TCP TIME-WAIT state on busy Linux servers | Vincent Bernat &#39;Re: Fix for rare EADDRNOTAVAIL error&#39; - MARC",
         "description": "<div class="section" id="id1">
@@ -272,7 +272,7 @@ ESTAB     0        0               10.0.2.15:61001       220.181.57.216:443
 ",
         "mainEntityOfPage": {
             "@type": "WebPage",
-            "@id": "https://mozillazg.com"
+            "@id": "http://127.0.0.1:8000"
         }
     }
     </script>
@@ -289,16 +289,16 @@ ESTAB     0        0               10.0.2.15:61001       220.181.57.216:443
                 <span class="icon-bar"></span>
                 <span class="icon-bar"></span>
             </button>
-            <a href="https://mozillazg.com/" class="navbar-brand">
+            <a href="http://127.0.0.1:8000/" class="navbar-brand">
 Huang Huang 的博客            </a>
         </div>
         <div class="collapse navbar-collapse navbar-ex1-collapse">
             <ul class="nav navbar-nav">
-                    <li><a href="https://mozillazg.com/feeds/all.atom.xml">Feed</a></li>
+                    <li><a href="http://127.0.0.1:8000/feeds/all.atom.xml">Feed</a></li>
                     <li><a href="/2014/10/pages/about-me.html">About</a></li>
             </ul>
             <ul class="nav navbar-nav navbar-right">
-              <li><a href="https://mozillazg.com/archives.html"><i class="fa fa-th-list"></i><span class="icon-label">Archives</span></a></li>
+              <li><a href="http://127.0.0.1:8000/archives.html"><i class="fa fa-th-list"></i><span class="icon-label">Archives</span></a></li>
             </ul>
         </div>
         <!-- /.navbar-collapse -->
@@ -313,7 +313,7 @@ Huang Huang 的博客            </a>
         <article>
             <header class="text-center">
                 <h1>
-                    <a href="https://mozillazg.com/2019/05/linux-what-net.ipv4.ip_local_port_range-effect-or-mean.html"
+                    <a href="http://127.0.0.1:8000/2019/05/linux-what-net.ipv4.ip_local_port_range-effect-or-mean.html"
                        rel="bookmark"
                        title="Permalink to net.ipv4.ip_local_port_range 的值究竟影响了啥">
                         net.ipv4.ip_local_port_range 的值究竟影响了啥
@@ -328,11 +328,11 @@ Huang Huang 的博客            </a>
             <div class="entry-content">
                 <div class="well-sm article-info">
 <footer class="post-info">
-        <a href="https://mozillazg.com/category/linux.html">linux</a>
+        <a href="http://127.0.0.1:8000/category/linux.html">linux</a>
 
 
 <span class="label label-default hide">Tags</span>
-	<a href="https://mozillazg.com/tag/sysctl.html">sysctl</a>
+	<a href="http://127.0.0.1:8000/tag/sysctl.html">sysctl</a>
     
 </footer><!-- /.post-info -->                </div>
                 <div class="js-toc"></div>
@@ -527,7 +527,7 @@ ESTAB     0        0               10.0.2.15:61001       220.181.57.216:443
 <section class="well" id="related-posts">
     <p>Related Posts:</p>
     <ul>
-        <li><a href="https://mozillazg.com/2017/10/linux-a-way-to-fix-haproxy-network-connection-timeout-ping-sendmsg-Invalid-argument-socket-errno-110-connection-timed-out.html">一种解决 HAProxy 节点网络异常（sendmsg: Invalid argument, Connection timed out ）的办法</a></li>
+        <li><a href="http://127.0.0.1:8000/2017/10/linux-a-way-to-fix-haproxy-network-connection-timeout-ping-sendmsg-Invalid-argument-socket-errno-110-connection-timed-out.html">一种解决 HAProxy 节点网络异常（sendmsg: Invalid argument, Connection timed out ）的办法</a></li>
     </ul>
 </section>
     <hr/>
@@ -540,7 +540,7 @@ ESTAB     0        0               10.0.2.15:61001       220.181.57.216:443
             var disqus_shortname = 'my-github-blog'; // required: replace example with your forum shortname
 
                     var disqus_identifier = 'linux-what-net.ipv4.ip_local_port_range-effect-or-mean';
-                var disqus_url = 'https://mozillazg.com/2019/05/linux-what-net.ipv4.ip_local_port_range-effect-or-mean.html';
+                var disqus_url = 'http://127.0.0.1:8000/2019/05/linux-what-net.ipv4.ip_local_port_range-effect-or-mean.html';
 
             var disqus_config = function () {
                 this.language = "zh-hans";
@@ -570,12 +570,12 @@ ESTAB     0        0               10.0.2.15:61001       220.181.57.216:443
    <div class="container">
       <hr>
       <div class="row">
-         <div class="col-xs-10">&copy; 2022 mozillazg
+         <div class="col-xs-10">&copy; 2021 mozillazg
             &middot; Powered by <a href="https://github.com/DandyDev/pelican-bootstrap3" target="_blank">pelican-bootstrap3</a>,
             <a href="http://docs.getpelican.com/" target="_blank">Pelican</a>,
             <a href="http://getbootstrap.com" target="_blank">Bootstrap</a>
             &middot; <a href="/privacy-policy.html" target="_blank">Privacy</a>              <p><small>  <a rel="license" href="http://creativecommons.org/licenses/by-sa/4.0/"><img alt="Creative Commons License" style="border-width:0" src="/static/images/by-sa-80x15.png" /></a>
-    &quot;<span xmlns:dct="http://purl.org/dc/terms/" property="dct:title">Huang Huang 的博客</span>&quot; by <a xmlns:cc="http://creativecommons.org/ns#" href="https://mozillazg.com" property="cc:attributionName" rel="cc:attributionURL">mozillazg</a> is
+    &quot;<span xmlns:dct="http://purl.org/dc/terms/" property="dct:title">Huang Huang 的博客</span>&quot; by <a xmlns:cc="http://creativecommons.org/ns#" href="http://127.0.0.1:8000" property="cc:attributionName" rel="cc:attributionURL">mozillazg</a> is
   licensed under a <a rel="license" href="http://creativecommons.org/licenses/by-sa/4.0/">Creative Commons Attribution-ShareAlike 4.0 International License</a>, except where indicated otherwise.
 </small></p>
          </div>
