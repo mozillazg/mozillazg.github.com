@@ -11,9 +11,9 @@
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/social-share.js@1.0.16/dist/css/share.min.css">
 
 
-    <link href="http://127.0.0.1:8000/favicon.ico" rel="icon">
+    <link href="https://mozillazg.com/favicon.ico" rel="icon">
 
-<link rel="canonical" href="http://127.0.0.1:8000/2019/01/notes-about-design-health-checking.html">
+<link rel="canonical" href="https://mozillazg.com/2019/01/notes-about-design-health-checking.html">
 
         <meta name="author" content="mozillazg" />
         <meta name="keywords" content="health-check,load-balancer" />
@@ -37,7 +37,7 @@
         <meta property="og:site_name" content="Huang Huang 的博客" />
         <meta property="og:type" content="article"/>
         <meta property="og:title" content="健康检查功能相关的一些备忘"/>
-        <meta property="og:url" content="http://127.0.0.1:8000/2019/01/notes-about-design-health-checking.html"/>
+        <meta property="og:url" content="https://mozillazg.com/2019/01/notes-about-design-health-checking.html"/>
         <meta property="og:description" content="前言¶ 本文记录一些健康检查功能相关的笔记/经验。 检查方法¶ 常见的健康检查一般分为主机层面的检查以及应用/服务层面的检查。 主机层面的检查¶ 主机层面的检查一般用下面的方法进行检查： 用是否能够 ping 通来检查 尝试用 tcp 连接一下目标 ip:port ，看看是否可以连通来检查 其中 tcp 连通性检查这里有时会用一个非常规的方法去做 tcp 健康检查 [1] ： 一般建立 tcp 连接都会经过 tcp 三次握手的过程: Client -&gt; Server: SYN Server -&gt; Client: SYN-ACK Client -&gt; Server: ACK 但是其实最后一次的 ACK 可以不用发，因为对于健康检查来说，收到服务端发送回来的 SYN-ACK 的时候， 我们就可以简单的认为客户端跟服务端是可联通的。所以 tcp 健康检查可以考虑省去最后一个 ACK: Client -&gt; Server: SYN Server -&gt; Client: SYN-ACK Client -&gt; Server: RST 这样做的好处是，因为没有完成三次握手而是直接 RST 掉了，所以就不会有后续关闭连接时的四次挥手了， 可以减少好几个包（客户端和服务端都省了一些包）。 应用/服务层面的检查¶ 应用/服务层面的检查，一般指的是按照应用/服务认可的普通客户端的方式去做健康检查， 比如发送合法的符合约定格式的 tcp/udp 包、http 请求、rpc 请求等。 一般这种检查都是服务端定义一个专门用来响应健康检查请求的 api ，针对客户端发送的健康检查请求发回约定的响应格式数据。 反应服务真正的健康情况¶ 服务层面的健康检查一个很重要的一点是要反应服务真正的健康状况，所以服务端在实现健康检查接口时要考虑自身情况， 检查各种强依赖项，然后反馈给客户端当前服务端是否足够健康可以接受新的请求： 检查强依赖的外部服务的连通性、响应时间等信息(db/redis/queue/...) 检查机器负载情况，当前机器负载是否在健康范围内 检查 CPU 利用率、内存使用率 检查程序后台任务的排队情况 检查磁盘剩余空间、IO 情况 检查机器带宽是否快跑满了 。。。 需要根据服务本身的实际情况选择合适的检查项（不是每个都需要检查,不同的服务的强依赖项不一样），以及有些检查项可能不适合在请求内完成（比如会导致响应时间太长客户端超时了），这种可能需要安装外部程序来协助检查，比如带宽/IO 信息可以从外部获取。 总之就是要真正反应服务真正的健康状况，一般不会啥都不做就回一个标志正常的响应。 如果这样的话跟普通的端口探活似乎没有太大的区别。 当然，如果场景就是只需要检查协议以及端口探活的话，直接响应一个表示成功的响应也没啥问题。:joy 响应或请求包含服务标识信息¶ 还有一个必须要提及的是，健康检查的请求或响应信息中最好标识相关的服务信息： 客户端在请求中包含要检查的服务的标识信息，比如服务名/appid 之类的，当服务端收到请求的时候发现不是请求本服务的，可以直接返回相应的错误信息。 客户端检查服务端返回的错误信息或响应中包含的服务标识信息时，就可以知道请求发错对象了。 为什么请求或响应中包含服务标识信息很重要呢，因为现在很多服务都在容器中运行，服务经常性的扩容/缩容/容器漂移 导致相同的 ip:port 可能会在不同时刻对应的是不同的服务，如果因为一些原因导致客户端没有感知到这个变化，然后健康检查请求了旧的 ip:port ，此时健康检查虽然通过了，但是实际上请求过去还是会失败了，因为远端已经不是原来客户端以为的那个服务了。 通过在请求和响应中包含服务标识信息就可以在客户端和服务端防御这种 case。 健康与不健康之外的第三种状态¶ 一般健康检查的结果都是只有两种状态：健康或不健康。这里介绍的是根据需要可以考虑引入第三种状态：overload 。 这个状态的目的是应对一种 case: 服务可以正常处理健康检查，但是本身的负载已经非常高了，再接入多一点请求可能就要宕机了，然后节点宕机对整体服务的影响比较大（比如一些有状态服务宕机导致的客户端重连会对剩下的健康节点造成比较大的影响）。一般这种情况都会触发系统负载相关告警（比如 CPU 或内存使用率告警），然后人工手动介入把节点从负载均衡器或者哪里给摘除防止持续处理请求导致宕机。 对于这种 case 可以考虑引入上面所说的第三种状态 overload。对于处于 overload 状态的节点不再接受新的请求，等到节点恢复为健康状态后再接受新的请求。至于为啥不直接把 overload 的解决标记为不健康呢，因为不健康状态一般都是节点宕机了不能自动恢复的情况，以及部分系统对于不健康的节点会自动触发实例重启的操作，这个自动重启的操作可能不是我们预期的也可能会触发更大的问题（比如引发客户端大量重连），所以不健康状态跟 overload 还是有一点区别，可以根据实际情况选择是引入 overload 状态还是直接用不健康状态代替。 这第三种状态也不一样要是跟负载有关，只要是一种介于健康和不健康两者之间的状态都可以考虑引入第三种状态（比如同时支持读写操作的节点在这第三种状态的时候只支持 读 操作，不接受 写 操作）。 必要的配置项¶ 一般健康检查都会有一些必要的配置项用来控制健康检查功能： 最基本的肯定是要有待检查的目标服务信息，ip:port 之类的用于发送健康检查请求 健康检查所使用的协议（如果支持多协议的话）以及发送的数据（比如 http 协议的话检查所访问的 url path, http method, 认证信息等，tcp 的话可能是发送特定的数据表示请求做健康检查等） 判断服务健康的依据： 基本的连通性 响应的内容，比如表示服务健康的 http 响应状态码是哪些，响应的 body 内容需要包含什么内容等 检查不通过几次算服务不健康（有一个特例那就是：对于 Connection refused 错误一般建议直接标记为不健康而不是等几次失败再标记为不健康，），从不健康到健康需要通过几次检查才算恢复健康 [2] [3] 以及健康检查的间隔，健康检查太频繁可能会影响被检查的服务，间隔太长可能会失去健康检查的意义无法及时探查到不健康的状态 超时，访问外部服务一定不能忘了超时相关的设置，健康检查也不例外 手动禁用/下线服务的能力¶ 所谓的手动禁用/下线服务的能力，指的是可以在检查端或被检查端把一个服务标记为不健康/下线的能力。 这个功能主要用于临时禁用一个服务，比如想对这个服务进行一些调试操作，但是又不希望这期间有请求进来进行干扰。 总结¶ 本文简单记录了一些健康检查功能相关的笔记/经验，如果以后还有新的知识会随时更新的。 参考资料¶ Health Checks and Graceful Degradation in Distributed Systems Health Endpoint Monitoring pattern - Cloud Design Patterns | Microsoft Docs NGINX Docs | TCP Health Checks Performing Health Checks | ALOHA 10.0 tevino/tcp-shaker: Performing TCP handshake without ACK in Go, useful for health checking, that is SYN, SYN-ACK, RST. Learning on mistakes | Developer 2.0 Cluster Health | Elasticsearch Reference [6.7] | Elastic [1]tevino/tcp-shaker: Performing TCP handshake without ACK in Go, useful for health checking, that is SYN, SYN-ACK, RST. [2]NGINX Docs | TCP Health Checks [3]Performing Health Checks | ALOHA 10.0"/>
         <meta property="article:published_time" content="2019-01-13" />
             <meta property="article:section" content="others" />
@@ -45,32 +45,32 @@
             <meta property="article:tag" content="load-balancer" />
             <meta property="article:author" content="mozillazg" />
             <meta property="og:image"
-                  content="http://127.0.0.1:8000/static/avatar.jpeg"/>
+                  content="https://mozillazg.com/static/avatar.jpeg"/>
 
 
     <meta name="twitter:card" content="summary">
         <meta name="twitter:site" content="@mozillazg">
         <meta name="twitter:creator" content="@mozillazg">
-    <meta name="twitter:domain" content="http://127.0.0.1:8000">
+    <meta name="twitter:domain" content="https://mozillazg.com">
             <meta property="twitter:image"
-                  content="http://127.0.0.1:8000/static/avatar.jpeg"/>
+                  content="https://mozillazg.com/static/avatar.jpeg"/>
 
     <!-- Bootstrap -->
         <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@3.3.4/dist/css/bootstrap.min.css" type="text/css"/>
     <link href="https://cdn.jsdelivr.net/npm/font-awesome@4.3.0/css/font-awesome.min.css" rel="stylesheet">
 
     <link href="https://cdn.jsdelivr.net/npm/pygments-css@1.0.0/github.css" rel="stylesheet">
-    <link rel="stylesheet" href="http://127.0.0.1:8000/theme/css/style.css" type="text/css"/>
-            <link href="http://127.0.0.1:8000/static/custom.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://mozillazg.com/theme/css/style.css" type="text/css"/>
+            <link href="https://mozillazg.com/static/custom.css" rel="stylesheet">
 
-        <link href="http://127.0.0.1:8000/feeds/all.atom.xml" type="application/atom+xml" rel="alternate"
+        <link href="https://mozillazg.com/feeds/all.atom.xml" type="application/atom+xml" rel="alternate"
               title="Huang Huang 的博客 ATOM Feed"/>
 
-        <link href="http://127.0.0.1:8000/feeds/all.rss.xml" type="application/rss+xml" rel="alternate"
+        <link href="https://mozillazg.com/feeds/all.rss.xml" type="application/rss+xml" rel="alternate"
               title="Huang Huang 的博客 RSS Feed"/>
 
 
-        <link href="http://127.0.0.1:8000/feeds/others.atom.xml" type="application/atom+xml" rel="alternate"
+        <link href="https://mozillazg.com/feeds/others.atom.xml" type="application/atom+xml" rel="alternate"
               title="Huang Huang 的博客 others ATOM Feed"/>
 
 
@@ -81,20 +81,20 @@
         "publisher": {
             "@type": "Person",
             "name": "mozillazg",
-            "logo": "http://127.0.0.1:8000/static/avatar.jpeg"
+            "logo": "https://mozillazg.com/static/avatar.jpeg"
         },
         "author": {
             "@type": "Person",
             "name": "mozillazg",
-            "image": "http://127.0.0.1:8000/static/avatar.jpeg",
-            "url": "http://127.0.0.1:8000",
+            "image": "https://mozillazg.com/static/avatar.jpeg",
+            "url": "https://mozillazg.com",
             "sameAs": []
         },
         // "headline": "",
-        "url": "http://127.0.0.1:8000/2019/01/notes-about-design-health-checking.html",
+        "url": "https://mozillazg.com/2019/01/notes-about-design-health-checking.html",
         "datePublished": "2019-01-13",
         // "dateModified": "",
-        "image": "http://127.0.0.1:8000/static/avatar.jpeg",
+        "image": "https://mozillazg.com/static/avatar.jpeg",
         "keywords": "health-check, load-balancer",
         // "description": "前言¶ 本文记录一些健康检查功能相关的笔记/经验。 检查方法¶ 常见的健康检查一般分为主机层面的检查以及应用/服务层面的检查。 主机层面的检查¶ 主机层面的检查一般用下面的方法进行检查： 用是否能够 ping 通来检查 尝试用 tcp 连接一下目标 ip:port ，看看是否可以连通来检查 其中 tcp 连通性检查这里有时会用一个非常规的方法去做 tcp 健康检查 [1] ： 一般建立 tcp 连接都会经过 tcp 三次握手的过程: Client -&gt; Server: SYN Server -&gt; Client: SYN-ACK Client -&gt; Server: ACK 但是其实最后一次的 ACK 可以不用发，因为对于健康检查来说，收到服务端发送回来的 SYN-ACK 的时候， 我们就可以简单的认为客户端跟服务端是可联通的。所以 tcp 健康检查可以考虑省去最后一个 ACK: Client -&gt; Server: SYN Server -&gt; Client: SYN-ACK Client -&gt; Server: RST 这样做的好处是，因为没有完成三次握手而是直接 RST 掉了，所以就不会有后续关闭连接时的四次挥手了， 可以减少好几个包（客户端和服务端都省了一些包）。 应用/服务层面的检查¶ 应用/服务层面的检查，一般指的是按照应用/服务认可的普通客户端的方式去做健康检查， 比如发送合法的符合约定格式的 tcp/udp 包、http 请求、rpc 请求等。 一般这种检查都是服务端定义一个专门用来响应健康检查请求的 api ，针对客户端发送的健康检查请求发回约定的响应格式数据。 反应服务真正的健康情况¶ 服务层面的健康检查一个很重要的一点是要反应服务真正的健康状况，所以服务端在实现健康检查接口时要考虑自身情况， 检查各种强依赖项，然后反馈给客户端当前服务端是否足够健康可以接受新的请求： 检查强依赖的外部服务的连通性、响应时间等信息(db/redis/queue/...) 检查机器负载情况，当前机器负载是否在健康范围内 检查 CPU 利用率、内存使用率 检查程序后台任务的排队情况 检查磁盘剩余空间、IO 情况 检查机器带宽是否快跑满了 。。。 需要根据服务本身的实际情况选择合适的检查项（不是每个都需要检查,不同的服务的强依赖项不一样），以及有些检查项可能不适合在请求内完成（比如会导致响应时间太长客户端超时了），这种可能需要安装外部程序来协助检查，比如带宽/IO 信息可以从外部获取。 总之就是要真正反应服务真正的健康状况，一般不会啥都不做就回一个标志正常的响应。 如果这样的话跟普通的端口探活似乎没有太大的区别。 当然，如果场景就是只需要检查协议以及端口探活的话，直接响应一个表示成功的响应也没啥问题。:joy 响应或请求包含服务标识信息¶ 还有一个必须要提及的是，健康检查的请求或响应信息中最好标识相关的服务信息： 客户端在请求中包含要检查的服务的标识信息，比如服务名/appid 之类的，当服务端收到请求的时候发现不是请求本服务的，可以直接返回相应的错误信息。 客户端检查服务端返回的错误信息或响应中包含的服务标识信息时，就可以知道请求发错对象了。 为什么请求或响应中包含服务标识信息很重要呢，因为现在很多服务都在容器中运行，服务经常性的扩容/缩容/容器漂移 导致相同的 ip:port 可能会在不同时刻对应的是不同的服务，如果因为一些原因导致客户端没有感知到这个变化，然后健康检查请求了旧的 ip:port ，此时健康检查虽然通过了，但是实际上请求过去还是会失败了，因为远端已经不是原来客户端以为的那个服务了。 通过在请求和响应中包含服务标识信息就可以在客户端和服务端防御这种 case。 健康与不健康之外的第三种状态¶ 一般健康检查的结果都是只有两种状态：健康或不健康。这里介绍的是根据需要可以考虑引入第三种状态：overload 。 这个状态的目的是应对一种 case: 服务可以正常处理健康检查，但是本身的负载已经非常高了，再接入多一点请求可能就要宕机了，然后节点宕机对整体服务的影响比较大（比如一些有状态服务宕机导致的客户端重连会对剩下的健康节点造成比较大的影响）。一般这种情况都会触发系统负载相关告警（比如 CPU 或内存使用率告警），然后人工手动介入把节点从负载均衡器或者哪里给摘除防止持续处理请求导致宕机。 对于这种 case 可以考虑引入上面所说的第三种状态 overload。对于处于 overload 状态的节点不再接受新的请求，等到节点恢复为健康状态后再接受新的请求。至于为啥不直接把 overload 的解决标记为不健康呢，因为不健康状态一般都是节点宕机了不能自动恢复的情况，以及部分系统对于不健康的节点会自动触发实例重启的操作，这个自动重启的操作可能不是我们预期的也可能会触发更大的问题（比如引发客户端大量重连），所以不健康状态跟 overload 还是有一点区别，可以根据实际情况选择是引入 overload 状态还是直接用不健康状态代替。 这第三种状态也不一样要是跟负载有关，只要是一种介于健康和不健康两者之间的状态都可以考虑引入第三种状态（比如同时支持读写操作的节点在这第三种状态的时候只支持 读 操作，不接受 写 操作）。 必要的配置项¶ 一般健康检查都会有一些必要的配置项用来控制健康检查功能： 最基本的肯定是要有待检查的目标服务信息，ip:port 之类的用于发送健康检查请求 健康检查所使用的协议（如果支持多协议的话）以及发送的数据（比如 http 协议的话检查所访问的 url path, http method, 认证信息等，tcp 的话可能是发送特定的数据表示请求做健康检查等） 判断服务健康的依据： 基本的连通性 响应的内容，比如表示服务健康的 http 响应状态码是哪些，响应的 body 内容需要包含什么内容等 检查不通过几次算服务不健康（有一个特例那就是：对于 Connection refused 错误一般建议直接标记为不健康而不是等几次失败再标记为不健康，），从不健康到健康需要通过几次检查才算恢复健康 [2] [3] 以及健康检查的间隔，健康检查太频繁可能会影响被检查的服务，间隔太长可能会失去健康检查的意义无法及时探查到不健康的状态 超时，访问外部服务一定不能忘了超时相关的设置，健康检查也不例外 手动禁用/下线服务的能力¶ 所谓的手动禁用/下线服务的能力，指的是可以在检查端或被检查端把一个服务标记为不健康/下线的能力。 这个功能主要用于临时禁用一个服务，比如想对这个服务进行一些调试操作，但是又不希望这期间有请求进来进行干扰。 总结¶ 本文简单记录了一些健康检查功能相关的笔记/经验，如果以后还有新的知识会随时更新的。 参考资料¶ Health Checks and Graceful Degradation in Distributed Systems Health Endpoint Monitoring pattern - Cloud Design Patterns | Microsoft Docs NGINX Docs | TCP Health Checks Performing Health Checks | ALOHA 10.0 tevino/tcp-shaker: Performing TCP handshake without ACK in Go, useful for health checking, that is SYN, SYN-ACK, RST. Learning on mistakes | Developer 2.0 Cluster Health | Elasticsearch Reference [6.7] | Elastic [1]tevino/tcp-shaker: Performing TCP handshake without ACK in Go, useful for health checking, that is SYN, SYN-ACK, RST. [2]NGINX Docs | TCP Health Checks [3]Performing Health Checks | ALOHA 10.0",
         "description": "<div class="section" id="id2">
@@ -228,7 +228,7 @@
 ",
         "mainEntityOfPage": {
             "@type": "WebPage",
-            "@id": "http://127.0.0.1:8000"
+            "@id": "https://mozillazg.com"
         }
     }
     </script>
@@ -245,16 +245,16 @@
                 <span class="icon-bar"></span>
                 <span class="icon-bar"></span>
             </button>
-            <a href="http://127.0.0.1:8000/" class="navbar-brand">
+            <a href="https://mozillazg.com/" class="navbar-brand">
 Huang Huang 的博客            </a>
         </div>
         <div class="collapse navbar-collapse navbar-ex1-collapse">
             <ul class="nav navbar-nav">
-                    <li><a href="http://127.0.0.1:8000/feeds/all.atom.xml">Feed</a></li>
+                    <li><a href="https://mozillazg.com/feeds/all.atom.xml">Feed</a></li>
                     <li><a href="/2014/10/pages/about-me.html">About</a></li>
             </ul>
             <ul class="nav navbar-nav navbar-right">
-              <li><a href="http://127.0.0.1:8000/archives.html"><i class="fa fa-th-list"></i><span class="icon-label">Archives</span></a></li>
+              <li><a href="https://mozillazg.com/archives.html"><i class="fa fa-th-list"></i><span class="icon-label">Archives</span></a></li>
             </ul>
         </div>
         <!-- /.navbar-collapse -->
@@ -269,7 +269,7 @@ Huang Huang 的博客            </a>
         <article>
             <header class="text-center">
                 <h1>
-                    <a href="http://127.0.0.1:8000/2019/01/notes-about-design-health-checking.html"
+                    <a href="https://mozillazg.com/2019/01/notes-about-design-health-checking.html"
                        rel="bookmark"
                        title="Permalink to 健康检查功能相关的一些备忘">
                         健康检查功能相关的一些备忘
@@ -284,13 +284,13 @@ Huang Huang 的博客            </a>
             <div class="entry-content">
                 <div class="well-sm article-info">
 <footer class="post-info">
-        <a href="http://127.0.0.1:8000/category/others.html">others</a>
+        <a href="https://mozillazg.com/category/others.html">others</a>
 
 
 <span class="label label-default hide">Tags</span>
-	<a href="http://127.0.0.1:8000/tag/health-check.html">health-check</a>
+	<a href="https://mozillazg.com/tag/health-check.html">health-check</a>
         /
-	<a href="http://127.0.0.1:8000/tag/load-balancer.html">load-balancer</a>
+	<a href="https://mozillazg.com/tag/load-balancer.html">load-balancer</a>
     
 </footer><!-- /.post-info -->                </div>
                 <div class="js-toc"></div>
@@ -440,11 +440,11 @@ Huang Huang 的博客            </a>
 <section class="well" id="related-posts">
     <p>Related Posts:</p>
     <ul>
-        <li><a href="http://127.0.0.1:8000/2019/03/load-balancing-strategy-algorithm-Consistent-hashing.html">负载均衡策略之一致性哈希</a></li>
-        <li><a href="http://127.0.0.1:8000/2019/02/load-balancing-strategy-algorithm-weighted-least-connection.html">负载均衡策略之最少连接</a></li>
-        <li><a href="http://127.0.0.1:8000/2019/03/load-balancer-load-balancing-dynamic-weight-max-connections-slow-start-mode.html">网络负载均衡器中的动态权重功能</a></li>
-        <li><a href="http://127.0.0.1:8000/2019/03/load-balancing-strategy-algorithm-the-power-of-two-random-choices.html">负载均衡策略之两次随机选择策略</a></li>
-        <li><a href="http://127.0.0.1:8000/2019/01/load-balancing-strategy-algorithm-weighted-random.html">负载均衡策略之随机选择</a></li>
+        <li><a href="https://mozillazg.com/2019/01/load-balancing-strategy-algorithm-weighted-random.html">负载均衡策略之随机选择</a></li>
+        <li><a href="https://mozillazg.com/2019/02/load-balancing-strategy-algorithm-weighted-round-robin.html">负载均衡策略之轮询策略</a></li>
+        <li><a href="https://mozillazg.com/2019/03/load-balancing-strategy-algorithm-the-power-of-two-random-choices.html">负载均衡策略之两次随机选择策略</a></li>
+        <li><a href="https://mozillazg.com/2019/01/notes-about-load-balancer-types-and-feature.html">网络负载均衡器的类别和功能介绍</a></li>
+        <li><a href="https://mozillazg.com/2019/03/load-balancing-strategy-algorithm-Consistent-hashing.html">负载均衡策略之一致性哈希</a></li>
     </ul>
 </section>
     <hr/>
@@ -457,7 +457,7 @@ Huang Huang 的博客            </a>
             var disqus_shortname = 'my-github-blog'; // required: replace example with your forum shortname
 
                     var disqus_identifier = 'notes-about-design-health-checking';
-                var disqus_url = 'http://127.0.0.1:8000/2019/01/notes-about-design-health-checking.html';
+                var disqus_url = 'https://mozillazg.com/2019/01/notes-about-design-health-checking.html';
 
             var disqus_config = function () {
                 this.language = "zh-hans";
@@ -492,7 +492,7 @@ Huang Huang 的博客            </a>
             <a href="http://docs.getpelican.com/" target="_blank">Pelican</a>,
             <a href="http://getbootstrap.com" target="_blank">Bootstrap</a>
             &middot; <a href="/privacy-policy.html" target="_blank">Privacy</a>              <p><small>  <a rel="license" href="http://creativecommons.org/licenses/by-sa/4.0/"><img alt="Creative Commons License" style="border-width:0" src="/static/images/by-sa-80x15.png" /></a>
-    &quot;<span xmlns:dct="http://purl.org/dc/terms/" property="dct:title">Huang Huang 的博客</span>&quot; by <a xmlns:cc="http://creativecommons.org/ns#" href="http://127.0.0.1:8000" property="cc:attributionName" rel="cc:attributionURL">mozillazg</a> is
+    &quot;<span xmlns:dct="http://purl.org/dc/terms/" property="dct:title">Huang Huang 的博客</span>&quot; by <a xmlns:cc="http://creativecommons.org/ns#" href="https://mozillazg.com" property="cc:attributionName" rel="cc:attributionURL">mozillazg</a> is
   licensed under a <a rel="license" href="http://creativecommons.org/licenses/by-sa/4.0/">Creative Commons Attribution-ShareAlike 4.0 International License</a>, except where indicated otherwise.
 </small></p>
          </div>

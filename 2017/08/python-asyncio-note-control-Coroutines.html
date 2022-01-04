@@ -11,9 +11,9 @@
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/social-share.js@1.0.16/dist/css/share.min.css">
 
 
-    <link href="http://127.0.0.1:8000/favicon.ico" rel="icon">
+    <link href="https://mozillazg.com/favicon.ico" rel="icon">
 
-<link rel="canonical" href="http://127.0.0.1:8000/2017/08/python-asyncio-note-control-Coroutines.html">
+<link rel="canonical" href="https://mozillazg.com/2017/08/python-asyncio-note-control-Coroutines.html">
 
         <meta name="author" content="mozillazg" />
         <meta name="keywords" content="asyncio" />
@@ -37,39 +37,39 @@
         <meta property="og:site_name" content="Huang Huang 的博客" />
         <meta property="og:type" content="article"/>
         <meta property="og:title" content="asyncio 学习笔记：控制组合式 Coroutines"/>
-        <meta property="og:url" content="http://127.0.0.1:8000/2017/08/python-asyncio-note-control-Coroutines.html"/>
+        <meta property="og:url" content="https://mozillazg.com/2017/08/python-asyncio-note-control-Coroutines.html"/>
         <meta property="og:description" content="本文是 https://pymotw.com/3/asyncio/control.html 的学习笔记，强烈推荐直接阅读原文。 对于线性执行的 Coroutines 可以很方便的通过 await 来控制。 对于组合式的 Coroutines，比如在一个 coroutine 中等待其他并发执行的 Coroutines 完成的操作也可以通过 asyncio 模块来实现。 等待多个 Coroutines¶ 在一个 Coroutine 中等待其他多个 Coroutines 操作完成是一个很常见的需求，比如下载一批数据，执行对顺序没有要求，只想要最后的结果。 wait() 方法可以实现暂停当前 Coroutine， 直到后台其他 Coroutines 操作完成： # asyncio_wait.py import asyncio async def phase(i): print(&#39;in phase {}&#39;.format(i)) await asyncio.sleep(0.1 * i) print(&#39;done with phase {}&#39;.format(i)) return &#39;phase {} result&#39;.format(i) async def main(num_phases): print(&#39;starting main&#39;) phases = [ phase(i) for i in range(num_phases) ] print(&#39;waiting for phases to complete&#39;) completed, pending = await asyncio.wait(phases) results = [t.result() for t in completed] print(&#39;results: {!r}&#39;.format(results)) event_loop = asyncio.get_event_loop() try: event_loop.run_until_complete(main(3)) finally: event_loop.close() 在 wait 内部，它使用一个集合来保存它创建的 Task 实例，所以它保存的 Task 的结果是无序的。wait 返回一个由两个集合组成的元祖，一个保存状态为 done 的 Task ，一个保存状态为 pending 的 Task: $ python3.6 asyncio_wait.py starting main waiting for phases to complete in phase 0 in phase 2 in phase 1 done with phase 0 done with phase 1 done with phase 2 results: [&#39;phase 0 result&#39;, &#39;phase 2 result&#39;, &#39;phase 1 result&#39;] 当调用 wait 时指定 timeout 参数才会有可能出现结果中包含状态为 pending 的 Task: # asyncio_wait_timeout.py import asyncio async def phase(i): print(&#39;in phase {}&#39;.format(i)) try: await asyncio.sleep(0.1 * i) except asyncio.CancelledError: print(&#39;phase {} canceled&#39;.format(i)) raise else: print(&#39;done with phase {}&#39;.format(i)) return &#39;phase {} result&#39;.format(i) async def main(num_phases): print(&#39;starting main&#39;) phases = [ phase(i) for i in range(num_phases) ] print(&#39;waiting 0.1 for phases to complete&#39;) completed, pending = await asyncio.wait(phases, timeout=0.1) print(&#39;{} completed and {} pending&#39;.format( len(completed), len(pending), )) if pending: print(&#39;canceling tasks&#39;) for t in pending: t.cancel() print(&#39;exiting main&#39;) event_loop = asyncio.get_event_loop() try: event_loop.run_until_complete(main(3)) finally: event_loop.close() 对于 pending 的 task 最好是把它们 cancel 掉，否则事件循环在之后会继续执行它们或者退出程序的时候会有警告信息. $ python3.6 asyncio_wait_timeout.py starting main waiting 0.1 for phases to complete in phase 0 in phase 2 in phase 1 done with phase 0 1 completed and 2 pending canceling tasks exiting main phase 1 canceled phase 2 canceled 不 cancel 会警告的情况: # asyncio_wait_timeout_without_cancel.py import asyncio async def phase(i): print(&#39;in phase {}&#39;.format(i)) try: await asyncio.sleep(0.1 * i) except asyncio.CancelledError: print(&#39;phase {} canceled&#39;.format(i)) raise else: print(&#39;done with phase {}&#39;.format(i)) return &#39;phase {} result&#39;.format(i) async def main(num_phases): print(&#39;starting main&#39;) phases = [ phase(i) for i in range(num_phases) ] print(&#39;waiting 0.1 for phases to complete&#39;) completed, pending = await asyncio.wait(phases, timeout=0.1) print(&#39;{} completed and {} pending&#39;.format( len(completed), len(pending), )) print(&#39;exiting main&#39;) event_loop = asyncio.get_event_loop() try: event_loop.run_until_complete(main(3)) finally: event_loop.close() 运行结果: $ python3.6 asyncio_wait_timeout_without_cancel_warn.py starting main waiting 0.1 for phases to complete in phase 1 in phase 0 in phase 2 done with phase 0 1 completed and 2 pending exiting main done with phase 1 Task was destroyed but it is pending! task: &lt;Task pending coro=&lt;phase() done, defined at asyncio_wait_timeout_without_cancel_warn.py:5&gt; wait_for=&lt;Future pending cb=[&lt;TaskWakeupMethWrapper object at 0x10e227918&gt;()]&gt;&gt; pending 还会继续执行的情况: # asyncio_wait_timeout_without_cancel_continue.py import asyncio async def phase(i): print(&#39;in phase {}&#39;.format(i)) try: await asyncio.sleep(0.1 * i) except asyncio.CancelledError: print(&#39;phase {} canceled&#39;.format(i)) raise else: print(&#39;done with phase {}&#39;.format(i)) return &#39;phase {} result&#39;.format(i) async def main(num_phases): print(&#39;starting main&#39;) phases = [ phase(i) for i in range(num_phases) ] print(&#39;waiting 0.1 for phases to complete&#39;) completed, pending = await asyncio.wait(phases, timeout=0.1) print(&#39;{} completed and {} pending&#39;.format( len(completed), len(pending), )) print(&#39;exiting main&#39;) event_loop = asyncio.get_event_loop() try: event_loop.run_until_complete(main(3)) event_loop.run_until_complete(asyncio.sleep(3)) finally: event_loop.close() 运行结果 $ python3.6 asyncio_wait_timeout_without_cancel_continue.py starting main waiting 0.1 for phases to complete in phase 1 in phase 0 in phase 2 done with phase 0 1 completed and 2 pending exiting main done with phase 1 done with phase 2 收集 Coroutines 结果¶ 如果 Coroutines 是在程序中显示生成的，并且只关心返回值结果的话，gather() 是一种比较好的收集多个操作结果的方法： # asyncio_gather.py import asyncio async def phase1(): print(&#39;in phase1&#39;) await asyncio.sleep(2) print(&#39;done with phase1&#39;) return &#39;phase1 result&#39; async def phase2(): print(&#39;in phase2&#39;) await asyncio.sleep(1) print(&#39;done with phase2&#39;) return &#39;phase2 result&#39; async def main(): print(&#39;starting main&#39;) print(&#39;waiting for phases to complete&#39;) results = await asyncio.gather( phase1(), phase2() ) print(&#39;results: {!r}&#39;.format(results)) event_loop = asyncio.get_event_loop() try: event_loop.run_until_complete(main()) finally: event_loop.close() 通过 gather 创建的 task 对外部是不可见的，所以它们不能被取消。返回值是按输入参数顺序保存的对应 coroutine 的执行结果，无论真正执行的时候是否按顺序执行的，最终的结果都是有序的。 $ python3.6 asyncio_gather.py starting main waiting for phases to complete in phase2 in phase1 done with phase2 done with phase1 results: [&#39;phase1 result&#39;, &#39;phase2 result&#39;] 当后台操作完成的时候做一些事情¶ as_completed() 是一个生成器，它将管理传入的 coroutines 执行， 每次迭代都将返回一个 coroutine 执行完成的 task。 跟 wait() 一样，as_completed() 也不会保证顺序，跟 wait() 的区别就是它不会等待所有的 coroutine 操作都完成以后才能做其他操作。 # asyncio_as_completed.py import asyncio async def phase(i): print(&#39;in phase {}&#39;.format(i)) await asyncio.sleep(0.5 - (0.1 * i)) print(&#39;done with phase {}&#39;.format(i)) return &#39;phase {} result&#39;.format(i) async def main(num_phases): print(&#39;starting main&#39;) phases = [ phase(i) for i in range(num_phases) ] print(&#39;waiting for phases to complete&#39;) results = [] for next_to_complete in asyncio.as_completed(phases): answer = await next_to_complete print(&#39;recevived answer {!r}&#39;.format(answer)) results.append(answer) print(&#39;results: {!r}&#39;.format(results)) return results event_loop = asyncio.get_event_loop() try: event_loop.run_until_complete(main(3)) finally: event_loop.close() 结果: $ python3.6 asyncio_as_completed.py starting main waiting for phases to complete in phase 1 in phase 2 in phase 0 done with phase 2 recevived answer &#39;phase 2 result&#39; done with phase 1 recevived answer &#39;phase 1 result&#39; done with phase 0 recevived answer &#39;phase 0 result&#39; results: [&#39;phase 2 result&#39;, &#39;phase 1 result&#39;, &#39;phase 0 result&#39;] 参考资料¶ Composing Coroutines with Control Structures — PyMOTW 3 18.5.3. Tasks and coroutines — Python 3.6.2 documentation"/>
         <meta property="article:published_time" content="2017-08-25" />
             <meta property="article:section" content="python" />
             <meta property="article:tag" content="asyncio" />
             <meta property="article:author" content="mozillazg" />
             <meta property="og:image"
-                  content="http://127.0.0.1:8000/static/avatar.jpeg"/>
+                  content="https://mozillazg.com/static/avatar.jpeg"/>
 
 
     <meta name="twitter:card" content="summary">
         <meta name="twitter:site" content="@mozillazg">
         <meta name="twitter:creator" content="@mozillazg">
-    <meta name="twitter:domain" content="http://127.0.0.1:8000">
+    <meta name="twitter:domain" content="https://mozillazg.com">
             <meta property="twitter:image"
-                  content="http://127.0.0.1:8000/static/avatar.jpeg"/>
+                  content="https://mozillazg.com/static/avatar.jpeg"/>
 
     <!-- Bootstrap -->
         <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@3.3.4/dist/css/bootstrap.min.css" type="text/css"/>
     <link href="https://cdn.jsdelivr.net/npm/font-awesome@4.3.0/css/font-awesome.min.css" rel="stylesheet">
 
     <link href="https://cdn.jsdelivr.net/npm/pygments-css@1.0.0/github.css" rel="stylesheet">
-    <link rel="stylesheet" href="http://127.0.0.1:8000/theme/css/style.css" type="text/css"/>
-            <link href="http://127.0.0.1:8000/static/custom.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://mozillazg.com/theme/css/style.css" type="text/css"/>
+            <link href="https://mozillazg.com/static/custom.css" rel="stylesheet">
 
-        <link href="http://127.0.0.1:8000/feeds/all.atom.xml" type="application/atom+xml" rel="alternate"
+        <link href="https://mozillazg.com/feeds/all.atom.xml" type="application/atom+xml" rel="alternate"
               title="Huang Huang 的博客 ATOM Feed"/>
 
-        <link href="http://127.0.0.1:8000/feeds/all.rss.xml" type="application/rss+xml" rel="alternate"
+        <link href="https://mozillazg.com/feeds/all.rss.xml" type="application/rss+xml" rel="alternate"
               title="Huang Huang 的博客 RSS Feed"/>
 
 
-        <link href="http://127.0.0.1:8000/feeds/python.atom.xml" type="application/atom+xml" rel="alternate"
+        <link href="https://mozillazg.com/feeds/python.atom.xml" type="application/atom+xml" rel="alternate"
               title="Huang Huang 的博客 python ATOM Feed"/>
 
 
@@ -80,20 +80,20 @@
         "publisher": {
             "@type": "Person",
             "name": "mozillazg",
-            "logo": "http://127.0.0.1:8000/static/avatar.jpeg"
+            "logo": "https://mozillazg.com/static/avatar.jpeg"
         },
         "author": {
             "@type": "Person",
             "name": "mozillazg",
-            "image": "http://127.0.0.1:8000/static/avatar.jpeg",
-            "url": "http://127.0.0.1:8000",
+            "image": "https://mozillazg.com/static/avatar.jpeg",
+            "url": "https://mozillazg.com",
             "sameAs": []
         },
         // "headline": "",
-        "url": "http://127.0.0.1:8000/2017/08/python-asyncio-note-control-Coroutines.html",
+        "url": "https://mozillazg.com/2017/08/python-asyncio-note-control-Coroutines.html",
         "datePublished": "2017-08-25",
         // "dateModified": "",
-        "image": "http://127.0.0.1:8000/static/avatar.jpeg",
+        "image": "https://mozillazg.com/static/avatar.jpeg",
         "keywords": "asyncio",
         // "description": "本文是 https://pymotw.com/3/asyncio/control.html 的学习笔记，强烈推荐直接阅读原文。 对于线性执行的 Coroutines 可以很方便的通过 await 来控制。 对于组合式的 Coroutines，比如在一个 coroutine 中等待其他并发执行的 Coroutines 完成的操作也可以通过 asyncio 模块来实现。 等待多个 Coroutines¶ 在一个 Coroutine 中等待其他多个 Coroutines 操作完成是一个很常见的需求，比如下载一批数据，执行对顺序没有要求，只想要最后的结果。 wait() 方法可以实现暂停当前 Coroutine， 直到后台其他 Coroutines 操作完成： # asyncio_wait.py import asyncio async def phase(i): print(&#39;in phase {}&#39;.format(i)) await asyncio.sleep(0.1 * i) print(&#39;done with phase {}&#39;.format(i)) return &#39;phase {} result&#39;.format(i) async def main(num_phases): print(&#39;starting main&#39;) phases = [ phase(i) for i in range(num_phases) ] print(&#39;waiting for phases to complete&#39;) completed, pending = await asyncio.wait(phases) results = [t.result() for t in completed] print(&#39;results: {!r}&#39;.format(results)) event_loop = asyncio.get_event_loop() try: event_loop.run_until_complete(main(3)) finally: event_loop.close() 在 wait 内部，它使用一个集合来保存它创建的 Task 实例，所以它保存的 Task 的结果是无序的。wait 返回一个由两个集合组成的元祖，一个保存状态为 done 的 Task ，一个保存状态为 pending 的 Task: $ python3.6 asyncio_wait.py starting main waiting for phases to complete in phase 0 in phase 2 in phase 1 done with phase 0 done with phase 1 done with phase 2 results: [&#39;phase 0 result&#39;, &#39;phase 2 result&#39;, &#39;phase 1 result&#39;] 当调用 wait 时指定 timeout 参数才会有可能出现结果中包含状态为 pending 的 Task: # asyncio_wait_timeout.py import asyncio async def phase(i): print(&#39;in phase {}&#39;.format(i)) try: await asyncio.sleep(0.1 * i) except asyncio.CancelledError: print(&#39;phase {} canceled&#39;.format(i)) raise else: print(&#39;done with phase {}&#39;.format(i)) return &#39;phase {} result&#39;.format(i) async def main(num_phases): print(&#39;starting main&#39;) phases = [ phase(i) for i in range(num_phases) ] print(&#39;waiting 0.1 for phases to complete&#39;) completed, pending = await asyncio.wait(phases, timeout=0.1) print(&#39;{} completed and {} pending&#39;.format( len(completed), len(pending), )) if pending: print(&#39;canceling tasks&#39;) for t in pending: t.cancel() print(&#39;exiting main&#39;) event_loop = asyncio.get_event_loop() try: event_loop.run_until_complete(main(3)) finally: event_loop.close() 对于 pending 的 task 最好是把它们 cancel 掉，否则事件循环在之后会继续执行它们或者退出程序的时候会有警告信息. $ python3.6 asyncio_wait_timeout.py starting main waiting 0.1 for phases to complete in phase 0 in phase 2 in phase 1 done with phase 0 1 completed and 2 pending canceling tasks exiting main phase 1 canceled phase 2 canceled 不 cancel 会警告的情况: # asyncio_wait_timeout_without_cancel.py import asyncio async def phase(i): print(&#39;in phase {}&#39;.format(i)) try: await asyncio.sleep(0.1 * i) except asyncio.CancelledError: print(&#39;phase {} canceled&#39;.format(i)) raise else: print(&#39;done with phase {}&#39;.format(i)) return &#39;phase {} result&#39;.format(i) async def main(num_phases): print(&#39;starting main&#39;) phases = [ phase(i) for i in range(num_phases) ] print(&#39;waiting 0.1 for phases to complete&#39;) completed, pending = await asyncio.wait(phases, timeout=0.1) print(&#39;{} completed and {} pending&#39;.format( len(completed), len(pending), )) print(&#39;exiting main&#39;) event_loop = asyncio.get_event_loop() try: event_loop.run_until_complete(main(3)) finally: event_loop.close() 运行结果: $ python3.6 asyncio_wait_timeout_without_cancel_warn.py starting main waiting 0.1 for phases to complete in phase 1 in phase 0 in phase 2 done with phase 0 1 completed and 2 pending exiting main done with phase 1 Task was destroyed but it is pending! task: &lt;Task pending coro=&lt;phase() done, defined at asyncio_wait_timeout_without_cancel_warn.py:5&gt; wait_for=&lt;Future pending cb=[&lt;TaskWakeupMethWrapper object at 0x10e227918&gt;()]&gt;&gt; pending 还会继续执行的情况: # asyncio_wait_timeout_without_cancel_continue.py import asyncio async def phase(i): print(&#39;in phase {}&#39;.format(i)) try: await asyncio.sleep(0.1 * i) except asyncio.CancelledError: print(&#39;phase {} canceled&#39;.format(i)) raise else: print(&#39;done with phase {}&#39;.format(i)) return &#39;phase {} result&#39;.format(i) async def main(num_phases): print(&#39;starting main&#39;) phases = [ phase(i) for i in range(num_phases) ] print(&#39;waiting 0.1 for phases to complete&#39;) completed, pending = await asyncio.wait(phases, timeout=0.1) print(&#39;{} completed and {} pending&#39;.format( len(completed), len(pending), )) print(&#39;exiting main&#39;) event_loop = asyncio.get_event_loop() try: event_loop.run_until_complete(main(3)) event_loop.run_until_complete(asyncio.sleep(3)) finally: event_loop.close() 运行结果 $ python3.6 asyncio_wait_timeout_without_cancel_continue.py starting main waiting 0.1 for phases to complete in phase 1 in phase 0 in phase 2 done with phase 0 1 completed and 2 pending exiting main done with phase 1 done with phase 2 收集 Coroutines 结果¶ 如果 Coroutines 是在程序中显示生成的，并且只关心返回值结果的话，gather() 是一种比较好的收集多个操作结果的方法： # asyncio_gather.py import asyncio async def phase1(): print(&#39;in phase1&#39;) await asyncio.sleep(2) print(&#39;done with phase1&#39;) return &#39;phase1 result&#39; async def phase2(): print(&#39;in phase2&#39;) await asyncio.sleep(1) print(&#39;done with phase2&#39;) return &#39;phase2 result&#39; async def main(): print(&#39;starting main&#39;) print(&#39;waiting for phases to complete&#39;) results = await asyncio.gather( phase1(), phase2() ) print(&#39;results: {!r}&#39;.format(results)) event_loop = asyncio.get_event_loop() try: event_loop.run_until_complete(main()) finally: event_loop.close() 通过 gather 创建的 task 对外部是不可见的，所以它们不能被取消。返回值是按输入参数顺序保存的对应 coroutine 的执行结果，无论真正执行的时候是否按顺序执行的，最终的结果都是有序的。 $ python3.6 asyncio_gather.py starting main waiting for phases to complete in phase2 in phase1 done with phase2 done with phase1 results: [&#39;phase1 result&#39;, &#39;phase2 result&#39;] 当后台操作完成的时候做一些事情¶ as_completed() 是一个生成器，它将管理传入的 coroutines 执行， 每次迭代都将返回一个 coroutine 执行完成的 task。 跟 wait() 一样，as_completed() 也不会保证顺序，跟 wait() 的区别就是它不会等待所有的 coroutine 操作都完成以后才能做其他操作。 # asyncio_as_completed.py import asyncio async def phase(i): print(&#39;in phase {}&#39;.format(i)) await asyncio.sleep(0.5 - (0.1 * i)) print(&#39;done with phase {}&#39;.format(i)) return &#39;phase {} result&#39;.format(i) async def main(num_phases): print(&#39;starting main&#39;) phases = [ phase(i) for i in range(num_phases) ] print(&#39;waiting for phases to complete&#39;) results = [] for next_to_complete in asyncio.as_completed(phases): answer = await next_to_complete print(&#39;recevived answer {!r}&#39;.format(answer)) results.append(answer) print(&#39;results: {!r}&#39;.format(results)) return results event_loop = asyncio.get_event_loop() try: event_loop.run_until_complete(main(3)) finally: event_loop.close() 结果: $ python3.6 asyncio_as_completed.py starting main waiting for phases to complete in phase 1 in phase 2 in phase 0 done with phase 2 recevived answer &#39;phase 2 result&#39; done with phase 1 recevived answer &#39;phase 1 result&#39; done with phase 0 recevived answer &#39;phase 0 result&#39; results: [&#39;phase 2 result&#39;, &#39;phase 1 result&#39;, &#39;phase 0 result&#39;] 参考资料¶ Composing Coroutines with Control Structures — PyMOTW 3 18.5.3. Tasks and coroutines — Python 3.6.2 documentation",
         "description": "<p>本文是 <a class="reference external" href="https://pymotw.com/3/asyncio/control.html">https://pymotw.com/3/asyncio/control.html</a>
@@ -451,7 +451,7 @@ documentation</a></li>
 ",
         "mainEntityOfPage": {
             "@type": "WebPage",
-            "@id": "http://127.0.0.1:8000"
+            "@id": "https://mozillazg.com"
         }
     }
     </script>
@@ -468,16 +468,16 @@ documentation</a></li>
                 <span class="icon-bar"></span>
                 <span class="icon-bar"></span>
             </button>
-            <a href="http://127.0.0.1:8000/" class="navbar-brand">
+            <a href="https://mozillazg.com/" class="navbar-brand">
 Huang Huang 的博客            </a>
         </div>
         <div class="collapse navbar-collapse navbar-ex1-collapse">
             <ul class="nav navbar-nav">
-                    <li><a href="http://127.0.0.1:8000/feeds/all.atom.xml">Feed</a></li>
+                    <li><a href="https://mozillazg.com/feeds/all.atom.xml">Feed</a></li>
                     <li><a href="/2014/10/pages/about-me.html">About</a></li>
             </ul>
             <ul class="nav navbar-nav navbar-right">
-              <li><a href="http://127.0.0.1:8000/archives.html"><i class="fa fa-th-list"></i><span class="icon-label">Archives</span></a></li>
+              <li><a href="https://mozillazg.com/archives.html"><i class="fa fa-th-list"></i><span class="icon-label">Archives</span></a></li>
             </ul>
         </div>
         <!-- /.navbar-collapse -->
@@ -492,7 +492,7 @@ Huang Huang 的博客            </a>
         <article>
             <header class="text-center">
                 <h1>
-                    <a href="http://127.0.0.1:8000/2017/08/python-asyncio-note-control-Coroutines.html"
+                    <a href="https://mozillazg.com/2017/08/python-asyncio-note-control-Coroutines.html"
                        rel="bookmark"
                        title="Permalink to asyncio 学习笔记：控制组合式 Coroutines">
                         asyncio 学习笔记：控制组合式 Coroutines
@@ -507,11 +507,11 @@ Huang Huang 的博客            </a>
             <div class="entry-content">
                 <div class="well-sm article-info">
 <footer class="post-info">
-        <a href="http://127.0.0.1:8000/category/python.html">python</a>
+        <a href="https://mozillazg.com/category/python.html">python</a>
 
 
 <span class="label label-default hide">Tags</span>
-	<a href="http://127.0.0.1:8000/tag/asyncio.html">asyncio</a>
+	<a href="https://mozillazg.com/tag/asyncio.html">asyncio</a>
     
 </footer><!-- /.post-info -->                </div>
                 <div class="js-toc"></div>
@@ -885,11 +885,11 @@ documentation</a></li>
 <section class="well" id="related-posts">
     <p>Related Posts:</p>
     <ul>
-        <li><a href="http://127.0.0.1:8000/2017/08/python-asyncio-note-synchronization-primitives.html">asyncio 学习笔记：同步原语</a></li>
-        <li><a href="http://127.0.0.1:8000/2017/08/python-asyncio-note-io-protocol.html">asyncio 学习笔记：使用抽象类 Protocol 实现异步 I/O</a></li>
-        <li><a href="http://127.0.0.1:8000/2017/08/python-asyncio-note-task-usage.html">asyncio 学习笔记：并发执行 Task</a></li>
-        <li><a href="http://127.0.0.1:8000/2017/08/python-asyncio-note-coroutine-schedule.html">asyncio 学习笔记：调用定时函数</a></li>
-        <li><a href="http://127.0.0.1:8000/2017/08/python-asyncio-note-coroutines-base-usage.html">asyncio 学习笔记：基本用法</a></li>
+        <li><a href="https://mozillazg.com/2017/08/python-asyncio-note-synchronization-primitives.html">asyncio 学习笔记：同步原语</a></li>
+        <li><a href="https://mozillazg.com/2017/08/python-asyncio-note-io-protocol.html">asyncio 学习笔记：使用抽象类 Protocol 实现异步 I/O</a></li>
+        <li><a href="https://mozillazg.com/2017/08/python-asyncio-note-coroutines-base-usage.html">asyncio 学习笔记：基本用法</a></li>
+        <li><a href="https://mozillazg.com/2017/08/python-asyncio-note-coroutine-schedule.html">asyncio 学习笔记：调用定时函数</a></li>
+        <li><a href="https://mozillazg.com/2017/08/python-asyncio-note-future-usage.html">asyncio 学习笔记：产生异步结果</a></li>
     </ul>
 </section>
     <hr/>
@@ -902,7 +902,7 @@ documentation</a></li>
             var disqus_shortname = 'my-github-blog'; // required: replace example with your forum shortname
 
                     var disqus_identifier = 'python-asyncio-note-control-Coroutines';
-                var disqus_url = 'http://127.0.0.1:8000/2017/08/python-asyncio-note-control-Coroutines.html';
+                var disqus_url = 'https://mozillazg.com/2017/08/python-asyncio-note-control-Coroutines.html';
 
             var disqus_config = function () {
                 this.language = "zh-hans";
@@ -937,7 +937,7 @@ documentation</a></li>
             <a href="http://docs.getpelican.com/" target="_blank">Pelican</a>,
             <a href="http://getbootstrap.com" target="_blank">Bootstrap</a>
             &middot; <a href="/privacy-policy.html" target="_blank">Privacy</a>              <p><small>  <a rel="license" href="http://creativecommons.org/licenses/by-sa/4.0/"><img alt="Creative Commons License" style="border-width:0" src="/static/images/by-sa-80x15.png" /></a>
-    &quot;<span xmlns:dct="http://purl.org/dc/terms/" property="dct:title">Huang Huang 的博客</span>&quot; by <a xmlns:cc="http://creativecommons.org/ns#" href="http://127.0.0.1:8000" property="cc:attributionName" rel="cc:attributionURL">mozillazg</a> is
+    &quot;<span xmlns:dct="http://purl.org/dc/terms/" property="dct:title">Huang Huang 的博客</span>&quot; by <a xmlns:cc="http://creativecommons.org/ns#" href="https://mozillazg.com" property="cc:attributionName" rel="cc:attributionURL">mozillazg</a> is
   licensed under a <a rel="license" href="http://creativecommons.org/licenses/by-sa/4.0/">Creative Commons Attribution-ShareAlike 4.0 International License</a>, except where indicated otherwise.
 </small></p>
          </div>

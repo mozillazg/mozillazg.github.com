@@ -11,9 +11,9 @@
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/social-share.js@1.0.16/dist/css/share.min.css">
 
 
-    <link href="http://127.0.0.1:8000/favicon.ico" rel="icon">
+    <link href="https://mozillazg.com/favicon.ico" rel="icon">
 
-<link rel="canonical" href="http://127.0.0.1:8000/2021/04/ebpf-gobpf-store-and-read-data-use-perf-event.html">
+<link rel="canonical" href="https://mozillazg.com/2021/04/ebpf-gobpf-store-and-read-data-use-perf-event.html">
 
         <meta name="author" content="mozillazg" />
         <meta name="keywords" content="eBPF,gobpf,Go,gobpf 使用示例" />
@@ -37,7 +37,7 @@
         <meta property="og:site_name" content="Huang Huang 的博客" />
         <meta property="og:type" content="article"/>
         <meta property="og:title" content="gobpf 使用示例：使用 perf event 保存数据"/>
-        <meta property="og:url" content="http://127.0.0.1:8000/2021/04/ebpf-gobpf-store-and-read-data-use-perf-event.html"/>
+        <meta property="og:url" content="https://mozillazg.com/2021/04/ebpf-gobpf-store-and-read-data-use-perf-event.html"/>
         <meta property="og:description" content="前言¶ 前面 hello 示例中我们是通过 sudo cat  /sys/kernel/debug/tracing/trace_pipe 的方式来查看数据的， 本文简单讲述如何通过 perf event 来保存 eBPF 数据然后再在 Go 程序中读取 perf event 中保存的数据。 使用 perf event 保存数据¶ 还是前面的那个 hello.c ，不过这次会使用 perf event 来保存 open 的文件名称 eBPF C 代码如下（hello.c）: #include &lt;linux/bpf.h&gt; #include &lt;linux/ptrace.h&gt; #include &#34;include/bpf_helpers.h&#34; struct bpf_map_def SEC(&#34;maps/open_event&#34;) open_event = { .type = BPF_MAP_TYPE_PERF_EVENT_ARRAY, .key_size = sizeof(int), .value_size = sizeof(__u32), .max_entries = 128, .pinning = 0, .namespace = &#34;&#34;, }; struct data_t { __u32 pid; char file_name[256]; }; SEC(&#34;kprobe/do_sys_open&#34;) int kprobe__do_sys_open(struct pt_regs *ctx) { struct data_t data = {}; data.pid = bpf_get_current_pid_tgid() &gt;&gt; 32; __u32 cpu = bpf_get_smp_processor_id(); bpf_probe_read(&amp;data.file_name, sizeof(data.file_name), PT_REGS_PARM2(ctx)); bpf_perf_event_output(ctx, &amp;open_event, cpu, &amp;data, sizeof(data)); return 0; } char _license[] SEC(&#34;license&#34;) = &#34;GPL&#34;; 简单来说就是定义一个 type 为 BPF_MAP_TYPE_PERF_EVENT_ARRAY 的 bpf_map_def 变量 open_event， 然后通过 bpf_perf_event_output 函数将数据写入到定义的 open_event 中。 在 Go 程序中读取 perf event 数据¶ package main import ( &#34;fmt&#34; &#34;os&#34; &#34;unsafe&#34; &#34;github.com/iovisor/gobpf/elf&#34; ) /* #include &lt;linux/types.h&gt; struct data_t { __u32 pid; char file_name[256]; }; */ import &#34;C&#34; type Event struct { Pid uint32 FileName string } func main() { mod := elf.NewModule(&#34;hello.o&#34;) err := mod.Load(nil) if err != nil { panic(err) } defer mod.Close() err = mod.EnableKprobes(128) if err != nil { panic(err) } channel := make(chan []byte) lost := make(chan uint64) perfMap, err := elf.InitPerfMap(mod, &#34;open_event&#34;, channel, lost) if err != nil { fmt.Fprintf(os.Stderr, &#34;Failed to init perf map: %s\n&#34;, err) os.Exit(1) } go func() { for { l := &lt;-lost fmt.Println(l) } }() perfMap.PollStart() defer perfMap.PollStop() for { var event Event data := &lt;-channel event = openEventToGo(&amp;data) fmt.Printf(&#34;pid %d open file %s\n&#34;, event.Pid, event.FileName) } } func openEventToGo(data *[]byte) (event Event) { eventC := (*C.struct_data_t)(unsafe.Pointer(&amp;(*data)[0])) event.Pid = uint32(eventC.pid) event.FileName = C.GoString(&amp;eventC.file_name[0]) return } 通过 elf.InitPerfMap 指定要读取的 perf event map 的变量的名称 （跟 eBPF 程序中定义的 open_event 相对应），然后使用方法的 channel 读取数据。 同时会使用 cgo 来将 c 中的数据类型转换为 go 中定义的结构体 编译并运行: $ make $ make run ... pid 364 open file /proc/493/status pid 364 open file /proc/493/status pid 364 open file /proc/493/comm ... 可以看到已经可以在 go 程序中读取到 eBPF 程序保存的数据了。 P.S. 本文的所有代码在 Github 上都有一份完整版： https://github.com/mozillazg/gobpf-examples/tree/master/2-perf-event 参考资料¶ iovisor/gobpf: Go bindings for creating BPF programs. kinvolk/bpf-exercises BPF In Depth: Communicating with Userspace | Oracle Linux Blog"/>
         <meta property="article:published_time" content="2021-04-17" />
             <meta property="article:section" content="ebpf" />
@@ -47,32 +47,32 @@
             <meta property="article:tag" content="gobpf 使用示例" />
             <meta property="article:author" content="mozillazg" />
             <meta property="og:image"
-                  content="http://127.0.0.1:8000/static/avatar.jpeg"/>
+                  content="https://mozillazg.com/static/avatar.jpeg"/>
 
 
     <meta name="twitter:card" content="summary">
         <meta name="twitter:site" content="@mozillazg">
         <meta name="twitter:creator" content="@mozillazg">
-    <meta name="twitter:domain" content="http://127.0.0.1:8000">
+    <meta name="twitter:domain" content="https://mozillazg.com">
             <meta property="twitter:image"
-                  content="http://127.0.0.1:8000/static/avatar.jpeg"/>
+                  content="https://mozillazg.com/static/avatar.jpeg"/>
 
     <!-- Bootstrap -->
         <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@3.3.4/dist/css/bootstrap.min.css" type="text/css"/>
     <link href="https://cdn.jsdelivr.net/npm/font-awesome@4.3.0/css/font-awesome.min.css" rel="stylesheet">
 
     <link href="https://cdn.jsdelivr.net/npm/pygments-css@1.0.0/github.css" rel="stylesheet">
-    <link rel="stylesheet" href="http://127.0.0.1:8000/theme/css/style.css" type="text/css"/>
-            <link href="http://127.0.0.1:8000/static/custom.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://mozillazg.com/theme/css/style.css" type="text/css"/>
+            <link href="https://mozillazg.com/static/custom.css" rel="stylesheet">
 
-        <link href="http://127.0.0.1:8000/feeds/all.atom.xml" type="application/atom+xml" rel="alternate"
+        <link href="https://mozillazg.com/feeds/all.atom.xml" type="application/atom+xml" rel="alternate"
               title="Huang Huang 的博客 ATOM Feed"/>
 
-        <link href="http://127.0.0.1:8000/feeds/all.rss.xml" type="application/rss+xml" rel="alternate"
+        <link href="https://mozillazg.com/feeds/all.rss.xml" type="application/rss+xml" rel="alternate"
               title="Huang Huang 的博客 RSS Feed"/>
 
 
-        <link href="http://127.0.0.1:8000/feeds/ebpf.atom.xml" type="application/atom+xml" rel="alternate"
+        <link href="https://mozillazg.com/feeds/ebpf.atom.xml" type="application/atom+xml" rel="alternate"
               title="Huang Huang 的博客 ebpf ATOM Feed"/>
 
 
@@ -83,20 +83,20 @@
         "publisher": {
             "@type": "Person",
             "name": "mozillazg",
-            "logo": "http://127.0.0.1:8000/static/avatar.jpeg"
+            "logo": "https://mozillazg.com/static/avatar.jpeg"
         },
         "author": {
             "@type": "Person",
             "name": "mozillazg",
-            "image": "http://127.0.0.1:8000/static/avatar.jpeg",
-            "url": "http://127.0.0.1:8000",
+            "image": "https://mozillazg.com/static/avatar.jpeg",
+            "url": "https://mozillazg.com",
             "sameAs": []
         },
         // "headline": "",
-        "url": "http://127.0.0.1:8000/2021/04/ebpf-gobpf-store-and-read-data-use-perf-event.html",
+        "url": "https://mozillazg.com/2021/04/ebpf-gobpf-store-and-read-data-use-perf-event.html",
         "datePublished": "2021-04-17",
         // "dateModified": "",
-        "image": "http://127.0.0.1:8000/static/avatar.jpeg",
+        "image": "https://mozillazg.com/static/avatar.jpeg",
         "keywords": "eBPF, gobpf, Go, gobpf 使用示例",
         // "description": "前言¶ 前面 hello 示例中我们是通过 sudo cat  /sys/kernel/debug/tracing/trace_pipe 的方式来查看数据的， 本文简单讲述如何通过 perf event 来保存 eBPF 数据然后再在 Go 程序中读取 perf event 中保存的数据。 使用 perf event 保存数据¶ 还是前面的那个 hello.c ，不过这次会使用 perf event 来保存 open 的文件名称 eBPF C 代码如下（hello.c）: #include &lt;linux/bpf.h&gt; #include &lt;linux/ptrace.h&gt; #include &#34;include/bpf_helpers.h&#34; struct bpf_map_def SEC(&#34;maps/open_event&#34;) open_event = { .type = BPF_MAP_TYPE_PERF_EVENT_ARRAY, .key_size = sizeof(int), .value_size = sizeof(__u32), .max_entries = 128, .pinning = 0, .namespace = &#34;&#34;, }; struct data_t { __u32 pid; char file_name[256]; }; SEC(&#34;kprobe/do_sys_open&#34;) int kprobe__do_sys_open(struct pt_regs *ctx) { struct data_t data = {}; data.pid = bpf_get_current_pid_tgid() &gt;&gt; 32; __u32 cpu = bpf_get_smp_processor_id(); bpf_probe_read(&amp;data.file_name, sizeof(data.file_name), PT_REGS_PARM2(ctx)); bpf_perf_event_output(ctx, &amp;open_event, cpu, &amp;data, sizeof(data)); return 0; } char _license[] SEC(&#34;license&#34;) = &#34;GPL&#34;; 简单来说就是定义一个 type 为 BPF_MAP_TYPE_PERF_EVENT_ARRAY 的 bpf_map_def 变量 open_event， 然后通过 bpf_perf_event_output 函数将数据写入到定义的 open_event 中。 在 Go 程序中读取 perf event 数据¶ package main import ( &#34;fmt&#34; &#34;os&#34; &#34;unsafe&#34; &#34;github.com/iovisor/gobpf/elf&#34; ) /* #include &lt;linux/types.h&gt; struct data_t { __u32 pid; char file_name[256]; }; */ import &#34;C&#34; type Event struct { Pid uint32 FileName string } func main() { mod := elf.NewModule(&#34;hello.o&#34;) err := mod.Load(nil) if err != nil { panic(err) } defer mod.Close() err = mod.EnableKprobes(128) if err != nil { panic(err) } channel := make(chan []byte) lost := make(chan uint64) perfMap, err := elf.InitPerfMap(mod, &#34;open_event&#34;, channel, lost) if err != nil { fmt.Fprintf(os.Stderr, &#34;Failed to init perf map: %s\n&#34;, err) os.Exit(1) } go func() { for { l := &lt;-lost fmt.Println(l) } }() perfMap.PollStart() defer perfMap.PollStop() for { var event Event data := &lt;-channel event = openEventToGo(&amp;data) fmt.Printf(&#34;pid %d open file %s\n&#34;, event.Pid, event.FileName) } } func openEventToGo(data *[]byte) (event Event) { eventC := (*C.struct_data_t)(unsafe.Pointer(&amp;(*data)[0])) event.Pid = uint32(eventC.pid) event.FileName = C.GoString(&amp;eventC.file_name[0]) return } 通过 elf.InitPerfMap 指定要读取的 perf event map 的变量的名称 （跟 eBPF 程序中定义的 open_event 相对应），然后使用方法的 channel 读取数据。 同时会使用 cgo 来将 c 中的数据类型转换为 go 中定义的结构体 编译并运行: $ make $ make run ... pid 364 open file /proc/493/status pid 364 open file /proc/493/status pid 364 open file /proc/493/comm ... 可以看到已经可以在 go 程序中读取到 eBPF 程序保存的数据了。 P.S. 本文的所有代码在 Github 上都有一份完整版： https://github.com/mozillazg/gobpf-examples/tree/master/2-perf-event 参考资料¶ iovisor/gobpf: Go bindings for creating BPF programs. kinvolk/bpf-exercises BPF In Depth: Communicating with Userspace | Oracle Linux Blog",
         "description": "<div class="section" id="id1">
@@ -244,7 +244,7 @@ pid 364 open file /proc/493/comm
 ",
         "mainEntityOfPage": {
             "@type": "WebPage",
-            "@id": "http://127.0.0.1:8000"
+            "@id": "https://mozillazg.com"
         }
     }
     </script>
@@ -261,16 +261,16 @@ pid 364 open file /proc/493/comm
                 <span class="icon-bar"></span>
                 <span class="icon-bar"></span>
             </button>
-            <a href="http://127.0.0.1:8000/" class="navbar-brand">
+            <a href="https://mozillazg.com/" class="navbar-brand">
 Huang Huang 的博客            </a>
         </div>
         <div class="collapse navbar-collapse navbar-ex1-collapse">
             <ul class="nav navbar-nav">
-                    <li><a href="http://127.0.0.1:8000/feeds/all.atom.xml">Feed</a></li>
+                    <li><a href="https://mozillazg.com/feeds/all.atom.xml">Feed</a></li>
                     <li><a href="/2014/10/pages/about-me.html">About</a></li>
             </ul>
             <ul class="nav navbar-nav navbar-right">
-              <li><a href="http://127.0.0.1:8000/archives.html"><i class="fa fa-th-list"></i><span class="icon-label">Archives</span></a></li>
+              <li><a href="https://mozillazg.com/archives.html"><i class="fa fa-th-list"></i><span class="icon-label">Archives</span></a></li>
             </ul>
         </div>
         <!-- /.navbar-collapse -->
@@ -285,7 +285,7 @@ Huang Huang 的博客            </a>
         <article>
             <header class="text-center">
                 <h1>
-                    <a href="http://127.0.0.1:8000/2021/04/ebpf-gobpf-store-and-read-data-use-perf-event.html"
+                    <a href="https://mozillazg.com/2021/04/ebpf-gobpf-store-and-read-data-use-perf-event.html"
                        rel="bookmark"
                        title="Permalink to gobpf 使用示例：使用 perf event 保存数据">
                         gobpf 使用示例：使用 perf event 保存数据
@@ -300,17 +300,17 @@ Huang Huang 的博客            </a>
             <div class="entry-content">
                 <div class="well-sm article-info">
 <footer class="post-info">
-        <a href="http://127.0.0.1:8000/category/ebpf.html">ebpf</a>
+        <a href="https://mozillazg.com/category/ebpf.html">ebpf</a>
 
 
 <span class="label label-default hide">Tags</span>
-	<a href="http://127.0.0.1:8000/tag/ebpf.html">eBPF</a>
+	<a href="https://mozillazg.com/tag/ebpf.html">eBPF</a>
         /
-	<a href="http://127.0.0.1:8000/tag/gobpf.html">gobpf</a>
+	<a href="https://mozillazg.com/tag/gobpf.html">gobpf</a>
         /
-	<a href="http://127.0.0.1:8000/tag/go.html">Go</a>
+	<a href="https://mozillazg.com/tag/go.html">Go</a>
         /
-	<a href="http://127.0.0.1:8000/tag/gobpf-shi-yong-shi-li.html">gobpf 使用示例</a>
+	<a href="https://mozillazg.com/tag/gobpf-shi-yong-shi-li.html">gobpf 使用示例</a>
     
 </footer><!-- /.post-info -->                </div>
                 <div class="js-toc"></div>
@@ -474,9 +474,9 @@ pid 364 open file /proc/493/comm
 <section class="well" id="related-posts">
     <p>Related Posts:</p>
     <ul>
-        <li><a href="http://127.0.0.1:8000/2021/05/ebpf-gobpf-how-to-find-system-call-kernel-function-for-kprobe-elf-section.html">gobpf 使用示例：如何找到一个系统调用对应的可用于 kprobe SEC 的内核函数</a></li>
-        <li><a href="http://127.0.0.1:8000/2021/04/ebpf-gobpf-dev-env-and-hello-first-program.html">gobpf 使用示例：开发环境及 Hello World</a></li>
-        <li><a href="http://127.0.0.1:8000/2021/05/ebpf-gobpf-get-function-argument-values-from-pt_regs.html">gobpf 使用示例：从 pt_regs 中获取内核函数的参数的值</a></li>
+        <li><a href="https://mozillazg.com/2021/05/ebpf-gobpf-how-to-find-system-call-kernel-function-for-kprobe-elf-section.html">gobpf 使用示例：如何找到一个系统调用对应的可用于 kprobe SEC 的内核函数</a></li>
+        <li><a href="https://mozillazg.com/2021/05/ebpf-gobpf-get-function-argument-values-from-pt_regs.html">gobpf 使用示例：从 pt_regs 中获取内核函数的参数的值</a></li>
+        <li><a href="https://mozillazg.com/2021/04/ebpf-gobpf-dev-env-and-hello-first-program.html">gobpf 使用示例：开发环境及 Hello World</a></li>
     </ul>
 </section>
     <hr/>
@@ -489,7 +489,7 @@ pid 364 open file /proc/493/comm
             var disqus_shortname = 'my-github-blog'; // required: replace example with your forum shortname
 
                     var disqus_identifier = 'ebpf-gobpf-store-and-read-data-use-perf-event';
-                var disqus_url = 'http://127.0.0.1:8000/2021/04/ebpf-gobpf-store-and-read-data-use-perf-event.html';
+                var disqus_url = 'https://mozillazg.com/2021/04/ebpf-gobpf-store-and-read-data-use-perf-event.html';
 
             var disqus_config = function () {
                 this.language = "zh-hans";
@@ -524,7 +524,7 @@ pid 364 open file /proc/493/comm
             <a href="http://docs.getpelican.com/" target="_blank">Pelican</a>,
             <a href="http://getbootstrap.com" target="_blank">Bootstrap</a>
             &middot; <a href="/privacy-policy.html" target="_blank">Privacy</a>              <p><small>  <a rel="license" href="http://creativecommons.org/licenses/by-sa/4.0/"><img alt="Creative Commons License" style="border-width:0" src="/static/images/by-sa-80x15.png" /></a>
-    &quot;<span xmlns:dct="http://purl.org/dc/terms/" property="dct:title">Huang Huang 的博客</span>&quot; by <a xmlns:cc="http://creativecommons.org/ns#" href="http://127.0.0.1:8000" property="cc:attributionName" rel="cc:attributionURL">mozillazg</a> is
+    &quot;<span xmlns:dct="http://purl.org/dc/terms/" property="dct:title">Huang Huang 的博客</span>&quot; by <a xmlns:cc="http://creativecommons.org/ns#" href="https://mozillazg.com" property="cc:attributionName" rel="cc:attributionURL">mozillazg</a> is
   licensed under a <a rel="license" href="http://creativecommons.org/licenses/by-sa/4.0/">Creative Commons Attribution-ShareAlike 4.0 International License</a>, except where indicated otherwise.
 </small></p>
          </div>

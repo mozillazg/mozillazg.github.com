@@ -11,9 +11,9 @@
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/social-share.js@1.0.16/dist/css/share.min.css">
 
 
-    <link href="http://127.0.0.1:8000/favicon.ico" rel="icon">
+    <link href="https://mozillazg.com/favicon.ico" rel="icon">
 
-<link rel="canonical" href="http://127.0.0.1:8000/2017/10/linux-a-way-to-fix-haproxy-network-connection-timeout-ping-sendmsg-Invalid-argument-socket-errno-110-connection-timed-out.html">
+<link rel="canonical" href="https://mozillazg.com/2017/10/linux-a-way-to-fix-haproxy-network-connection-timeout-ping-sendmsg-Invalid-argument-socket-errno-110-connection-timed-out.html">
 
         <meta name="author" content="mozillazg" />
         <meta name="keywords" content="ping,sysctl,HAProxy,ARP" />
@@ -37,7 +37,7 @@
         <meta property="og:site_name" content="Huang Huang 的博客" />
         <meta property="og:type" content="article"/>
         <meta property="og:title" content="一种解决 HAProxy 节点网络异常（sendmsg: Invalid argument, Connection timed out ）的办法"/>
-        <meta property="og:url" content="http://127.0.0.1:8000/2017/10/linux-a-way-to-fix-haproxy-network-connection-timeout-ping-sendmsg-Invalid-argument-socket-errno-110-connection-timed-out.html"/>
+        <meta property="og:url" content="https://mozillazg.com/2017/10/linux-a-way-to-fix-haproxy-network-connection-timeout-ping-sendmsg-Invalid-argument-socket-errno-110-connection-timed-out.html"/>
         <meta property="og:description" content="问题¶ 之前连接一个 HAProxy 前端服务时总是时不时出现 [Errno 110] Connection timed out ，并且本地 ping 服务器丢包率特别高。 到服务器上看了以后，发现 ping 127.0.0.1 的丢包率也特别高，而且 ping 命令还出现 ping: sendmsg: Invalid argument 错误: 64 bytes from 127.0.0.1: icmp_seq=150 ttl=64 time=0.050 ms 64 bytes from 127.0.0.1: icmp_seq=151 ttl=64 time=0.062 ms ping: sendmsg: Invalid argument ping: sendmsg: Invalid argument ping: sendmsg: Invalid argument ping: sendmsg: Invalid argument ping: sendmsg: Invalid argument ping: sendmsg: Invalid argument 64 bytes from 127.0.0.1: icmp_seq=158 ttl=64 time=0.962 ms 64 bytes from 127.0.0.1: icmp_seq=159 ttl=64 time=0.033 ms 查看 dmesg -H 有很多类似 net_ratelimit: 478 callbacks suppressed 的记录: ``` [ +6.555833] net_ratelimit: 478 callbacks suppressed [Oct19 11:08] net_ratelimit: 57 callbacks suppressed ``` 需要提一下的就是，这个 HAProxy 服务在一个非常大的内网(large subnets)里， 内网里很多机器都会去连接这个服务。 解决方法¶ 修改了一下 sysctl, 加大了 ARP cache: $ sudo sysctl -w net.ipv4.neigh.default.gc_thresh1=1024 $ sudo sysctl -w net.ipv4.neigh.default.gc_thresh2=2048 $ sudo sysctl -w net.ipv4.neigh.default.gc_thresh3=4096 $ sudo sysctl -p $ sudo sysctl -a |grep net.ipv4.neigh.default.gc_thresh 为什么要修改为上面的值？¶ 先来看看这几个配置项的含义(摘自 https://www.kernel.org/doc/Documentation/networking/ip-sysctl.txt): neigh/default/gc_thresh1 - INTEGER Minimum number of entries to keep. Garbage collector will not purge entries if there are fewer than this number. Default: 128 neigh/default/gc_thresh2 - INTEGER Threshold when garbage collector becomes more aggressive about purging entries. Entries older than 5 seconds will be cleared when over this number. Default: 512 neigh/default/gc_thresh3 - INTEGER Maximum number of neighbor entries allowed. Increase this when using large numbers of interfaces and when communicating with large numbers of directly-connected peers. Default: 1024 ARP 相关的 简单解释就是 (详见 arp(7)): net.ipv4.neigh.default.gc_thresh1: min IPV4 entries to keep in ARP cache - garbage collection never runs if this many or less entries are in cache net.ipv4.neigh.default.gc_thresh2: IPV4 entries allowed in ARP cache before garbage collection will be scheduled in 5 seconds net.ipv4.neigh.default.gc_thresh3: maximum IPV4 entries allowed in ARP cache; garbage collection runs when this many entries reached 然后我们通过 arp -an|wc -l 查看当前记录的 ARP 记录的数量: $ arp -an|wc -l 1108 或者通过 ip -4 neigh show nud all | wc -l 查看当前 IPv4 的 ARP 记录的数量: $ ip -4 neigh show nud all | wc -l 1112 可以看到上面的值比 net.ipv4.neigh.default.gc_thresh3 的默认值 1024 要大， &lt;del&gt;*此时就会进行 gc 操作，如果 gc 操作持续时间太久就会导致新的 ARP 记录无法被创建，进而导致 ARP 通信无法正常完成，TCP 之类的操作更加就无法完成了(有空的时候再仔细求证这个理解...)* ，&lt;/del&gt; 所以我们要修改为更大的值。 如果上面的值特别大，可以考虑配置再大一点的值，比如: net.ipv4.neigh.default.gc_thresh1 = 8192 net.ipv4.neigh.default.gc_thresh2 = 32768 net.ipv4.neigh.default.gc_thresh3 = 65536 注：上面修改的都是 IPv4 相关的配置，如果有用到 IPv6 网络的话可以把对应的配置项也修改一下。 注：如果机器性能特别好或者比较介意 gc，可以考虑把值调到非常非常大，然后禁用 gc: net.ipv4.neigh.default.gc_interval, net.ipv4.neigh.default.gc_stale_time 参考资料¶ Bug 1316981 – Arp table kernel tuning necessary for large neutron environments Bug 1498213 – Increase ARP cache size on loadbalancers Chapter 4. Setting up a Router - Red Hat Customer Portal ARP cache: What is it and how can it help you? - Petri kernel.org/doc/Documentation/networking/ip-sysctl.txt Welcome to High Performance Computing (HPC) Central : Linux System Tuning Recommendations router - What happens when the ARP cache overflows? - Network Engineering Stack Exchange PacketFence: Solving neighbour table overflow errors (large subnets) Kernel: Neighbour table overflow | Mark&#39;s Blog arp(7) - Linux manual page ARP and ARP Cache - 35629 - The Cisco Learning Network The TCP/IP Guide - ARP Caching Address Resolution Protocol - Wikipedia"/>
         <meta property="article:published_time" content="2017-10-21" />
             <meta property="article:section" content="linux" />
@@ -47,32 +47,32 @@
             <meta property="article:tag" content="ARP" />
             <meta property="article:author" content="mozillazg" />
             <meta property="og:image"
-                  content="http://127.0.0.1:8000/static/avatar.jpeg"/>
+                  content="https://mozillazg.com/static/avatar.jpeg"/>
 
 
     <meta name="twitter:card" content="summary">
         <meta name="twitter:site" content="@mozillazg">
         <meta name="twitter:creator" content="@mozillazg">
-    <meta name="twitter:domain" content="http://127.0.0.1:8000">
+    <meta name="twitter:domain" content="https://mozillazg.com">
             <meta property="twitter:image"
-                  content="http://127.0.0.1:8000/static/avatar.jpeg"/>
+                  content="https://mozillazg.com/static/avatar.jpeg"/>
 
     <!-- Bootstrap -->
         <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@3.3.4/dist/css/bootstrap.min.css" type="text/css"/>
     <link href="https://cdn.jsdelivr.net/npm/font-awesome@4.3.0/css/font-awesome.min.css" rel="stylesheet">
 
     <link href="https://cdn.jsdelivr.net/npm/pygments-css@1.0.0/github.css" rel="stylesheet">
-    <link rel="stylesheet" href="http://127.0.0.1:8000/theme/css/style.css" type="text/css"/>
-            <link href="http://127.0.0.1:8000/static/custom.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://mozillazg.com/theme/css/style.css" type="text/css"/>
+            <link href="https://mozillazg.com/static/custom.css" rel="stylesheet">
 
-        <link href="http://127.0.0.1:8000/feeds/all.atom.xml" type="application/atom+xml" rel="alternate"
+        <link href="https://mozillazg.com/feeds/all.atom.xml" type="application/atom+xml" rel="alternate"
               title="Huang Huang 的博客 ATOM Feed"/>
 
-        <link href="http://127.0.0.1:8000/feeds/all.rss.xml" type="application/rss+xml" rel="alternate"
+        <link href="https://mozillazg.com/feeds/all.rss.xml" type="application/rss+xml" rel="alternate"
               title="Huang Huang 的博客 RSS Feed"/>
 
 
-        <link href="http://127.0.0.1:8000/feeds/linux.atom.xml" type="application/atom+xml" rel="alternate"
+        <link href="https://mozillazg.com/feeds/linux.atom.xml" type="application/atom+xml" rel="alternate"
               title="Huang Huang 的博客 linux ATOM Feed"/>
 
 
@@ -83,20 +83,20 @@
         "publisher": {
             "@type": "Person",
             "name": "mozillazg",
-            "logo": "http://127.0.0.1:8000/static/avatar.jpeg"
+            "logo": "https://mozillazg.com/static/avatar.jpeg"
         },
         "author": {
             "@type": "Person",
             "name": "mozillazg",
-            "image": "http://127.0.0.1:8000/static/avatar.jpeg",
-            "url": "http://127.0.0.1:8000",
+            "image": "https://mozillazg.com/static/avatar.jpeg",
+            "url": "https://mozillazg.com",
             "sameAs": []
         },
         // "headline": "",
-        "url": "http://127.0.0.1:8000/2017/10/linux-a-way-to-fix-haproxy-network-connection-timeout-ping-sendmsg-Invalid-argument-socket-errno-110-connection-timed-out.html",
+        "url": "https://mozillazg.com/2017/10/linux-a-way-to-fix-haproxy-network-connection-timeout-ping-sendmsg-Invalid-argument-socket-errno-110-connection-timed-out.html",
         "datePublished": "2017-10-21",
         // "dateModified": "",
-        "image": "http://127.0.0.1:8000/static/avatar.jpeg",
+        "image": "https://mozillazg.com/static/avatar.jpeg",
         "keywords": "ping, sysctl, HAProxy, ARP",
         // "description": "问题¶ 之前连接一个 HAProxy 前端服务时总是时不时出现 [Errno 110] Connection timed out ，并且本地 ping 服务器丢包率特别高。 到服务器上看了以后，发现 ping 127.0.0.1 的丢包率也特别高，而且 ping 命令还出现 ping: sendmsg: Invalid argument 错误: 64 bytes from 127.0.0.1: icmp_seq=150 ttl=64 time=0.050 ms 64 bytes from 127.0.0.1: icmp_seq=151 ttl=64 time=0.062 ms ping: sendmsg: Invalid argument ping: sendmsg: Invalid argument ping: sendmsg: Invalid argument ping: sendmsg: Invalid argument ping: sendmsg: Invalid argument ping: sendmsg: Invalid argument 64 bytes from 127.0.0.1: icmp_seq=158 ttl=64 time=0.962 ms 64 bytes from 127.0.0.1: icmp_seq=159 ttl=64 time=0.033 ms 查看 dmesg -H 有很多类似 net_ratelimit: 478 callbacks suppressed 的记录: ``` [ +6.555833] net_ratelimit: 478 callbacks suppressed [Oct19 11:08] net_ratelimit: 57 callbacks suppressed ``` 需要提一下的就是，这个 HAProxy 服务在一个非常大的内网(large subnets)里， 内网里很多机器都会去连接这个服务。 解决方法¶ 修改了一下 sysctl, 加大了 ARP cache: $ sudo sysctl -w net.ipv4.neigh.default.gc_thresh1=1024 $ sudo sysctl -w net.ipv4.neigh.default.gc_thresh2=2048 $ sudo sysctl -w net.ipv4.neigh.default.gc_thresh3=4096 $ sudo sysctl -p $ sudo sysctl -a |grep net.ipv4.neigh.default.gc_thresh 为什么要修改为上面的值？¶ 先来看看这几个配置项的含义(摘自 https://www.kernel.org/doc/Documentation/networking/ip-sysctl.txt): neigh/default/gc_thresh1 - INTEGER Minimum number of entries to keep. Garbage collector will not purge entries if there are fewer than this number. Default: 128 neigh/default/gc_thresh2 - INTEGER Threshold when garbage collector becomes more aggressive about purging entries. Entries older than 5 seconds will be cleared when over this number. Default: 512 neigh/default/gc_thresh3 - INTEGER Maximum number of neighbor entries allowed. Increase this when using large numbers of interfaces and when communicating with large numbers of directly-connected peers. Default: 1024 ARP 相关的 简单解释就是 (详见 arp(7)): net.ipv4.neigh.default.gc_thresh1: min IPV4 entries to keep in ARP cache - garbage collection never runs if this many or less entries are in cache net.ipv4.neigh.default.gc_thresh2: IPV4 entries allowed in ARP cache before garbage collection will be scheduled in 5 seconds net.ipv4.neigh.default.gc_thresh3: maximum IPV4 entries allowed in ARP cache; garbage collection runs when this many entries reached 然后我们通过 arp -an|wc -l 查看当前记录的 ARP 记录的数量: $ arp -an|wc -l 1108 或者通过 ip -4 neigh show nud all | wc -l 查看当前 IPv4 的 ARP 记录的数量: $ ip -4 neigh show nud all | wc -l 1112 可以看到上面的值比 net.ipv4.neigh.default.gc_thresh3 的默认值 1024 要大， &lt;del&gt;*此时就会进行 gc 操作，如果 gc 操作持续时间太久就会导致新的 ARP 记录无法被创建，进而导致 ARP 通信无法正常完成，TCP 之类的操作更加就无法完成了(有空的时候再仔细求证这个理解...)* ，&lt;/del&gt; 所以我们要修改为更大的值。 如果上面的值特别大，可以考虑配置再大一点的值，比如: net.ipv4.neigh.default.gc_thresh1 = 8192 net.ipv4.neigh.default.gc_thresh2 = 32768 net.ipv4.neigh.default.gc_thresh3 = 65536 注：上面修改的都是 IPv4 相关的配置，如果有用到 IPv6 网络的话可以把对应的配置项也修改一下。 注：如果机器性能特别好或者比较介意 gc，可以考虑把值调到非常非常大，然后禁用 gc: net.ipv4.neigh.default.gc_interval, net.ipv4.neigh.default.gc_stale_time 参考资料¶ Bug 1316981 – Arp table kernel tuning necessary for large neutron environments Bug 1498213 – Increase ARP cache size on loadbalancers Chapter 4. Setting up a Router - Red Hat Customer Portal ARP cache: What is it and how can it help you? - Petri kernel.org/doc/Documentation/networking/ip-sysctl.txt Welcome to High Performance Computing (HPC) Central : Linux System Tuning Recommendations router - What happens when the ARP cache overflows? - Network Engineering Stack Exchange PacketFence: Solving neighbour table overflow errors (large subnets) Kernel: Neighbour table overflow | Mark&#39;s Blog arp(7) - Linux manual page ARP and ARP Cache - 35629 - The Cisco Learning Network The TCP/IP Guide - ARP Caching Address Resolution Protocol - Wikipedia",
         "description": "<div class="section" id="id1">
@@ -207,7 +207,7 @@ net.ipv4.neigh.default.gc_thresh3 = 65536
 ",
         "mainEntityOfPage": {
             "@type": "WebPage",
-            "@id": "http://127.0.0.1:8000"
+            "@id": "https://mozillazg.com"
         }
     }
     </script>
@@ -224,16 +224,16 @@ net.ipv4.neigh.default.gc_thresh3 = 65536
                 <span class="icon-bar"></span>
                 <span class="icon-bar"></span>
             </button>
-            <a href="http://127.0.0.1:8000/" class="navbar-brand">
+            <a href="https://mozillazg.com/" class="navbar-brand">
 Huang Huang 的博客            </a>
         </div>
         <div class="collapse navbar-collapse navbar-ex1-collapse">
             <ul class="nav navbar-nav">
-                    <li><a href="http://127.0.0.1:8000/feeds/all.atom.xml">Feed</a></li>
+                    <li><a href="https://mozillazg.com/feeds/all.atom.xml">Feed</a></li>
                     <li><a href="/2014/10/pages/about-me.html">About</a></li>
             </ul>
             <ul class="nav navbar-nav navbar-right">
-              <li><a href="http://127.0.0.1:8000/archives.html"><i class="fa fa-th-list"></i><span class="icon-label">Archives</span></a></li>
+              <li><a href="https://mozillazg.com/archives.html"><i class="fa fa-th-list"></i><span class="icon-label">Archives</span></a></li>
             </ul>
         </div>
         <!-- /.navbar-collapse -->
@@ -248,7 +248,7 @@ Huang Huang 的博客            </a>
         <article>
             <header class="text-center">
                 <h1>
-                    <a href="http://127.0.0.1:8000/2017/10/linux-a-way-to-fix-haproxy-network-connection-timeout-ping-sendmsg-Invalid-argument-socket-errno-110-connection-timed-out.html"
+                    <a href="https://mozillazg.com/2017/10/linux-a-way-to-fix-haproxy-network-connection-timeout-ping-sendmsg-Invalid-argument-socket-errno-110-connection-timed-out.html"
                        rel="bookmark"
                        title="Permalink to 一种解决 HAProxy 节点网络异常（sendmsg: Invalid argument, Connection timed out ）的办法">
                         一种解决 HAProxy 节点网络异常（sendmsg: Invalid argument, Connection timed out ）的办法
@@ -263,17 +263,17 @@ Huang Huang 的博客            </a>
             <div class="entry-content">
                 <div class="well-sm article-info">
 <footer class="post-info">
-        <a href="http://127.0.0.1:8000/category/linux.html">linux</a>
+        <a href="https://mozillazg.com/category/linux.html">linux</a>
 
 
 <span class="label label-default hide">Tags</span>
-	<a href="http://127.0.0.1:8000/tag/ping.html">ping</a>
+	<a href="https://mozillazg.com/tag/ping.html">ping</a>
         /
-	<a href="http://127.0.0.1:8000/tag/sysctl.html">sysctl</a>
+	<a href="https://mozillazg.com/tag/sysctl.html">sysctl</a>
         /
-	<a href="http://127.0.0.1:8000/tag/haproxy.html">HAProxy</a>
+	<a href="https://mozillazg.com/tag/haproxy.html">HAProxy</a>
         /
-	<a href="http://127.0.0.1:8000/tag/arp.html">ARP</a>
+	<a href="https://mozillazg.com/tag/arp.html">ARP</a>
     
 </footer><!-- /.post-info -->                </div>
                 <div class="js-toc"></div>
@@ -400,7 +400,7 @@ net.ipv4.neigh.default.gc_thresh3 = 65536
 <section class="well" id="related-posts">
     <p>Related Posts:</p>
     <ul>
-        <li><a href="http://127.0.0.1:8000/2019/05/linux-what-net.ipv4.ip_local_port_range-effect-or-mean.html">net.ipv4.ip_local_port_range 的值究竟影响了啥</a></li>
+        <li><a href="https://mozillazg.com/2019/05/linux-what-net.ipv4.ip_local_port_range-effect-or-mean.html">net.ipv4.ip_local_port_range 的值究竟影响了啥</a></li>
     </ul>
 </section>
     <hr/>
@@ -413,7 +413,7 @@ net.ipv4.neigh.default.gc_thresh3 = 65536
             var disqus_shortname = 'my-github-blog'; // required: replace example with your forum shortname
 
                     var disqus_identifier = 'linux-a-way-to-fix-haproxy-network-connection-timeout-ping-sendmsg-Invalid-argument-socket-errno-110-connection-timed-out';
-                var disqus_url = 'http://127.0.0.1:8000/2017/10/linux-a-way-to-fix-haproxy-network-connection-timeout-ping-sendmsg-Invalid-argument-socket-errno-110-connection-timed-out.html';
+                var disqus_url = 'https://mozillazg.com/2017/10/linux-a-way-to-fix-haproxy-network-connection-timeout-ping-sendmsg-Invalid-argument-socket-errno-110-connection-timed-out.html';
 
             var disqus_config = function () {
                 this.language = "zh-hans";
@@ -448,7 +448,7 @@ net.ipv4.neigh.default.gc_thresh3 = 65536
             <a href="http://docs.getpelican.com/" target="_blank">Pelican</a>,
             <a href="http://getbootstrap.com" target="_blank">Bootstrap</a>
             &middot; <a href="/privacy-policy.html" target="_blank">Privacy</a>              <p><small>  <a rel="license" href="http://creativecommons.org/licenses/by-sa/4.0/"><img alt="Creative Commons License" style="border-width:0" src="/static/images/by-sa-80x15.png" /></a>
-    &quot;<span xmlns:dct="http://purl.org/dc/terms/" property="dct:title">Huang Huang 的博客</span>&quot; by <a xmlns:cc="http://creativecommons.org/ns#" href="http://127.0.0.1:8000" property="cc:attributionName" rel="cc:attributionURL">mozillazg</a> is
+    &quot;<span xmlns:dct="http://purl.org/dc/terms/" property="dct:title">Huang Huang 的博客</span>&quot; by <a xmlns:cc="http://creativecommons.org/ns#" href="https://mozillazg.com" property="cc:attributionName" rel="cc:attributionURL">mozillazg</a> is
   licensed under a <a rel="license" href="http://creativecommons.org/licenses/by-sa/4.0/">Creative Commons Attribution-ShareAlike 4.0 International License</a>, except where indicated otherwise.
 </small></p>
          </div>
