@@ -16,7 +16,7 @@
 <link rel="canonical" href="https://mozillazg.com/2019/03/safe-client-behaviour-notes-retry-jitter-back-off-more.html">
 
         <meta name="author" content="mozillazg" />
-        <meta name="keywords" content="client" />
+        <meta name="keywords" content="others,client" />
     <meta name="description" content="前言¶ 本文是 Safe Client Behaviour | USENIX 这个视频的简单总结，可以当做是 调用远程服务的一些备忘录 的延伸/补充内容。强烈建议直接查看 Safe Client Behaviour | USENIX 这个原始视频，本文只是个简单的笔记没啥可看的，原视频才是精华。 不安全的客户端行为最直观的表现就是会在出现异常情况时 DDoS 服务端，所以安全的客户端行为就是要避免发生 DDoS 服务端的情况。视频里已一个 app 需要每 5 分钟从服务端获取一次信息为例，讲了几个原则，下面简单记录一下。 period = 300 // Once every 5 minutes while true: send_rpc() wait(period) Jitter Everything!¶ 所谓的 Jitter 指的是给周期性的操作增加随机因子，不要固定操作周期平滑一下客户端的请求，让服务端的负载也平滑一下。 这里举了几个怎么加 jitter 的例子。 首先容易想到的是在 wait 的时候加 jitter: period = 300 // Once every 5 minutes while true: send_rpc() wait(period * random(.5, 1.5)) 这种方法虽然确实平滑了后面周期性的请求，但是还有一个瑕疵，那就是第一次请求的时候多个客户端会产生一个尖峰，因为有可能发生大量客户端都在那个时候启动触发第一次请求，所以就有了第二方法：在第一次的时候就加 jitter，当然后面 wait 的时候也还是要继续加 jitter 的。 period = 300 // Once every 5 minutes wait(period * random(.5, 1.5)) while true: send_rpc() wait(period * random(.5, 1.5)) 通过在第一次请求前和后面 wait 的时候加 jitter 就可以尽可能的平滑请求，做一个不 DDoS 为服务端着想的好宝宝。 作者还说了一个不对周期时间做 jitter 而是对执行时间做 jitter 的方法，视频中说这种方法可以完全平滑请求曲线 ，达到一种完美的状态(但是我并没有搞懂这个方法中 truncate 函数是怎么实现的究竟包含了什么魔法，视频中也没说细节，大家如果知道的话可以留言告知我一下，谢谢了): while true: period = 300 // Once every 5 minutes next_execution = now() next_execution = truncate(next_execution, period) next_execution += random(1.0, 2.0) * period wait_until(next_execution) send_rpc() Don’t Retry! &amp;&amp; If you retry, back off!¶ 这个主要说的是如果要重试的话记得给重试增加 back-off(重试间隔指数递增) 和 jitter，例子： while true: period = 300; delay = 10 success = send_rpc() while not success: wait(delay * random(.5, 1.5)) success = send_rpc() delay = delay * 2 wait(period * random(.5, 1.5) 还有一个重试时比上面效率更高更平滑的方法是限制重试次数： while true: period = 300; delay = 10 success = send_rpc() while not success &amp;&amp; delay &lt;= period: wait(delay * random(.5, 1.5)) success = send_rpc() delay = delay * 2 wait(period * random(.5, 1.5) 还提到了关于重试的其他 tips: 默认不要重试。 重试时增加 back-off 指数递增的重试间隔。 同时也别忘了增加 jitter 随机因子。 不同场景下的重试策略： 不要重试客户端错误（比如 HTTP 404 错误）。 在服务端错误时重试（比如 HTTP 500 错误）。 在发生网络错误时重试。 在发生超时的时候小心重试。 在配额超限的时候不要重试！ Safer clients: Move control to the server!¶ 可以实现一些功能让服务端拥有控制客户端的能力： 在客户端和服务端都实现 Retry-After 这个 HTTP Header，双方通过这个 Header 来约定下次重试的时机。 服务端在实现这个重试周期的时候别忘了增加 jitter 随机因子。 远程控制客户端的能力（比如远程把客户端的请求给临时停了，或者临时拉大重试基础间隔）。 远程配置调用周期。 维护一个可远程控制的客户端特性黑名单。 Safer clients: Expose information to server¶ 客户端暴露越多的信息给服务端，就可以得到更精细的响应: 给请求打标签 客户端名称和版本号 什么特性触发了当前请求 失败请求的严重程度（比如短期内失败了多少次） 当前请求是第一次请求还是重试发起的请求 可能得到的服务端响应 给请求赋予不同的优先级 drop 一些后台请求 防止 drop 了一些可能会触发重连风暴的请求 为客户端的 bug 做一些 workaround （比如旧版本的客户端 bug） Safer Microservices¶ 微服务环境下可以做的更多。 重试预算 限制只有多少百分比的重试可以正常发出，其他的重试直接取消。比如只允许发出 10% 的重试。 阻止重连请求影响其他正常请求。 适当的限流 * 基于失败率直接在客户端取消掉新的请求，通过这种方式来减轻服务端的负载。 总结¶ 强烈建议直接查看 Safe Client Behaviour | USENIX 这个原始视频，本文只是个简单的笔记没啥可看的，原视频才是精华。 参考资料¶ Safe Client Behaviour | USENIX SREcon18 Asia/Australia - Safe Client Behaviour - YouTube Sides of Safe Client Behaviour Exponential Backoff And Jitter | AWS Architecture Blog" />
     <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-4941850466486001"
      crossorigin="anonymous"></script>
@@ -41,6 +41,7 @@
         <meta property="og:description" content="前言¶ 本文是 Safe Client Behaviour | USENIX 这个视频的简单总结，可以当做是 调用远程服务的一些备忘录 的延伸/补充内容。强烈建议直接查看 Safe Client Behaviour | USENIX 这个原始视频，本文只是个简单的笔记没啥可看的，原视频才是精华。 不安全的客户端行为最直观的表现就是会在出现异常情况时 DDoS 服务端，所以安全的客户端行为就是要避免发生 DDoS 服务端的情况。视频里已一个 app 需要每 5 分钟从服务端获取一次信息为例，讲了几个原则，下面简单记录一下。 period = 300 // Once every 5 minutes while true: send_rpc() wait(period) Jitter Everything!¶ 所谓的 Jitter 指的是给周期性的操作增加随机因子，不要固定操作周期平滑一下客户端的请求，让服务端的负载也平滑一下。 这里举了几个怎么加 jitter 的例子。 首先容易想到的是在 wait 的时候加 jitter: period = 300 // Once every 5 minutes while true: send_rpc() wait(period * random(.5, 1.5)) 这种方法虽然确实平滑了后面周期性的请求，但是还有一个瑕疵，那就是第一次请求的时候多个客户端会产生一个尖峰，因为有可能发生大量客户端都在那个时候启动触发第一次请求，所以就有了第二方法：在第一次的时候就加 jitter，当然后面 wait 的时候也还是要继续加 jitter 的。 period = 300 // Once every 5 minutes wait(period * random(.5, 1.5)) while true: send_rpc() wait(period * random(.5, 1.5)) 通过在第一次请求前和后面 wait 的时候加 jitter 就可以尽可能的平滑请求，做一个不 DDoS 为服务端着想的好宝宝。 作者还说了一个不对周期时间做 jitter 而是对执行时间做 jitter 的方法，视频中说这种方法可以完全平滑请求曲线 ，达到一种完美的状态(但是我并没有搞懂这个方法中 truncate 函数是怎么实现的究竟包含了什么魔法，视频中也没说细节，大家如果知道的话可以留言告知我一下，谢谢了): while true: period = 300 // Once every 5 minutes next_execution = now() next_execution = truncate(next_execution, period) next_execution += random(1.0, 2.0) * period wait_until(next_execution) send_rpc() Don’t Retry! &amp;&amp; If you retry, back off!¶ 这个主要说的是如果要重试的话记得给重试增加 back-off(重试间隔指数递增) 和 jitter，例子： while true: period = 300; delay = 10 success = send_rpc() while not success: wait(delay * random(.5, 1.5)) success = send_rpc() delay = delay * 2 wait(period * random(.5, 1.5) 还有一个重试时比上面效率更高更平滑的方法是限制重试次数： while true: period = 300; delay = 10 success = send_rpc() while not success &amp;&amp; delay &lt;= period: wait(delay * random(.5, 1.5)) success = send_rpc() delay = delay * 2 wait(period * random(.5, 1.5) 还提到了关于重试的其他 tips: 默认不要重试。 重试时增加 back-off 指数递增的重试间隔。 同时也别忘了增加 jitter 随机因子。 不同场景下的重试策略： 不要重试客户端错误（比如 HTTP 404 错误）。 在服务端错误时重试（比如 HTTP 500 错误）。 在发生网络错误时重试。 在发生超时的时候小心重试。 在配额超限的时候不要重试！ Safer clients: Move control to the server!¶ 可以实现一些功能让服务端拥有控制客户端的能力： 在客户端和服务端都实现 Retry-After 这个 HTTP Header，双方通过这个 Header 来约定下次重试的时机。 服务端在实现这个重试周期的时候别忘了增加 jitter 随机因子。 远程控制客户端的能力（比如远程把客户端的请求给临时停了，或者临时拉大重试基础间隔）。 远程配置调用周期。 维护一个可远程控制的客户端特性黑名单。 Safer clients: Expose information to server¶ 客户端暴露越多的信息给服务端，就可以得到更精细的响应: 给请求打标签 客户端名称和版本号 什么特性触发了当前请求 失败请求的严重程度（比如短期内失败了多少次） 当前请求是第一次请求还是重试发起的请求 可能得到的服务端响应 给请求赋予不同的优先级 drop 一些后台请求 防止 drop 了一些可能会触发重连风暴的请求 为客户端的 bug 做一些 workaround （比如旧版本的客户端 bug） Safer Microservices¶ 微服务环境下可以做的更多。 重试预算 限制只有多少百分比的重试可以正常发出，其他的重试直接取消。比如只允许发出 10% 的重试。 阻止重连请求影响其他正常请求。 适当的限流 * 基于失败率直接在客户端取消掉新的请求，通过这种方式来减轻服务端的负载。 总结¶ 强烈建议直接查看 Safe Client Behaviour | USENIX 这个原始视频，本文只是个简单的笔记没啥可看的，原视频才是精华。 参考资料¶ Safe Client Behaviour | USENIX SREcon18 Asia/Australia - Safe Client Behaviour - YouTube Sides of Safe Client Behaviour Exponential Backoff And Jitter | AWS Architecture Blog"/>
         <meta property="article:published_time" content="2019-03-24" />
             <meta property="article:section" content="others" />
+            <meta property="article:tag" content="others" />
             <meta property="article:tag" content="client" />
             <meta property="article:author" content="mozillazg" />
             <meta property="og:image"
@@ -76,7 +77,7 @@
     <script type="application/ld+json">
     {
         "@context": "https://schema.org",
-        "@type": "Website",
+        "@type": "BlogPosting",
         "publisher": {
             "@type": "Person",
             "name": "mozillazg",
@@ -89,150 +90,13 @@
             "url": "https://mozillazg.com",
             "sameAs": []
         },
-        // "headline": "",
+        "headline": "安全友好的客户端行为",
         "url": "https://mozillazg.com/2019/03/safe-client-behaviour-notes-retry-jitter-back-off-more.html",
-        "datePublished": "2019-03-24",
-        // "dateModified": "",
-        "image": "https://mozillazg.com/static/avatar.jpeg",
-        "keywords": "client",
-        // "description": "前言¶ 本文是 Safe Client Behaviour | USENIX 这个视频的简单总结，可以当做是 调用远程服务的一些备忘录 的延伸/补充内容。强烈建议直接查看 Safe Client Behaviour | USENIX 这个原始视频，本文只是个简单的笔记没啥可看的，原视频才是精华。 不安全的客户端行为最直观的表现就是会在出现异常情况时 DDoS 服务端，所以安全的客户端行为就是要避免发生 DDoS 服务端的情况。视频里已一个 app 需要每 5 分钟从服务端获取一次信息为例，讲了几个原则，下面简单记录一下。 period = 300 // Once every 5 minutes while true: send_rpc() wait(period) Jitter Everything!¶ 所谓的 Jitter 指的是给周期性的操作增加随机因子，不要固定操作周期平滑一下客户端的请求，让服务端的负载也平滑一下。 这里举了几个怎么加 jitter 的例子。 首先容易想到的是在 wait 的时候加 jitter: period = 300 // Once every 5 minutes while true: send_rpc() wait(period * random(.5, 1.5)) 这种方法虽然确实平滑了后面周期性的请求，但是还有一个瑕疵，那就是第一次请求的时候多个客户端会产生一个尖峰，因为有可能发生大量客户端都在那个时候启动触发第一次请求，所以就有了第二方法：在第一次的时候就加 jitter，当然后面 wait 的时候也还是要继续加 jitter 的。 period = 300 // Once every 5 minutes wait(period * random(.5, 1.5)) while true: send_rpc() wait(period * random(.5, 1.5)) 通过在第一次请求前和后面 wait 的时候加 jitter 就可以尽可能的平滑请求，做一个不 DDoS 为服务端着想的好宝宝。 作者还说了一个不对周期时间做 jitter 而是对执行时间做 jitter 的方法，视频中说这种方法可以完全平滑请求曲线 ，达到一种完美的状态(但是我并没有搞懂这个方法中 truncate 函数是怎么实现的究竟包含了什么魔法，视频中也没说细节，大家如果知道的话可以留言告知我一下，谢谢了): while true: period = 300 // Once every 5 minutes next_execution = now() next_execution = truncate(next_execution, period) next_execution += random(1.0, 2.0) * period wait_until(next_execution) send_rpc() Don’t Retry! &amp;&amp; If you retry, back off!¶ 这个主要说的是如果要重试的话记得给重试增加 back-off(重试间隔指数递增) 和 jitter，例子： while true: period = 300; delay = 10 success = send_rpc() while not success: wait(delay * random(.5, 1.5)) success = send_rpc() delay = delay * 2 wait(period * random(.5, 1.5) 还有一个重试时比上面效率更高更平滑的方法是限制重试次数： while true: period = 300; delay = 10 success = send_rpc() while not success &amp;&amp; delay &lt;= period: wait(delay * random(.5, 1.5)) success = send_rpc() delay = delay * 2 wait(period * random(.5, 1.5) 还提到了关于重试的其他 tips: 默认不要重试。 重试时增加 back-off 指数递增的重试间隔。 同时也别忘了增加 jitter 随机因子。 不同场景下的重试策略： 不要重试客户端错误（比如 HTTP 404 错误）。 在服务端错误时重试（比如 HTTP 500 错误）。 在发生网络错误时重试。 在发生超时的时候小心重试。 在配额超限的时候不要重试！ Safer clients: Move control to the server!¶ 可以实现一些功能让服务端拥有控制客户端的能力： 在客户端和服务端都实现 Retry-After 这个 HTTP Header，双方通过这个 Header 来约定下次重试的时机。 服务端在实现这个重试周期的时候别忘了增加 jitter 随机因子。 远程控制客户端的能力（比如远程把客户端的请求给临时停了，或者临时拉大重试基础间隔）。 远程配置调用周期。 维护一个可远程控制的客户端特性黑名单。 Safer clients: Expose information to server¶ 客户端暴露越多的信息给服务端，就可以得到更精细的响应: 给请求打标签 客户端名称和版本号 什么特性触发了当前请求 失败请求的严重程度（比如短期内失败了多少次） 当前请求是第一次请求还是重试发起的请求 可能得到的服务端响应 给请求赋予不同的优先级 drop 一些后台请求 防止 drop 了一些可能会触发重连风暴的请求 为客户端的 bug 做一些 workaround （比如旧版本的客户端 bug） Safer Microservices¶ 微服务环境下可以做的更多。 重试预算 限制只有多少百分比的重试可以正常发出，其他的重试直接取消。比如只允许发出 10% 的重试。 阻止重连请求影响其他正常请求。 适当的限流 * 基于失败率直接在客户端取消掉新的请求，通过这种方式来减轻服务端的负载。 总结¶ 强烈建议直接查看 Safe Client Behaviour | USENIX 这个原始视频，本文只是个简单的笔记没啥可看的，原视频才是精华。 参考资料¶ Safe Client Behaviour | USENIX SREcon18 Asia/Australia - Safe Client Behaviour - YouTube Sides of Safe Client Behaviour Exponential Backoff And Jitter | AWS Architecture Blog",
-        "description": "<div class="section" id="id2">
-<h2 id="hidid2">前言<a class="headerlink" href="#hidid2" title="Permalink to this headline">¶</a></h2>
-<p>本文是 <a class="reference external" href="https://www.usenix.org/conference/srecon18asia/presentation/goh">Safe Client Behaviour | USENIX</a> 这个视频的简单总结，可以当做是 <a class="reference external" href="https://mozillazg.com/2018/08/call-remote-service-checklist.html">调用远程服务的一些备忘录</a> 的延伸/补充内容。强烈建议直接查看 <a class="reference external" href="https://www.usenix.org/conference/srecon18asia/presentation/goh">Safe Client Behaviour | USENIX</a> 这个原始视频，本文只是个简单的笔记没啥可看的，原视频才是精华。</p>
-<p>不安全的客户端行为最直观的表现就是会在出现异常情况时 DDoS 服务端，所以安全的客户端行为就是要避免发生 DDoS 服务端的情况。视频里已一个 app 需要每 5 分钟从服务端获取一次信息为例，讲了几个原则，下面简单记录一下。</p>
-<div class="highlight"><pre><span></span><span class="nx">period</span> <span class="o">=</span> <span class="mi">300</span> <span class="c1">// Once every 5 minutes</span>
-<span class="k">while</span> <span class="kc">true</span><span class="o">:</span>
-  <span class="nx">send_rpc</span><span class="p">()</span>
-  <span class="nx">wait</span><span class="p">(</span><span class="nx">period</span><span class="p">)</span>
-</pre></div>
-</div>
-<div class="section" id="jitter-everything">
-<h2 id="hidjitter-everything">Jitter Everything!<a class="headerlink" href="#hidjitter-everything" title="Permalink to this headline">¶</a></h2>
-<p>所谓的 Jitter 指的是给周期性的操作增加随机因子，不要固定操作周期平滑一下客户端的请求，让服务端的负载也平滑一下。
-这里举了几个怎么加 jitter 的例子。</p>
-<p>首先容易想到的是在 wait 的时候加 jitter:</p>
-<div class="highlight"><pre><span></span><span class="nx">period</span> <span class="o">=</span> <span class="mi">300</span> <span class="c1">// Once every 5 minutes</span>
-<span class="k">while</span> <span class="kc">true</span><span class="o">:</span>
-  <span class="nx">send_rpc</span><span class="p">()</span>
-  <span class="nx">wait</span><span class="p">(</span><span class="nx">period</span> <span class="o">*</span> <span class="nx">random</span><span class="p">(.</span><span class="mi">5</span><span class="p">,</span> <span class="mf">1.5</span><span class="p">))</span>
-</pre></div>
-<p>这种方法虽然确实平滑了后面周期性的请求，但是还有一个瑕疵，那就是第一次请求的时候多个客户端会产生一个尖峰，因为有可能发生大量客户端都在那个时候启动触发第一次请求，所以就有了第二方法：在第一次的时候就加 jitter，当然后面 wait 的时候也还是要继续加 jitter 的。</p>
-<div class="highlight"><pre><span></span><span class="nx">period</span> <span class="o">=</span> <span class="mi">300</span> <span class="c1">// Once every 5 minutes</span>
-<span class="nx">wait</span><span class="p">(</span><span class="nx">period</span> <span class="o">*</span> <span class="nx">random</span><span class="p">(.</span><span class="mi">5</span><span class="p">,</span> <span class="mf">1.5</span><span class="p">))</span>
-<span class="k">while</span> <span class="kc">true</span><span class="o">:</span>
-  <span class="nx">send_rpc</span><span class="p">()</span>
-  <span class="nx">wait</span><span class="p">(</span><span class="nx">period</span> <span class="o">*</span> <span class="nx">random</span><span class="p">(.</span><span class="mi">5</span><span class="p">,</span> <span class="mf">1.5</span><span class="p">))</span>
-</pre></div>
-<p>通过在第一次请求前和后面 wait 的时候加 jitter 就可以尽可能的平滑请求，做一个不 DDoS 为服务端着想的好宝宝。</p>
-<p>作者还说了一个不对周期时间做 jitter 而是对执行时间做 jitter 的方法，视频中说这种方法可以完全平滑请求曲线 ，达到一种完美的状态(但是我并没有搞懂这个方法中 truncate 函数是怎么实现的究竟包含了什么魔法，视频中也没说细节，大家如果知道的话可以留言告知我一下，谢谢了):</p>
-<div class="highlight"><pre><span></span><span class="k">while</span> <span class="kc">true</span><span class="o">:</span>
-  <span class="nx">period</span> <span class="o">=</span> <span class="mi">300</span> <span class="c1">// Once every 5 minutes</span>
-  <span class="nx">next_execution</span> <span class="o">=</span> <span class="nx">now</span><span class="p">()</span>
-  <span class="nx">next_execution</span> <span class="o">=</span> <span class="nx">truncate</span><span class="p">(</span><span class="nx">next_execution</span><span class="p">,</span> <span class="nx">period</span><span class="p">)</span>
-  <span class="nx">next_execution</span> <span class="o">+=</span> <span class="nx">random</span><span class="p">(</span><span class="mf">1.0</span><span class="p">,</span> <span class="mf">2.0</span><span class="p">)</span> <span class="o">*</span> <span class="nx">period</span>
-  <span class="nx">wait_until</span><span class="p">(</span><span class="nx">next_execution</span><span class="p">)</span>
-  <span class="nx">send_rpc</span><span class="p">()</span>
-</pre></div>
-</div>
-<div class="section" id="dont-retry-if-you-retry-back-off">
-<h2 id="hiddont-retry-if-you-retry-back-off">Don’t Retry! &amp;&amp; If you retry, back off!<a class="headerlink" href="#hiddont-retry-if-you-retry-back-off" title="Permalink to this headline">¶</a></h2>
-<p>这个主要说的是如果要重试的话记得给重试增加 back-off(重试间隔指数递增) 和 jitter，例子：</p>
-<div class="highlight"><pre><span></span><span class="k">while</span> <span class="kc">true</span><span class="o">:</span>
-  <span class="nx">period</span> <span class="o">=</span> <span class="mi">300</span><span class="p">;</span> <span class="nx">delay</span> <span class="o">=</span> <span class="mi">10</span>
-  <span class="nx">success</span> <span class="o">=</span> <span class="nx">send_rpc</span><span class="p">()</span>
-  <span class="k">while</span> <span class="nx">not</span> <span class="nx">success</span><span class="o">:</span>
-    <span class="nx">wait</span><span class="p">(</span><span class="nx">delay</span> <span class="o">*</span> <span class="nx">random</span><span class="p">(.</span><span class="mi">5</span><span class="p">,</span> <span class="mf">1.5</span><span class="p">))</span>
-    <span class="nx">success</span> <span class="o">=</span> <span class="nx">send_rpc</span><span class="p">()</span>
-    <span class="nx">delay</span> <span class="o">=</span> <span class="nx">delay</span> <span class="o">*</span> <span class="mi">2</span>
-  <span class="nx">wait</span><span class="p">(</span><span class="nx">period</span> <span class="o">*</span> <span class="nx">random</span><span class="p">(.</span><span class="mi">5</span><span class="p">,</span> <span class="mf">1.5</span><span class="p">)</span>
-</pre></div>
-<p>还有一个重试时比上面效率更高更平滑的方法是限制重试次数：</p>
-<div class="highlight"><pre><span></span><span class="k">while</span> <span class="kc">true</span><span class="o">:</span>
-  <span class="nx">period</span> <span class="o">=</span> <span class="mi">300</span><span class="p">;</span> <span class="nx">delay</span> <span class="o">=</span> <span class="mi">10</span>
-  <span class="nx">success</span> <span class="o">=</span> <span class="nx">send_rpc</span><span class="p">()</span>
-  <span class="k">while</span> <span class="nx">not</span> <span class="nx">success</span> <span class="o">&amp;&amp;</span> <span class="nx">delay</span> <span class="o">&lt;=</span> <span class="nx">period</span><span class="o">:</span>
-    <span class="nx">wait</span><span class="p">(</span><span class="nx">delay</span> <span class="o">*</span> <span class="nx">random</span><span class="p">(.</span><span class="mi">5</span><span class="p">,</span> <span class="mf">1.5</span><span class="p">))</span>
-    <span class="nx">success</span> <span class="o">=</span> <span class="nx">send_rpc</span><span class="p">()</span>
-    <span class="nx">delay</span> <span class="o">=</span> <span class="nx">delay</span> <span class="o">*</span> <span class="mi">2</span>
-  <span class="nx">wait</span><span class="p">(</span><span class="nx">period</span> <span class="o">*</span> <span class="nx">random</span><span class="p">(.</span><span class="mi">5</span><span class="p">,</span> <span class="mf">1.5</span><span class="p">)</span>
-</pre></div>
-<p>还提到了关于重试的其他 tips:</p>
-<ul class="simple">
-<li>默认不要重试。</li>
-<li>重试时增加 back-off 指数递增的重试间隔。</li>
-<li>同时也别忘了增加 jitter 随机因子。</li>
-<li>不同场景下的重试策略：<ul>
-<li>不要重试客户端错误（比如 HTTP 404 错误）。</li>
-<li>在服务端错误时重试（比如 HTTP 500 错误）。</li>
-<li>在发生网络错误时重试。</li>
-<li>在发生超时的时候小心重试。</li>
-<li>在配额超限的时候不要重试！</li>
-</ul>
-</li>
-</ul>
-</div>
-<div class="section" id="safer-clients-move-control-to-the-server">
-<h2 id="hidsafer-clients-move-control-to-the-server">Safer clients: Move control to the server!<a class="headerlink" href="#hidsafer-clients-move-control-to-the-server" title="Permalink to this headline">¶</a></h2>
-<p>可以实现一些功能让服务端拥有控制客户端的能力：</p>
-<ul class="simple">
-<li>在客户端和服务端都实现 <tt class="docutils literal"><span class="pre">Retry-After</span></tt> 这个 HTTP Header，双方通过这个 Header 来约定下次重试的时机。</li>
-<li>服务端在实现这个重试周期的时候别忘了增加 jitter 随机因子。</li>
-<li>远程控制客户端的能力（比如远程把客户端的请求给临时停了，或者临时拉大重试基础间隔）。</li>
-<li>远程配置调用周期。</li>
-<li>维护一个可远程控制的客户端特性黑名单。</li>
-</ul>
-</div>
-<div class="section" id="safer-clients-expose-information-to-server">
-<h2 id="hidsafer-clients-expose-information-to-server">Safer clients: Expose information to server<a class="headerlink" href="#hidsafer-clients-expose-information-to-server" title="Permalink to this headline">¶</a></h2>
-<p>客户端暴露越多的信息给服务端，就可以得到更精细的响应:</p>
-<ul class="simple">
-<li>给请求打标签<ul>
-<li>客户端名称和版本号</li>
-<li>什么特性触发了当前请求</li>
-<li>失败请求的严重程度（比如短期内失败了多少次）</li>
-<li>当前请求是第一次请求还是重试发起的请求</li>
-</ul>
-</li>
-<li>可能得到的服务端响应<ul>
-<li>给请求赋予不同的优先级</li>
-<li>drop 一些后台请求</li>
-<li>防止 drop 了一些可能会触发重连风暴的请求</li>
-<li>为客户端的 bug 做一些 workaround （比如旧版本的客户端 bug）</li>
-</ul>
-</li>
-</ul>
-</div>
-<div class="section" id="safer-microservices">
-<h2 id="hidsafer-microservices">Safer Microservices<a class="headerlink" href="#hidsafer-microservices" title="Permalink to this headline">¶</a></h2>
-<p>微服务环境下可以做的更多。</p>
-<ul class="simple">
-<li>重试预算<ul>
-<li>限制只有多少百分比的重试可以正常发出，其他的重试直接取消。比如只允许发出 10% 的重试。</li>
-<li>阻止重连请求影响其他正常请求。</li>
-</ul>
-</li>
-<li>适当的限流
-* 基于失败率直接在客户端取消掉新的请求，通过这种方式来减轻服务端的负载。</li>
-</ul>
-</div>
-<div class="section" id="id3">
-<h2 id="hidid3">总结<a class="headerlink" href="#hidid3" title="Permalink to this headline">¶</a></h2>
-<p>强烈建议直接查看 <a class="reference external" href="https://www.usenix.org/conference/srecon18asia/presentation/goh">Safe Client Behaviour | USENIX</a> 这个原始视频，本文只是个简单的笔记没啥可看的，原视频才是精华。</p>
-</div>
-<div class="section" id="id4">
-<h2 id="hidid4">参考资料<a class="headerlink" href="#hidid4" title="Permalink to this headline">¶</a></h2>
-<ul class="simple">
-<li><a class="reference external" href="https://www.usenix.org/conference/srecon18asia/presentation/goh">Safe Client Behaviour | USENIX</a></li>
-<li><a class="reference external" href="https://www.youtube.com/watch?v=NHNZab_AzZo">SREcon18 Asia/Australia - Safe Client Behaviour - YouTube</a></li>
-<li><a class="reference external" href="/static/downloads/Safe-Client-Behaviour.pdf">Sides of Safe Client Behaviour</a></li>
-<li><a class="reference external" href="https://aws.amazon.com/blogs/architecture/exponential-backoff-and-jitter/">Exponential Backoff And Jitter | AWS Architecture Blog</a></li>
-</ul>
-</div>
-",
-        "mainEntityOfPage": {
-            "@type": "WebPage",
-            "@id": "https://mozillazg.com"
-        }
+        "image": [
+            "https://mozillazg.com/static/avatar.jpeg"
+         ],
+        "keywords": "others, client",
+        "datePublished": "2019-03-24"
     }
     </script>
 

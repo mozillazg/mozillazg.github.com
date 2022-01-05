@@ -16,7 +16,7 @@
 <link rel="canonical" href="https://mozillazg.com/2019/04/rate-limiting-intro-leaky-bucket.html">
 
         <meta name="author" content="mozillazg" />
-        <meta name="keywords" content="rate-limiting,leaky-bucket" />
+        <meta name="keywords" content="others,rate-limiting,leaky-bucket" />
     <meta name="description" content="前言¶ 简单介绍一下 leaky bucket 算法。 版本¶ leaky bucket 有两个版本：一个是 as a meter 、另一个是 as a queue 。 as a meter¶ (图片来自 https://en.wikipedia.org/wiki/Leaky_bucket ) 在 as a meter 版本中，一般用下面的方法来描述（来自 wikipedia ）： A fixed capacity bucket, associated with each virtual connection or user, leaks at a fixed rate. 一个固定容量的 bucket ，用来处理每个连接或用户，这个 bucket 以一个固定的速率往下漏东西。 If the bucket is empty, it stops leaking. 如果 bucket 为空，将不再漏东西。 For a packet to conform, it has to be possible to add a specific amount of water to the bucket: The specific amount added by a conforming packet can be the same for all packets, or can be proportional to the length of the packet. 当需要确认一个数据包的时候，把它当做一定数量的水加到 bucket 中：这个添加的水量可以跟所有的包一样，也可以按包的实际长度以一定比例来添加。 If this amount of water would cause the bucket to exceed its capacity then the packet does not conform and the water in the bucket is left unchanged. 如果 bucket 中水的总量达到了 bucket 的容量限制，那么新的包就不被接受并且 bucket 中的水不会有啥变化。 不被接受的包可以被丢弃( Traffic policing )，也可以被排队( Traffic shaping )，看具体的需求来做。 通过上面可以发现，as a meter 的 leaky bucket 其实跟前面说过的 token bucket 是类似的，只是实现上不一样而已，实际的效果其实是一样的： bucket 都有容量限制。 都允许存在波峰/尖刺，考虑一个极端情况：在 token bucket 中当 bucket 满的时候是可以一次性拿出所有 token 的，此时就是个波峰/尖刺了，在 leaky bucket 中当 bucket 空的时候是可以一次性倒入达到 bucket 容量限制的水的，此时也会有个波峰/尖刺。 as a queue¶ (图片来自 https://en.wikipedia.org/wiki/Leaky_bucket ) 在 as a queue 版本中，可以把它作为一个先进先出的队列，流量涌入到 bucket 中，但是只能以恒定的速率流出，可以用来平滑流量或消峰： 流量涌入到 bucket 中，当超出 bucket 容量限制时，排队或者被丢弃 bucket 中的流量被以一个恒定的速率流出（当然，如果 bucket 中的数据太少的话流出就会断断续续，主要是不会超过指定的速率） 通过上面的介绍，可以看出来其实 as a queue 的 leaky bucket 可以看做是 as a meter 的 leaky bucket 的一个特例： 只要 as a meter 的 leaky bucket 的 bucket 容量被设置为在一个 ticket 周期内将流出的水量就可以达到类似 as a queue 的平滑流量/消峰的效果了。比如 rate 是 10kb/s ，ticket 是 1s，那么把 as a meter 的 bucket 容量限制为 10kb 即可达到类似效果。 总结¶ 简单介绍了一下 leaky bucket 算法，基本都是 wikipedia 上的知识， 建议直接查看参考资料中的 wikipedia 。 参考资料¶ Leaky bucket - Wikipedia Token bucket - Wikipedia" />
     <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-4941850466486001"
      crossorigin="anonymous"></script>
@@ -41,6 +41,7 @@
         <meta property="og:description" content="前言¶ 简单介绍一下 leaky bucket 算法。 版本¶ leaky bucket 有两个版本：一个是 as a meter 、另一个是 as a queue 。 as a meter¶ (图片来自 https://en.wikipedia.org/wiki/Leaky_bucket ) 在 as a meter 版本中，一般用下面的方法来描述（来自 wikipedia ）： A fixed capacity bucket, associated with each virtual connection or user, leaks at a fixed rate. 一个固定容量的 bucket ，用来处理每个连接或用户，这个 bucket 以一个固定的速率往下漏东西。 If the bucket is empty, it stops leaking. 如果 bucket 为空，将不再漏东西。 For a packet to conform, it has to be possible to add a specific amount of water to the bucket: The specific amount added by a conforming packet can be the same for all packets, or can be proportional to the length of the packet. 当需要确认一个数据包的时候，把它当做一定数量的水加到 bucket 中：这个添加的水量可以跟所有的包一样，也可以按包的实际长度以一定比例来添加。 If this amount of water would cause the bucket to exceed its capacity then the packet does not conform and the water in the bucket is left unchanged. 如果 bucket 中水的总量达到了 bucket 的容量限制，那么新的包就不被接受并且 bucket 中的水不会有啥变化。 不被接受的包可以被丢弃( Traffic policing )，也可以被排队( Traffic shaping )，看具体的需求来做。 通过上面可以发现，as a meter 的 leaky bucket 其实跟前面说过的 token bucket 是类似的，只是实现上不一样而已，实际的效果其实是一样的： bucket 都有容量限制。 都允许存在波峰/尖刺，考虑一个极端情况：在 token bucket 中当 bucket 满的时候是可以一次性拿出所有 token 的，此时就是个波峰/尖刺了，在 leaky bucket 中当 bucket 空的时候是可以一次性倒入达到 bucket 容量限制的水的，此时也会有个波峰/尖刺。 as a queue¶ (图片来自 https://en.wikipedia.org/wiki/Leaky_bucket ) 在 as a queue 版本中，可以把它作为一个先进先出的队列，流量涌入到 bucket 中，但是只能以恒定的速率流出，可以用来平滑流量或消峰： 流量涌入到 bucket 中，当超出 bucket 容量限制时，排队或者被丢弃 bucket 中的流量被以一个恒定的速率流出（当然，如果 bucket 中的数据太少的话流出就会断断续续，主要是不会超过指定的速率） 通过上面的介绍，可以看出来其实 as a queue 的 leaky bucket 可以看做是 as a meter 的 leaky bucket 的一个特例： 只要 as a meter 的 leaky bucket 的 bucket 容量被设置为在一个 ticket 周期内将流出的水量就可以达到类似 as a queue 的平滑流量/消峰的效果了。比如 rate 是 10kb/s ，ticket 是 1s，那么把 as a meter 的 bucket 容量限制为 10kb 即可达到类似效果。 总结¶ 简单介绍了一下 leaky bucket 算法，基本都是 wikipedia 上的知识， 建议直接查看参考资料中的 wikipedia 。 参考资料¶ Leaky bucket - Wikipedia Token bucket - Wikipedia"/>
         <meta property="article:published_time" content="2019-04-14" />
             <meta property="article:section" content="others" />
+            <meta property="article:tag" content="others" />
             <meta property="article:tag" content="rate-limiting" />
             <meta property="article:tag" content="leaky-bucket" />
             <meta property="article:author" content="mozillazg" />
@@ -77,7 +78,7 @@
     <script type="application/ld+json">
     {
         "@context": "https://schema.org",
-        "@type": "Website",
+        "@type": "BlogPosting",
         "publisher": {
             "@type": "Person",
             "name": "mozillazg",
@@ -90,72 +91,13 @@
             "url": "https://mozillazg.com",
             "sameAs": []
         },
-        // "headline": "",
+        "headline": "rate limiting 之 leaky bucket",
         "url": "https://mozillazg.com/2019/04/rate-limiting-intro-leaky-bucket.html",
-        "datePublished": "2019-04-14",
-        // "dateModified": "",
-        "image": "https://mozillazg.com/static/avatar.jpeg",
-        "keywords": "rate-limiting, leaky-bucket",
-        // "description": "前言¶ 简单介绍一下 leaky bucket 算法。 版本¶ leaky bucket 有两个版本：一个是 as a meter 、另一个是 as a queue 。 as a meter¶ (图片来自 https://en.wikipedia.org/wiki/Leaky_bucket ) 在 as a meter 版本中，一般用下面的方法来描述（来自 wikipedia ）： A fixed capacity bucket, associated with each virtual connection or user, leaks at a fixed rate. 一个固定容量的 bucket ，用来处理每个连接或用户，这个 bucket 以一个固定的速率往下漏东西。 If the bucket is empty, it stops leaking. 如果 bucket 为空，将不再漏东西。 For a packet to conform, it has to be possible to add a specific amount of water to the bucket: The specific amount added by a conforming packet can be the same for all packets, or can be proportional to the length of the packet. 当需要确认一个数据包的时候，把它当做一定数量的水加到 bucket 中：这个添加的水量可以跟所有的包一样，也可以按包的实际长度以一定比例来添加。 If this amount of water would cause the bucket to exceed its capacity then the packet does not conform and the water in the bucket is left unchanged. 如果 bucket 中水的总量达到了 bucket 的容量限制，那么新的包就不被接受并且 bucket 中的水不会有啥变化。 不被接受的包可以被丢弃( Traffic policing )，也可以被排队( Traffic shaping )，看具体的需求来做。 通过上面可以发现，as a meter 的 leaky bucket 其实跟前面说过的 token bucket 是类似的，只是实现上不一样而已，实际的效果其实是一样的： bucket 都有容量限制。 都允许存在波峰/尖刺，考虑一个极端情况：在 token bucket 中当 bucket 满的时候是可以一次性拿出所有 token 的，此时就是个波峰/尖刺了，在 leaky bucket 中当 bucket 空的时候是可以一次性倒入达到 bucket 容量限制的水的，此时也会有个波峰/尖刺。 as a queue¶ (图片来自 https://en.wikipedia.org/wiki/Leaky_bucket ) 在 as a queue 版本中，可以把它作为一个先进先出的队列，流量涌入到 bucket 中，但是只能以恒定的速率流出，可以用来平滑流量或消峰： 流量涌入到 bucket 中，当超出 bucket 容量限制时，排队或者被丢弃 bucket 中的流量被以一个恒定的速率流出（当然，如果 bucket 中的数据太少的话流出就会断断续续，主要是不会超过指定的速率） 通过上面的介绍，可以看出来其实 as a queue 的 leaky bucket 可以看做是 as a meter 的 leaky bucket 的一个特例： 只要 as a meter 的 leaky bucket 的 bucket 容量被设置为在一个 ticket 周期内将流出的水量就可以达到类似 as a queue 的平滑流量/消峰的效果了。比如 rate 是 10kb/s ，ticket 是 1s，那么把 as a meter 的 bucket 容量限制为 10kb 即可达到类似效果。 总结¶ 简单介绍了一下 leaky bucket 算法，基本都是 wikipedia 上的知识， 建议直接查看参考资料中的 wikipedia 。 参考资料¶ Leaky bucket - Wikipedia Token bucket - Wikipedia",
-        "description": "<div class="section" id="id1">
-<h2 id="hidid1">前言<a class="headerlink" href="#hidid1" title="Permalink to this headline">¶</a></h2>
-<p>简单介绍一下 leaky bucket 算法。</p>
-</div>
-<div class="section" id="id2">
-<h2 id="hidid2">版本<a class="headerlink" href="#hidid2" title="Permalink to this headline">¶</a></h2>
-<p>leaky bucket 有两个版本：一个是 as a meter 、另一个是 as a queue 。</p>
-</div>
-<div class="section" id="as-a-meter">
-<h2 id="hidas-a-meter">as a meter<a class="headerlink" href="#hidas-a-meter" title="Permalink to this headline">¶</a></h2>
-<p><img alt="Leaky_bucket_image1" src="/static/images/leaky-bucket/Leaky_bucket_analogy.JPG" /></p>
-<p>(图片来自 <a class="reference external" href="https://en.wikipedia.org/wiki/Leaky_bucket">https://en.wikipedia.org/wiki/Leaky_bucket</a> )</p>
-<p>在 as a meter 版本中，一般用下面的方法来描述（来自 <a class="reference external" href="https://en.wikipedia.org/wiki/Leaky_bucket">wikipedia</a> ）：</p>
-<ul class="simple">
-<li>A fixed capacity bucket, associated with each virtual connection or user, leaks at a fixed rate.
-一个固定容量的 bucket ，用来处理每个连接或用户，这个 bucket 以一个固定的速率往下漏东西。</li>
-<li>If the bucket is empty, it stops leaking.
-如果 bucket 为空，将不再漏东西。</li>
-<li>For a packet to conform, it has to be possible to add a specific amount of water to the bucket: The specific amount added by a conforming packet can be the same for all packets, or can be proportional to the length of the packet.
-当需要确认一个数据包的时候，把它当做一定数量的水加到 bucket 中：这个添加的水量可以跟所有的包一样，也可以按包的实际长度以一定比例来添加。</li>
-<li>If this amount of water would cause the bucket to exceed its capacity then the packet does not conform and the water in the bucket is left unchanged.
-如果 bucket 中水的总量达到了 bucket 的容量限制，那么新的包就不被接受并且 bucket 中的水不会有啥变化。</li>
-<li>不被接受的包可以被丢弃( <a class="reference external" href="https://en.wikipedia.org/wiki/Traffic_police">Traffic policing</a> )，也可以被排队( <a class="reference external" href="https://en.wikipedia.org/wiki/Traffic_shaping">Traffic shaping</a> )，看具体的需求来做。</li>
-</ul>
-<p>通过上面可以发现，as a meter 的 leaky bucket 其实跟前面说过的 <a class="reference external" href="https://mozillazg.com/2019/01/rate-limiting-intro-token-bucket.html">token bucket</a> 是类似的，只是实现上不一样而已，实际的效果其实是一样的：</p>
-<ul class="simple">
-<li>bucket 都有容量限制。</li>
-<li>都允许存在波峰/尖刺，考虑一个极端情况：在 token bucket 中当 bucket 满的时候是可以一次性拿出所有 token 的，此时就是个波峰/尖刺了，在 leaky bucket 中当 bucket 空的时候是可以一次性倒入达到 bucket 容量限制的水的，此时也会有个波峰/尖刺。</li>
-</ul>
-</div>
-<div class="section" id="as-a-queue">
-<h2 id="hidas-a-queue">as a queue<a class="headerlink" href="#hidas-a-queue" title="Permalink to this headline">¶</a></h2>
-<p><img alt="Leaky_bucket_image2" src="/static/images/leaky-bucket/LeakyBucket.png" /></p>
-<p>(图片来自 <a class="reference external" href="https://en.wikipedia.org/wiki/Leaky_bucket">https://en.wikipedia.org/wiki/Leaky_bucket</a> )</p>
-<p>在 as a queue 版本中，可以把它作为一个先进先出的队列，流量涌入到 bucket 中，但是只能以恒定的速率流出，可以用来平滑流量或消峰：</p>
-<ul class="simple">
-<li>流量涌入到 bucket 中，当超出 bucket 容量限制时，排队或者被丢弃</li>
-<li>bucket 中的流量被以一个恒定的速率流出（当然，如果 bucket 中的数据太少的话流出就会断断续续，主要是不会超过指定的速率）</li>
-</ul>
-<p>通过上面的介绍，可以看出来其实 as a queue 的 leaky bucket 可以看做是 as a meter 的 leaky bucket 的一个特例：
-只要 as a meter 的 leaky bucket 的 bucket 容量被设置为在一个 ticket 周期内将流出的水量就可以达到类似 as a queue 的平滑流量/消峰的效果了。比如 rate 是 10kb/s ，ticket 是 1s，那么把 as a meter 的 bucket 容量限制为 10kb 即可达到类似效果。</p>
-</div>
-<div class="section" id="id3">
-<h2 id="hidid3">总结<a class="headerlink" href="#hidid3" title="Permalink to this headline">¶</a></h2>
-<p>简单介绍了一下 leaky bucket 算法，基本都是 wikipedia 上的知识，
-建议直接查看参考资料中的 <a class="reference external" href="https://en.wikipedia.org/wiki/Leaky_bucket">wikipedia</a> 。</p>
-</div>
-<div class="section" id="id4">
-<h2 id="hidid4">参考资料<a class="headerlink" href="#hidid4" title="Permalink to this headline">¶</a></h2>
-<ul class="simple">
-<li><a class="reference external" href="https://en.wikipedia.org/wiki/Leaky_bucket">Leaky bucket - Wikipedia</a></li>
-<li><a class="reference external" href="https://en.wikipedia.org/wiki/Token_bucket">Token bucket - Wikipedia</a></li>
-</ul>
-</div>
-",
-        "mainEntityOfPage": {
-            "@type": "WebPage",
-            "@id": "https://mozillazg.com"
-        }
+        "image": [
+            "https://mozillazg.com/static/avatar.jpeg"
+         ],
+        "keywords": "others, rate-limiting, leaky-bucket",
+        "datePublished": "2019-04-14"
     }
     </script>
 

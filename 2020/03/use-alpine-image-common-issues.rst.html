@@ -16,7 +16,7 @@
 <link rel="canonical" href="https://mozillazg.com/2020/03/use-alpine-image-common-issues.rst.html">
 
         <meta name="author" content="mozillazg" />
-        <meta name="keywords" content="alpine" />
+        <meta name="keywords" content="container,alpine" />
     <meta name="description" content="前言¶ 简单记录一下使用 Alpine 作为基础镜像时可能会遇到的常见问题的解决方法。 设置国内软件仓库镜像¶ alpine 镜像默认的软件仓库在国外，有时 docker build 的时候安装软件包会很慢。 解决方法：使用国内的软件包镜像，比如 https://mirrors.ustc.edu.cn 的镜像: RUN sed -i &#39;s!http://dl-cdn.alpinelinux.org/!https://mirrors.ustc.edu.cn/!g&#39; /etc/apk/repositories panic: open /usr/local/go/lib/time/zoneinfo.zip: no such file or directory¶ 有些使用 alpine 作为基础镜像的 go 程序镜像可能会出现类似下面这样的错误: panic: open /usr/local/go/lib/time/zoneinfo.zip: no such file or directory 常见原因：alpine 基础镜像中没有包含时区信息文件，当代码中有调用类似下面这样的通过名称获取时区信息的时候，就会出现上面的错误: lc, err := time.LoadLocation(&#34;Asia/Shanghai&#34;) if err != nil { panic(err) } panic: open /usr/local/go/lib/time/zoneinfo.zip: no such file or directory 解决方法：安装 tzdata 这个包: RUN apk --no-cache add tzdata 配置时区¶ 可以通过下面的方法配置时区，大部分程序都会认这个配置: RUN apk --no-cache add tzdata &amp;&amp; \ cp /usr/share/zoneinfo/Asia/Shanghai /etc/localtime &amp;&amp; \ echo &#34;Asia/Shanghai&#34; &gt; /etc/timezone ENV TZ Asia/Shanghai 明明镜像中有对应的二进制文件，但是执行时却提示 not found 或 no such file¶ 有时可能会遇到明明镜像中存在相应的二进制文件，但是执行对应的二进制文件时却提示 not found 或 no such file 错误，类似下面这样: # ls /usr/bin/grep /usr/bin/grep # /usr/bin/grep /bin/sh: /usr/bin/grep: not found 常见原因：该二进制文件是使用动态链接方式编译了一个使用了 GLIBC 库的程序生成的，但是 alpne 镜像中没有 GLIBC 库而是用的 MUSL LIBC 库，这样就会导致该二进制文件无法被执行。 解决办法：下面两个解决方法 改为静态编译 如果要使用动态链接函数编译的话，不要依赖 GLIBC （比如编译 Go 程序的时候指定 CGO_ENABLED=0 ） 或者在 alpine 中编译一个依赖 MUSL LIBC 的版本 Go 程序访问 https 服务时提示证书问题：x509: certificate signed by unknown authority¶ Go 程序使用 alpine 作为基础镜像时有时可能会遇到程序中访问 https 服务时会提示证书问题 x509: certificate signed by unknown authority 常见原因：镜像内的 CA 证书信息太老了，需要更新一下: RUN apk add --no-cache ca-certificates &amp;&amp; \ update-ca-certificates exec user process caused &#34;exec format error&#34;¶ 有时运行有些基于 alpine 的容器会提示 exec user process caused &#34;exec format error&#34; 。 常见原因：镜像中的程序编译的时候适配的不是当前运行该镜像的机器的 CPU 架构，比如程序和镜像编译时是为 x86 架构编译的，此时这个镜像就无法在 amd64 架构下运行，会报上面的错误。 总结¶ 简单记录了一下使用 Apline 作为基础镜像时可能会遇到的常见问题的解决方法（后面会持续更新）。 参考资料¶ Alpine Linux 源使用帮助 — USTC Mirror Help 文档 takecy/tz-sample: Sample for alpine with timezone in Golang Error Executing &#39;ps&#39; Command RHEL 7.x/8x - Ubuntu 19x · Issue #501 · aquasecurity/kube-bench Go-compiled binary won&#39;t run in an alpine docker container on Ubuntu host - Stack Overflow Cross Compiling Golang with a Docker Alpine Container -- JeffSloyer.io net - The Go Programming Language Setting the timezone - Alpine Linux" />
     <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-4941850466486001"
      crossorigin="anonymous"></script>
@@ -41,6 +41,7 @@
         <meta property="og:description" content="前言¶ 简单记录一下使用 Alpine 作为基础镜像时可能会遇到的常见问题的解决方法。 设置国内软件仓库镜像¶ alpine 镜像默认的软件仓库在国外，有时 docker build 的时候安装软件包会很慢。 解决方法：使用国内的软件包镜像，比如 https://mirrors.ustc.edu.cn 的镜像: RUN sed -i &#39;s!http://dl-cdn.alpinelinux.org/!https://mirrors.ustc.edu.cn/!g&#39; /etc/apk/repositories panic: open /usr/local/go/lib/time/zoneinfo.zip: no such file or directory¶ 有些使用 alpine 作为基础镜像的 go 程序镜像可能会出现类似下面这样的错误: panic: open /usr/local/go/lib/time/zoneinfo.zip: no such file or directory 常见原因：alpine 基础镜像中没有包含时区信息文件，当代码中有调用类似下面这样的通过名称获取时区信息的时候，就会出现上面的错误: lc, err := time.LoadLocation(&#34;Asia/Shanghai&#34;) if err != nil { panic(err) } panic: open /usr/local/go/lib/time/zoneinfo.zip: no such file or directory 解决方法：安装 tzdata 这个包: RUN apk --no-cache add tzdata 配置时区¶ 可以通过下面的方法配置时区，大部分程序都会认这个配置: RUN apk --no-cache add tzdata &amp;&amp; \ cp /usr/share/zoneinfo/Asia/Shanghai /etc/localtime &amp;&amp; \ echo &#34;Asia/Shanghai&#34; &gt; /etc/timezone ENV TZ Asia/Shanghai 明明镜像中有对应的二进制文件，但是执行时却提示 not found 或 no such file¶ 有时可能会遇到明明镜像中存在相应的二进制文件，但是执行对应的二进制文件时却提示 not found 或 no such file 错误，类似下面这样: # ls /usr/bin/grep /usr/bin/grep # /usr/bin/grep /bin/sh: /usr/bin/grep: not found 常见原因：该二进制文件是使用动态链接方式编译了一个使用了 GLIBC 库的程序生成的，但是 alpne 镜像中没有 GLIBC 库而是用的 MUSL LIBC 库，这样就会导致该二进制文件无法被执行。 解决办法：下面两个解决方法 改为静态编译 如果要使用动态链接函数编译的话，不要依赖 GLIBC （比如编译 Go 程序的时候指定 CGO_ENABLED=0 ） 或者在 alpine 中编译一个依赖 MUSL LIBC 的版本 Go 程序访问 https 服务时提示证书问题：x509: certificate signed by unknown authority¶ Go 程序使用 alpine 作为基础镜像时有时可能会遇到程序中访问 https 服务时会提示证书问题 x509: certificate signed by unknown authority 常见原因：镜像内的 CA 证书信息太老了，需要更新一下: RUN apk add --no-cache ca-certificates &amp;&amp; \ update-ca-certificates exec user process caused &#34;exec format error&#34;¶ 有时运行有些基于 alpine 的容器会提示 exec user process caused &#34;exec format error&#34; 。 常见原因：镜像中的程序编译的时候适配的不是当前运行该镜像的机器的 CPU 架构，比如程序和镜像编译时是为 x86 架构编译的，此时这个镜像就无法在 amd64 架构下运行，会报上面的错误。 总结¶ 简单记录了一下使用 Apline 作为基础镜像时可能会遇到的常见问题的解决方法（后面会持续更新）。 参考资料¶ Alpine Linux 源使用帮助 — USTC Mirror Help 文档 takecy/tz-sample: Sample for alpine with timezone in Golang Error Executing &#39;ps&#39; Command RHEL 7.x/8x - Ubuntu 19x · Issue #501 · aquasecurity/kube-bench Go-compiled binary won&#39;t run in an alpine docker container on Ubuntu host - Stack Overflow Cross Compiling Golang with a Docker Alpine Container -- JeffSloyer.io net - The Go Programming Language Setting the timezone - Alpine Linux"/>
         <meta property="article:published_time" content="2020-03-31" />
             <meta property="article:section" content="container" />
+            <meta property="article:tag" content="container" />
             <meta property="article:tag" content="alpine" />
             <meta property="article:author" content="mozillazg" />
             <meta property="og:image"
@@ -76,7 +77,7 @@
     <script type="application/ld+json">
     {
         "@context": "https://schema.org",
-        "@type": "Website",
+        "@type": "BlogPosting",
         "publisher": {
             "@type": "Person",
             "name": "mozillazg",
@@ -89,110 +90,13 @@
             "url": "https://mozillazg.com",
             "sameAs": []
         },
-        // "headline": "",
+        "headline": "使用 Alpine 作为基础镜像时可能会遇到的常见问题的解决方法",
         "url": "https://mozillazg.com/2020/03/use-alpine-image-common-issues.rst.html",
-        "datePublished": "2020-03-31",
-        // "dateModified": "",
-        "image": "https://mozillazg.com/static/avatar.jpeg",
-        "keywords": "alpine",
-        // "description": "前言¶ 简单记录一下使用 Alpine 作为基础镜像时可能会遇到的常见问题的解决方法。 设置国内软件仓库镜像¶ alpine 镜像默认的软件仓库在国外，有时 docker build 的时候安装软件包会很慢。 解决方法：使用国内的软件包镜像，比如 https://mirrors.ustc.edu.cn 的镜像: RUN sed -i &#39;s!http://dl-cdn.alpinelinux.org/!https://mirrors.ustc.edu.cn/!g&#39; /etc/apk/repositories panic: open /usr/local/go/lib/time/zoneinfo.zip: no such file or directory¶ 有些使用 alpine 作为基础镜像的 go 程序镜像可能会出现类似下面这样的错误: panic: open /usr/local/go/lib/time/zoneinfo.zip: no such file or directory 常见原因：alpine 基础镜像中没有包含时区信息文件，当代码中有调用类似下面这样的通过名称获取时区信息的时候，就会出现上面的错误: lc, err := time.LoadLocation(&#34;Asia/Shanghai&#34;) if err != nil { panic(err) } panic: open /usr/local/go/lib/time/zoneinfo.zip: no such file or directory 解决方法：安装 tzdata 这个包: RUN apk --no-cache add tzdata 配置时区¶ 可以通过下面的方法配置时区，大部分程序都会认这个配置: RUN apk --no-cache add tzdata &amp;&amp; \ cp /usr/share/zoneinfo/Asia/Shanghai /etc/localtime &amp;&amp; \ echo &#34;Asia/Shanghai&#34; &gt; /etc/timezone ENV TZ Asia/Shanghai 明明镜像中有对应的二进制文件，但是执行时却提示 not found 或 no such file¶ 有时可能会遇到明明镜像中存在相应的二进制文件，但是执行对应的二进制文件时却提示 not found 或 no such file 错误，类似下面这样: # ls /usr/bin/grep /usr/bin/grep # /usr/bin/grep /bin/sh: /usr/bin/grep: not found 常见原因：该二进制文件是使用动态链接方式编译了一个使用了 GLIBC 库的程序生成的，但是 alpne 镜像中没有 GLIBC 库而是用的 MUSL LIBC 库，这样就会导致该二进制文件无法被执行。 解决办法：下面两个解决方法 改为静态编译 如果要使用动态链接函数编译的话，不要依赖 GLIBC （比如编译 Go 程序的时候指定 CGO_ENABLED=0 ） 或者在 alpine 中编译一个依赖 MUSL LIBC 的版本 Go 程序访问 https 服务时提示证书问题：x509: certificate signed by unknown authority¶ Go 程序使用 alpine 作为基础镜像时有时可能会遇到程序中访问 https 服务时会提示证书问题 x509: certificate signed by unknown authority 常见原因：镜像内的 CA 证书信息太老了，需要更新一下: RUN apk add --no-cache ca-certificates &amp;&amp; \ update-ca-certificates exec user process caused &#34;exec format error&#34;¶ 有时运行有些基于 alpine 的容器会提示 exec user process caused &#34;exec format error&#34; 。 常见原因：镜像中的程序编译的时候适配的不是当前运行该镜像的机器的 CPU 架构，比如程序和镜像编译时是为 x86 架构编译的，此时这个镜像就无法在 amd64 架构下运行，会报上面的错误。 总结¶ 简单记录了一下使用 Apline 作为基础镜像时可能会遇到的常见问题的解决方法（后面会持续更新）。 参考资料¶ Alpine Linux 源使用帮助 — USTC Mirror Help 文档 takecy/tz-sample: Sample for alpine with timezone in Golang Error Executing &#39;ps&#39; Command RHEL 7.x/8x - Ubuntu 19x · Issue #501 · aquasecurity/kube-bench Go-compiled binary won&#39;t run in an alpine docker container on Ubuntu host - Stack Overflow Cross Compiling Golang with a Docker Alpine Container -- JeffSloyer.io net - The Go Programming Language Setting the timezone - Alpine Linux",
-        "description": "<div class="section" id="id1">
-<h2 id="hidid1">前言<a class="headerlink" href="#hidid1" title="Permalink to this headline">¶</a></h2>
-<p>简单记录一下使用 Alpine 作为基础镜像时可能会遇到的常见问题的解决方法。</p>
-</div>
-<div class="section" id="id2">
-<h2 id="hidid2">设置国内软件仓库镜像<a class="headerlink" href="#hidid2" title="Permalink to this headline">¶</a></h2>
-<p>alpine 镜像默认的软件仓库在国外，有时 docker build 的时候安装软件包会很慢。</p>
-<p>解决方法：使用国内的软件包镜像，比如 <a class="reference external" href="https://mirrors.ustc.edu.cn">https://mirrors.ustc.edu.cn</a> 的镜像:</p>
-<pre class="literal-block">
-RUN sed -i 's!http://dl-cdn.alpinelinux.org/!https://mirrors.ustc.edu.cn/!g' /etc/apk/repositories
-</pre>
-</div>
-<div class="section" id="panic-open-usr-local-go-lib-time-zoneinfo-zip-no-such-file-or-directory">
-<h2 id="hidpanic-open-usr-local-go-lib-time-zoneinfo-zip-no-such-file-or-directory">panic: open /usr/local/go/lib/time/zoneinfo.zip: no such file or directory<a class="headerlink" href="#hidpanic-open-usr-local-go-lib-time-zoneinfo-zip-no-such-file-or-directory" title="Permalink to this headline">¶</a></h2>
-<p>有些使用 alpine 作为基础镜像的 go 程序镜像可能会出现类似下面这样的错误:</p>
-<pre class="literal-block">
-panic: open /usr/local/go/lib/time/zoneinfo.zip: no such file or directory
-</pre>
-<p>常见原因：alpine 基础镜像中没有包含时区信息文件，当代码中有调用类似下面这样的通过名称获取时区信息的时候，就会出现上面的错误:</p>
-<pre class="literal-block">
-lc, err := time.LoadLocation(&quot;Asia/Shanghai&quot;)
-if err != nil {
-    panic(err)
-}
-
-panic: open /usr/local/go/lib/time/zoneinfo.zip: no such file or directory
-</pre>
-<p>解决方法：安装 <tt class="docutils literal">tzdata</tt> 这个包:</p>
-<pre class="literal-block">
-RUN apk --no-cache add tzdata
-</pre>
-</div>
-<div class="section" id="id3">
-<h2 id="hidid3">配置时区<a class="headerlink" href="#hidid3" title="Permalink to this headline">¶</a></h2>
-<p>可以通过下面的方法配置时区，大部分程序都会认这个配置:</p>
-<pre class="literal-block">
-RUN apk --no-cache add tzdata &amp;&amp; \
-    cp /usr/share/zoneinfo/Asia/Shanghai /etc/localtime &amp;&amp; \
-    echo &quot;Asia/Shanghai&quot; &gt; /etc/timezone
-ENV TZ Asia/Shanghai
-</pre>
-</div>
-<div class="section" id="not-found-no-such-file">
-<h2 id="hidnot-found-no-such-file">明明镜像中有对应的二进制文件，但是执行时却提示 not found 或 no such file<a class="headerlink" href="#hidnot-found-no-such-file" title="Permalink to this headline">¶</a></h2>
-<p>有时可能会遇到明明镜像中存在相应的二进制文件，但是执行对应的二进制文件时却提示 <tt class="docutils literal">not found</tt> 或 <tt class="docutils literal">no such file</tt> 错误，类似下面这样:</p>
-<pre class="literal-block">
-# ls /usr/bin/grep
-/usr/bin/grep
-
-# /usr/bin/grep
-/bin/sh: /usr/bin/grep: not found
-</pre>
-<p>常见原因：该二进制文件是使用动态链接方式编译了一个使用了 <tt class="docutils literal">GLIBC</tt> 库的程序生成的，但是 alpne 镜像中没有 <tt class="docutils literal">GLIBC</tt> 库而是用的 <tt class="docutils literal">MUSL LIBC</tt> 库，这样就会导致该二进制文件无法被执行。</p>
-<p>解决办法：下面两个解决方法</p>
-<ul class="simple">
-<li>改为静态编译</li>
-<li>如果要使用动态链接函数编译的话，不要依赖 <tt class="docutils literal">GLIBC</tt> （比如编译 Go 程序的时候指定 <tt class="docutils literal">CGO_ENABLED=0</tt> ） 或者在 alpine 中编译一个依赖 <tt class="docutils literal">MUSL LIBC</tt> 的版本</li>
-</ul>
-</div>
-<div class="section" id="go-https-x509-certificate-signed-by-unknown-authority">
-<h2 id="hidgo-https-x509-certificate-signed-by-unknown-authority">Go 程序访问 https 服务时提示证书问题：x509: certificate signed by unknown authority<a class="headerlink" href="#hidgo-https-x509-certificate-signed-by-unknown-authority" title="Permalink to this headline">¶</a></h2>
-<p>Go 程序使用 alpine 作为基础镜像时有时可能会遇到程序中访问 https 服务时会提示证书问题 <tt class="docutils literal">x509: certificate signed by unknown authority</tt></p>
-<p>常见原因：镜像内的 CA 证书信息太老了，需要更新一下:</p>
-<pre class="literal-block">
-RUN apk add --no-cache ca-certificates &amp;&amp; \
-    update-ca-certificates
-</pre>
-<!-- 还有另一个证书错误（待补充对应的 case 和详细错误信息）的原因是：编译的时候没有禁用 CGO，导致编译时使用了部分依赖 glic 的代码，解决方法就是通过 ``CGO_ENABLED=0`` 禁用 CGO（只在确认程序确实不依赖 CGO 也可以正常工作的情况下禁用）:: -->
-<!--  -->
-<!-- CGO_ENABLED=0 go build -->
-</div>
-<div class="section" id="exec-user-process-caused-exec-format-error">
-<h2 id="hidexec-user-process-caused-exec-format-error">exec user process caused &quot;exec format error&quot;<a class="headerlink" href="#hidexec-user-process-caused-exec-format-error" title="Permalink to this headline">¶</a></h2>
-<p>有时运行有些基于 alpine 的容器会提示 <tt class="docutils literal">exec user process caused &quot;exec format error&quot;</tt> 。</p>
-<p>常见原因：镜像中的程序编译的时候适配的不是当前运行该镜像的机器的 CPU 架构，比如程序和镜像编译时是为 x86 架构编译的，此时这个镜像就无法在 amd64 架构下运行，会报上面的错误。</p>
-</div>
-<div class="section" id="id4">
-<h2 id="hidid4">总结<a class="headerlink" href="#hidid4" title="Permalink to this headline">¶</a></h2>
-<p>简单记录了一下使用 Apline 作为基础镜像时可能会遇到的常见问题的解决方法（后面会持续更新）。</p>
-</div>
-<div class="section" id="id5">
-<h2 id="hidid5">参考资料<a class="headerlink" href="#hidid5" title="Permalink to this headline">¶</a></h2>
-<ul class="simple">
-<li><a class="reference external" href="https://mirrors.ustc.edu.cn/help/alpine.html">Alpine Linux 源使用帮助 — USTC Mirror Help 文档</a></li>
-<li><a class="reference external" href="https://github.com/takecy/tz-sample">takecy/tz-sample: Sample for alpine with timezone in Golang</a></li>
-<li><a class="reference external" href="https://github.com/aquasecurity/kube-bench/issues/501">Error Executing 'ps' Command RHEL 7.x/8x - Ubuntu 19x · Issue #501 · aquasecurity/kube-bench</a></li>
-<li><a class="reference external" href="https://stackoverflow.com/questions/36279253/go-compiled-binary-wont-run-in-an-alpine-docker-container-on-ubuntu-host">Go-compiled binary won't run in an alpine docker container on Ubuntu host - Stack Overflow</a></li>
-<li><a class="reference external" href="http://www.jeffsloyer.io/post/cross-compiling-docker-alpine-golang/">Cross Compiling Golang with a Docker Alpine Container -- JeffSloyer.io</a></li>
-<li><a class="reference external" href="https://golang.org/pkg/net/#hdr-Name_Resolution">net - The Go Programming Language</a></li>
-<li><a class="reference external" href="https://wiki.alpinelinux.org/wiki/Setting_the_timezone">Setting the timezone - Alpine Linux</a></li>
-</ul>
-</div>
-",
-        "mainEntityOfPage": {
-            "@type": "WebPage",
-            "@id": "https://mozillazg.com"
-        }
+        "image": [
+            "https://mozillazg.com/static/avatar.jpeg"
+         ],
+        "keywords": "container, alpine",
+        "datePublished": "2020-03-31"
     }
     </script>
 

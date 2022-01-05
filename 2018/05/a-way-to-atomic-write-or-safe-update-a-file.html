@@ -16,7 +16,7 @@
 <link rel="canonical" href="https://mozillazg.com/2018/05/a-way-to-atomic-write-or-safe-update-a-file.html">
 
         <meta name="author" content="mozillazg" />
-        <meta name="keywords" content="atomic,fsync,file" />
+        <meta name="keywords" content="python,atomic,fsync,file" />
     <meta name="description" content="前言¶ 所谓的原子性更新文件指的是要么更新成功，要么更新失败，不能有中间状态，不能出现更新到一半失败了的情况。 想像一下，当更新文件的时候程序中途崩溃了或者被终止了出现文件更新不完整的情况或在更新的时候有另一个程序正好在读取该文件，此时就会出现非预期的情况：读取程序读取到了脏数据，同时原来的旧数据也丢失了。所以我们在更新一些比较重要的文件时要考虑实现原子性的更新。下面就来讲一下一种实现原子性更新文件的方法。 借助临时文件实现原子性更新文件¶ 比较常见的实现原子性更新文件的方法是借助临时文件来实现： 把新数据写入到一个临时文件中 确保内容已经全部写入到磁盘上 用临时文件替换原来的文件 伪代码如下: with open(tmp_file, &#39;wb&#39;) as fp: fp.write(new_content) fp.flush() fsync(fp_fd) rename(tmp_file, orig_file) fsync(orig_file_dir_fd) close(orig_file_dir_fd) 使用第三方模块来实现¶ 实现这个功能的第三方 Python 模块还是有一些的，我目前使用的是 https://github.com/untitaker/python-atomicwrites 这个模块: $ pip install atomicwrites &gt;&gt;&gt; from atomicwrites import atomic_write &gt;&gt;&gt; with atomic_write(&#39;foo.txt&#39;, overwrite=True) as fp: ... fp.write(&#39;Hello world.&#39;) ... 其他的模块可以在 https://github.com 或 https://pypi.org 上搜索 atomic file 。然后看一下搜索出来的项目的代码，看看有没有实现上面的流程，以及一些细节的功能是否满足你的实际需求，以此来判断是使用该模块。 局限性¶ 这种方法也有一定的局限性，常见的问题如下： 有些文件系统不支持 fsync(file_fd) 操作 有些文件系统不支持 fsync(dir_fd) 操作 windows/mac 可能不支持这些操作，需要找额外替代的方法去实现类似的功能 问题¶ 同时这种方法还有一些缺陷： fsync 操作在某些场景下有性能问题比不加 fsync 操作会慢很多，比如需要在短时间内更新大量文件的时候 （最近测试有个程序一个操作周期需要更新 900 多个文件，没加 fsync 比加了 fsync 的程序快了将近 8 倍）。 如果速度是不可妥协的需求并且可以接受一定概率下文件内容不完整的情况的话（可以再在文件内容中增加校验信息，或者在其他地方保存这个校验信息，读取文件内容的时候通过校验信息来检查文件的完整信息，读取到不完整的文件时直接抛异常），可以考虑省略 fsync ， 但是如果文件不完整是绝对不可接受的情况的话，那就绝对不要省略 fsync [1] 。 总结¶ 本文讲了一种常用的使用临时文件来实现原子性/安全更新文件的方法，希望能对你有所帮忙。 如果有其他更好的方法欢迎留言交流。 参考资料¶ fsync(2) - Linux manual page When should you fsync the containing directory in addition to the file itself? - Quora Use atomic file writing and updating for configuration and key files · Issue #1060 · borgbackup/borg Don&#39;t fear the fsync! | Theodore Ts&#39;o Don’t Panic – fsync(), ext3/4, and your data – Valerie Aurora&#39;s blog Ts&#39;o: Delayed allocation and the zero-length file problem [LWN.net] Reliable file updates with Python – gocept blog Everything You Always Wanted To Know About fsync() - xavier roche&#39;s homework Option to disable fsync · Issue #17 · untitaker/python-atomicwrites Possible bug: fsync() required after calling rename() · Issue #195 · google/leveldb kernel.org/doc/Documentation/filesystems/ext4.txt linux - Is rename() without fsync() safe? - Stack Overflow [1]Delayed allocation and the zero-length file problem | Theodore Ts&#39;o" />
     <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-4941850466486001"
      crossorigin="anonymous"></script>
@@ -41,6 +41,7 @@
         <meta property="og:description" content="前言¶ 所谓的原子性更新文件指的是要么更新成功，要么更新失败，不能有中间状态，不能出现更新到一半失败了的情况。 想像一下，当更新文件的时候程序中途崩溃了或者被终止了出现文件更新不完整的情况或在更新的时候有另一个程序正好在读取该文件，此时就会出现非预期的情况：读取程序读取到了脏数据，同时原来的旧数据也丢失了。所以我们在更新一些比较重要的文件时要考虑实现原子性的更新。下面就来讲一下一种实现原子性更新文件的方法。 借助临时文件实现原子性更新文件¶ 比较常见的实现原子性更新文件的方法是借助临时文件来实现： 把新数据写入到一个临时文件中 确保内容已经全部写入到磁盘上 用临时文件替换原来的文件 伪代码如下: with open(tmp_file, &#39;wb&#39;) as fp: fp.write(new_content) fp.flush() fsync(fp_fd) rename(tmp_file, orig_file) fsync(orig_file_dir_fd) close(orig_file_dir_fd) 使用第三方模块来实现¶ 实现这个功能的第三方 Python 模块还是有一些的，我目前使用的是 https://github.com/untitaker/python-atomicwrites 这个模块: $ pip install atomicwrites &gt;&gt;&gt; from atomicwrites import atomic_write &gt;&gt;&gt; with atomic_write(&#39;foo.txt&#39;, overwrite=True) as fp: ... fp.write(&#39;Hello world.&#39;) ... 其他的模块可以在 https://github.com 或 https://pypi.org 上搜索 atomic file 。然后看一下搜索出来的项目的代码，看看有没有实现上面的流程，以及一些细节的功能是否满足你的实际需求，以此来判断是使用该模块。 局限性¶ 这种方法也有一定的局限性，常见的问题如下： 有些文件系统不支持 fsync(file_fd) 操作 有些文件系统不支持 fsync(dir_fd) 操作 windows/mac 可能不支持这些操作，需要找额外替代的方法去实现类似的功能 问题¶ 同时这种方法还有一些缺陷： fsync 操作在某些场景下有性能问题比不加 fsync 操作会慢很多，比如需要在短时间内更新大量文件的时候 （最近测试有个程序一个操作周期需要更新 900 多个文件，没加 fsync 比加了 fsync 的程序快了将近 8 倍）。 如果速度是不可妥协的需求并且可以接受一定概率下文件内容不完整的情况的话（可以再在文件内容中增加校验信息，或者在其他地方保存这个校验信息，读取文件内容的时候通过校验信息来检查文件的完整信息，读取到不完整的文件时直接抛异常），可以考虑省略 fsync ， 但是如果文件不完整是绝对不可接受的情况的话，那就绝对不要省略 fsync [1] 。 总结¶ 本文讲了一种常用的使用临时文件来实现原子性/安全更新文件的方法，希望能对你有所帮忙。 如果有其他更好的方法欢迎留言交流。 参考资料¶ fsync(2) - Linux manual page When should you fsync the containing directory in addition to the file itself? - Quora Use atomic file writing and updating for configuration and key files · Issue #1060 · borgbackup/borg Don&#39;t fear the fsync! | Theodore Ts&#39;o Don’t Panic – fsync(), ext3/4, and your data – Valerie Aurora&#39;s blog Ts&#39;o: Delayed allocation and the zero-length file problem [LWN.net] Reliable file updates with Python – gocept blog Everything You Always Wanted To Know About fsync() - xavier roche&#39;s homework Option to disable fsync · Issue #17 · untitaker/python-atomicwrites Possible bug: fsync() required after calling rename() · Issue #195 · google/leveldb kernel.org/doc/Documentation/filesystems/ext4.txt linux - Is rename() without fsync() safe? - Stack Overflow [1]Delayed allocation and the zero-length file problem | Theodore Ts&#39;o"/>
         <meta property="article:published_time" content="2018-05-06" />
             <meta property="article:section" content="python" />
+            <meta property="article:tag" content="python" />
             <meta property="article:tag" content="atomic" />
             <meta property="article:tag" content="fsync" />
             <meta property="article:tag" content="file" />
@@ -78,7 +79,7 @@
     <script type="application/ld+json">
     {
         "@context": "https://schema.org",
-        "@type": "Website",
+        "@type": "BlogPosting",
         "publisher": {
             "@type": "Person",
             "name": "mozillazg",
@@ -91,102 +92,13 @@
             "url": "https://mozillazg.com",
             "sameAs": []
         },
-        // "headline": "",
+        "headline": "通过临时文件实现安全的/原子性的更新文件",
         "url": "https://mozillazg.com/2018/05/a-way-to-atomic-write-or-safe-update-a-file.html",
-        "datePublished": "2018-05-06",
-        // "dateModified": "",
-        "image": "https://mozillazg.com/static/avatar.jpeg",
-        "keywords": "atomic, fsync, file",
-        // "description": "前言¶ 所谓的原子性更新文件指的是要么更新成功，要么更新失败，不能有中间状态，不能出现更新到一半失败了的情况。 想像一下，当更新文件的时候程序中途崩溃了或者被终止了出现文件更新不完整的情况或在更新的时候有另一个程序正好在读取该文件，此时就会出现非预期的情况：读取程序读取到了脏数据，同时原来的旧数据也丢失了。所以我们在更新一些比较重要的文件时要考虑实现原子性的更新。下面就来讲一下一种实现原子性更新文件的方法。 借助临时文件实现原子性更新文件¶ 比较常见的实现原子性更新文件的方法是借助临时文件来实现： 把新数据写入到一个临时文件中 确保内容已经全部写入到磁盘上 用临时文件替换原来的文件 伪代码如下: with open(tmp_file, &#39;wb&#39;) as fp: fp.write(new_content) fp.flush() fsync(fp_fd) rename(tmp_file, orig_file) fsync(orig_file_dir_fd) close(orig_file_dir_fd) 使用第三方模块来实现¶ 实现这个功能的第三方 Python 模块还是有一些的，我目前使用的是 https://github.com/untitaker/python-atomicwrites 这个模块: $ pip install atomicwrites &gt;&gt;&gt; from atomicwrites import atomic_write &gt;&gt;&gt; with atomic_write(&#39;foo.txt&#39;, overwrite=True) as fp: ... fp.write(&#39;Hello world.&#39;) ... 其他的模块可以在 https://github.com 或 https://pypi.org 上搜索 atomic file 。然后看一下搜索出来的项目的代码，看看有没有实现上面的流程，以及一些细节的功能是否满足你的实际需求，以此来判断是使用该模块。 局限性¶ 这种方法也有一定的局限性，常见的问题如下： 有些文件系统不支持 fsync(file_fd) 操作 有些文件系统不支持 fsync(dir_fd) 操作 windows/mac 可能不支持这些操作，需要找额外替代的方法去实现类似的功能 问题¶ 同时这种方法还有一些缺陷： fsync 操作在某些场景下有性能问题比不加 fsync 操作会慢很多，比如需要在短时间内更新大量文件的时候 （最近测试有个程序一个操作周期需要更新 900 多个文件，没加 fsync 比加了 fsync 的程序快了将近 8 倍）。 如果速度是不可妥协的需求并且可以接受一定概率下文件内容不完整的情况的话（可以再在文件内容中增加校验信息，或者在其他地方保存这个校验信息，读取文件内容的时候通过校验信息来检查文件的完整信息，读取到不完整的文件时直接抛异常），可以考虑省略 fsync ， 但是如果文件不完整是绝对不可接受的情况的话，那就绝对不要省略 fsync [1] 。 总结¶ 本文讲了一种常用的使用临时文件来实现原子性/安全更新文件的方法，希望能对你有所帮忙。 如果有其他更好的方法欢迎留言交流。 参考资料¶ fsync(2) - Linux manual page When should you fsync the containing directory in addition to the file itself? - Quora Use atomic file writing and updating for configuration and key files · Issue #1060 · borgbackup/borg Don&#39;t fear the fsync! | Theodore Ts&#39;o Don’t Panic – fsync(), ext3/4, and your data – Valerie Aurora&#39;s blog Ts&#39;o: Delayed allocation and the zero-length file problem [LWN.net] Reliable file updates with Python – gocept blog Everything You Always Wanted To Know About fsync() - xavier roche&#39;s homework Option to disable fsync · Issue #17 · untitaker/python-atomicwrites Possible bug: fsync() required after calling rename() · Issue #195 · google/leveldb kernel.org/doc/Documentation/filesystems/ext4.txt linux - Is rename() without fsync() safe? - Stack Overflow [1]Delayed allocation and the zero-length file problem | Theodore Ts&#39;o",
-        "description": "<div class="section" id="id2">
-<h2 id="hidid2">前言<a class="headerlink" href="#hidid2" title="Permalink to this headline">¶</a></h2>
-<p>所谓的原子性更新文件指的是要么更新成功，要么更新失败，不能有中间状态，不能出现更新到一半失败了的情况。</p>
-<p>想像一下，当更新文件的时候程序中途崩溃了或者被终止了出现文件更新不完整的情况或在更新的时候有另一个程序正好在读取该文件，此时就会出现非预期的情况：读取程序读取到了脏数据，同时原来的旧数据也丢失了。所以我们在更新一些比较重要的文件时要考虑实现原子性的更新。下面就来讲一下一种实现原子性更新文件的方法。</p>
-</div>
-<div class="section" id="id3">
-<h2 id="hidid3">借助临时文件实现原子性更新文件<a class="headerlink" href="#hidid3" title="Permalink to this headline">¶</a></h2>
-<p>比较常见的实现原子性更新文件的方法是借助临时文件来实现：</p>
-<ol class="arabic simple">
-<li>把新数据写入到一个临时文件中</li>
-<li>确保内容已经全部写入到磁盘上</li>
-<li>用临时文件替换原来的文件</li>
-</ol>
-<p>伪代码如下:</p>
-<div class="highlight"><pre><span></span><span class="k">with</span> <span class="nb">open</span><span class="p">(</span><span class="n">tmp_file</span><span class="p">,</span> <span class="s1">&#39;wb&#39;</span><span class="p">)</span> <span class="k">as</span> <span class="n">fp</span><span class="p">:</span>
-    <span class="n">fp</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="n">new_content</span><span class="p">)</span>
-    <span class="n">fp</span><span class="o">.</span><span class="n">flush</span><span class="p">()</span>
-    <span class="n">fsync</span><span class="p">(</span><span class="n">fp_fd</span><span class="p">)</span>
-
-<span class="n">rename</span><span class="p">(</span><span class="n">tmp_file</span><span class="p">,</span> <span class="n">orig_file</span><span class="p">)</span>
-<span class="n">fsync</span><span class="p">(</span><span class="n">orig_file_dir_fd</span><span class="p">)</span>
-<span class="n">close</span><span class="p">(</span><span class="n">orig_file_dir_fd</span><span class="p">)</span>
-</pre></div>
-<div class="section" id="id4">
-<h3 id="hidid4">使用第三方模块来实现<a class="headerlink" href="#hidid4" title="Permalink to this headline">¶</a></h3>
-<p>实现这个功能的第三方 Python 模块还是有一些的，我目前使用的是 <a class="reference external" href="https://github.com/untitaker/python-atomicwrites">https://github.com/untitaker/python-atomicwrites</a> 这个模块:</p>
-<div class="highlight"><pre><span></span>$ pip install atomicwrites
-</pre></div>
-<div class="highlight"><pre><span></span><span class="o">&gt;&gt;&gt;</span> <span class="kn">from</span> <span class="nn">atomicwrites</span> <span class="kn">import</span> <span class="n">atomic_write</span>
-<span class="o">&gt;&gt;&gt;</span> <span class="k">with</span> <span class="n">atomic_write</span><span class="p">(</span><span class="s1">&#39;foo.txt&#39;</span><span class="p">,</span> <span class="n">overwrite</span><span class="o">=</span><span class="bp">True</span><span class="p">)</span> <span class="k">as</span> <span class="n">fp</span><span class="p">:</span>
-<span class="o">...</span>     <span class="n">fp</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="s1">&#39;Hello world.&#39;</span><span class="p">)</span>
-<span class="o">...</span>
-</pre></div>
-<p>其他的模块可以在 <a class="reference external" href="https://github.com">https://github.com</a> 或 <a class="reference external" href="https://pypi.org">https://pypi.org</a> 上搜索 <tt class="docutils literal">atomic file</tt> 。然后看一下搜索出来的项目的代码，看看有没有实现上面的流程，以及一些细节的功能是否满足你的实际需求，以此来判断是使用该模块。</p>
-</div>
-</div>
-<div class="section" id="id5">
-<h2 id="hidid5">局限性<a class="headerlink" href="#hidid5" title="Permalink to this headline">¶</a></h2>
-<p>这种方法也有一定的局限性，常见的问题如下：</p>
-<ul class="simple">
-<li>有些文件系统不支持 <tt class="docutils literal">fsync(file_fd)</tt> 操作</li>
-<li>有些文件系统不支持 <tt class="docutils literal">fsync(dir_fd)</tt> 操作</li>
-<li>windows/mac 可能不支持这些操作，需要找额外替代的方法去实现类似的功能</li>
-</ul>
-</div>
-<div class="section" id="id6">
-<h2 id="hidid6">问题<a class="headerlink" href="#hidid6" title="Permalink to this headline">¶</a></h2>
-<p>同时这种方法还有一些缺陷：</p>
-<ul class="simple">
-<li><tt class="docutils literal">fsync</tt> 操作在某些场景下有性能问题比不加 <tt class="docutils literal">fsync</tt> 操作会慢很多，比如需要在短时间内更新大量文件的时候
-（最近测试有个程序一个操作周期需要更新 900 多个文件，没加 <tt class="docutils literal">fsync</tt>
-比加了 <tt class="docutils literal">fsync</tt> 的程序快了将近 8 倍）。</li>
-</ul>
-<p>如果速度是不可妥协的需求并且可以接受一定概率下文件内容不完整的情况的话（可以再在文件内容中增加校验信息，或者在其他地方保存这个校验信息，读取文件内容的时候通过校验信息来检查文件的完整信息，读取到不完整的文件时直接抛异常），可以考虑省略 <tt class="docutils literal">fsync</tt> ，
-但是如果文件不完整是绝对不可接受的情况的话，那就绝对不要省略 <tt class="docutils literal">fsync</tt> <a class="footnote-reference" href="#id10" id="id7">[1]</a> 。</p>
-</div>
-<div class="section" id="id8">
-<h2 id="hidid8">总结<a class="headerlink" href="#hidid8" title="Permalink to this headline">¶</a></h2>
-<p>本文讲了一种常用的使用临时文件来实现原子性/安全更新文件的方法，希望能对你有所帮忙。
-如果有其他更好的方法欢迎留言交流。</p>
-</div>
-<div class="section" id="id9">
-<h2 id="hidid9">参考资料<a class="headerlink" href="#hidid9" title="Permalink to this headline">¶</a></h2>
-<ul class="simple">
-<li><a class="reference external" href="http://man7.org/linux/man-pages/man2/fsync.2.html">fsync(2) - Linux manual page</a></li>
-<li><a class="reference external" href="https://www.quora.com/When-should-you-fsync-the-containing-directory-in-addition-to-the-file-itself">When should you fsync the containing directory in addition to the file itself? - Quora</a></li>
-<li><a class="reference external" href="https://github.com/borgbackup/borg/issues/1060">Use atomic file writing and updating for configuration and key files · Issue #1060 · borgbackup/borg</a></li>
-<li><a class="reference external" href="http://thunk.org/tytso/blog/2009/03/15/dont-fear-the-fsync/">Don't fear the fsync! | Theodore Ts'o</a></li>
-<li><a class="reference external" href="https://blog.valerieaurora.org/2009/04/16/dont-panic-fsync-ext34-and-your-data/">Don’t Panic – fsync(), ext3/4, and your data – Valerie Aurora's blog</a></li>
-<li><a class="reference external" href="https://lwn.net/Articles/323169/">Ts'o: Delayed allocation and the zero-length file problem [LWN.net]</a></li>
-<li><a class="reference external" href="https://blog.gocept.com/2013/07/15/reliable-file-updates-with-python/">Reliable file updates with Python – gocept blog</a></li>
-<li><a class="reference external" href="http://blog.httrack.com/blog/2013/11/15/everything-you-always-wanted-to-know-about-fsync/">Everything You Always Wanted To Know About fsync() - xavier roche's homework</a></li>
-<li><a class="reference external" href="https://github.com/untitaker/python-atomicwrites/issues/17">Option to disable fsync · Issue #17 · untitaker/python-atomicwrites</a></li>
-<li><a class="reference external" href="https://github.com/google/leveldb/issues/195">Possible bug: fsync() required after calling rename() · Issue #195 · google/leveldb</a></li>
-<li><a class="reference external" href="https://www.kernel.org/doc/Documentation/filesystems/ext4.txt">kernel.org/doc/Documentation/filesystems/ext4.txt</a></li>
-<li><a class="reference external" href="https://stackoverflow.com/questions/7433057/is-rename-without-fsync-safe">linux - Is rename() without fsync() safe? - Stack Overflow</a></li>
-</ul>
-<table class="docutils footnote" frame="void" id="id10" rules="none">
-<colgroup><col class="label" /><col /></colgroup>
-<tbody valign="top">
-<tr><td class="label"><a class="fn-backref" href="#id7">[1]</a></td><td><a class="reference external" href="http://dream.thunk.org/tytso/blog/2009/03/12/delayed-allocation-and-the-zero-length-file-problem/">Delayed allocation and the zero-length file problem | Theodore Ts'o</a></td></tr>
-</tbody>
-</table>
-</div>
-",
-        "mainEntityOfPage": {
-            "@type": "WebPage",
-            "@id": "https://mozillazg.com"
-        }
+        "image": [
+            "https://mozillazg.com/static/avatar.jpeg"
+         ],
+        "keywords": "python, atomic, fsync, file",
+        "datePublished": "2018-05-06"
     }
     </script>
 

@@ -16,7 +16,7 @@
 <link rel="canonical" href="https://mozillazg.com/2017/08/python-asyncio-note-task-usage.html">
 
         <meta name="author" content="mozillazg" />
-        <meta name="keywords" content="asyncio" />
+        <meta name="keywords" content="python,asyncio" />
     <meta name="description" content="本文是 https://pymotw.com/3/asyncio/tasks.html 的学习笔记，强烈推荐直接阅读原文。 Task 是跟事件循环交互的一种主要方式。Task 包装并追踪 Coroutine 的完成状态。Task 是 Future 的子类，因此其他 Coroutine 可以 wait Task 并且在 Task 完成时还可以获取 Coroutine 的结果。 启动 Task¶ 可以使用 create_task 来创建一个 Task 实例: # asyncio_create_task.py import asyncio async def task_func(): print(&#39;in task_func&#39;) return &#39;the result&#39; async def main(loop): print(&#39;creating task&#39;) task = loop.create_task(task_func()) print(&#39;waiting for {!r}&#39;.format(task)) return_value = await task print(&#39;task completed {!r}&#39;.format(task)) print(&#39;return value: {!r}&#39;.format(return_value)) event_loop = asyncio.get_event_loop() try: event_loop.run_until_complete(main(event_loop)) finally: event_loop.close() 可以看到 await task 返回的是 task_func 函数的返回值: $ python3.6 asyncio_create_task.py creating task waiting for &lt;Task pending coro=&lt;task_func() running at asyncio_create_task.py:5&gt;&gt; in task_func task completed &lt;Task finished coro=&lt;task_func() done, defined at asyncio_create_task.py:5&gt; result=&#39;the result&#39;&gt; return value: &#39;the result&#39; 取消 Task¶ 可以在 Task 完成之前取消 task 的操作: # asyncio_cancel_task.py import asyncio async def task_func(): print(&#39;in task_func&#39;) return &#39;the result&#39; async def main(loop): print(&#39;creating task&#39;) task = loop.create_task(task_func()) print(&#39;canceling task&#39;) task.cancel() print(&#39;canceled task {!r}&#39;.format(task)) try: await task except asyncio.CancelledError: print(&#39;caught error from canceled task&#39;) else: print(&#39;task result: {!r}&#39;.format(task.result())) event_loop = asyncio.get_event_loop() try: event_loop.run_until_complete(main(event_loop)) finally: event_loop.close() 当在事件循环启动前取消一下 task 时， await task 会抛出 CancelledError 异常: $ python3.6 asyncio_cancel_task.py creating task canceling task canceled task &lt;Task cancelling coro=&lt;task_func() running at asyncio_cancel_task.py:5&gt;&gt; caught error from canceled task 当取消一个正在等待其他 concurrent 操作的 task 时，等待操作的位置会抛出 CancelledError 异常: # asyncio_cancel_task2.py import asyncio async def task_func(): print(&#39;in task_func, sleeping&#39;) try: await asyncio.sleep(1) except asyncio.CancelledError: print(&#39;task_func was canceled&#39;) raise return &#39;the result&#39; def task_canceller(t): print(&#39;in task_canceller&#39;) t.cancel() print(&#39;canceled the task&#39;) async def main(loop): print(&#39;creating task&#39;) task = loop.create_task(task_func()) loop.call_soon(task_canceller, task) try: await task except asyncio.CancelledError: print(&#39;main() also sees task as canceled&#39;) event_loop = asyncio.get_event_loop() try: event_loop.run_until_complete(main(event_loop)) finally: event_loop.close() 结果: $ python3.6 asyncio_cancel_task2.py creating task in task_func, sleeping in task_canceller canceled the task task_func was canceled main() also sees task as canceled 上面 asyncio_cancel_task2.py 的 task_func 中如果没有把 CancelledError 异常再 raise 出来的话，其实还是会继续执行下去的: # asyncio_cancel_task3.py import asyncio async def task_func(): print(&#39;in task_func, sleeping&#39;) try: await asyncio.sleep(1) except asyncio.CancelledError: print(&#39;task_func was canceled&#39;) print(&#39;task_func still active&#39;) return &#39;the result&#39; def task_canceller(t): print(&#39;in task_canceller&#39;) ok = t.cancel() print(&#39;canceled the task: {0}&#39;.format(ok)) async def main(loop): print(&#39;creating task&#39;) task = loop.create_task(task_func()) loop.call_soon(task_canceller, task) return_value = await task print(&#39;task completed {!r}&#39;.format(task)) print(&#39;return value: {!r}&#39;.format(return_value)) event_loop = asyncio.get_event_loop() try: event_loop.run_until_complete(main(event_loop)) finally: event_loop.close() 结果: $ python3.6 asyncio_cancel_task3.py creating task in task_func, sleeping in task_canceller canceled the task: True task_func was canceled task_func still active task completed &lt;Task finished coro=&lt;task_func() done, defined at asyncio_cancel_task3.py:5&gt; result=&#39;the result&#39;&gt; return value: &#39;the result&#39; 在 Coroutine 中创建 Task¶ ensure_future() 函数返回一个与一个 coroutine 的执行相关连的 Task。这个 Task 实例可以作为变量传入其他代码中，这样的话其他代码就可以直接 await 这个 Task 而不需要知道原始的 coroutine 是如何被创建的。 # asyncio_ensure_future.py import asyncio async def wrapped(): print(&#39;wrapped&#39;) return &#39;result&#39; async def inner(task): print(&#39;inner: starting&#39;) print(&#39;inner: waiting for {!r}&#39;.format(task)) result = await task print(&#39;inner: task returned {!r}&#39;.format(result)) async def starter(): print(&#39;starter: creating task&#39;) task = asyncio.ensure_future(wrapped()) print(&#39;starter: waiting for inner&#39;) await inner(task) print(&#39;starter: inner returned&#39;) event_loop = asyncio.get_event_loop() try: print(&#39;entering event loop&#39;) result = event_loop.run_until_complete(starter()) finally: event_loop.close() 需要注意的是，传入 ensure_future() 的 coroutine 不会立马启动，需要有某个地方使用了 await 语句操作创建的 task 的时候它才会被执行。 $ python3.6 asyncio_ensure_future.py entering event loop starter: creating task starter: waiting for inner inner: starting inner: waiting for &lt;Task pending coro=&lt;wrapped() running at asyncio_ensure_future.py:5&gt;&gt; wrapped inner: task returned &#39;result&#39; starter: inner returned 参考资料¶ Executing Tasks Concurrently — PyMOTW 3 18.5.3. Tasks and coroutines — Python 3.6.2 documentation" />
     <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-4941850466486001"
      crossorigin="anonymous"></script>
@@ -41,6 +41,7 @@
         <meta property="og:description" content="本文是 https://pymotw.com/3/asyncio/tasks.html 的学习笔记，强烈推荐直接阅读原文。 Task 是跟事件循环交互的一种主要方式。Task 包装并追踪 Coroutine 的完成状态。Task 是 Future 的子类，因此其他 Coroutine 可以 wait Task 并且在 Task 完成时还可以获取 Coroutine 的结果。 启动 Task¶ 可以使用 create_task 来创建一个 Task 实例: # asyncio_create_task.py import asyncio async def task_func(): print(&#39;in task_func&#39;) return &#39;the result&#39; async def main(loop): print(&#39;creating task&#39;) task = loop.create_task(task_func()) print(&#39;waiting for {!r}&#39;.format(task)) return_value = await task print(&#39;task completed {!r}&#39;.format(task)) print(&#39;return value: {!r}&#39;.format(return_value)) event_loop = asyncio.get_event_loop() try: event_loop.run_until_complete(main(event_loop)) finally: event_loop.close() 可以看到 await task 返回的是 task_func 函数的返回值: $ python3.6 asyncio_create_task.py creating task waiting for &lt;Task pending coro=&lt;task_func() running at asyncio_create_task.py:5&gt;&gt; in task_func task completed &lt;Task finished coro=&lt;task_func() done, defined at asyncio_create_task.py:5&gt; result=&#39;the result&#39;&gt; return value: &#39;the result&#39; 取消 Task¶ 可以在 Task 完成之前取消 task 的操作: # asyncio_cancel_task.py import asyncio async def task_func(): print(&#39;in task_func&#39;) return &#39;the result&#39; async def main(loop): print(&#39;creating task&#39;) task = loop.create_task(task_func()) print(&#39;canceling task&#39;) task.cancel() print(&#39;canceled task {!r}&#39;.format(task)) try: await task except asyncio.CancelledError: print(&#39;caught error from canceled task&#39;) else: print(&#39;task result: {!r}&#39;.format(task.result())) event_loop = asyncio.get_event_loop() try: event_loop.run_until_complete(main(event_loop)) finally: event_loop.close() 当在事件循环启动前取消一下 task 时， await task 会抛出 CancelledError 异常: $ python3.6 asyncio_cancel_task.py creating task canceling task canceled task &lt;Task cancelling coro=&lt;task_func() running at asyncio_cancel_task.py:5&gt;&gt; caught error from canceled task 当取消一个正在等待其他 concurrent 操作的 task 时，等待操作的位置会抛出 CancelledError 异常: # asyncio_cancel_task2.py import asyncio async def task_func(): print(&#39;in task_func, sleeping&#39;) try: await asyncio.sleep(1) except asyncio.CancelledError: print(&#39;task_func was canceled&#39;) raise return &#39;the result&#39; def task_canceller(t): print(&#39;in task_canceller&#39;) t.cancel() print(&#39;canceled the task&#39;) async def main(loop): print(&#39;creating task&#39;) task = loop.create_task(task_func()) loop.call_soon(task_canceller, task) try: await task except asyncio.CancelledError: print(&#39;main() also sees task as canceled&#39;) event_loop = asyncio.get_event_loop() try: event_loop.run_until_complete(main(event_loop)) finally: event_loop.close() 结果: $ python3.6 asyncio_cancel_task2.py creating task in task_func, sleeping in task_canceller canceled the task task_func was canceled main() also sees task as canceled 上面 asyncio_cancel_task2.py 的 task_func 中如果没有把 CancelledError 异常再 raise 出来的话，其实还是会继续执行下去的: # asyncio_cancel_task3.py import asyncio async def task_func(): print(&#39;in task_func, sleeping&#39;) try: await asyncio.sleep(1) except asyncio.CancelledError: print(&#39;task_func was canceled&#39;) print(&#39;task_func still active&#39;) return &#39;the result&#39; def task_canceller(t): print(&#39;in task_canceller&#39;) ok = t.cancel() print(&#39;canceled the task: {0}&#39;.format(ok)) async def main(loop): print(&#39;creating task&#39;) task = loop.create_task(task_func()) loop.call_soon(task_canceller, task) return_value = await task print(&#39;task completed {!r}&#39;.format(task)) print(&#39;return value: {!r}&#39;.format(return_value)) event_loop = asyncio.get_event_loop() try: event_loop.run_until_complete(main(event_loop)) finally: event_loop.close() 结果: $ python3.6 asyncio_cancel_task3.py creating task in task_func, sleeping in task_canceller canceled the task: True task_func was canceled task_func still active task completed &lt;Task finished coro=&lt;task_func() done, defined at asyncio_cancel_task3.py:5&gt; result=&#39;the result&#39;&gt; return value: &#39;the result&#39; 在 Coroutine 中创建 Task¶ ensure_future() 函数返回一个与一个 coroutine 的执行相关连的 Task。这个 Task 实例可以作为变量传入其他代码中，这样的话其他代码就可以直接 await 这个 Task 而不需要知道原始的 coroutine 是如何被创建的。 # asyncio_ensure_future.py import asyncio async def wrapped(): print(&#39;wrapped&#39;) return &#39;result&#39; async def inner(task): print(&#39;inner: starting&#39;) print(&#39;inner: waiting for {!r}&#39;.format(task)) result = await task print(&#39;inner: task returned {!r}&#39;.format(result)) async def starter(): print(&#39;starter: creating task&#39;) task = asyncio.ensure_future(wrapped()) print(&#39;starter: waiting for inner&#39;) await inner(task) print(&#39;starter: inner returned&#39;) event_loop = asyncio.get_event_loop() try: print(&#39;entering event loop&#39;) result = event_loop.run_until_complete(starter()) finally: event_loop.close() 需要注意的是，传入 ensure_future() 的 coroutine 不会立马启动，需要有某个地方使用了 await 语句操作创建的 task 的时候它才会被执行。 $ python3.6 asyncio_ensure_future.py entering event loop starter: creating task starter: waiting for inner inner: starting inner: waiting for &lt;Task pending coro=&lt;wrapped() running at asyncio_ensure_future.py:5&gt;&gt; wrapped inner: task returned &#39;result&#39; starter: inner returned 参考资料¶ Executing Tasks Concurrently — PyMOTW 3 18.5.3. Tasks and coroutines — Python 3.6.2 documentation"/>
         <meta property="article:published_time" content="2017-08-20" />
             <meta property="article:section" content="python" />
+            <meta property="article:tag" content="python" />
             <meta property="article:tag" content="asyncio" />
             <meta property="article:author" content="mozillazg" />
             <meta property="og:image"
@@ -76,7 +77,7 @@
     <script type="application/ld+json">
     {
         "@context": "https://schema.org",
-        "@type": "Website",
+        "@type": "BlogPosting",
         "publisher": {
             "@type": "Person",
             "name": "mozillazg",
@@ -89,267 +90,13 @@
             "url": "https://mozillazg.com",
             "sameAs": []
         },
-        // "headline": "",
+        "headline": "asyncio 学习笔记：并发执行 Task",
         "url": "https://mozillazg.com/2017/08/python-asyncio-note-task-usage.html",
-        "datePublished": "2017-08-20",
-        // "dateModified": "",
-        "image": "https://mozillazg.com/static/avatar.jpeg",
-        "keywords": "asyncio",
-        // "description": "本文是 https://pymotw.com/3/asyncio/tasks.html 的学习笔记，强烈推荐直接阅读原文。 Task 是跟事件循环交互的一种主要方式。Task 包装并追踪 Coroutine 的完成状态。Task 是 Future 的子类，因此其他 Coroutine 可以 wait Task 并且在 Task 完成时还可以获取 Coroutine 的结果。 启动 Task¶ 可以使用 create_task 来创建一个 Task 实例: # asyncio_create_task.py import asyncio async def task_func(): print(&#39;in task_func&#39;) return &#39;the result&#39; async def main(loop): print(&#39;creating task&#39;) task = loop.create_task(task_func()) print(&#39;waiting for {!r}&#39;.format(task)) return_value = await task print(&#39;task completed {!r}&#39;.format(task)) print(&#39;return value: {!r}&#39;.format(return_value)) event_loop = asyncio.get_event_loop() try: event_loop.run_until_complete(main(event_loop)) finally: event_loop.close() 可以看到 await task 返回的是 task_func 函数的返回值: $ python3.6 asyncio_create_task.py creating task waiting for &lt;Task pending coro=&lt;task_func() running at asyncio_create_task.py:5&gt;&gt; in task_func task completed &lt;Task finished coro=&lt;task_func() done, defined at asyncio_create_task.py:5&gt; result=&#39;the result&#39;&gt; return value: &#39;the result&#39; 取消 Task¶ 可以在 Task 完成之前取消 task 的操作: # asyncio_cancel_task.py import asyncio async def task_func(): print(&#39;in task_func&#39;) return &#39;the result&#39; async def main(loop): print(&#39;creating task&#39;) task = loop.create_task(task_func()) print(&#39;canceling task&#39;) task.cancel() print(&#39;canceled task {!r}&#39;.format(task)) try: await task except asyncio.CancelledError: print(&#39;caught error from canceled task&#39;) else: print(&#39;task result: {!r}&#39;.format(task.result())) event_loop = asyncio.get_event_loop() try: event_loop.run_until_complete(main(event_loop)) finally: event_loop.close() 当在事件循环启动前取消一下 task 时， await task 会抛出 CancelledError 异常: $ python3.6 asyncio_cancel_task.py creating task canceling task canceled task &lt;Task cancelling coro=&lt;task_func() running at asyncio_cancel_task.py:5&gt;&gt; caught error from canceled task 当取消一个正在等待其他 concurrent 操作的 task 时，等待操作的位置会抛出 CancelledError 异常: # asyncio_cancel_task2.py import asyncio async def task_func(): print(&#39;in task_func, sleeping&#39;) try: await asyncio.sleep(1) except asyncio.CancelledError: print(&#39;task_func was canceled&#39;) raise return &#39;the result&#39; def task_canceller(t): print(&#39;in task_canceller&#39;) t.cancel() print(&#39;canceled the task&#39;) async def main(loop): print(&#39;creating task&#39;) task = loop.create_task(task_func()) loop.call_soon(task_canceller, task) try: await task except asyncio.CancelledError: print(&#39;main() also sees task as canceled&#39;) event_loop = asyncio.get_event_loop() try: event_loop.run_until_complete(main(event_loop)) finally: event_loop.close() 结果: $ python3.6 asyncio_cancel_task2.py creating task in task_func, sleeping in task_canceller canceled the task task_func was canceled main() also sees task as canceled 上面 asyncio_cancel_task2.py 的 task_func 中如果没有把 CancelledError 异常再 raise 出来的话，其实还是会继续执行下去的: # asyncio_cancel_task3.py import asyncio async def task_func(): print(&#39;in task_func, sleeping&#39;) try: await asyncio.sleep(1) except asyncio.CancelledError: print(&#39;task_func was canceled&#39;) print(&#39;task_func still active&#39;) return &#39;the result&#39; def task_canceller(t): print(&#39;in task_canceller&#39;) ok = t.cancel() print(&#39;canceled the task: {0}&#39;.format(ok)) async def main(loop): print(&#39;creating task&#39;) task = loop.create_task(task_func()) loop.call_soon(task_canceller, task) return_value = await task print(&#39;task completed {!r}&#39;.format(task)) print(&#39;return value: {!r}&#39;.format(return_value)) event_loop = asyncio.get_event_loop() try: event_loop.run_until_complete(main(event_loop)) finally: event_loop.close() 结果: $ python3.6 asyncio_cancel_task3.py creating task in task_func, sleeping in task_canceller canceled the task: True task_func was canceled task_func still active task completed &lt;Task finished coro=&lt;task_func() done, defined at asyncio_cancel_task3.py:5&gt; result=&#39;the result&#39;&gt; return value: &#39;the result&#39; 在 Coroutine 中创建 Task¶ ensure_future() 函数返回一个与一个 coroutine 的执行相关连的 Task。这个 Task 实例可以作为变量传入其他代码中，这样的话其他代码就可以直接 await 这个 Task 而不需要知道原始的 coroutine 是如何被创建的。 # asyncio_ensure_future.py import asyncio async def wrapped(): print(&#39;wrapped&#39;) return &#39;result&#39; async def inner(task): print(&#39;inner: starting&#39;) print(&#39;inner: waiting for {!r}&#39;.format(task)) result = await task print(&#39;inner: task returned {!r}&#39;.format(result)) async def starter(): print(&#39;starter: creating task&#39;) task = asyncio.ensure_future(wrapped()) print(&#39;starter: waiting for inner&#39;) await inner(task) print(&#39;starter: inner returned&#39;) event_loop = asyncio.get_event_loop() try: print(&#39;entering event loop&#39;) result = event_loop.run_until_complete(starter()) finally: event_loop.close() 需要注意的是，传入 ensure_future() 的 coroutine 不会立马启动，需要有某个地方使用了 await 语句操作创建的 task 的时候它才会被执行。 $ python3.6 asyncio_ensure_future.py entering event loop starter: creating task starter: waiting for inner inner: starting inner: waiting for &lt;Task pending coro=&lt;wrapped() running at asyncio_ensure_future.py:5&gt;&gt; wrapped inner: task returned &#39;result&#39; starter: inner returned 参考资料¶ Executing Tasks Concurrently — PyMOTW 3 18.5.3. Tasks and coroutines — Python 3.6.2 documentation",
-        "description": "<p>本文是 <a class="reference external" href="https://pymotw.com/3/asyncio/tasks.html">https://pymotw.com/3/asyncio/tasks.html</a>
-的学习笔记，强烈推荐直接阅读原文。</p>
-<p>Task 是跟事件循环交互的一种主要方式。Task 包装并追踪 Coroutine
-的完成状态。Task 是 <tt class="docutils literal">Future</tt> 的子类，因此其他 Coroutine 可以 wait Task
-并且在 Task 完成时还可以获取 Coroutine 的结果。</p>
-<div class="section" id="task">
-<h2 id="hidtask">启动 Task<a class="headerlink" href="#hidtask" title="Permalink to this headline">¶</a></h2>
-<p>可以使用 <tt class="docutils literal">create_task</tt> 来创建一个 <tt class="docutils literal">Task</tt> 实例:</p>
-<pre class="code python literal-block">
-<span class="c1"># asyncio_create_task.py</span>
-<span class="kn">import</span> <span class="nn">asyncio</span>
-
-
-<span class="n">async</span> <span class="k">def</span> <span class="nf">task_func</span><span class="p">():</span>
-    <span class="k">print</span><span class="p">(</span><span class="s1">'in task_func'</span><span class="p">)</span>
-    <span class="k">return</span> <span class="s1">'the result'</span>
-
-
-<span class="n">async</span> <span class="k">def</span> <span class="nf">main</span><span class="p">(</span><span class="n">loop</span><span class="p">):</span>
-    <span class="k">print</span><span class="p">(</span><span class="s1">'creating task'</span><span class="p">)</span>
-    <span class="n">task</span> <span class="o">=</span> <span class="n">loop</span><span class="o">.</span><span class="n">create_task</span><span class="p">(</span><span class="n">task_func</span><span class="p">())</span>
-    <span class="k">print</span><span class="p">(</span><span class="s1">'waiting for {!r}'</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">task</span><span class="p">))</span>
-    <span class="n">return_value</span> <span class="o">=</span> <span class="n">await</span> <span class="n">task</span>
-    <span class="k">print</span><span class="p">(</span><span class="s1">'task completed {!r}'</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">task</span><span class="p">))</span>
-    <span class="k">print</span><span class="p">(</span><span class="s1">'return value: {!r}'</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">return_value</span><span class="p">))</span>
-
-
-<span class="n">event_loop</span> <span class="o">=</span> <span class="n">asyncio</span><span class="o">.</span><span class="n">get_event_loop</span><span class="p">()</span>
-<span class="k">try</span><span class="p">:</span>
-    <span class="n">event_loop</span><span class="o">.</span><span class="n">run_until_complete</span><span class="p">(</span><span class="n">main</span><span class="p">(</span><span class="n">event_loop</span><span class="p">))</span>
-<span class="k">finally</span><span class="p">:</span>
-    <span class="n">event_loop</span><span class="o">.</span><span class="n">close</span><span class="p">()</span>
-</pre>
-<p>可以看到 <tt class="docutils literal">await task</tt> 返回的是 <tt class="docutils literal">task_func</tt> 函数的返回值:</p>
-<pre class="literal-block">
-$ python3.6 asyncio_create_task.py
-creating task
-waiting for &lt;Task pending coro=&lt;task_func() running at asyncio_create_task.py:5&gt;&gt;
-in task_func
-task completed &lt;Task finished coro=&lt;task_func() done, defined at asyncio_create_task.py:5&gt; result='the result'&gt;
-return value: 'the result'
-</pre>
-</div>
-<div class="section" id="id1">
-<h2 id="hidid1">取消 Task<a class="headerlink" href="#hidid1" title="Permalink to this headline">¶</a></h2>
-<p>可以在 <tt class="docutils literal">Task</tt> 完成之前取消 task 的操作:</p>
-<pre class="code python literal-block">
-<span class="c1"># asyncio_cancel_task.py</span>
-<span class="kn">import</span> <span class="nn">asyncio</span>
-
-
-<span class="n">async</span> <span class="k">def</span> <span class="nf">task_func</span><span class="p">():</span>
-    <span class="k">print</span><span class="p">(</span><span class="s1">'in task_func'</span><span class="p">)</span>
-    <span class="k">return</span> <span class="s1">'the result'</span>
-
-
-<span class="n">async</span> <span class="k">def</span> <span class="nf">main</span><span class="p">(</span><span class="n">loop</span><span class="p">):</span>
-    <span class="k">print</span><span class="p">(</span><span class="s1">'creating task'</span><span class="p">)</span>
-    <span class="n">task</span> <span class="o">=</span> <span class="n">loop</span><span class="o">.</span><span class="n">create_task</span><span class="p">(</span><span class="n">task_func</span><span class="p">())</span>
-
-    <span class="k">print</span><span class="p">(</span><span class="s1">'canceling task'</span><span class="p">)</span>
-    <span class="n">task</span><span class="o">.</span><span class="n">cancel</span><span class="p">()</span>
-
-    <span class="k">print</span><span class="p">(</span><span class="s1">'canceled task {!r}'</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">task</span><span class="p">))</span>
-    <span class="k">try</span><span class="p">:</span>
-        <span class="n">await</span> <span class="n">task</span>
-    <span class="k">except</span> <span class="n">asyncio</span><span class="o">.</span><span class="n">CancelledError</span><span class="p">:</span>
-        <span class="k">print</span><span class="p">(</span><span class="s1">'caught error from canceled task'</span><span class="p">)</span>
-    <span class="k">else</span><span class="p">:</span>
-        <span class="k">print</span><span class="p">(</span><span class="s1">'task result: {!r}'</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">task</span><span class="o">.</span><span class="n">result</span><span class="p">()))</span>
-
-
-<span class="n">event_loop</span> <span class="o">=</span> <span class="n">asyncio</span><span class="o">.</span><span class="n">get_event_loop</span><span class="p">()</span>
-<span class="k">try</span><span class="p">:</span>
-    <span class="n">event_loop</span><span class="o">.</span><span class="n">run_until_complete</span><span class="p">(</span><span class="n">main</span><span class="p">(</span><span class="n">event_loop</span><span class="p">))</span>
-<span class="k">finally</span><span class="p">:</span>
-    <span class="n">event_loop</span><span class="o">.</span><span class="n">close</span><span class="p">()</span>
-</pre>
-<p>当在事件循环启动前取消一下 task 时， <tt class="docutils literal">await task</tt> 会抛出
-<tt class="docutils literal">CancelledError</tt> 异常:</p>
-<pre class="literal-block">
-$ python3.6 asyncio_cancel_task.py
-creating task
-canceling task
-canceled task &lt;Task cancelling coro=&lt;task_func() running at asyncio_cancel_task.py:5&gt;&gt;
-caught error from canceled task
-</pre>
-<p>当取消一个正在等待其他 concurrent 操作的 task 时，等待操作的位置会抛出
-<tt class="docutils literal">CancelledError</tt> 异常:</p>
-<pre class="code python literal-block">
-<span class="c1"># asyncio_cancel_task2.py</span>
-<span class="kn">import</span> <span class="nn">asyncio</span>
-
-
-<span class="n">async</span> <span class="k">def</span> <span class="nf">task_func</span><span class="p">():</span>
-    <span class="k">print</span><span class="p">(</span><span class="s1">'in task_func, sleeping'</span><span class="p">)</span>
-    <span class="k">try</span><span class="p">:</span>
-        <span class="n">await</span> <span class="n">asyncio</span><span class="o">.</span><span class="n">sleep</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span>
-    <span class="k">except</span> <span class="n">asyncio</span><span class="o">.</span><span class="n">CancelledError</span><span class="p">:</span>
-        <span class="k">print</span><span class="p">(</span><span class="s1">'task_func was canceled'</span><span class="p">)</span>
-        <span class="k">raise</span>
-    <span class="k">return</span> <span class="s1">'the result'</span>
-
-
-<span class="k">def</span> <span class="nf">task_canceller</span><span class="p">(</span><span class="n">t</span><span class="p">):</span>
-    <span class="k">print</span><span class="p">(</span><span class="s1">'in task_canceller'</span><span class="p">)</span>
-    <span class="n">t</span><span class="o">.</span><span class="n">cancel</span><span class="p">()</span>
-    <span class="k">print</span><span class="p">(</span><span class="s1">'canceled the task'</span><span class="p">)</span>
-
-
-<span class="n">async</span> <span class="k">def</span> <span class="nf">main</span><span class="p">(</span><span class="n">loop</span><span class="p">):</span>
-    <span class="k">print</span><span class="p">(</span><span class="s1">'creating task'</span><span class="p">)</span>
-    <span class="n">task</span> <span class="o">=</span> <span class="n">loop</span><span class="o">.</span><span class="n">create_task</span><span class="p">(</span><span class="n">task_func</span><span class="p">())</span>
-    <span class="n">loop</span><span class="o">.</span><span class="n">call_soon</span><span class="p">(</span><span class="n">task_canceller</span><span class="p">,</span> <span class="n">task</span><span class="p">)</span>
-    <span class="k">try</span><span class="p">:</span>
-        <span class="n">await</span> <span class="n">task</span>
-    <span class="k">except</span> <span class="n">asyncio</span><span class="o">.</span><span class="n">CancelledError</span><span class="p">:</span>
-        <span class="k">print</span><span class="p">(</span><span class="s1">'main() also sees task as canceled'</span><span class="p">)</span>
-
-
-<span class="n">event_loop</span> <span class="o">=</span> <span class="n">asyncio</span><span class="o">.</span><span class="n">get_event_loop</span><span class="p">()</span>
-<span class="k">try</span><span class="p">:</span>
-    <span class="n">event_loop</span><span class="o">.</span><span class="n">run_until_complete</span><span class="p">(</span><span class="n">main</span><span class="p">(</span><span class="n">event_loop</span><span class="p">))</span>
-<span class="k">finally</span><span class="p">:</span>
-    <span class="n">event_loop</span><span class="o">.</span><span class="n">close</span><span class="p">()</span>
-</pre>
-<p>结果:</p>
-<pre class="literal-block">
-$ python3.6 asyncio_cancel_task2.py
-creating task
-in task_func, sleeping
-in task_canceller
-canceled the task
-task_func was canceled
-main() also sees task as canceled
-</pre>
-<p>上面 asyncio_cancel_task2.py 的 <tt class="docutils literal">task_func</tt> 中如果没有把
-<tt class="docutils literal">CancelledError</tt> 异常再 raise 出来的话，其实还是会继续执行下去的:</p>
-<pre class="code python literal-block">
-<span class="c1"># asyncio_cancel_task3.py</span>
-<span class="kn">import</span> <span class="nn">asyncio</span>
-
-
-<span class="n">async</span> <span class="k">def</span> <span class="nf">task_func</span><span class="p">():</span>
-    <span class="k">print</span><span class="p">(</span><span class="s1">'in task_func, sleeping'</span><span class="p">)</span>
-    <span class="k">try</span><span class="p">:</span>
-        <span class="n">await</span> <span class="n">asyncio</span><span class="o">.</span><span class="n">sleep</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span>
-    <span class="k">except</span> <span class="n">asyncio</span><span class="o">.</span><span class="n">CancelledError</span><span class="p">:</span>
-        <span class="k">print</span><span class="p">(</span><span class="s1">'task_func was canceled'</span><span class="p">)</span>
-    <span class="k">print</span><span class="p">(</span><span class="s1">'task_func still active'</span><span class="p">)</span>
-    <span class="k">return</span> <span class="s1">'the result'</span>
-
-
-<span class="k">def</span> <span class="nf">task_canceller</span><span class="p">(</span><span class="n">t</span><span class="p">):</span>
-    <span class="k">print</span><span class="p">(</span><span class="s1">'in task_canceller'</span><span class="p">)</span>
-    <span class="n">ok</span> <span class="o">=</span> <span class="n">t</span><span class="o">.</span><span class="n">cancel</span><span class="p">()</span>
-    <span class="k">print</span><span class="p">(</span><span class="s1">'canceled the task: {0}'</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">ok</span><span class="p">))</span>
-
-
-<span class="n">async</span> <span class="k">def</span> <span class="nf">main</span><span class="p">(</span><span class="n">loop</span><span class="p">):</span>
-    <span class="k">print</span><span class="p">(</span><span class="s1">'creating task'</span><span class="p">)</span>
-    <span class="n">task</span> <span class="o">=</span> <span class="n">loop</span><span class="o">.</span><span class="n">create_task</span><span class="p">(</span><span class="n">task_func</span><span class="p">())</span>
-    <span class="n">loop</span><span class="o">.</span><span class="n">call_soon</span><span class="p">(</span><span class="n">task_canceller</span><span class="p">,</span> <span class="n">task</span><span class="p">)</span>
-    <span class="n">return_value</span> <span class="o">=</span> <span class="n">await</span> <span class="n">task</span>
-    <span class="k">print</span><span class="p">(</span><span class="s1">'task completed {!r}'</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">task</span><span class="p">))</span>
-    <span class="k">print</span><span class="p">(</span><span class="s1">'return value: {!r}'</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">return_value</span><span class="p">))</span>
-
-
-<span class="n">event_loop</span> <span class="o">=</span> <span class="n">asyncio</span><span class="o">.</span><span class="n">get_event_loop</span><span class="p">()</span>
-<span class="k">try</span><span class="p">:</span>
-    <span class="n">event_loop</span><span class="o">.</span><span class="n">run_until_complete</span><span class="p">(</span><span class="n">main</span><span class="p">(</span><span class="n">event_loop</span><span class="p">))</span>
-<span class="k">finally</span><span class="p">:</span>
-    <span class="n">event_loop</span><span class="o">.</span><span class="n">close</span><span class="p">()</span>
-</pre>
-<p>结果:</p>
-<pre class="literal-block">
-$ python3.6 asyncio_cancel_task3.py
-creating task
-in task_func, sleeping
-in task_canceller
-canceled the task: True
-task_func was canceled
-task_func still active
-task completed &lt;Task finished coro=&lt;task_func() done, defined at asyncio_cancel_task3.py:5&gt; result='the result'&gt;
-return value: 'the result'
-</pre>
-</div>
-<div class="section" id="coroutine-task">
-<h2 id="hidcoroutine-task">在 Coroutine 中创建 Task<a class="headerlink" href="#hidcoroutine-task" title="Permalink to this headline">¶</a></h2>
-<p><tt class="docutils literal">ensure_future()</tt> 函数返回一个与一个 coroutine 的执行相关连的
-Task。这个 Task
-实例可以作为变量传入其他代码中，这样的话其他代码就可以直接 await 这个
-Task 而不需要知道原始的 coroutine 是如何被创建的。</p>
-<pre class="code python literal-block">
-<span class="c1"># asyncio_ensure_future.py</span>
-<span class="kn">import</span> <span class="nn">asyncio</span>
-
-
-<span class="n">async</span> <span class="k">def</span> <span class="nf">wrapped</span><span class="p">():</span>
-    <span class="k">print</span><span class="p">(</span><span class="s1">'wrapped'</span><span class="p">)</span>
-    <span class="k">return</span> <span class="s1">'result'</span>
-
-
-<span class="n">async</span> <span class="k">def</span> <span class="nf">inner</span><span class="p">(</span><span class="n">task</span><span class="p">):</span>
-    <span class="k">print</span><span class="p">(</span><span class="s1">'inner: starting'</span><span class="p">)</span>
-    <span class="k">print</span><span class="p">(</span><span class="s1">'inner: waiting for {!r}'</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">task</span><span class="p">))</span>
-    <span class="n">result</span> <span class="o">=</span> <span class="n">await</span> <span class="n">task</span>
-    <span class="k">print</span><span class="p">(</span><span class="s1">'inner: task returned {!r}'</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">result</span><span class="p">))</span>
-
-
-<span class="n">async</span> <span class="k">def</span> <span class="nf">starter</span><span class="p">():</span>
-    <span class="k">print</span><span class="p">(</span><span class="s1">'starter: creating task'</span><span class="p">)</span>
-    <span class="n">task</span> <span class="o">=</span> <span class="n">asyncio</span><span class="o">.</span><span class="n">ensure_future</span><span class="p">(</span><span class="n">wrapped</span><span class="p">())</span>
-    <span class="k">print</span><span class="p">(</span><span class="s1">'starter: waiting for inner'</span><span class="p">)</span>
-    <span class="n">await</span> <span class="n">inner</span><span class="p">(</span><span class="n">task</span><span class="p">)</span>
-    <span class="k">print</span><span class="p">(</span><span class="s1">'starter: inner returned'</span><span class="p">)</span>
-
-
-<span class="n">event_loop</span> <span class="o">=</span> <span class="n">asyncio</span><span class="o">.</span><span class="n">get_event_loop</span><span class="p">()</span>
-<span class="k">try</span><span class="p">:</span>
-    <span class="k">print</span><span class="p">(</span><span class="s1">'entering event loop'</span><span class="p">)</span>
-    <span class="n">result</span> <span class="o">=</span> <span class="n">event_loop</span><span class="o">.</span><span class="n">run_until_complete</span><span class="p">(</span><span class="n">starter</span><span class="p">())</span>
-<span class="k">finally</span><span class="p">:</span>
-    <span class="n">event_loop</span><span class="o">.</span><span class="n">close</span><span class="p">()</span>
-</pre>
-<p>需要注意的是，传入 <tt class="docutils literal">ensure_future()</tt> 的 coroutine
-不会立马启动，需要有某个地方使用了 <tt class="docutils literal">await</tt> 语句操作创建的 task
-的时候它才会被执行。</p>
-<pre class="literal-block">
-$ python3.6 asyncio_ensure_future.py
-entering event loop
-starter: creating task
-starter: waiting for inner
-inner: starting
-inner: waiting for &lt;Task pending coro=&lt;wrapped() running at asyncio_ensure_future.py:5&gt;&gt;
-wrapped
-inner: task returned 'result'
-starter: inner returned
-</pre>
-</div>
-<div class="section" id="id2">
-<h2 id="hidid2">参考资料<a class="headerlink" href="#hidid2" title="Permalink to this headline">¶</a></h2>
-<ul class="simple">
-<li><a class="reference external" href="https://pymotw.com/3/asyncio/tasks.html">Executing Tasks Concurrently — PyMOTW
-3</a></li>
-<li><a class="reference external" href="https://docs.python.org/3/library/asyncio-task.html">18.5.3. Tasks and coroutines — Python 3.6.2
-documentation</a></li>
-</ul>
-</div>
-",
-        "mainEntityOfPage": {
-            "@type": "WebPage",
-            "@id": "https://mozillazg.com"
-        }
+        "image": [
+            "https://mozillazg.com/static/avatar.jpeg"
+         ],
+        "keywords": "python, asyncio",
+        "datePublished": "2017-08-20"
     }
     </script>
 
@@ -680,10 +427,10 @@ documentation</a></li>
     <p>Related Posts:</p>
     <ul>
         <li><a href="https://mozillazg.com/2017/08/python-asyncio-note-synchronization-primitives.html">asyncio 学习笔记：同步原语</a></li>
-        <li><a href="https://mozillazg.com/2017/08/python-asyncio-note-io-protocol.html">asyncio 学习笔记：使用抽象类 Protocol 实现异步 I/O</a></li>
         <li><a href="https://mozillazg.com/2017/08/python-asyncio-note-coroutines-base-usage.html">asyncio 学习笔记：基本用法</a></li>
         <li><a href="https://mozillazg.com/2017/08/python-asyncio-note-coroutine-schedule.html">asyncio 学习笔记：调用定时函数</a></li>
         <li><a href="https://mozillazg.com/2017/08/python-asyncio-note-future-usage.html">asyncio 学习笔记：产生异步结果</a></li>
+        <li><a href="https://mozillazg.com/2017/08/python-asyncio-note-control-Coroutines.html">asyncio 学习笔记：控制组合式 Coroutines</a></li>
     </ul>
 </section>
     <hr/>

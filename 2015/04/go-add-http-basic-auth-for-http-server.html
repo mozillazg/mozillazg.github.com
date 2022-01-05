@@ -40,6 +40,7 @@
         <meta property="og:description" content="一句话总结就是：增加一个装饰器函数 BasicAuth 装饰需要被保护的函数。 package main import ( &#34;bytes&#34; &#34;encoding/base64&#34; &#34;io&#34; &#34;log&#34; &#34;net/http&#34; &#34;strings&#34; ) type ViewFunc func(http.ResponseWriter, *http.Request) func BasicAuth(f ViewFunc, user, passwd []byte) ViewFunc { return func(w http.ResponseWriter, r *http.Request) { basicAuthPrefix := &#34;Basic &#34; // 获取 request header auth := r.Header.Get(&#34;Authorization&#34;) // 如果是 http basic auth if strings.HasPrefix(auth, basicAuthPrefix) { // 解码认证信息 payload, err := base64.StdEncoding.DecodeString( auth[len(basicAuthPrefix):], ) if err == nil { pair := bytes.SplitN(payload, []byte(&#34;:&#34;), 2) if len(pair) == 2 &amp;&amp; bytes.Equal(pair[0], user) &amp;&amp; bytes.Equal(pair[1], passwd) { // 执行被装饰的函数 f(w, r) return } } } // 认证失败，提示 401 Unauthorized // Restricted 可以改成其他的值 w.Header().Set(&#34;WWW-Authenticate&#34;, `Basic realm=&#34;Restricted&#34;`) // 401 状态码 w.WriteHeader(http.StatusUnauthorized) } } // 需要被保护的内容 func HelloServer(w http.ResponseWriter, req *http.Request) { io.WriteString(w, &#34;hello, world!\n&#34;) } func main() { user := []byte(&#34;foo&#34;) passwd := []byte(&#34;bar&#34;) // 装饰需要保护的 handler http.HandleFunc(&#34;/hello&#34;, BasicAuth(HelloServer, user, passwd)) log.Println(&#34;Listen :8000&#34;) err := http.ListenAndServe(&#34;:8000&#34;, nil) if err != nil { log.Fatal(&#34;ListenAndServe: &#34;, err) } } 效果¶ 未输入用户名和密码的情况下，提示未认证： ~$ curl -i http://127.0.0.1:8000/hello HTTP/1.1 401 Unauthorized Www-Authenticate: Basic realm=&#34;Restricted&#34; Date: Mon, 06 Apr 2015 11:56:10 GMT Content-Length: 0 Content-Type: text/plain; charset=utf-8 输入用户名和密码，显示被保护的内容： ~$ curl -i --user &#34;foo:bar&#34; http://127.0.0.1:8000/hello HTTP/1.1 200 OK Date: Mon, 06 Apr 2015 11:56:23 GMT Content-Length: 14 Content-Type: text/plain; charset=utf-8 hello, world! 参考资料¶ https://godoc.org/net/http http://tools.ietf.org/html/rfc2617#section-2 http://stackoverflow.com/questions/12701085/what-is-the-realm-in-basic-authentication"/>
         <meta property="article:published_time" content="2015-04-07" />
             <meta property="article:section" content="go" />
+            <meta property="article:tag" content="go" />
             <meta property="article:author" content="mozillazg" />
             <meta property="og:image"
                   content="https://mozillazg.com/static/avatar.jpeg"/>
@@ -74,7 +75,7 @@
     <script type="application/ld+json">
     {
         "@context": "https://schema.org",
-        "@type": "Website",
+        "@type": "BlogPosting",
         "publisher": {
             "@type": "Person",
             "name": "mozillazg",
@@ -87,109 +88,13 @@
             "url": "https://mozillazg.com",
             "sameAs": []
         },
-        // "headline": "",
+        "headline": "[go] 如何为 HTTP Server 增加 HTTP Basic Auth",
         "url": "https://mozillazg.com/2015/04/go-add-http-basic-auth-for-http-server.html",
-        "datePublished": "2015-04-07",
-        // "dateModified": "",
-        "image": "https://mozillazg.com/static/avatar.jpeg",
-        // "description": "一句话总结就是：增加一个装饰器函数 BasicAuth 装饰需要被保护的函数。 package main import ( &#34;bytes&#34; &#34;encoding/base64&#34; &#34;io&#34; &#34;log&#34; &#34;net/http&#34; &#34;strings&#34; ) type ViewFunc func(http.ResponseWriter, *http.Request) func BasicAuth(f ViewFunc, user, passwd []byte) ViewFunc { return func(w http.ResponseWriter, r *http.Request) { basicAuthPrefix := &#34;Basic &#34; // 获取 request header auth := r.Header.Get(&#34;Authorization&#34;) // 如果是 http basic auth if strings.HasPrefix(auth, basicAuthPrefix) { // 解码认证信息 payload, err := base64.StdEncoding.DecodeString( auth[len(basicAuthPrefix):], ) if err == nil { pair := bytes.SplitN(payload, []byte(&#34;:&#34;), 2) if len(pair) == 2 &amp;&amp; bytes.Equal(pair[0], user) &amp;&amp; bytes.Equal(pair[1], passwd) { // 执行被装饰的函数 f(w, r) return } } } // 认证失败，提示 401 Unauthorized // Restricted 可以改成其他的值 w.Header().Set(&#34;WWW-Authenticate&#34;, `Basic realm=&#34;Restricted&#34;`) // 401 状态码 w.WriteHeader(http.StatusUnauthorized) } } // 需要被保护的内容 func HelloServer(w http.ResponseWriter, req *http.Request) { io.WriteString(w, &#34;hello, world!\n&#34;) } func main() { user := []byte(&#34;foo&#34;) passwd := []byte(&#34;bar&#34;) // 装饰需要保护的 handler http.HandleFunc(&#34;/hello&#34;, BasicAuth(HelloServer, user, passwd)) log.Println(&#34;Listen :8000&#34;) err := http.ListenAndServe(&#34;:8000&#34;, nil) if err != nil { log.Fatal(&#34;ListenAndServe: &#34;, err) } } 效果¶ 未输入用户名和密码的情况下，提示未认证： ~$ curl -i http://127.0.0.1:8000/hello HTTP/1.1 401 Unauthorized Www-Authenticate: Basic realm=&#34;Restricted&#34; Date: Mon, 06 Apr 2015 11:56:10 GMT Content-Length: 0 Content-Type: text/plain; charset=utf-8 输入用户名和密码，显示被保护的内容： ~$ curl -i --user &#34;foo:bar&#34; http://127.0.0.1:8000/hello HTTP/1.1 200 OK Date: Mon, 06 Apr 2015 11:56:23 GMT Content-Length: 14 Content-Type: text/plain; charset=utf-8 hello, world! 参考资料¶ https://godoc.org/net/http http://tools.ietf.org/html/rfc2617#section-2 http://stackoverflow.com/questions/12701085/what-is-the-realm-in-basic-authentication",
-        "description": "<p>一句话总结就是：增加一个装饰器函数 <tt class="docutils literal">BasicAuth</tt> 装饰需要被保护的函数。</p>
-<div class="highlight"><pre><span></span><span class="kn">package</span> <span class="nx">main</span>
-
-<span class="kn">import</span> <span class="p">(</span>
-    <span class="s">&quot;bytes&quot;</span>
-    <span class="s">&quot;encoding/base64&quot;</span>
-    <span class="s">&quot;io&quot;</span>
-    <span class="s">&quot;log&quot;</span>
-    <span class="s">&quot;net/http&quot;</span>
-    <span class="s">&quot;strings&quot;</span>
-<span class="p">)</span>
-
-<span class="kd">type</span> <span class="nx">ViewFunc</span> <span class="kd">func</span><span class="p">(</span><span class="nx">http</span><span class="p">.</span><span class="nx">ResponseWriter</span><span class="p">,</span> <span class="o">*</span><span class="nx">http</span><span class="p">.</span><span class="nx">Request</span><span class="p">)</span>
-
-<span class="kd">func</span> <span class="nx">BasicAuth</span><span class="p">(</span><span class="nx">f</span> <span class="nx">ViewFunc</span><span class="p">,</span> <span class="nx">user</span><span class="p">,</span> <span class="nx">passwd</span> <span class="p">[]</span><span class="kt">byte</span><span class="p">)</span> <span class="nx">ViewFunc</span> <span class="p">{</span>
-    <span class="k">return</span> <span class="kd">func</span><span class="p">(</span><span class="nx">w</span> <span class="nx">http</span><span class="p">.</span><span class="nx">ResponseWriter</span><span class="p">,</span> <span class="nx">r</span> <span class="o">*</span><span class="nx">http</span><span class="p">.</span><span class="nx">Request</span><span class="p">)</span> <span class="p">{</span>
-        <span class="nx">basicAuthPrefix</span> <span class="o">:=</span> <span class="s">&quot;Basic &quot;</span>
-
-        <span class="c1">// 获取 request header</span>
-        <span class="nx">auth</span> <span class="o">:=</span> <span class="nx">r</span><span class="p">.</span><span class="nx">Header</span><span class="p">.</span><span class="nx">Get</span><span class="p">(</span><span class="s">&quot;Authorization&quot;</span><span class="p">)</span>
-        <span class="c1">// 如果是 http basic auth</span>
-        <span class="k">if</span> <span class="nx">strings</span><span class="p">.</span><span class="nx">HasPrefix</span><span class="p">(</span><span class="nx">auth</span><span class="p">,</span> <span class="nx">basicAuthPrefix</span><span class="p">)</span> <span class="p">{</span>
-            <span class="c1">// 解码认证信息</span>
-            <span class="nx">payload</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">base64</span><span class="p">.</span><span class="nx">StdEncoding</span><span class="p">.</span><span class="nx">DecodeString</span><span class="p">(</span>
-                <span class="nx">auth</span><span class="p">[</span><span class="nb">len</span><span class="p">(</span><span class="nx">basicAuthPrefix</span><span class="p">):],</span>
-            <span class="p">)</span>
-            <span class="k">if</span> <span class="nx">err</span> <span class="o">==</span> <span class="kc">nil</span> <span class="p">{</span>
-                <span class="nx">pair</span> <span class="o">:=</span> <span class="nx">bytes</span><span class="p">.</span><span class="nx">SplitN</span><span class="p">(</span><span class="nx">payload</span><span class="p">,</span> <span class="p">[]</span><span class="nb">byte</span><span class="p">(</span><span class="s">&quot;:&quot;</span><span class="p">),</span> <span class="mi">2</span><span class="p">)</span>
-                <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="nx">pair</span><span class="p">)</span> <span class="o">==</span> <span class="mi">2</span> <span class="o">&amp;&amp;</span> <span class="nx">bytes</span><span class="p">.</span><span class="nx">Equal</span><span class="p">(</span><span class="nx">pair</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span> <span class="nx">user</span><span class="p">)</span> <span class="o">&amp;&amp;</span>
-                    <span class="nx">bytes</span><span class="p">.</span><span class="nx">Equal</span><span class="p">(</span><span class="nx">pair</span><span class="p">[</span><span class="mi">1</span><span class="p">],</span> <span class="nx">passwd</span><span class="p">)</span> <span class="p">{</span>
-                    <span class="c1">// 执行被装饰的函数</span>
-                    <span class="nx">f</span><span class="p">(</span><span class="nx">w</span><span class="p">,</span> <span class="nx">r</span><span class="p">)</span>
-                    <span class="k">return</span>
-                <span class="p">}</span>
-            <span class="p">}</span>
-        <span class="p">}</span>
-
-        <span class="c1">// 认证失败，提示 401 Unauthorized</span>
-        <span class="c1">// Restricted 可以改成其他的值</span>
-        <span class="nx">w</span><span class="p">.</span><span class="nx">Header</span><span class="p">().</span><span class="nx">Set</span><span class="p">(</span><span class="s">&quot;WWW-Authenticate&quot;</span><span class="p">,</span> <span class="s">`Basic realm=&quot;Restricted&quot;`</span><span class="p">)</span>
-        <span class="c1">// 401 状态码</span>
-        <span class="nx">w</span><span class="p">.</span><span class="nx">WriteHeader</span><span class="p">(</span><span class="nx">http</span><span class="p">.</span><span class="nx">StatusUnauthorized</span><span class="p">)</span>
-    <span class="p">}</span>
-<span class="p">}</span>
-
-<span class="c1">// 需要被保护的内容</span>
-<span class="kd">func</span> <span class="nx">HelloServer</span><span class="p">(</span><span class="nx">w</span> <span class="nx">http</span><span class="p">.</span><span class="nx">ResponseWriter</span><span class="p">,</span> <span class="nx">req</span> <span class="o">*</span><span class="nx">http</span><span class="p">.</span><span class="nx">Request</span><span class="p">)</span> <span class="p">{</span>
-    <span class="nx">io</span><span class="p">.</span><span class="nx">WriteString</span><span class="p">(</span><span class="nx">w</span><span class="p">,</span> <span class="s">&quot;hello, world!\n&quot;</span><span class="p">)</span>
-<span class="p">}</span>
-
-<span class="kd">func</span> <span class="nx">main</span><span class="p">()</span> <span class="p">{</span>
-    <span class="nx">user</span> <span class="o">:=</span> <span class="p">[]</span><span class="nb">byte</span><span class="p">(</span><span class="s">&quot;foo&quot;</span><span class="p">)</span>
-    <span class="nx">passwd</span> <span class="o">:=</span> <span class="p">[]</span><span class="nb">byte</span><span class="p">(</span><span class="s">&quot;bar&quot;</span><span class="p">)</span>
-
-    <span class="c1">// 装饰需要保护的 handler</span>
-    <span class="nx">http</span><span class="p">.</span><span class="nx">HandleFunc</span><span class="p">(</span><span class="s">&quot;/hello&quot;</span><span class="p">,</span> <span class="nx">BasicAuth</span><span class="p">(</span><span class="nx">HelloServer</span><span class="p">,</span> <span class="nx">user</span><span class="p">,</span> <span class="nx">passwd</span><span class="p">))</span>
-
-    <span class="nx">log</span><span class="p">.</span><span class="nx">Println</span><span class="p">(</span><span class="s">&quot;Listen :8000&quot;</span><span class="p">)</span>
-    <span class="nx">err</span> <span class="o">:=</span> <span class="nx">http</span><span class="p">.</span><span class="nx">ListenAndServe</span><span class="p">(</span><span class="s">&quot;:8000&quot;</span><span class="p">,</span> <span class="kc">nil</span><span class="p">)</span>
-    <span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
-        <span class="nx">log</span><span class="p">.</span><span class="nx">Fatal</span><span class="p">(</span><span class="s">&quot;ListenAndServe: &quot;</span><span class="p">,</span> <span class="nx">err</span><span class="p">)</span>
-    <span class="p">}</span>
-<span class="p">}</span>
-</pre></div>
-<div class="section" id="id1">
-<h2 id="hidid1">效果<a class="headerlink" href="#hidid1" title="Permalink to this headline">¶</a></h2>
-<p>未输入用户名和密码的情况下，提示未认证：</p>
-<div class="highlight"><pre><span></span><span class="go"> ~$ curl -i http://127.0.0.1:8000/hello</span>
-<span class="go">HTTP/1.1 401 Unauthorized</span>
-<span class="go">Www-Authenticate: Basic realm=&quot;Restricted&quot;</span>
-<span class="go">Date: Mon, 06 Apr 2015 11:56:10 GMT</span>
-<span class="go">Content-Length: 0</span>
-<span class="go">Content-Type: text/plain; charset=utf-8</span>
-</pre></div>
-<p>输入用户名和密码，显示被保护的内容：</p>
-<div class="highlight"><pre><span></span><span class="go"> ~$ curl -i --user &quot;foo:bar&quot; http://127.0.0.1:8000/hello</span>
-<span class="go">HTTP/1.1 200 OK</span>
-<span class="go">Date: Mon, 06 Apr 2015 11:56:23 GMT</span>
-<span class="go">Content-Length: 14</span>
-<span class="go">Content-Type: text/plain; charset=utf-8</span>
-
-<span class="go">hello, world!</span>
-</pre></div>
-</div>
-<div class="section" id="id2">
-<h2 id="hidid2">参考资料<a class="headerlink" href="#hidid2" title="Permalink to this headline">¶</a></h2>
-<ul class="simple">
-<li><a class="reference external" href="https://godoc.org/net/http">https://godoc.org/net/http</a></li>
-<li><a class="reference external" href="http://tools.ietf.org/html/rfc2617#section-2">http://tools.ietf.org/html/rfc2617#section-2</a></li>
-<li><a class="reference external" href="http://stackoverflow.com/questions/12701085/what-is-the-realm-in-basic-authentication">http://stackoverflow.com/questions/12701085/what-is-the-realm-in-basic-authentication</a></li>
-</ul>
-</div>
-",
-        "mainEntityOfPage": {
-            "@type": "WebPage",
-            "@id": "https://mozillazg.com"
-        }
+        "image": [
+            "https://mozillazg.com/static/avatar.jpeg"
+         ],
+        "keywords": "go",
+        "datePublished": "2015-04-07"
     }
     </script>
 

@@ -16,7 +16,7 @@
 <link rel="canonical" href="https://mozillazg.com/2016/04/apm-python-agent-principle.html">
 
         <meta name="author" content="mozillazg" />
-        <meta name="keywords" content="import,sys.meta_path,sitecustomize,usercustomize,探针,APM" />
+        <meta name="keywords" content="python,import,sys.meta_path,sitecustomize,usercustomize,探针,APM" />
     <meta name="description" content="本文将简单讲述一下 Python 探针的实现原理。 同时为了验证这个原理，我们也会一起来实现一个简单的统计指定函数执行时间的探针程序。 探针的实现主要涉及以下几个知识点: sys.meta_path sitecustomize.py sys.meta_path¶ sys.meta_path 这个简单的来说就是可以实现 import hook 的功能， 当执行 import 相关的操作时，会触发 sys.meta_path 列表中定义的对象。 关于 sys.meta_path 更详细的资料请查阅 python 文档中 sys.meta_path 相关内容以及 PEP 0302 。 sys.meta_path 中的对象需要实现一个 find_module 方法， 这个 find_module 方法返回 None 或一个实现了 load_module 方法的对象 (代码可以从 github 上下载 part1) : import sys class MetaPathFinder: def find_module(self, fullname, path=None): print(&#39;find_module {}&#39;.format(fullname)) return MetaPathLoader() class MetaPathLoader: def load_module(self, fullname): print(&#39;load_module {}&#39;.format(fullname)) sys.modules[fullname] = sys return sys sys.meta_path.insert(0, MetaPathFinder()) if __name__ == &#39;__main__&#39;: import http print(http) print(http.version_info) load_module 方法返回一个 module 对象，这个对象就是 import 的 module 对象了。 比如我上面那样就把 http 替换为 sys 这个 module 了。 $ python meta_path1.py find_module http load_module http &lt;module &#39;sys&#39; (built-in)&gt; sys.version_info(major=3, minor=5, micro=1, releaselevel=&#39;final&#39;, serial=0) 通过 sys.meta_path 我们就可以实现 import hook 的功能： 当 import 预定的 module 时，对这个 module 里的对象来个狸猫换太子， 从而实现获取函数或方法的执行时间等探测信息。 上面说到了狸猫换太子，那么怎么对一个对象进行狸猫换太子的操作呢？ 对于函数对象，我们可以使用装饰器的方式来替换函数对象(代码可以从 github 上下载 part2) : import functools import time def func_wrapper(func): @functools.wraps(func) def wrapper(*args, **kwargs): print(&#39;start func&#39;) start = time.time() result = func(*args, **kwargs) end = time.time() print(&#39;spent {}s&#39;.format(end - start)) return result return wrapper def sleep(n): time.sleep(n) return n if __name__ == &#39;__main__&#39;: func = func_wrapper(sleep) print(func(3)) 执行结果: $ python func_wrapper.py start func spent 3.004966974258423s 3 下面我们来实现一个计算指定模块的指定函数的执行时间的功能(代码可以从 github 上下载 part3) 。 假设我们的模块文件是 hello.py: import time def sleep(n): time.sleep(n) return n 我们的 import hook 是 hook.py: import functools import importlib import sys import time _hook_modules = {&#39;hello&#39;} class MetaPathFinder: def find_module(self, fullname, path=None): print(&#39;find_module {}&#39;.format(fullname)) if fullname in _hook_modules: return MetaPathLoader() class MetaPathLoader: def load_module(self, fullname): print(&#39;load_module {}&#39;.format(fullname)) # ``sys.modules`` 中保存的是已经导入过的 module if fullname in sys.modules: return sys.modules[fullname] # 先从 sys.meta_path 中删除自定义的 finder # 防止下面执行 import_module 的时候再次触发此 finder # 从而出现递归调用的问题 finder = sys.meta_path.pop(0) # 导入 module module = importlib.import_module(fullname) module_hook(fullname, module) sys.meta_path.insert(0, finder) return module sys.meta_path.insert(0, MetaPathFinder()) def module_hook(fullname, module): if fullname == &#39;hello&#39;: module.sleep = func_wrapper(module.sleep) def func_wrapper(func): @functools.wraps(func) def wrapper(*args, **kwargs): print(&#39;start func&#39;) start = time.time() result = func(*args, **kwargs) end = time.time() print(&#39;spent {}s&#39;.format(end - start)) return result return wrapper 测试代码: &gt;&gt;&gt; import hook &gt;&gt;&gt; import hello find_module hello load_module hello &gt;&gt;&gt; &gt;&gt;&gt; hello.sleep(3) start func spent 3.0029919147491455s 3 &gt;&gt;&gt; 其实上面的代码已经实现了探针的基本功能。不过有一个问题就是上面的代码需要显示的 执行 import hook 操作才会注册上我们定义的 hook。 那么有没有办法在启动 python 解释器的时候自动执行 import hook 的操作呢？ 答案就是可以通过定义 sitecustomize.py 的方式来实现这个功能。 sitecustomize.py¶ 简单的说就是，python 解释器初始化的时候会自动 import PYTHONPATH 下存在的 sitecustomize 和 usercustomize 模块: 实验项目的目录结构如下(代码可以从 github 上下载 part4) $ tree . ├── sitecustomize.py └── usercustomize.py sitecustomize.py: $ cat sitecustomize.py print(&#39;this is sitecustomize&#39;) usercustomize.py: $ cat usercustomize.py print(&#39;this is usercustomize&#39;) 把当前目录加到 PYTHONPATH 中，然后看看效果: $ export PYTHONPATH=. $ python this is sitecustomize &lt;---- this is usercustomize &lt;---- Python 3.5.1 (default, Dec 24 2015, 17:20:27) [GCC 4.2.1 Compatible Apple LLVM 7.0.2 (clang-700.1.81)] on darwin Type &#34;help&#34;, &#34;copyright&#34;, &#34;credits&#34; or &#34;license&#34; for more information. &gt;&gt;&gt; 可以看到确实自动导入了。所以我们可以把之前的探测程序改为支持自动执行 import hook (代码可以从 github 上下载 part5) 。 目录结构: $ tree . ├── hello.py ├── hook.py ├── sitecustomize.py sitecustomize.py: $ cat sitecustomize.py import hook 结果: $ export PYTHONPATH=. $ python find_module usercustomize Python 3.5.1 (default, Dec 24 2015, 17:20:27) [GCC 4.2.1 Compatible Apple LLVM 7.0.2 (clang-700.1.81)] on darwin Type &#34;help&#34;, &#34;copyright&#34;, &#34;credits&#34; or &#34;license&#34; for more information. find_module readline find_module atexit find_module rlcompleter &gt;&gt;&gt; &gt;&gt;&gt; import hello find_module hello load_module hello &gt;&gt;&gt; &gt;&gt;&gt; hello.sleep(3) start func spent 3.005002021789551s 3 不过上面的探测程序其实还有一个问题，那就是需要手动修改 PYTHONPATH 。 用过探针程序的朋友应该会记得， 使用 newrelic 之类的探针只需要执行一条命令就 可以了： newrelic-admin run-program python hello.py 实际上修改 PYTHONPATH 的操作是在 newrelic-admin 这个程序里完成的。 下面我们也要来实现一个类似的命令行程序，就叫 agent.py 吧。 agent¶ 还是在上一个程序的基础上修改。先调整一个目录结构，把 hook 操作放到一个单独的目录下， 方便设置 PYTHONPATH 后不会有其他的干扰（代码可以从 github 上下载 part6 ）。 $ mkdir bootstrap $ mv hook.py bootstrap/_hook.py $ touch bootstrap/__init__.py $ touch agent.py $ tree . ├── bootstrap │   ├── __init__.py │   ├── _hook.py │   └── sitecustomize.py ├── hello.py ├── test.py ├── agent.py bootstrap/sitecustomize.py 的内容修改为: $ cat bootstrap/sitecustomize.py import _hook agent.py 的内容如下: import os import sys current_dir = os.path.dirname(os.path.realpath(__file__)) boot_dir = os.path.join(current_dir, &#39;bootstrap&#39;) def main(): args = sys.argv[1:] os.environ[&#39;PYTHONPATH&#39;] = boot_dir # 执行后面的 python 程序命令 # sys.executable 是 python 解释器程序的绝对路径 ``which python`` # &gt;&gt;&gt; sys.executable # &#39;/usr/local/var/pyenv/versions/3.5.1/bin/python3.5&#39; os.execl(sys.executable, sys.executable, *args) if __name__ == &#39;__main__&#39;: main() test.py 的内容为: $ cat test.py import sys import hello print(sys.argv) print(hello.sleep(3)) 使用方法: $ python agent.py test.py arg1 arg2 find_module usercustomize find_module hello load_module hello [&#39;test.py&#39;, &#39;arg1&#39;, &#39;arg2&#39;] start func spent 3.005035161972046s 3 至此，我们就实现了一个简单的 python 探针程序。当然，跟实际使用的探针程序相比肯定是有 很大的差距的，这篇文章主要是讲解一下探针背后的实现原理。 如果大家对商用探针程序的具体实现感兴趣的话，可以看一下国外的 New Relic 或国内的 OneAPM, TingYun 等这些 APM 厂商的商用 python 探针的源代码，相信你会发现一些很有趣的事情。" />
     <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-4941850466486001"
      crossorigin="anonymous"></script>
@@ -41,6 +41,7 @@
         <meta property="og:description" content="本文将简单讲述一下 Python 探针的实现原理。 同时为了验证这个原理，我们也会一起来实现一个简单的统计指定函数执行时间的探针程序。 探针的实现主要涉及以下几个知识点: sys.meta_path sitecustomize.py sys.meta_path¶ sys.meta_path 这个简单的来说就是可以实现 import hook 的功能， 当执行 import 相关的操作时，会触发 sys.meta_path 列表中定义的对象。 关于 sys.meta_path 更详细的资料请查阅 python 文档中 sys.meta_path 相关内容以及 PEP 0302 。 sys.meta_path 中的对象需要实现一个 find_module 方法， 这个 find_module 方法返回 None 或一个实现了 load_module 方法的对象 (代码可以从 github 上下载 part1) : import sys class MetaPathFinder: def find_module(self, fullname, path=None): print(&#39;find_module {}&#39;.format(fullname)) return MetaPathLoader() class MetaPathLoader: def load_module(self, fullname): print(&#39;load_module {}&#39;.format(fullname)) sys.modules[fullname] = sys return sys sys.meta_path.insert(0, MetaPathFinder()) if __name__ == &#39;__main__&#39;: import http print(http) print(http.version_info) load_module 方法返回一个 module 对象，这个对象就是 import 的 module 对象了。 比如我上面那样就把 http 替换为 sys 这个 module 了。 $ python meta_path1.py find_module http load_module http &lt;module &#39;sys&#39; (built-in)&gt; sys.version_info(major=3, minor=5, micro=1, releaselevel=&#39;final&#39;, serial=0) 通过 sys.meta_path 我们就可以实现 import hook 的功能： 当 import 预定的 module 时，对这个 module 里的对象来个狸猫换太子， 从而实现获取函数或方法的执行时间等探测信息。 上面说到了狸猫换太子，那么怎么对一个对象进行狸猫换太子的操作呢？ 对于函数对象，我们可以使用装饰器的方式来替换函数对象(代码可以从 github 上下载 part2) : import functools import time def func_wrapper(func): @functools.wraps(func) def wrapper(*args, **kwargs): print(&#39;start func&#39;) start = time.time() result = func(*args, **kwargs) end = time.time() print(&#39;spent {}s&#39;.format(end - start)) return result return wrapper def sleep(n): time.sleep(n) return n if __name__ == &#39;__main__&#39;: func = func_wrapper(sleep) print(func(3)) 执行结果: $ python func_wrapper.py start func spent 3.004966974258423s 3 下面我们来实现一个计算指定模块的指定函数的执行时间的功能(代码可以从 github 上下载 part3) 。 假设我们的模块文件是 hello.py: import time def sleep(n): time.sleep(n) return n 我们的 import hook 是 hook.py: import functools import importlib import sys import time _hook_modules = {&#39;hello&#39;} class MetaPathFinder: def find_module(self, fullname, path=None): print(&#39;find_module {}&#39;.format(fullname)) if fullname in _hook_modules: return MetaPathLoader() class MetaPathLoader: def load_module(self, fullname): print(&#39;load_module {}&#39;.format(fullname)) # ``sys.modules`` 中保存的是已经导入过的 module if fullname in sys.modules: return sys.modules[fullname] # 先从 sys.meta_path 中删除自定义的 finder # 防止下面执行 import_module 的时候再次触发此 finder # 从而出现递归调用的问题 finder = sys.meta_path.pop(0) # 导入 module module = importlib.import_module(fullname) module_hook(fullname, module) sys.meta_path.insert(0, finder) return module sys.meta_path.insert(0, MetaPathFinder()) def module_hook(fullname, module): if fullname == &#39;hello&#39;: module.sleep = func_wrapper(module.sleep) def func_wrapper(func): @functools.wraps(func) def wrapper(*args, **kwargs): print(&#39;start func&#39;) start = time.time() result = func(*args, **kwargs) end = time.time() print(&#39;spent {}s&#39;.format(end - start)) return result return wrapper 测试代码: &gt;&gt;&gt; import hook &gt;&gt;&gt; import hello find_module hello load_module hello &gt;&gt;&gt; &gt;&gt;&gt; hello.sleep(3) start func spent 3.0029919147491455s 3 &gt;&gt;&gt; 其实上面的代码已经实现了探针的基本功能。不过有一个问题就是上面的代码需要显示的 执行 import hook 操作才会注册上我们定义的 hook。 那么有没有办法在启动 python 解释器的时候自动执行 import hook 的操作呢？ 答案就是可以通过定义 sitecustomize.py 的方式来实现这个功能。 sitecustomize.py¶ 简单的说就是，python 解释器初始化的时候会自动 import PYTHONPATH 下存在的 sitecustomize 和 usercustomize 模块: 实验项目的目录结构如下(代码可以从 github 上下载 part4) $ tree . ├── sitecustomize.py └── usercustomize.py sitecustomize.py: $ cat sitecustomize.py print(&#39;this is sitecustomize&#39;) usercustomize.py: $ cat usercustomize.py print(&#39;this is usercustomize&#39;) 把当前目录加到 PYTHONPATH 中，然后看看效果: $ export PYTHONPATH=. $ python this is sitecustomize &lt;---- this is usercustomize &lt;---- Python 3.5.1 (default, Dec 24 2015, 17:20:27) [GCC 4.2.1 Compatible Apple LLVM 7.0.2 (clang-700.1.81)] on darwin Type &#34;help&#34;, &#34;copyright&#34;, &#34;credits&#34; or &#34;license&#34; for more information. &gt;&gt;&gt; 可以看到确实自动导入了。所以我们可以把之前的探测程序改为支持自动执行 import hook (代码可以从 github 上下载 part5) 。 目录结构: $ tree . ├── hello.py ├── hook.py ├── sitecustomize.py sitecustomize.py: $ cat sitecustomize.py import hook 结果: $ export PYTHONPATH=. $ python find_module usercustomize Python 3.5.1 (default, Dec 24 2015, 17:20:27) [GCC 4.2.1 Compatible Apple LLVM 7.0.2 (clang-700.1.81)] on darwin Type &#34;help&#34;, &#34;copyright&#34;, &#34;credits&#34; or &#34;license&#34; for more information. find_module readline find_module atexit find_module rlcompleter &gt;&gt;&gt; &gt;&gt;&gt; import hello find_module hello load_module hello &gt;&gt;&gt; &gt;&gt;&gt; hello.sleep(3) start func spent 3.005002021789551s 3 不过上面的探测程序其实还有一个问题，那就是需要手动修改 PYTHONPATH 。 用过探针程序的朋友应该会记得， 使用 newrelic 之类的探针只需要执行一条命令就 可以了： newrelic-admin run-program python hello.py 实际上修改 PYTHONPATH 的操作是在 newrelic-admin 这个程序里完成的。 下面我们也要来实现一个类似的命令行程序，就叫 agent.py 吧。 agent¶ 还是在上一个程序的基础上修改。先调整一个目录结构，把 hook 操作放到一个单独的目录下， 方便设置 PYTHONPATH 后不会有其他的干扰（代码可以从 github 上下载 part6 ）。 $ mkdir bootstrap $ mv hook.py bootstrap/_hook.py $ touch bootstrap/__init__.py $ touch agent.py $ tree . ├── bootstrap │   ├── __init__.py │   ├── _hook.py │   └── sitecustomize.py ├── hello.py ├── test.py ├── agent.py bootstrap/sitecustomize.py 的内容修改为: $ cat bootstrap/sitecustomize.py import _hook agent.py 的内容如下: import os import sys current_dir = os.path.dirname(os.path.realpath(__file__)) boot_dir = os.path.join(current_dir, &#39;bootstrap&#39;) def main(): args = sys.argv[1:] os.environ[&#39;PYTHONPATH&#39;] = boot_dir # 执行后面的 python 程序命令 # sys.executable 是 python 解释器程序的绝对路径 ``which python`` # &gt;&gt;&gt; sys.executable # &#39;/usr/local/var/pyenv/versions/3.5.1/bin/python3.5&#39; os.execl(sys.executable, sys.executable, *args) if __name__ == &#39;__main__&#39;: main() test.py 的内容为: $ cat test.py import sys import hello print(sys.argv) print(hello.sleep(3)) 使用方法: $ python agent.py test.py arg1 arg2 find_module usercustomize find_module hello load_module hello [&#39;test.py&#39;, &#39;arg1&#39;, &#39;arg2&#39;] start func spent 3.005035161972046s 3 至此，我们就实现了一个简单的 python 探针程序。当然，跟实际使用的探针程序相比肯定是有 很大的差距的，这篇文章主要是讲解一下探针背后的实现原理。 如果大家对商用探针程序的具体实现感兴趣的话，可以看一下国外的 New Relic 或国内的 OneAPM, TingYun 等这些 APM 厂商的商用 python 探针的源代码，相信你会发现一些很有趣的事情。"/>
         <meta property="article:published_time" content="2016-04-04" />
             <meta property="article:section" content="python" />
+            <meta property="article:tag" content="python" />
             <meta property="article:tag" content="import" />
             <meta property="article:tag" content="sys.meta_path" />
             <meta property="article:tag" content="sitecustomize" />
@@ -81,7 +82,7 @@
     <script type="application/ld+json">
     {
         "@context": "https://schema.org",
-        "@type": "Website",
+        "@type": "BlogPosting",
         "publisher": {
             "@type": "Person",
             "name": "mozillazg",
@@ -94,336 +95,13 @@
             "url": "https://mozillazg.com",
             "sameAs": []
         },
-        // "headline": "",
+        "headline": "Python 探针实现原理",
         "url": "https://mozillazg.com/2016/04/apm-python-agent-principle.html",
-        "datePublished": "2016-04-04",
-        // "dateModified": "",
-        "image": "https://mozillazg.com/static/avatar.jpeg",
-        "keywords": "import, sys.meta_path, sitecustomize, usercustomize, 探针, APM",
-        // "description": "本文将简单讲述一下 Python 探针的实现原理。 同时为了验证这个原理，我们也会一起来实现一个简单的统计指定函数执行时间的探针程序。 探针的实现主要涉及以下几个知识点: sys.meta_path sitecustomize.py sys.meta_path¶ sys.meta_path 这个简单的来说就是可以实现 import hook 的功能， 当执行 import 相关的操作时，会触发 sys.meta_path 列表中定义的对象。 关于 sys.meta_path 更详细的资料请查阅 python 文档中 sys.meta_path 相关内容以及 PEP 0302 。 sys.meta_path 中的对象需要实现一个 find_module 方法， 这个 find_module 方法返回 None 或一个实现了 load_module 方法的对象 (代码可以从 github 上下载 part1) : import sys class MetaPathFinder: def find_module(self, fullname, path=None): print(&#39;find_module {}&#39;.format(fullname)) return MetaPathLoader() class MetaPathLoader: def load_module(self, fullname): print(&#39;load_module {}&#39;.format(fullname)) sys.modules[fullname] = sys return sys sys.meta_path.insert(0, MetaPathFinder()) if __name__ == &#39;__main__&#39;: import http print(http) print(http.version_info) load_module 方法返回一个 module 对象，这个对象就是 import 的 module 对象了。 比如我上面那样就把 http 替换为 sys 这个 module 了。 $ python meta_path1.py find_module http load_module http &lt;module &#39;sys&#39; (built-in)&gt; sys.version_info(major=3, minor=5, micro=1, releaselevel=&#39;final&#39;, serial=0) 通过 sys.meta_path 我们就可以实现 import hook 的功能： 当 import 预定的 module 时，对这个 module 里的对象来个狸猫换太子， 从而实现获取函数或方法的执行时间等探测信息。 上面说到了狸猫换太子，那么怎么对一个对象进行狸猫换太子的操作呢？ 对于函数对象，我们可以使用装饰器的方式来替换函数对象(代码可以从 github 上下载 part2) : import functools import time def func_wrapper(func): @functools.wraps(func) def wrapper(*args, **kwargs): print(&#39;start func&#39;) start = time.time() result = func(*args, **kwargs) end = time.time() print(&#39;spent {}s&#39;.format(end - start)) return result return wrapper def sleep(n): time.sleep(n) return n if __name__ == &#39;__main__&#39;: func = func_wrapper(sleep) print(func(3)) 执行结果: $ python func_wrapper.py start func spent 3.004966974258423s 3 下面我们来实现一个计算指定模块的指定函数的执行时间的功能(代码可以从 github 上下载 part3) 。 假设我们的模块文件是 hello.py: import time def sleep(n): time.sleep(n) return n 我们的 import hook 是 hook.py: import functools import importlib import sys import time _hook_modules = {&#39;hello&#39;} class MetaPathFinder: def find_module(self, fullname, path=None): print(&#39;find_module {}&#39;.format(fullname)) if fullname in _hook_modules: return MetaPathLoader() class MetaPathLoader: def load_module(self, fullname): print(&#39;load_module {}&#39;.format(fullname)) # ``sys.modules`` 中保存的是已经导入过的 module if fullname in sys.modules: return sys.modules[fullname] # 先从 sys.meta_path 中删除自定义的 finder # 防止下面执行 import_module 的时候再次触发此 finder # 从而出现递归调用的问题 finder = sys.meta_path.pop(0) # 导入 module module = importlib.import_module(fullname) module_hook(fullname, module) sys.meta_path.insert(0, finder) return module sys.meta_path.insert(0, MetaPathFinder()) def module_hook(fullname, module): if fullname == &#39;hello&#39;: module.sleep = func_wrapper(module.sleep) def func_wrapper(func): @functools.wraps(func) def wrapper(*args, **kwargs): print(&#39;start func&#39;) start = time.time() result = func(*args, **kwargs) end = time.time() print(&#39;spent {}s&#39;.format(end - start)) return result return wrapper 测试代码: &gt;&gt;&gt; import hook &gt;&gt;&gt; import hello find_module hello load_module hello &gt;&gt;&gt; &gt;&gt;&gt; hello.sleep(3) start func spent 3.0029919147491455s 3 &gt;&gt;&gt; 其实上面的代码已经实现了探针的基本功能。不过有一个问题就是上面的代码需要显示的 执行 import hook 操作才会注册上我们定义的 hook。 那么有没有办法在启动 python 解释器的时候自动执行 import hook 的操作呢？ 答案就是可以通过定义 sitecustomize.py 的方式来实现这个功能。 sitecustomize.py¶ 简单的说就是，python 解释器初始化的时候会自动 import PYTHONPATH 下存在的 sitecustomize 和 usercustomize 模块: 实验项目的目录结构如下(代码可以从 github 上下载 part4) $ tree . ├── sitecustomize.py └── usercustomize.py sitecustomize.py: $ cat sitecustomize.py print(&#39;this is sitecustomize&#39;) usercustomize.py: $ cat usercustomize.py print(&#39;this is usercustomize&#39;) 把当前目录加到 PYTHONPATH 中，然后看看效果: $ export PYTHONPATH=. $ python this is sitecustomize &lt;---- this is usercustomize &lt;---- Python 3.5.1 (default, Dec 24 2015, 17:20:27) [GCC 4.2.1 Compatible Apple LLVM 7.0.2 (clang-700.1.81)] on darwin Type &#34;help&#34;, &#34;copyright&#34;, &#34;credits&#34; or &#34;license&#34; for more information. &gt;&gt;&gt; 可以看到确实自动导入了。所以我们可以把之前的探测程序改为支持自动执行 import hook (代码可以从 github 上下载 part5) 。 目录结构: $ tree . ├── hello.py ├── hook.py ├── sitecustomize.py sitecustomize.py: $ cat sitecustomize.py import hook 结果: $ export PYTHONPATH=. $ python find_module usercustomize Python 3.5.1 (default, Dec 24 2015, 17:20:27) [GCC 4.2.1 Compatible Apple LLVM 7.0.2 (clang-700.1.81)] on darwin Type &#34;help&#34;, &#34;copyright&#34;, &#34;credits&#34; or &#34;license&#34; for more information. find_module readline find_module atexit find_module rlcompleter &gt;&gt;&gt; &gt;&gt;&gt; import hello find_module hello load_module hello &gt;&gt;&gt; &gt;&gt;&gt; hello.sleep(3) start func spent 3.005002021789551s 3 不过上面的探测程序其实还有一个问题，那就是需要手动修改 PYTHONPATH 。 用过探针程序的朋友应该会记得， 使用 newrelic 之类的探针只需要执行一条命令就 可以了： newrelic-admin run-program python hello.py 实际上修改 PYTHONPATH 的操作是在 newrelic-admin 这个程序里完成的。 下面我们也要来实现一个类似的命令行程序，就叫 agent.py 吧。 agent¶ 还是在上一个程序的基础上修改。先调整一个目录结构，把 hook 操作放到一个单独的目录下， 方便设置 PYTHONPATH 后不会有其他的干扰（代码可以从 github 上下载 part6 ）。 $ mkdir bootstrap $ mv hook.py bootstrap/_hook.py $ touch bootstrap/__init__.py $ touch agent.py $ tree . ├── bootstrap │   ├── __init__.py │   ├── _hook.py │   └── sitecustomize.py ├── hello.py ├── test.py ├── agent.py bootstrap/sitecustomize.py 的内容修改为: $ cat bootstrap/sitecustomize.py import _hook agent.py 的内容如下: import os import sys current_dir = os.path.dirname(os.path.realpath(__file__)) boot_dir = os.path.join(current_dir, &#39;bootstrap&#39;) def main(): args = sys.argv[1:] os.environ[&#39;PYTHONPATH&#39;] = boot_dir # 执行后面的 python 程序命令 # sys.executable 是 python 解释器程序的绝对路径 ``which python`` # &gt;&gt;&gt; sys.executable # &#39;/usr/local/var/pyenv/versions/3.5.1/bin/python3.5&#39; os.execl(sys.executable, sys.executable, *args) if __name__ == &#39;__main__&#39;: main() test.py 的内容为: $ cat test.py import sys import hello print(sys.argv) print(hello.sleep(3)) 使用方法: $ python agent.py test.py arg1 arg2 find_module usercustomize find_module hello load_module hello [&#39;test.py&#39;, &#39;arg1&#39;, &#39;arg2&#39;] start func spent 3.005035161972046s 3 至此，我们就实现了一个简单的 python 探针程序。当然，跟实际使用的探针程序相比肯定是有 很大的差距的，这篇文章主要是讲解一下探针背后的实现原理。 如果大家对商用探针程序的具体实现感兴趣的话，可以看一下国外的 New Relic 或国内的 OneAPM, TingYun 等这些 APM 厂商的商用 python 探针的源代码，相信你会发现一些很有趣的事情。",
-        "description": "<p>本文将简单讲述一下 Python 探针的实现原理。
-同时为了验证这个原理，我们也会一起来实现一个简单的统计指定函数执行时间的探针程序。</p>
-<p>探针的实现主要涉及以下几个知识点:</p>
-<ul class="simple">
-<li>sys.meta_path</li>
-<li>sitecustomize.py</li>
-</ul>
-<div class="section" id="sys-meta-path">
-<h2 id="hidsys-meta-path">sys.meta_path<a class="headerlink" href="#hidsys-meta-path" title="Permalink to this headline">¶</a></h2>
-<p><tt class="docutils literal">sys.meta_path</tt> 这个简单的来说就是可以实现 import hook 的功能，
-当执行 import 相关的操作时，会触发 <tt class="docutils literal">sys.meta_path</tt> 列表中定义的对象。
-关于 <tt class="docutils literal">sys.meta_path</tt> 更详细的资料请查阅 python 文档中 <a class="reference external" href="https://docs.python.org/3/library/sys.html#sys.meta_path">sys.meta_path</a> 相关内容以及
-<a class="reference external" href="https://www.python.org/dev/peps/pep-0302/">PEP 0302</a> 。</p>
-<p><tt class="docutils literal">sys.meta_path</tt> 中的对象需要实现一个 <tt class="docutils literal">find_module</tt> 方法，
-这个 <tt class="docutils literal">find_module</tt> 方法返回 <tt class="docutils literal">None</tt> 或一个实现了 <tt class="docutils literal">load_module</tt> 方法的对象
-(代码可以从 github 上下载 <a class="reference external" href="https://github.com/mozillazg/apm-python-agent-principle/tree/master/part1">part1</a>) :</p>
-<div class="highlight"><pre><span></span><span class="kn">import</span> <span class="nn">sys</span>
-
-
-<span class="k">class</span> <span class="nc">MetaPathFinder</span><span class="p">:</span>
-
-    <span class="k">def</span> <span class="nf">find_module</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">fullname</span><span class="p">,</span> <span class="n">path</span><span class="o">=</span><span class="bp">None</span><span class="p">):</span>
-        <span class="k">print</span><span class="p">(</span><span class="s1">&#39;find_module {}&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">fullname</span><span class="p">))</span>
-        <span class="k">return</span> <span class="n">MetaPathLoader</span><span class="p">()</span>
-
-
-<span class="k">class</span> <span class="nc">MetaPathLoader</span><span class="p">:</span>
-
-    <span class="k">def</span> <span class="nf">load_module</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">fullname</span><span class="p">):</span>
-        <span class="k">print</span><span class="p">(</span><span class="s1">&#39;load_module {}&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">fullname</span><span class="p">))</span>
-        <span class="n">sys</span><span class="o">.</span><span class="n">modules</span><span class="p">[</span><span class="n">fullname</span><span class="p">]</span> <span class="o">=</span> <span class="n">sys</span>
-        <span class="k">return</span> <span class="n">sys</span>
-
-<span class="n">sys</span><span class="o">.</span><span class="n">meta_path</span><span class="o">.</span><span class="n">insert</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="n">MetaPathFinder</span><span class="p">())</span>
-
-<span class="k">if</span> <span class="n">__name__</span> <span class="o">==</span> <span class="s1">&#39;__main__&#39;</span><span class="p">:</span>
-    <span class="kn">import</span> <span class="nn">http</span>
-    <span class="k">print</span><span class="p">(</span><span class="n">http</span><span class="p">)</span>
-    <span class="k">print</span><span class="p">(</span><span class="n">http</span><span class="o">.</span><span class="n">version_info</span><span class="p">)</span>
-</pre></div>
-<p><tt class="docutils literal">load_module</tt> 方法返回一个 module 对象，这个对象就是 import 的 module 对象了。
-比如我上面那样就把 <tt class="docutils literal">http</tt> 替换为 <tt class="docutils literal">sys</tt> 这个 module 了。</p>
-<div class="highlight"><pre><span></span>$ python meta_path1.py
-find_module http
-load_module http
-&lt;module <span class="s1">&#39;sys&#39;</span> <span class="o">(</span>built-in<span class="o">)</span>&gt;
-sys.version_info<span class="o">(</span><span class="nv">major</span><span class="o">=</span>3, <span class="nv">minor</span><span class="o">=</span>5, <span class="nv">micro</span><span class="o">=</span>1, <span class="nv">releaselevel</span><span class="o">=</span><span class="s1">&#39;final&#39;</span>, <span class="nv">serial</span><span class="o">=</span>0<span class="o">)</span>
-</pre></div>
-<p>通过 <tt class="docutils literal">sys.meta_path</tt> 我们就可以实现 import hook 的功能：
-当 import 预定的 module 时，对这个 module 里的对象来个狸猫换太子，
-从而实现获取函数或方法的执行时间等探测信息。</p>
-<p>上面说到了狸猫换太子，那么怎么对一个对象进行狸猫换太子的操作呢？
-对于函数对象，我们可以使用装饰器的方式来替换函数对象(代码可以从 github 上下载 <a class="reference external" href="https://github.com/mozillazg/apm-python-agent-principle/tree/master/part2">part2</a>) :</p>
-<div class="highlight"><pre><span></span><span class="kn">import</span> <span class="nn">functools</span>
-<span class="kn">import</span> <span class="nn">time</span>
-
-
-<span class="k">def</span> <span class="nf">func_wrapper</span><span class="p">(</span><span class="n">func</span><span class="p">):</span>
-    <span class="nd">@functools.wraps</span><span class="p">(</span><span class="n">func</span><span class="p">)</span>
-    <span class="k">def</span> <span class="nf">wrapper</span><span class="p">(</span><span class="o">*</span><span class="n">args</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
-        <span class="k">print</span><span class="p">(</span><span class="s1">&#39;start func&#39;</span><span class="p">)</span>
-        <span class="n">start</span> <span class="o">=</span> <span class="n">time</span><span class="o">.</span><span class="n">time</span><span class="p">()</span>
-        <span class="n">result</span> <span class="o">=</span> <span class="n">func</span><span class="p">(</span><span class="o">*</span><span class="n">args</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span>
-        <span class="n">end</span> <span class="o">=</span> <span class="n">time</span><span class="o">.</span><span class="n">time</span><span class="p">()</span>
-        <span class="k">print</span><span class="p">(</span><span class="s1">&#39;spent {}s&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">end</span> <span class="o">-</span> <span class="n">start</span><span class="p">))</span>
-        <span class="k">return</span> <span class="n">result</span>
-    <span class="k">return</span> <span class="n">wrapper</span>
-
-
-<span class="k">def</span> <span class="nf">sleep</span><span class="p">(</span><span class="n">n</span><span class="p">):</span>
-    <span class="n">time</span><span class="o">.</span><span class="n">sleep</span><span class="p">(</span><span class="n">n</span><span class="p">)</span>
-    <span class="k">return</span> <span class="n">n</span>
-
-<span class="k">if</span> <span class="n">__name__</span> <span class="o">==</span> <span class="s1">&#39;__main__&#39;</span><span class="p">:</span>
-    <span class="n">func</span> <span class="o">=</span> <span class="n">func_wrapper</span><span class="p">(</span><span class="n">sleep</span><span class="p">)</span>
-    <span class="k">print</span><span class="p">(</span><span class="n">func</span><span class="p">(</span><span class="mi">3</span><span class="p">))</span>
-</pre></div>
-<p>执行结果:</p>
-<pre class="literal-block">
-$ python func_wrapper.py
-start func
-spent 3.004966974258423s
-3
-</pre>
-<p>下面我们来实现一个计算指定模块的指定函数的执行时间的功能(代码可以从 github 上下载 <a class="reference external" href="https://github.com/mozillazg/apm-python-agent-principle/tree/master/part3">part3</a>) 。</p>
-<p>假设我们的模块文件是 hello.py:</p>
-<div class="highlight"><pre><span></span><span class="kn">import</span> <span class="nn">time</span>
-
-
-<span class="k">def</span> <span class="nf">sleep</span><span class="p">(</span><span class="n">n</span><span class="p">):</span>
-    <span class="n">time</span><span class="o">.</span><span class="n">sleep</span><span class="p">(</span><span class="n">n</span><span class="p">)</span>
-    <span class="k">return</span> <span class="n">n</span>
-</pre></div>
-<p>我们的 import hook 是 hook.py:</p>
-<div class="highlight"><pre><span></span><span class="kn">import</span> <span class="nn">functools</span>
-<span class="kn">import</span> <span class="nn">importlib</span>
-<span class="kn">import</span> <span class="nn">sys</span>
-<span class="kn">import</span> <span class="nn">time</span>
-
-<span class="n">_hook_modules</span> <span class="o">=</span> <span class="p">{</span><span class="s1">&#39;hello&#39;</span><span class="p">}</span>
-
-
-<span class="k">class</span> <span class="nc">MetaPathFinder</span><span class="p">:</span>
-
-    <span class="k">def</span> <span class="nf">find_module</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">fullname</span><span class="p">,</span> <span class="n">path</span><span class="o">=</span><span class="bp">None</span><span class="p">):</span>
-        <span class="k">print</span><span class="p">(</span><span class="s1">&#39;find_module {}&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">fullname</span><span class="p">))</span>
-        <span class="k">if</span> <span class="n">fullname</span> <span class="ow">in</span> <span class="n">_hook_modules</span><span class="p">:</span>
-            <span class="k">return</span> <span class="n">MetaPathLoader</span><span class="p">()</span>
-
-
-<span class="k">class</span> <span class="nc">MetaPathLoader</span><span class="p">:</span>
-
-    <span class="k">def</span> <span class="nf">load_module</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">fullname</span><span class="p">):</span>
-        <span class="k">print</span><span class="p">(</span><span class="s1">&#39;load_module {}&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">fullname</span><span class="p">))</span>
-        <span class="c1"># ``sys.modules`` 中保存的是已经导入过的 module</span>
-        <span class="k">if</span> <span class="n">fullname</span> <span class="ow">in</span> <span class="n">sys</span><span class="o">.</span><span class="n">modules</span><span class="p">:</span>
-            <span class="k">return</span> <span class="n">sys</span><span class="o">.</span><span class="n">modules</span><span class="p">[</span><span class="n">fullname</span><span class="p">]</span>
-
-        <span class="c1"># 先从 sys.meta_path 中删除自定义的 finder</span>
-        <span class="c1"># 防止下面执行 import_module 的时候再次触发此 finder</span>
-        <span class="c1"># 从而出现递归调用的问题</span>
-        <span class="n">finder</span> <span class="o">=</span> <span class="n">sys</span><span class="o">.</span><span class="n">meta_path</span><span class="o">.</span><span class="n">pop</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span>
-        <span class="c1"># 导入 module</span>
-        <span class="n">module</span> <span class="o">=</span> <span class="n">importlib</span><span class="o">.</span><span class="n">import_module</span><span class="p">(</span><span class="n">fullname</span><span class="p">)</span>
-
-        <span class="n">module_hook</span><span class="p">(</span><span class="n">fullname</span><span class="p">,</span> <span class="n">module</span><span class="p">)</span>
-
-        <span class="n">sys</span><span class="o">.</span><span class="n">meta_path</span><span class="o">.</span><span class="n">insert</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="n">finder</span><span class="p">)</span>
-        <span class="k">return</span> <span class="n">module</span>
-
-<span class="n">sys</span><span class="o">.</span><span class="n">meta_path</span><span class="o">.</span><span class="n">insert</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="n">MetaPathFinder</span><span class="p">())</span>
-
-
-<span class="k">def</span> <span class="nf">module_hook</span><span class="p">(</span><span class="n">fullname</span><span class="p">,</span> <span class="n">module</span><span class="p">):</span>
-    <span class="k">if</span> <span class="n">fullname</span> <span class="o">==</span> <span class="s1">&#39;hello&#39;</span><span class="p">:</span>
-        <span class="n">module</span><span class="o">.</span><span class="n">sleep</span> <span class="o">=</span> <span class="n">func_wrapper</span><span class="p">(</span><span class="n">module</span><span class="o">.</span><span class="n">sleep</span><span class="p">)</span>
-
-
-<span class="k">def</span> <span class="nf">func_wrapper</span><span class="p">(</span><span class="n">func</span><span class="p">):</span>
-    <span class="nd">@functools.wraps</span><span class="p">(</span><span class="n">func</span><span class="p">)</span>
-    <span class="k">def</span> <span class="nf">wrapper</span><span class="p">(</span><span class="o">*</span><span class="n">args</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
-        <span class="k">print</span><span class="p">(</span><span class="s1">&#39;start func&#39;</span><span class="p">)</span>
-        <span class="n">start</span> <span class="o">=</span> <span class="n">time</span><span class="o">.</span><span class="n">time</span><span class="p">()</span>
-        <span class="n">result</span> <span class="o">=</span> <span class="n">func</span><span class="p">(</span><span class="o">*</span><span class="n">args</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span>
-        <span class="n">end</span> <span class="o">=</span> <span class="n">time</span><span class="o">.</span><span class="n">time</span><span class="p">()</span>
-        <span class="k">print</span><span class="p">(</span><span class="s1">&#39;spent {}s&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">end</span> <span class="o">-</span> <span class="n">start</span><span class="p">))</span>
-        <span class="k">return</span> <span class="n">result</span>
-    <span class="k">return</span> <span class="n">wrapper</span>
-</pre></div>
-<p>测试代码:</p>
-<div class="highlight"><pre><span></span><span class="o">&gt;&gt;&gt;</span> <span class="kn">import</span> <span class="nn">hook</span>
-<span class="o">&gt;&gt;&gt;</span> <span class="kn">import</span> <span class="nn">hello</span>
-<span class="n">find_module</span> <span class="n">hello</span>
-<span class="n">load_module</span> <span class="n">hello</span>
-<span class="o">&gt;&gt;&gt;</span>
-<span class="o">&gt;&gt;&gt;</span> <span class="n">hello</span><span class="o">.</span><span class="n">sleep</span><span class="p">(</span><span class="mi">3</span><span class="p">)</span>
-<span class="n">start</span> <span class="n">func</span>
-<span class="n">spent</span> <span class="mf">3.0029919147491455</span><span class="n">s</span>
-<span class="mi">3</span>
-<span class="o">&gt;&gt;&gt;</span>
-</pre></div>
-<p>其实上面的代码已经实现了探针的基本功能。不过有一个问题就是上面的代码需要显示的
-执行 <tt class="docutils literal">import hook</tt> 操作才会注册上我们定义的 hook。</p>
-<p>那么有没有办法在启动 python 解释器的时候自动执行 <tt class="docutils literal">import hook</tt> 的操作呢？
-答案就是可以通过定义 sitecustomize.py 的方式来实现这个功能。</p>
-</div>
-<div class="section" id="sitecustomize-py">
-<h2 id="hidsitecustomize-py">sitecustomize.py<a class="headerlink" href="#hidsitecustomize-py" title="Permalink to this headline">¶</a></h2>
-<p>简单的说就是，python 解释器初始化的时候会自动 import <tt class="docutils literal">PYTHONPATH</tt> 下存在的
-<tt class="docutils literal">sitecustomize</tt> 和 <tt class="docutils literal">usercustomize</tt> 模块:</p>
-<p>实验项目的目录结构如下(代码可以从 github 上下载 <a class="reference external" href="https://github.com/mozillazg/apm-python-agent-principle/tree/master/part4">part4</a>)</p>
-<pre class="literal-block">
-$ tree
-.
-├── sitecustomize.py
-└── usercustomize.py
-</pre>
-<p><tt class="docutils literal">sitecustomize.py</tt>:</p>
-<pre class="literal-block">
-$ cat sitecustomize.py
-print('this is sitecustomize')
-</pre>
-<p><tt class="docutils literal">usercustomize.py</tt>:</p>
-<pre class="literal-block">
-$ cat usercustomize.py
-print('this is usercustomize')
-</pre>
-<p>把当前目录加到 <tt class="docutils literal">PYTHONPATH</tt> 中，然后看看效果:</p>
-<pre class="literal-block">
-$ export PYTHONPATH=.
-$ python
-this is sitecustomize       &lt;----
-this is usercustomize       &lt;----
-Python 3.5.1 (default, Dec 24 2015, 17:20:27)
-[GCC 4.2.1 Compatible Apple LLVM 7.0.2 (clang-700.1.81)] on darwin
-Type &quot;help&quot;, &quot;copyright&quot;, &quot;credits&quot; or &quot;license&quot; for more information.
-&gt;&gt;&gt;
-</pre>
-<p>可以看到确实自动导入了。所以我们可以把之前的探测程序改为支持自动执行 <tt class="docutils literal">import hook</tt>
-(代码可以从 github 上下载 <a class="reference external" href="https://github.com/mozillazg/apm-python-agent-principle/tree/master/part5">part5</a>) 。</p>
-<p>目录结构:</p>
-<pre class="literal-block">
-$ tree
-.
-├── hello.py
-├── hook.py
-├── sitecustomize.py
-</pre>
-<p>sitecustomize.py:</p>
-<pre class="literal-block">
-$ cat sitecustomize.py
-import hook
-</pre>
-<p>结果:</p>
-<pre class="literal-block">
-$ export PYTHONPATH=.
-$ python
-find_module usercustomize
-Python 3.5.1 (default, Dec 24 2015, 17:20:27)
-[GCC 4.2.1 Compatible Apple LLVM 7.0.2 (clang-700.1.81)] on darwin
-Type &quot;help&quot;, &quot;copyright&quot;, &quot;credits&quot; or &quot;license&quot; for more information.
-find_module readline
-find_module atexit
-find_module rlcompleter
-&gt;&gt;&gt;
-&gt;&gt;&gt; import hello
-find_module hello
-load_module hello
-&gt;&gt;&gt;
-&gt;&gt;&gt; hello.sleep(3)
-start func
-spent 3.005002021789551s
-3
-</pre>
-<p>不过上面的探测程序其实还有一个问题，那就是需要手动修改 <tt class="docutils literal">PYTHONPATH</tt> 。
-用过探针程序的朋友应该会记得， 使用 newrelic 之类的探针只需要执行一条命令就
-可以了： <tt class="docutils literal"><span class="pre">newrelic-admin</span> <span class="pre">run-program</span> python hello.py</tt>
-实际上修改 <tt class="docutils literal">PYTHONPATH</tt> 的操作是在 <tt class="docutils literal"><span class="pre">newrelic-admin</span></tt> 这个程序里完成的。</p>
-<p>下面我们也要来实现一个类似的命令行程序，就叫 <tt class="docutils literal">agent.py</tt> 吧。</p>
-</div>
-<div class="section" id="agent">
-<h2 id="hidagent">agent<a class="headerlink" href="#hidagent" title="Permalink to this headline">¶</a></h2>
-<p>还是在上一个程序的基础上修改。先调整一个目录结构，把 hook 操作放到一个单独的目录下，
-方便设置 <tt class="docutils literal">PYTHONPATH</tt> 后不会有其他的干扰（代码可以从 github 上下载 <a class="reference external" href="https://github.com/mozillazg/apm-python-agent-principle/tree/master/part6">part6</a> ）。</p>
-<pre class="literal-block">
-$ mkdir bootstrap
-$ mv hook.py bootstrap/_hook.py
-$ touch bootstrap/__init__.py
-$ touch agent.py
-$ tree
-.
-├── bootstrap
-│&nbsp;&nbsp; ├── __init__.py
-│&nbsp;&nbsp; ├── _hook.py
-│&nbsp;&nbsp; └── sitecustomize.py
-├── hello.py
-├── test.py
-├── agent.py
-</pre>
-<p><tt class="docutils literal">bootstrap/sitecustomize.py</tt> 的内容修改为:</p>
-<pre class="literal-block">
-$ cat bootstrap/sitecustomize.py
-import _hook
-</pre>
-<p>agent.py 的内容如下:</p>
-<div class="highlight"><pre><span></span><span class="kn">import</span> <span class="nn">os</span>
-<span class="kn">import</span> <span class="nn">sys</span>
-
-<span class="n">current_dir</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">dirname</span><span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">realpath</span><span class="p">(</span><span class="n">__file__</span><span class="p">))</span>
-<span class="n">boot_dir</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">current_dir</span><span class="p">,</span> <span class="s1">&#39;bootstrap&#39;</span><span class="p">)</span>
-
-
-<span class="k">def</span> <span class="nf">main</span><span class="p">():</span>
-    <span class="n">args</span> <span class="o">=</span> <span class="n">sys</span><span class="o">.</span><span class="n">argv</span><span class="p">[</span><span class="mi">1</span><span class="p">:]</span>
-    <span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="p">[</span><span class="s1">&#39;PYTHONPATH&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">boot_dir</span>
-    <span class="c1"># 执行后面的 python 程序命令</span>
-    <span class="c1"># sys.executable 是 python 解释器程序的绝对路径 ``which python``</span>
-    <span class="c1"># &gt;&gt;&gt; sys.executable</span>
-    <span class="c1"># &#39;/usr/local/var/pyenv/versions/3.5.1/bin/python3.5&#39;</span>
-    <span class="n">os</span><span class="o">.</span><span class="n">execl</span><span class="p">(</span><span class="n">sys</span><span class="o">.</span><span class="n">executable</span><span class="p">,</span> <span class="n">sys</span><span class="o">.</span><span class="n">executable</span><span class="p">,</span> <span class="o">*</span><span class="n">args</span><span class="p">)</span>
-
-<span class="k">if</span> <span class="n">__name__</span> <span class="o">==</span> <span class="s1">&#39;__main__&#39;</span><span class="p">:</span>
-    <span class="n">main</span><span class="p">()</span>
-</pre></div>
-<p><tt class="docutils literal">test.py</tt> 的内容为:</p>
-<pre class="literal-block">
-$ cat test.py
-import sys
-import hello
-
-print(sys.argv)
-print(hello.sleep(3))
-</pre>
-<p>使用方法:</p>
-<pre class="literal-block">
-$ python agent.py test.py arg1 arg2
-find_module usercustomize
-find_module hello
-load_module hello
-['test.py', 'arg1', 'arg2']
-start func
-spent 3.005035161972046s
-3
-</pre>
-<p>至此，我们就实现了一个简单的 python 探针程序。当然，跟实际使用的探针程序相比肯定是有
-很大的差距的，这篇文章主要是讲解一下探针背后的实现原理。</p>
-<p>如果大家对商用探针程序的具体实现感兴趣的话，可以看一下国外的 <a class="reference external" href="https://pypi.python.org/pypi/newrelic">New Relic</a> 或国内的 <a class="reference external" href="http://pypi.oneapm.com/simple/blueware/">OneAPM</a>, <a class="reference external" href="http://doc.tingyun.com/help/html/doc/sdkServerDownload.html?tabType=python">TingYun</a>
-等这些 APM 厂商的商用 python 探针的源代码，相信你会发现一些很有趣的事情。</p>
-<!-- 浏览了一下这两家的代码（通过上面的链接可以下载到各自的源代码）， -->
-<!-- 其中 OneAPM 的代码跟 New Relic 的 太像了，目录结构，类，方法，函数之类的完全一个模子出来的， copy 成分居多（纯复制😓） 。 -->
-<!--  -->
-<!-- TingYun 的代码跟 New Relic 的目录结构差别比较大，里面的类，方法，函数之类的差别 -->
-<!-- 也比较大，应该是借鉴的成分居多（不排除有个别功能是 copy 的，没细看）。 -->
-<!--  -->
-<!-- 网络上 2014 年的讨论: -->
-<!-- OneAPM: https://www.v2ex.com/t/125736 -->
-<!-- TingYun: https://www.v2ex.com/t/214359 -->
-</div>
-",
-        "mainEntityOfPage": {
-            "@type": "WebPage",
-            "@id": "https://mozillazg.com"
-        }
+        "image": [
+            "https://mozillazg.com/static/avatar.jpeg"
+         ],
+        "keywords": "python, import, sys.meta_path, sitecustomize, usercustomize, 探针, APM",
+        "datePublished": "2016-04-04"
     }
     </script>
 

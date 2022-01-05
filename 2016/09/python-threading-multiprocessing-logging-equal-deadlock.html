@@ -40,6 +40,7 @@
         <meta property="og:description" content="前段时间有个程序突然出现了子进程不工作的情况。 后来通过调查发现是因为程序中同时使用了多线程，多进程以及 logging 模块，导致子进程中出现了死锁的情况。 当创建子进程的时候，后台线程中的 logging 模块正好获取了一个锁(threading.RLock)在记录日志信息。由于在 unix/linux 平台下 Python 是通过 fork 来创建子进程的，因此创建子进程的时候会把 logging 中的锁也复制了一份，当子进程中需要记录日志的时候发现 logging 的锁一直处于被占用的状态，从而出现了死锁（复制的这个锁永远也不会被释放，因为它的所有者是父进程的某个线程，但是这个线程释放锁的时候又不会影响子进程里的这个锁）。 复现问题的代码如下: import os import sys import threading import time class ThreadWorker(threading.Thread): def __init__(self): print(&#39;ThreadWorker: init&#39;) super().__init__() def run(self): print(&#39;ThreadWorker: running (rlock = {0})&#39;.format(global_rlock)) global_rlock.acquire() print(&#39;ThreadWorker: i got lock {0}&#39;.format(global_rlock)) time.sleep(5) global_rlock.release() print(&#39;ThreadWorker: release lock {0} and &#39; &#39;sleeping forever&#39;.format(global_rlock)) time.sleep(600000) global_rlock = threading.RLock(verbose=True) worker = ThreadWorker() worker.start() time.sleep(1) print(&#39;forking&#39;) pid = os.fork() if pid != 0: # pid != 0 当前处于父进程 print(&#39;parent: running (rlock = {0})&#39;.format(global_rlock)) else: # pid = 0 当前处于子进程 print(&#39;child: running (rlock = {0}), &#39; &#39;getting the lock...&#39;.format(global_rlock)) global_rlock.acquire() print(&#39;child: got the lock {0}&#39;.format(global_rlock)) sys.exit(0) time.sleep(10) 上面代码的执行结果如下: $ python fork.py ThreadWorker: init ThreadWorker: running (rlock = &lt;unlocked _thread.RLock object owner=0 count=0 at 0x10116cb40&gt;) ThreadWorker: i got lock &lt;locked _thread.RLock object owner=123145307557888 count=1 at 0x10116cb40&gt; forking parent: running (rlock = &lt;locked _thread.RLock object owner=123145307557888 count=1 at 0x10116cb40&gt;) child: running (rlock = &lt;locked _thread.RLock object owner=123145307557888 count=1 at 0x10116cb40&gt;), getting the lock... ThreadWorker: release lock &lt;unlocked _thread.RLock object owner=0 count=0 at 0x10116cb40&gt; and sleeping forever 从上面的结果中可以看出来：虽然线程随后释放了获得的锁，但是子进程却永远的卡在了获取锁的地方。 那么, 应该如何解决这个问题呢？至少有三种解决办法: 先创建子进程，然后再创建线程: import os import sys import threading import time class ThreadWorker(threading.Thread): def __init__(self): print(&#39;ThreadWorker: init&#39;) super().__init__() def run(self): print(&#39;ThreadWorker: running (rlock = {0})&#39;.format(global_rlock)) global_rlock.acquire() print(&#39;ThreadWorker: i got lock {0}&#39;.format(global_rlock)) time.sleep(5) global_rlock.release() print(&#39;ThreadWorker: release lock {0} and &#39; &#39;sleeping forever&#39;.format(global_rlock)) time.sleep(600000) global_rlock = threading.RLock(verbose=True) worker = ThreadWorker() print(&#39;forking&#39;) pid = os.fork() if pid != 0: # pid != 0 当前处于父进程 print(&#39;parent: running (rlock = {0})&#39;.format(global_rlock)) worker.start() else: # pid = 0 当前处于子进程 time.sleep(1) print(&#39;child: running (rlock = {0}), &#39; &#39;getting the lock...&#39;.format(global_rlock)) global_rlock.acquire() print(&#39;child: got the lock {0}&#39;.format(global_rlock)) global_rlock.release() print(&#39;child: release the lock {0}&#39;.format(global_rlock)) sys.exit(0) time.sleep(10) 结果: $ python fork2.py ThreadWorker: init forking parent: running (rlock = &lt;unlocked _thread.RLock object owner=0 count=0 at 0x10f24cb70&gt;) ThreadWorker: running (rlock = &lt;unlocked _thread.RLock object owner=0 count=0 at 0x10f24cb70&gt;) ThreadWorker: i got lock &lt;locked _thread.RLock object owner=123145307557888 count=1 at 0x10f24cb70&gt; child: running (rlock = &lt;unlocked _thread.RLock object owner=0 count=0 at 0x10f24cb70&gt;), getting the lock... child: got the lock &lt;locked _thread.RLock object owner=140735162044416 count=1 at 0x10f24cb70&gt; child: release the lock &lt;unlocked _thread.RLock object owner=0 count=0 at 0x10f24cb70&gt; ThreadWorker: release lock &lt;unlocked _thread.RLock object owner=0 count=0 at 0x10f24cb70&gt; and sleeping forever 可以看到子进程和线程都能够正常获取锁。 不要混合使用 threading, multiprocessing, logging/其他使用了线程锁的模块。 要么都是多线程，要么都是多进程。 另一个办法就是配置 logging 使用无锁的 handler 来记录日志信息。 参考资料¶ PythonLoggingThreadingMultiprocessingIntermixedStudy(Using modules Python logging, threading and multiprocessing in a single application.) &lt; Main &lt; TWiki Issue 6721: Locks in the standard library should be sanitized on fork - Python tracker multithreading - Deadlock with logging multiprocess/multithread python script - Stack Overflow python - 使用multiprocessing.Process调用start方法后，有较小的几率子进程中run方法未执行 - SegmentFault python multiprocessing hanging, potential queue memory error? - Stack Overflow Threads and fork(): think twice before mixing them. | Linux Programming Blog"/>
         <meta property="article:published_time" content="2016-09-18" />
             <meta property="article:section" content="python" />
+            <meta property="article:tag" content="python" />
             <meta property="article:author" content="mozillazg" />
             <meta property="og:image"
                   content="https://mozillazg.com/static/avatar.jpeg"/>
@@ -74,7 +75,7 @@
     <script type="application/ld+json">
     {
         "@context": "https://schema.org",
-        "@type": "Website",
+        "@type": "BlogPosting",
         "publisher": {
             "@type": "Person",
             "name": "mozillazg",
@@ -87,219 +88,13 @@
             "url": "https://mozillazg.com",
             "sameAs": []
         },
-        // "headline": "",
+        "headline": "Python: threading + multiprocessing + logging = 死锁 ?",
         "url": "https://mozillazg.com/2016/09/python-threading-multiprocessing-logging-equal-deadlock.html",
-        "datePublished": "2016-09-18",
-        // "dateModified": "",
-        "image": "https://mozillazg.com/static/avatar.jpeg",
-        // "description": "前段时间有个程序突然出现了子进程不工作的情况。 后来通过调查发现是因为程序中同时使用了多线程，多进程以及 logging 模块，导致子进程中出现了死锁的情况。 当创建子进程的时候，后台线程中的 logging 模块正好获取了一个锁(threading.RLock)在记录日志信息。由于在 unix/linux 平台下 Python 是通过 fork 来创建子进程的，因此创建子进程的时候会把 logging 中的锁也复制了一份，当子进程中需要记录日志的时候发现 logging 的锁一直处于被占用的状态，从而出现了死锁（复制的这个锁永远也不会被释放，因为它的所有者是父进程的某个线程，但是这个线程释放锁的时候又不会影响子进程里的这个锁）。 复现问题的代码如下: import os import sys import threading import time class ThreadWorker(threading.Thread): def __init__(self): print(&#39;ThreadWorker: init&#39;) super().__init__() def run(self): print(&#39;ThreadWorker: running (rlock = {0})&#39;.format(global_rlock)) global_rlock.acquire() print(&#39;ThreadWorker: i got lock {0}&#39;.format(global_rlock)) time.sleep(5) global_rlock.release() print(&#39;ThreadWorker: release lock {0} and &#39; &#39;sleeping forever&#39;.format(global_rlock)) time.sleep(600000) global_rlock = threading.RLock(verbose=True) worker = ThreadWorker() worker.start() time.sleep(1) print(&#39;forking&#39;) pid = os.fork() if pid != 0: # pid != 0 当前处于父进程 print(&#39;parent: running (rlock = {0})&#39;.format(global_rlock)) else: # pid = 0 当前处于子进程 print(&#39;child: running (rlock = {0}), &#39; &#39;getting the lock...&#39;.format(global_rlock)) global_rlock.acquire() print(&#39;child: got the lock {0}&#39;.format(global_rlock)) sys.exit(0) time.sleep(10) 上面代码的执行结果如下: $ python fork.py ThreadWorker: init ThreadWorker: running (rlock = &lt;unlocked _thread.RLock object owner=0 count=0 at 0x10116cb40&gt;) ThreadWorker: i got lock &lt;locked _thread.RLock object owner=123145307557888 count=1 at 0x10116cb40&gt; forking parent: running (rlock = &lt;locked _thread.RLock object owner=123145307557888 count=1 at 0x10116cb40&gt;) child: running (rlock = &lt;locked _thread.RLock object owner=123145307557888 count=1 at 0x10116cb40&gt;), getting the lock... ThreadWorker: release lock &lt;unlocked _thread.RLock object owner=0 count=0 at 0x10116cb40&gt; and sleeping forever 从上面的结果中可以看出来：虽然线程随后释放了获得的锁，但是子进程却永远的卡在了获取锁的地方。 那么, 应该如何解决这个问题呢？至少有三种解决办法: 先创建子进程，然后再创建线程: import os import sys import threading import time class ThreadWorker(threading.Thread): def __init__(self): print(&#39;ThreadWorker: init&#39;) super().__init__() def run(self): print(&#39;ThreadWorker: running (rlock = {0})&#39;.format(global_rlock)) global_rlock.acquire() print(&#39;ThreadWorker: i got lock {0}&#39;.format(global_rlock)) time.sleep(5) global_rlock.release() print(&#39;ThreadWorker: release lock {0} and &#39; &#39;sleeping forever&#39;.format(global_rlock)) time.sleep(600000) global_rlock = threading.RLock(verbose=True) worker = ThreadWorker() print(&#39;forking&#39;) pid = os.fork() if pid != 0: # pid != 0 当前处于父进程 print(&#39;parent: running (rlock = {0})&#39;.format(global_rlock)) worker.start() else: # pid = 0 当前处于子进程 time.sleep(1) print(&#39;child: running (rlock = {0}), &#39; &#39;getting the lock...&#39;.format(global_rlock)) global_rlock.acquire() print(&#39;child: got the lock {0}&#39;.format(global_rlock)) global_rlock.release() print(&#39;child: release the lock {0}&#39;.format(global_rlock)) sys.exit(0) time.sleep(10) 结果: $ python fork2.py ThreadWorker: init forking parent: running (rlock = &lt;unlocked _thread.RLock object owner=0 count=0 at 0x10f24cb70&gt;) ThreadWorker: running (rlock = &lt;unlocked _thread.RLock object owner=0 count=0 at 0x10f24cb70&gt;) ThreadWorker: i got lock &lt;locked _thread.RLock object owner=123145307557888 count=1 at 0x10f24cb70&gt; child: running (rlock = &lt;unlocked _thread.RLock object owner=0 count=0 at 0x10f24cb70&gt;), getting the lock... child: got the lock &lt;locked _thread.RLock object owner=140735162044416 count=1 at 0x10f24cb70&gt; child: release the lock &lt;unlocked _thread.RLock object owner=0 count=0 at 0x10f24cb70&gt; ThreadWorker: release lock &lt;unlocked _thread.RLock object owner=0 count=0 at 0x10f24cb70&gt; and sleeping forever 可以看到子进程和线程都能够正常获取锁。 不要混合使用 threading, multiprocessing, logging/其他使用了线程锁的模块。 要么都是多线程，要么都是多进程。 另一个办法就是配置 logging 使用无锁的 handler 来记录日志信息。 参考资料¶ PythonLoggingThreadingMultiprocessingIntermixedStudy(Using modules Python logging, threading and multiprocessing in a single application.) &lt; Main &lt; TWiki Issue 6721: Locks in the standard library should be sanitized on fork - Python tracker multithreading - Deadlock with logging multiprocess/multithread python script - Stack Overflow python - 使用multiprocessing.Process调用start方法后，有较小的几率子进程中run方法未执行 - SegmentFault python multiprocessing hanging, potential queue memory error? - Stack Overflow Threads and fork(): think twice before mixing them. | Linux Programming Blog",
-        "description": "<p>前段时间有个程序突然出现了子进程不工作的情况。</p>
-<p>后来通过调查发现是因为程序中同时使用了多线程，多进程以及 logging
-模块，导致子进程中出现了死锁的情况。</p>
-<p>当创建子进程的时候，后台线程中的 logging 模块正好获取了一个锁(<tt class="docutils literal">threading.RLock</tt>)在记录日志信息。由于在 unix/linux 平台下 Python 是通过 fork 来创建子进程的，因此创建子进程的时候会把 logging 中的锁也复制了一份，当子进程中需要记录日志的时候发现 logging 的锁一直处于被占用的状态，从而出现了死锁（复制的这个锁永远也不会被释放，因为它的所有者是父进程的某个线程，但是这个线程释放锁的时候又不会影响子进程里的这个锁）。</p>
-<p>复现问题的代码如下:</p>
-<div class="highlight"><pre><span></span><span class="kn">import</span> <span class="nn">os</span>
-<span class="kn">import</span> <span class="nn">sys</span>
-<span class="kn">import</span> <span class="nn">threading</span>
-<span class="kn">import</span> <span class="nn">time</span>
-
-
-<span class="k">class</span> <span class="nc">ThreadWorker</span><span class="p">(</span><span class="n">threading</span><span class="o">.</span><span class="n">Thread</span><span class="p">):</span>
-    <span class="k">def</span> <span class="nf">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
-        <span class="k">print</span><span class="p">(</span><span class="s1">&#39;ThreadWorker: init&#39;</span><span class="p">)</span>
-        <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="n">__init__</span><span class="p">()</span>
-
-    <span class="k">def</span> <span class="nf">run</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
-        <span class="k">print</span><span class="p">(</span><span class="s1">&#39;ThreadWorker: running (rlock = {0})&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">global_rlock</span><span class="p">))</span>
-
-        <span class="n">global_rlock</span><span class="o">.</span><span class="n">acquire</span><span class="p">()</span>
-        <span class="k">print</span><span class="p">(</span><span class="s1">&#39;ThreadWorker: i got lock {0}&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">global_rlock</span><span class="p">))</span>
-        <span class="n">time</span><span class="o">.</span><span class="n">sleep</span><span class="p">(</span><span class="mi">5</span><span class="p">)</span>
-        <span class="n">global_rlock</span><span class="o">.</span><span class="n">release</span><span class="p">()</span>
-        <span class="k">print</span><span class="p">(</span><span class="s1">&#39;ThreadWorker: release lock {0} and &#39;</span>
-              <span class="s1">&#39;sleeping forever&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">global_rlock</span><span class="p">))</span>
-
-        <span class="n">time</span><span class="o">.</span><span class="n">sleep</span><span class="p">(</span><span class="mi">600000</span><span class="p">)</span>
-
-<span class="n">global_rlock</span> <span class="o">=</span> <span class="n">threading</span><span class="o">.</span><span class="n">RLock</span><span class="p">(</span><span class="n">verbose</span><span class="o">=</span><span class="bp">True</span><span class="p">)</span>
-<span class="n">worker</span> <span class="o">=</span> <span class="n">ThreadWorker</span><span class="p">()</span>
-<span class="n">worker</span><span class="o">.</span><span class="n">start</span><span class="p">()</span>
-
-<span class="n">time</span><span class="o">.</span><span class="n">sleep</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span>
-<span class="k">print</span><span class="p">(</span><span class="s1">&#39;forking&#39;</span><span class="p">)</span>
-<span class="n">pid</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">fork</span><span class="p">()</span>
-<span class="k">if</span> <span class="n">pid</span> <span class="o">!=</span> <span class="mi">0</span><span class="p">:</span>    <span class="c1"># pid != 0 当前处于父进程</span>
-    <span class="k">print</span><span class="p">(</span><span class="s1">&#39;parent: running (rlock = {0})&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">global_rlock</span><span class="p">))</span>
-<span class="k">else</span><span class="p">:</span>      <span class="c1"># pid = 0 当前处于子进程</span>
-    <span class="k">print</span><span class="p">(</span><span class="s1">&#39;child: running (rlock = {0}), &#39;</span>
-          <span class="s1">&#39;getting the lock...&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">global_rlock</span><span class="p">))</span>
-    <span class="n">global_rlock</span><span class="o">.</span><span class="n">acquire</span><span class="p">()</span>
-    <span class="k">print</span><span class="p">(</span><span class="s1">&#39;child: got the lock {0}&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">global_rlock</span><span class="p">))</span>
-    <span class="n">sys</span><span class="o">.</span><span class="n">exit</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span>
-
-<span class="n">time</span><span class="o">.</span><span class="n">sleep</span><span class="p">(</span><span class="mi">10</span><span class="p">)</span>
-</pre></div>
-<p>上面代码的执行结果如下:</p>
-<div class="highlight"><pre><span></span>$ python fork.py
-ThreadWorker: init
-ThreadWorker: running <span class="o">(</span><span class="nv">rlock</span> <span class="o">=</span> &lt;unlocked _thread.RLock object <span class="nv">owner</span><span class="o">=</span><span class="m">0</span> <span class="nv">count</span><span class="o">=</span><span class="m">0</span> at 0x10116cb40&gt;<span class="o">)</span>
-ThreadWorker: i got lock &lt;locked _thread.RLock object <span class="nv">owner</span><span class="o">=</span><span class="m">123145307557888</span> <span class="nv">count</span><span class="o">=</span><span class="m">1</span> at 0x10116cb40&gt;
-forking
-parent: running <span class="o">(</span><span class="nv">rlock</span> <span class="o">=</span> &lt;locked _thread.RLock object <span class="nv">owner</span><span class="o">=</span><span class="m">123145307557888</span> <span class="nv">count</span><span class="o">=</span><span class="m">1</span> at 0x10116cb40&gt;<span class="o">)</span>
-child: running <span class="o">(</span><span class="nv">rlock</span> <span class="o">=</span> &lt;locked _thread.RLock object <span class="nv">owner</span><span class="o">=</span><span class="m">123145307557888</span> <span class="nv">count</span><span class="o">=</span><span class="m">1</span> at 0x10116cb40&gt;<span class="o">)</span>, getting the lock...
-ThreadWorker: release lock &lt;unlocked _thread.RLock object <span class="nv">owner</span><span class="o">=</span><span class="m">0</span> <span class="nv">count</span><span class="o">=</span><span class="m">0</span> at 0x10116cb40&gt; and sleeping forever
-</pre></div>
-<p>从上面的结果中可以看出来：虽然线程随后释放了获得的锁，但是子进程却永远的卡在了获取锁的地方。</p>
-<p>那么, 应该如何解决这个问题呢？至少有三种解决办法:</p>
-<ul class="simple">
-<li>先创建子进程，然后再创建线程:</li>
-</ul>
-<div class="highlight"><pre><span></span><span class="kn">import</span> <span class="nn">os</span>
-<span class="kn">import</span> <span class="nn">sys</span>
-<span class="kn">import</span> <span class="nn">threading</span>
-<span class="kn">import</span> <span class="nn">time</span>
-
-
-<span class="k">class</span> <span class="nc">ThreadWorker</span><span class="p">(</span><span class="n">threading</span><span class="o">.</span><span class="n">Thread</span><span class="p">):</span>
-    <span class="k">def</span> <span class="nf">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
-        <span class="k">print</span><span class="p">(</span><span class="s1">&#39;ThreadWorker: init&#39;</span><span class="p">)</span>
-        <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="n">__init__</span><span class="p">()</span>
-
-    <span class="k">def</span> <span class="nf">run</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
-        <span class="k">print</span><span class="p">(</span><span class="s1">&#39;ThreadWorker: running (rlock = {0})&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">global_rlock</span><span class="p">))</span>
-
-        <span class="n">global_rlock</span><span class="o">.</span><span class="n">acquire</span><span class="p">()</span>
-        <span class="k">print</span><span class="p">(</span><span class="s1">&#39;ThreadWorker: i got lock {0}&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">global_rlock</span><span class="p">))</span>
-        <span class="n">time</span><span class="o">.</span><span class="n">sleep</span><span class="p">(</span><span class="mi">5</span><span class="p">)</span>
-        <span class="n">global_rlock</span><span class="o">.</span><span class="n">release</span><span class="p">()</span>
-        <span class="k">print</span><span class="p">(</span><span class="s1">&#39;ThreadWorker: release lock {0} and &#39;</span>
-              <span class="s1">&#39;sleeping forever&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">global_rlock</span><span class="p">))</span>
-
-        <span class="n">time</span><span class="o">.</span><span class="n">sleep</span><span class="p">(</span><span class="mi">600000</span><span class="p">)</span>
-
-<span class="n">global_rlock</span> <span class="o">=</span> <span class="n">threading</span><span class="o">.</span><span class="n">RLock</span><span class="p">(</span><span class="n">verbose</span><span class="o">=</span><span class="bp">True</span><span class="p">)</span>
-<span class="n">worker</span> <span class="o">=</span> <span class="n">ThreadWorker</span><span class="p">()</span>
-
-<span class="k">print</span><span class="p">(</span><span class="s1">&#39;forking&#39;</span><span class="p">)</span>
-<span class="n">pid</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">fork</span><span class="p">()</span>
-<span class="k">if</span> <span class="n">pid</span> <span class="o">!=</span> <span class="mi">0</span><span class="p">:</span>    <span class="c1"># pid != 0 当前处于父进程</span>
-    <span class="k">print</span><span class="p">(</span><span class="s1">&#39;parent: running (rlock = {0})&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">global_rlock</span><span class="p">))</span>
-    <span class="n">worker</span><span class="o">.</span><span class="n">start</span><span class="p">()</span>
-<span class="k">else</span><span class="p">:</span>      <span class="c1"># pid = 0 当前处于子进程</span>
-    <span class="n">time</span><span class="o">.</span><span class="n">sleep</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span>
-    <span class="k">print</span><span class="p">(</span><span class="s1">&#39;child: running (rlock = {0}), &#39;</span>
-          <span class="s1">&#39;getting the lock...&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">global_rlock</span><span class="p">))</span>
-    <span class="n">global_rlock</span><span class="o">.</span><span class="n">acquire</span><span class="p">()</span>
-    <span class="k">print</span><span class="p">(</span><span class="s1">&#39;child: got the lock {0}&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">global_rlock</span><span class="p">))</span>
-    <span class="n">global_rlock</span><span class="o">.</span><span class="n">release</span><span class="p">()</span>
-    <span class="k">print</span><span class="p">(</span><span class="s1">&#39;child: release the lock {0}&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">global_rlock</span><span class="p">))</span>
-    <span class="n">sys</span><span class="o">.</span><span class="n">exit</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span>
-
-<span class="n">time</span><span class="o">.</span><span class="n">sleep</span><span class="p">(</span><span class="mi">10</span><span class="p">)</span>
-</pre></div>
-<p>结果:</p>
-<div class="highlight"><pre><span></span>$ python fork2.py
-ThreadWorker: init
-forking
-parent: running <span class="o">(</span><span class="nv">rlock</span> <span class="o">=</span> &lt;unlocked _thread.RLock object <span class="nv">owner</span><span class="o">=</span><span class="m">0</span> <span class="nv">count</span><span class="o">=</span><span class="m">0</span> at 0x10f24cb70&gt;<span class="o">)</span>
-ThreadWorker: running <span class="o">(</span><span class="nv">rlock</span> <span class="o">=</span> &lt;unlocked _thread.RLock object <span class="nv">owner</span><span class="o">=</span><span class="m">0</span> <span class="nv">count</span><span class="o">=</span><span class="m">0</span> at 0x10f24cb70&gt;<span class="o">)</span>
-ThreadWorker: i got lock &lt;locked _thread.RLock object <span class="nv">owner</span><span class="o">=</span><span class="m">123145307557888</span> <span class="nv">count</span><span class="o">=</span><span class="m">1</span> at 0x10f24cb70&gt;
-child: running <span class="o">(</span><span class="nv">rlock</span> <span class="o">=</span> &lt;unlocked _thread.RLock object <span class="nv">owner</span><span class="o">=</span><span class="m">0</span> <span class="nv">count</span><span class="o">=</span><span class="m">0</span> at 0x10f24cb70&gt;<span class="o">)</span>, getting the lock...
-child: got the lock &lt;locked _thread.RLock object <span class="nv">owner</span><span class="o">=</span><span class="m">140735162044416</span> <span class="nv">count</span><span class="o">=</span><span class="m">1</span> at 0x10f24cb70&gt;
-child: release the lock &lt;unlocked _thread.RLock object <span class="nv">owner</span><span class="o">=</span><span class="m">0</span> <span class="nv">count</span><span class="o">=</span><span class="m">0</span> at 0x10f24cb70&gt;
-ThreadWorker: release lock &lt;unlocked _thread.RLock object <span class="nv">owner</span><span class="o">=</span><span class="m">0</span> <span class="nv">count</span><span class="o">=</span><span class="m">0</span> at 0x10f24cb70&gt; and sleeping forever
-</pre></div>
-<p>可以看到子进程和线程都能够正常获取锁。</p>
-<ul class="simple">
-<li>不要混合使用 threading, multiprocessing, logging/其他使用了线程锁的模块。
-要么都是多线程，要么都是多进程。</li>
-<li>另一个办法就是配置 logging 使用无锁的 handler 来记录日志信息。</li>
-</ul>
-<!-- * 还有一个解决办法是使用一个第三方模块 `python-atfork <https://github.com/google/python-atfork>`_ (这个模块已经停止维护)，这个模块可以给 logging 模块打 monkey patch。 -->
-<!--  -->
-<!-- pip install https://github.com/google/python-atfork/archive/master.zip -->
-<!-- .. code-block:: python -->
-<!--  -->
-<!-- import os -->
-<!-- import sys -->
-<!-- import threading -->
-<!-- import time -->
-<!--  -->
-<!-- import atfork -->
-<!-- atfork.monkeypatch_os_fork_functions() -->
-<!--  -->
-<!--  -->
-<!-- class ThreadWorker(threading.Thread): -->
-<!-- def __init__(self): -->
-<!-- print('ThreadWorker: init') -->
-<!-- super(ThreadWorker, self).__init__() -->
-<!--  -->
-<!-- def run(self): -->
-<!-- print('ThreadWorker: running (rlock = {0})'.format(global_rlock)) -->
-<!--  -->
-<!-- global_rlock.acquire() -->
-<!-- print('ThreadWorker: i got lock {0}'.format(global_rlock)) -->
-<!-- time.sleep(5) -->
-<!-- global_rlock.release() -->
-<!-- print('ThreadWorker: release lock {0} and ' -->
-<!-- 'sleeping forever'.format(global_rlock)) -->
-<!--  -->
-<!-- time.sleep(600000) -->
-<!--  -->
-<!-- global_rlock = threading.RLock(verbose=True) -->
-<!-- atfork.atfork(prepare=global_rlock.acquire, -->
-<!-- parent=global_rlock.release, -->
-<!-- child=global_rlock.release) -->
-<!--  -->
-<!-- worker = ThreadWorker() -->
-<!-- worker.start() -->
-<!--  -->
-<!-- time.sleep(1) -->
-<!-- print('forking') -->
-<!-- pid = os.fork() -->
-<!-- if pid != 0:    # pid != 0 当前处于父进程 -->
-<!-- print('parent: running (rlock = {0})'.format(global_rlock)) -->
-<!-- else:      # pid = 0 当前处于子进程 -->
-<!-- print('child: running (rlock = {0}), ' -->
-<!-- 'getting the lock...'.format(global_rlock)) -->
-<!-- global_rlock.acquire() -->
-<!-- print('child: got the lock {0}'.format(global_rlock)) -->
-<!-- sys.exit(0) -->
-<!--  -->
-<!-- time.sleep(10) -->
-<!--  -->
-<!-- $ python2 fork3.py -->
-<!-- ThreadWorker: init -->
-<!-- ThreadWorker: running (rlock = <_RLock owner=None count=0>) -->
-<!-- Thread-1: <_RLock owner='Thread-1' count=1>.acquire(1): initial success -->
-<!-- ThreadWorker: i got lock <_RLock owner='Thread-1' count=1> -->
-<!-- forking -->
-<!-- Thread-1: <_RLock owner=None count=0>.release(): final release -->
-<!-- MainThread: <_RLock owner='MainThread' count=1>.acquire(1): initial success -->
-<!-- MainThread: <_RLock owner=None count=0>.release(): final release -->
-<!-- parent: running (rlock = <_RLock owner=None count=0>) -->
-<!-- ThreadWorker: release lock <_RLock owner=None count=0> and sleeping forever -->
-<!-- MainThread: <_RLock owner=None count=0>.release(): final release -->
-<!-- child: running (rlock = <_RLock owner=None count=0>), getting the lock... -->
-<!-- MainThread: <_RLock owner='MainThread' count=1>.acquire(1): initial success -->
-<!-- child: got the lock <_RLock owner='MainThread' count=1> -->
-<!--  -->
-<div class="section" id="id1">
-<h2 id="hidid1">参考资料<a class="headerlink" href="#hidid1" title="Permalink to this headline">¶</a></h2>
-<ul class="simple">
-<li><a class="reference external" href="https://twiki.cern.ch/twiki/bin/view/Main/PythonLoggingThreadingMultiprocessingIntermixedStudy">PythonLoggingThreadingMultiprocessingIntermixedStudy(Using modules Python logging, threading and multiprocessing in a single application.) &lt; Main &lt; TWiki</a></li>
-<li><a class="reference external" href="http://bugs.python.org/issue6721">Issue 6721: Locks in the standard library should be sanitized on fork - Python tracker</a></li>
-<li><a class="reference external" href="http://stackoverflow.com/questions/24509650/deadlock-with-logging-multiprocess-multithread-python-script">multithreading - Deadlock with logging multiprocess/multithread python script - Stack Overflow</a></li>
-<li><a class="reference external" href="https://segmentfault.com/q/1010000005919174">python - 使用multiprocessing.Process调用start方法后，有较小的几率子进程中run方法未执行 - SegmentFault</a></li>
-<li><a class="reference external" href="http://stackoverflow.com/questions/14087527/python-multiprocessing-hanging-potential-queue-memory-error">python multiprocessing hanging, potential queue memory error? - Stack Overflow</a></li>
-<li><a class="reference external" href="http://www.linuxprogrammingblog.com/threads-and-fork-think-twice-before-using-them">Threads and fork(): think twice before mixing them. | Linux Programming Blog</a></li>
-</ul>
-</div>
-",
-        "mainEntityOfPage": {
-            "@type": "WebPage",
-            "@id": "https://mozillazg.com"
-        }
+        "image": [
+            "https://mozillazg.com/static/avatar.jpeg"
+         ],
+        "keywords": "python",
+        "datePublished": "2016-09-18"
     }
     </script>
 

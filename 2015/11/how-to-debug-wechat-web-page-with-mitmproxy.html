@@ -16,7 +16,7 @@
 <link rel="canonical" href="https://mozillazg.com/2015/11/how-to-debug-wechat-web-page-with-mitmproxy.html">
 
         <meta name="author" content="mozillazg" />
-        <meta name="keywords" content="wechat,微信,mitmproxy,python,移动端开发" />
+        <meta name="keywords" content="web,wechat,微信,mitmproxy,python,移动端开发" />
     <meta name="description" content="图片来源：https://blog.selectel.ru/analiz-http-trafika-s-mitmproxy/ 本文主要讲述如何使用代理服务器的方式本地调试已上线的 微信公众号内的网页。 因为已经上线了，所以不能随便在线上服务器上修改代码增加 alert 之类的代码，也不能在线上启用 debug 模式。 所以，我们要通过在本地搭建代理服务器的方式来修改服务端返回 的信息，比如：将 jssdk 的调用改为 debug 模式， 替换页面内容为本地修改后的内容等等 mitmproxy 介绍¶ mitmproxy is a console tool that allows interactive examination and modification of HTTP traffic. It differs from mitmdump in that all flows are kept in memory, which means that it’s intended for taking and manipulating small-ish samples. Use the ? shortcut key to view, context-sensitive documentation from any mitmproxy screen. —— 摘自 官网 安装 mitmproxy¶ 我们这里使用 mitmproxy 在 github 上的最新代码 $ git clone git@github.com:mitmproxy/mitmproxy.git --depth=1 $ cd mitmproxy $ virtualenv venv $ source venv/bin/activate $ pip install . $ hello word¶ 直接执行 mitmproxy 命令就会启动一个监听 0.0.0.0:8080 的代理服务器: 但是这个服务器不会修改任何服务器的返回内容，所以我们需要另一种启动方式 mitmproxy -s script.py script.py 的内容如下，作用是将任意页面的响应改为 hello world : def response(context, flow): flow.response.content = &#39;hello world&#39; 执行 mitmproxy -s script.py 启动代理服务器，然后在手机上配置好 wifi 代理。 现在在手机浏览器上访问任意网页都将显示 hello world :) 下面我就讲几个微信开发中应该会用到的调试方式（以 “语音云开放平台”这个公众号为例）。 修改 wx.config, 将 debug 参数改为 true¶ 上线后的公众号网页内的 wx.config 中 debug 参数的值都是 false， 既然我要调试问题自然就要开启调试模式了。 比如修改【我的应用】-【个人资料】这个页面的 wx.config。 通过 mitmproxy 搭建的代理服务器，我们找到了 wx.config 所在文件： http://wx.openspeech.cn/xfyun-wx/userInfo/xxx，查看源码发现 wx.config 的代码片段如下 &lt;script&gt; if(typeof wx != &#34;undefined&#34;){ wx.config({ debug : false, appId : &#39;&#39;, timestamp : &#39;&#39;, nonceStr : &#39;&#39;, signature : &#39;&#39; jsApiList : [ &#39;checkJsApi&#39;, &#39;hideMenuItems&#39;, &#39;hideOptionMenu&#39;, &#39;showOptionMenu&#39;, &#39;hideAllNonBaseMenuItem&#39;,&#39;onMenuShareAppMessage&#39;,&#39;onMenuShareTimeline&#39; ] }); } &lt;/script&gt; 知道了这个后，我们就可以修改 debug 参数了。修改后的 script.py 内容如下 import re from libmproxy.models import decoded def response(context, flow): with decoded(flow.response): if flow.request.path.startswith(&#39;/xfyun-wx/userInfo/&#39;): body = flow.response.content flow.response.content = re.sub( r&#39;{\s*debug\s*:\s*false,&#39;, &#39;{debug:true,&#39;, body ) 按 q 退出先有的代理服务器，然后重新启动代理服务器：mitmproxy -s script.py。 效果： 我好像帮他们发现了一个 bug ;) 下面我再举一些例子，更多例子请参考 官方仓库的 example 目录 禁用本地缓存¶ def request(context, flow): headers = flow.request.headers for key in [&#39;If-None-Match&#39;, &#39;If-Modified-Since&#39;]: headers.pop(key, None) 如果这样还不行的话，可以尝试修改 response：替换 headers 以及修改 html 中与 cache 有关的 meta 标签内容。 替换为本地文件内容¶ def response(context, flow): if flow.request.pretty_url == &#39;http://www.baidu.com&#39;: with decoded(flow.response): with open(&#39;baidu.html&#39;) as f: flow.response.content = f.read() 终止连接¶ def request(context, flow): if flow.request.path.startswith(&#39;/static/images/&#39;): context.kill_flow(flow) 更详细的用法请查阅 官方文档 参考资料¶ mitmproxy 官方文档 https://github.com/mitmproxy/mitmproxy" />
     <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-4941850466486001"
      crossorigin="anonymous"></script>
@@ -41,6 +41,7 @@
         <meta property="og:description" content="图片来源：https://blog.selectel.ru/analiz-http-trafika-s-mitmproxy/ 本文主要讲述如何使用代理服务器的方式本地调试已上线的 微信公众号内的网页。 因为已经上线了，所以不能随便在线上服务器上修改代码增加 alert 之类的代码，也不能在线上启用 debug 模式。 所以，我们要通过在本地搭建代理服务器的方式来修改服务端返回 的信息，比如：将 jssdk 的调用改为 debug 模式， 替换页面内容为本地修改后的内容等等 mitmproxy 介绍¶ mitmproxy is a console tool that allows interactive examination and modification of HTTP traffic. It differs from mitmdump in that all flows are kept in memory, which means that it’s intended for taking and manipulating small-ish samples. Use the ? shortcut key to view, context-sensitive documentation from any mitmproxy screen. —— 摘自 官网 安装 mitmproxy¶ 我们这里使用 mitmproxy 在 github 上的最新代码 $ git clone git@github.com:mitmproxy/mitmproxy.git --depth=1 $ cd mitmproxy $ virtualenv venv $ source venv/bin/activate $ pip install . $ hello word¶ 直接执行 mitmproxy 命令就会启动一个监听 0.0.0.0:8080 的代理服务器: 但是这个服务器不会修改任何服务器的返回内容，所以我们需要另一种启动方式 mitmproxy -s script.py script.py 的内容如下，作用是将任意页面的响应改为 hello world : def response(context, flow): flow.response.content = &#39;hello world&#39; 执行 mitmproxy -s script.py 启动代理服务器，然后在手机上配置好 wifi 代理。 现在在手机浏览器上访问任意网页都将显示 hello world :) 下面我就讲几个微信开发中应该会用到的调试方式（以 “语音云开放平台”这个公众号为例）。 修改 wx.config, 将 debug 参数改为 true¶ 上线后的公众号网页内的 wx.config 中 debug 参数的值都是 false， 既然我要调试问题自然就要开启调试模式了。 比如修改【我的应用】-【个人资料】这个页面的 wx.config。 通过 mitmproxy 搭建的代理服务器，我们找到了 wx.config 所在文件： http://wx.openspeech.cn/xfyun-wx/userInfo/xxx，查看源码发现 wx.config 的代码片段如下 &lt;script&gt; if(typeof wx != &#34;undefined&#34;){ wx.config({ debug : false, appId : &#39;&#39;, timestamp : &#39;&#39;, nonceStr : &#39;&#39;, signature : &#39;&#39; jsApiList : [ &#39;checkJsApi&#39;, &#39;hideMenuItems&#39;, &#39;hideOptionMenu&#39;, &#39;showOptionMenu&#39;, &#39;hideAllNonBaseMenuItem&#39;,&#39;onMenuShareAppMessage&#39;,&#39;onMenuShareTimeline&#39; ] }); } &lt;/script&gt; 知道了这个后，我们就可以修改 debug 参数了。修改后的 script.py 内容如下 import re from libmproxy.models import decoded def response(context, flow): with decoded(flow.response): if flow.request.path.startswith(&#39;/xfyun-wx/userInfo/&#39;): body = flow.response.content flow.response.content = re.sub( r&#39;{\s*debug\s*:\s*false,&#39;, &#39;{debug:true,&#39;, body ) 按 q 退出先有的代理服务器，然后重新启动代理服务器：mitmproxy -s script.py。 效果： 我好像帮他们发现了一个 bug ;) 下面我再举一些例子，更多例子请参考 官方仓库的 example 目录 禁用本地缓存¶ def request(context, flow): headers = flow.request.headers for key in [&#39;If-None-Match&#39;, &#39;If-Modified-Since&#39;]: headers.pop(key, None) 如果这样还不行的话，可以尝试修改 response：替换 headers 以及修改 html 中与 cache 有关的 meta 标签内容。 替换为本地文件内容¶ def response(context, flow): if flow.request.pretty_url == &#39;http://www.baidu.com&#39;: with decoded(flow.response): with open(&#39;baidu.html&#39;) as f: flow.response.content = f.read() 终止连接¶ def request(context, flow): if flow.request.path.startswith(&#39;/static/images/&#39;): context.kill_flow(flow) 更详细的用法请查阅 官方文档 参考资料¶ mitmproxy 官方文档 https://github.com/mitmproxy/mitmproxy"/>
         <meta property="article:published_time" content="2015-11-16" />
             <meta property="article:section" content="web" />
+            <meta property="article:tag" content="web" />
             <meta property="article:tag" content="wechat" />
             <meta property="article:tag" content="微信" />
             <meta property="article:tag" content="mitmproxy" />
@@ -80,7 +81,7 @@
     <script type="application/ld+json">
     {
         "@context": "https://schema.org",
-        "@type": "Website",
+        "@type": "BlogPosting",
         "publisher": {
             "@type": "Person",
             "name": "mozillazg",
@@ -93,142 +94,13 @@
             "url": "https://mozillazg.com",
             "sameAs": []
         },
-        // "headline": "",
+        "headline": "使用 mitmproxy 搭建代理服务器的方式来调试微信开发",
         "url": "https://mozillazg.com/2015/11/how-to-debug-wechat-web-page-with-mitmproxy.html",
-        "datePublished": "2015-11-16",
-        // "dateModified": "",
-        "image": "https://mozillazg.com/static/avatar.jpeg",
-        "keywords": "wechat, 微信, mitmproxy, python, 移动端开发",
-        // "description": "图片来源：https://blog.selectel.ru/analiz-http-trafika-s-mitmproxy/ 本文主要讲述如何使用代理服务器的方式本地调试已上线的 微信公众号内的网页。 因为已经上线了，所以不能随便在线上服务器上修改代码增加 alert 之类的代码，也不能在线上启用 debug 模式。 所以，我们要通过在本地搭建代理服务器的方式来修改服务端返回 的信息，比如：将 jssdk 的调用改为 debug 模式， 替换页面内容为本地修改后的内容等等 mitmproxy 介绍¶ mitmproxy is a console tool that allows interactive examination and modification of HTTP traffic. It differs from mitmdump in that all flows are kept in memory, which means that it’s intended for taking and manipulating small-ish samples. Use the ? shortcut key to view, context-sensitive documentation from any mitmproxy screen. —— 摘自 官网 安装 mitmproxy¶ 我们这里使用 mitmproxy 在 github 上的最新代码 $ git clone git@github.com:mitmproxy/mitmproxy.git --depth=1 $ cd mitmproxy $ virtualenv venv $ source venv/bin/activate $ pip install . $ hello word¶ 直接执行 mitmproxy 命令就会启动一个监听 0.0.0.0:8080 的代理服务器: 但是这个服务器不会修改任何服务器的返回内容，所以我们需要另一种启动方式 mitmproxy -s script.py script.py 的内容如下，作用是将任意页面的响应改为 hello world : def response(context, flow): flow.response.content = &#39;hello world&#39; 执行 mitmproxy -s script.py 启动代理服务器，然后在手机上配置好 wifi 代理。 现在在手机浏览器上访问任意网页都将显示 hello world :) 下面我就讲几个微信开发中应该会用到的调试方式（以 “语音云开放平台”这个公众号为例）。 修改 wx.config, 将 debug 参数改为 true¶ 上线后的公众号网页内的 wx.config 中 debug 参数的值都是 false， 既然我要调试问题自然就要开启调试模式了。 比如修改【我的应用】-【个人资料】这个页面的 wx.config。 通过 mitmproxy 搭建的代理服务器，我们找到了 wx.config 所在文件： http://wx.openspeech.cn/xfyun-wx/userInfo/xxx，查看源码发现 wx.config 的代码片段如下 &lt;script&gt; if(typeof wx != &#34;undefined&#34;){ wx.config({ debug : false, appId : &#39;&#39;, timestamp : &#39;&#39;, nonceStr : &#39;&#39;, signature : &#39;&#39; jsApiList : [ &#39;checkJsApi&#39;, &#39;hideMenuItems&#39;, &#39;hideOptionMenu&#39;, &#39;showOptionMenu&#39;, &#39;hideAllNonBaseMenuItem&#39;,&#39;onMenuShareAppMessage&#39;,&#39;onMenuShareTimeline&#39; ] }); } &lt;/script&gt; 知道了这个后，我们就可以修改 debug 参数了。修改后的 script.py 内容如下 import re from libmproxy.models import decoded def response(context, flow): with decoded(flow.response): if flow.request.path.startswith(&#39;/xfyun-wx/userInfo/&#39;): body = flow.response.content flow.response.content = re.sub( r&#39;{\s*debug\s*:\s*false,&#39;, &#39;{debug:true,&#39;, body ) 按 q 退出先有的代理服务器，然后重新启动代理服务器：mitmproxy -s script.py。 效果： 我好像帮他们发现了一个 bug ;) 下面我再举一些例子，更多例子请参考 官方仓库的 example 目录 禁用本地缓存¶ def request(context, flow): headers = flow.request.headers for key in [&#39;If-None-Match&#39;, &#39;If-Modified-Since&#39;]: headers.pop(key, None) 如果这样还不行的话，可以尝试修改 response：替换 headers 以及修改 html 中与 cache 有关的 meta 标签内容。 替换为本地文件内容¶ def response(context, flow): if flow.request.pretty_url == &#39;http://www.baidu.com&#39;: with decoded(flow.response): with open(&#39;baidu.html&#39;) as f: flow.response.content = f.read() 终止连接¶ def request(context, flow): if flow.request.path.startswith(&#39;/static/images/&#39;): context.kill_flow(flow) 更详细的用法请查阅 官方文档 参考资料¶ mitmproxy 官方文档 https://github.com/mitmproxy/mitmproxy",
-        "description": "<p><img alt="6adc8d35564a0044d1cec9e225f38794.png" src="/static/images/mitmproxy/6adc8d35564a0044d1cec9e225f38794.png" /></p>
-<p>图片来源：<a class="reference external" href="https://blog.selectel.ru/analiz-http-trafika-s-mitmproxy/">https://blog.selectel.ru/analiz-http-trafika-s-mitmproxy/</a></p>
-<p>本文主要讲述如何使用代理服务器的方式本地调试已上线的
-微信公众号内的网页。</p>
-<p>因为已经上线了，所以不能随便在线上服务器上修改代码增加 alert 之类的代码，也不能在线上启用 debug 模式。
-所以，我们要通过在本地搭建代理服务器的方式来修改服务端返回
-的信息，比如：将 jssdk 的调用改为 debug 模式，
-替换页面内容为本地修改后的内容等等</p>
-<div class="section" id="id1">
-<h2 id="hidid1">mitmproxy 介绍<a class="headerlink" href="#hidid1" title="Permalink to this headline">¶</a></h2>
-<blockquote>
-<p>mitmproxy is a console tool that allows interactive examination and modification of HTTP traffic. It differs from mitmdump in that all flows are kept in memory, which means that it’s intended for taking and manipulating small-ish samples. Use the ? shortcut key to view, context-sensitive documentation from any mitmproxy screen.</p>
-<p class="attribution">&mdash;— 摘自 <a class="reference external" href="http://docs.mitmproxy.org/en/latest/mitmproxy.html">官网</a></p>
-</blockquote>
-</div>
-<div class="section" id="id2">
-<h2 id="hidid2">安装 mitmproxy<a class="headerlink" href="#hidid2" title="Permalink to this headline">¶</a></h2>
-<p>我们这里使用 mitmproxy 在 github 上的最新代码</p>
-<pre class="literal-block">
-$ git clone git&#64;github.com:mitmproxy/mitmproxy.git --depth=1
-$ cd mitmproxy
-$ virtualenv venv
-$ source venv/bin/activate
-$ pip install .
-$
-</pre>
-</div>
-<div class="section" id="hello-word">
-<h2 id="hidhello-word">hello word<a class="headerlink" href="#hidhello-word" title="Permalink to this headline">¶</a></h2>
-<p>直接执行 <tt class="docutils literal">mitmproxy</tt> 命令就会启动一个监听 <tt class="docutils literal">0.0.0.0:8080</tt> 的代理服务器:</p>
-<p><img alt="Snip20151116_1.png" src="/static/images/mitmproxy/Snip20151116_1.png" />
-<img alt="Snip20151116_2.png" src="/static/images/mitmproxy/Snip20151116_2.png" /></p>
-<p>但是这个服务器不会修改任何服务器的返回内容，所以我们需要另一种启动方式 <tt class="docutils literal">mitmproxy <span class="pre">-s</span> script.py</tt></p>
-<p>script.py 的内容如下，作用是将任意页面的响应改为 <tt class="docutils literal">hello world</tt> :</p>
-<pre class="code python literal-block">
-<span class="k">def</span> <span class="nf">response</span><span class="p">(</span><span class="n">context</span><span class="p">,</span> <span class="n">flow</span><span class="p">):</span>
-    <span class="n">flow</span><span class="o">.</span><span class="n">response</span><span class="o">.</span><span class="n">content</span> <span class="o">=</span> <span class="s1">'hello world'</span>
-</pre>
-<p>执行 <tt class="docutils literal">mitmproxy <span class="pre">-s</span> script.py</tt> 启动代理服务器，然后在手机上配置好 wifi 代理。
-现在在手机浏览器上访问任意网页都将显示 <tt class="docutils literal">hello world</tt> :)</p>
-<p><img alt="Snip20151116_4.png" src="/static/images/mitmproxy/Snip20151116_4.png" />
-<img alt="Screenshot_2015-11-16-16-48-38_com.tencent.mm.png" src="/static/images/mitmproxy/Screenshot_2015-11-16-16-48-38_com.tencent.mm.png" /></p>
-<p>下面我就讲几个微信开发中应该会用到的调试方式（以 “语音云开放平台”这个公众号为例）。</p>
-</div>
-<div class="section" id="wx-config-debug-true">
-<h2 id="hidwx-config-debug-true">修改 wx.config, 将 debug 参数改为 true<a class="headerlink" href="#hidwx-config-debug-true" title="Permalink to this headline">¶</a></h2>
-<p>上线后的公众号网页内的 <tt class="docutils literal">wx.config</tt> 中 <tt class="docutils literal">debug</tt> 参数的值都是 <tt class="docutils literal">false</tt>，
-既然我要调试问题自然就要开启调试模式了。</p>
-<p>比如修改【我的应用】-【个人资料】这个页面的 <tt class="docutils literal">wx.config</tt>。
-通过 mitmproxy 搭建的代理服务器，我们找到了 <tt class="docutils literal">wx.config</tt> 所在文件：
-<tt class="docutils literal"><span class="pre">http://wx.openspeech.cn/xfyun-wx/userInfo/xxx</span></tt>，查看源码发现 <tt class="docutils literal">wx.config</tt> 的代码片段如下</p>
-<pre class="literal-block">
-&lt;script&gt;
-if(typeof wx != &quot;undefined&quot;){
-    wx.config({
-        debug : false,
-        appId : '',
-        timestamp : '',
-        nonceStr : '',
-        signature : ''
-        jsApiList : [ 'checkJsApi', 'hideMenuItems', 'hideOptionMenu',
-                'showOptionMenu', 'hideAllNonBaseMenuItem','onMenuShareAppMessage','onMenuShareTimeline' ]
-    });
-}
-&lt;/script&gt;
-</pre>
-<p>知道了这个后，我们就可以修改 <tt class="docutils literal">debug</tt> 参数了。修改后的 <tt class="docutils literal">script.py</tt> 内容如下</p>
-<pre class="literal-block">
-import re
-
-from libmproxy.models import decoded
-
-
-def response(context, flow):
-    with decoded(flow.response):
-        if flow.request.path.startswith('/xfyun-wx/userInfo/'):
-            body = flow.response.content
-            flow.response.content = re.sub(
-                r'{\s*debug\s*:\s*false,', '{debug:true,', body
-            )
-</pre>
-<p>按 <tt class="docutils literal">q</tt> 退出先有的代理服务器，然后重新启动代理服务器：<tt class="docutils literal">mitmproxy <span class="pre">-s</span> script.py</tt>。
-效果：</p>
-<p><img alt="Screenshot_2015-11-16-18-15-49_com.tencent.mm.png" src="/static/images/mitmproxy/Screenshot_2015-11-16-18-15-49_com.tencent.mm.png" />
-<img alt="Screenshot_2015-11-16-18-16-00_com.tencent.mm.png" src="/static/images/mitmproxy/Screenshot_2015-11-16-18-16-00_com.tencent.mm.png" /></p>
-<p>我好像帮他们发现了一个 bug ;)</p>
-<p>下面我再举一些例子，更多例子请参考 <a class="reference external" href="https://github.com/mitmproxy/mitmproxy/tree/master/examples">官方仓库的 example 目录</a></p>
-</div>
-<div class="section" id="id3">
-<h2 id="hidid3">禁用本地缓存<a class="headerlink" href="#hidid3" title="Permalink to this headline">¶</a></h2>
-<pre class="literal-block">
-def request(context, flow):
-    headers = flow.request.headers
-    for key in ['If-None-Match', 'If-Modified-Since']:
-        headers.pop(key, None)
-</pre>
-<p>如果这样还不行的话，可以尝试修改 response：替换 headers 以及修改 html 中与 cache 有关的 meta 标签内容。</p>
-</div>
-<div class="section" id="id4">
-<h2 id="hidid4">替换为本地文件内容<a class="headerlink" href="#hidid4" title="Permalink to this headline">¶</a></h2>
-<pre class="literal-block">
-def response(context, flow):
-    if flow.request.pretty_url == 'http://www.baidu.com':
-        with decoded(flow.response):
-            with open('baidu.html') as f:
-                flow.response.content = f.read()
-</pre>
-</div>
-<div class="section" id="id5">
-<h2 id="hidid5">终止连接<a class="headerlink" href="#hidid5" title="Permalink to this headline">¶</a></h2>
-<pre class="literal-block">
-def request(context, flow):
-    if flow.request.path.startswith('/static/images/'):
-        context.kill_flow(flow)
-</pre>
-<p>更详细的用法请查阅 <a class="reference external" href="http://docs.mitmproxy.org/en/stable/scripting/inlinescripts.html">官方文档</a></p>
-</div>
-<div class="section" id="id6">
-<h2 id="hidid6">参考资料<a class="headerlink" href="#hidid6" title="Permalink to this headline">¶</a></h2>
-<ul class="simple">
-<li><a class="reference external" href="http://docs.mitmproxy.org/en/stable/index.html">mitmproxy 官方文档</a></li>
-<li><a class="reference external" href="https://github.com/mitmproxy/mitmproxy">https://github.com/mitmproxy/mitmproxy</a></li>
-</ul>
-</div>
-",
-        "mainEntityOfPage": {
-            "@type": "WebPage",
-            "@id": "https://mozillazg.com"
-        }
+        "image": [
+            "https://mozillazg.com/static/avatar.jpeg"
+         ],
+        "keywords": "web, wechat, 微信, mitmproxy, python, 移动端开发",
+        "datePublished": "2015-11-16"
     }
     </script>
 
@@ -442,10 +314,10 @@ def request(context, flow):
     <p>Related Posts:</p>
     <ul>
         <li><a href="https://mozillazg.com/2015/11/how-to-debug-wechat-web-page-with-weinre.html">使用 weinre 远程调试微信页面</a></li>
-        <li><a href="https://mozillazg.com/2013/11/python-socket-connect-set-timeout.html">[python]指定 Socket connect 方法的超时时间</a></li>
-        <li><a href="https://mozillazg.com/2013/06/python-third-party-model-python-dateutil.html">[python]第三方模块 python-dateutil：扩展并增强 datetime 模块的功能</a></li>
-        <li><a href="https://mozillazg.com/2013/03/python-zope2-download-file-and-generator-csv-file.html">[python]zope2 文件下载及导出为 csv 文件</a></li>
-        <li><a href="https://mozillazg.com/2014/03/django-save-uploaded-file-with-utf8-encoding-by-custom-model-field.html">[django]通过自定义 Model Field 的方式将上传的文本文件按 UTF-8 编码保存</a></li>
+        <li><a href="https://mozillazg.com/2013/02/django-typeerror-decod-argument-1-must-be-string-not-none.html">[django] 创建后台超级用户时出现 TypeError: decode() argument 1 must be string, not None 错误</a></li>
+        <li><a href="https://mozillazg.com/2013/03/django-merge-queryset-then-sort.html">[django]合并多个查询结果集(queryset)并按字段排序</a></li>
+        <li><a href="https://mozillazg.com/2013/02/django-copy-or-clone-a-query-result-and-insert-it-into-database.html">[django]复制/克隆一条查询结果</a></li>
+        <li><a href="https://mozillazg.com/2013/07/python-send-email-set-priority.html">[python] 发送邮件时设置邮件的优先级/重要性</a></li>
     </ul>
 </section>
     <hr/>

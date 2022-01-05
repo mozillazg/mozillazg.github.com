@@ -16,7 +16,7 @@
 <link rel="canonical" href="https://mozillazg.com/2017/12/python-get-concurrency-programm-all-tracebacks-threading-gevent-asyncio-etc.html">
 
         <meta name="author" content="mozillazg" />
-        <meta name="keywords" content="debug" />
+        <meta name="keywords" content="python,debug" />
     <meta name="description" content="本文记录如何获取多线程、多协程(gevent)、asyncio 程序中所有线程/协程的 traceback 信息。 获取所有线程的 traceback 信息¶ 可以通过 threading.enumerate() 获取所有线程信息， 通过 sys._current_frames() 获取线程 traceback 信息。 测试程序： import sys import traceback import threading import time def do(x): x = x * 3 time.sleep(x * 60) def main(): threads = [] for x in range(3): t = threading.Thread(target=do, args=(x,), name=&#39;thread-{}&#39;.format(x)) t.start() if __name__ == &#39;__main__&#39;: main() id2thread = {} for thread in threading.enumerate(): id2thread[thread.ident] = thread for thread_id, stack in sys._current_frames().items(): stack_list = traceback.format_list(traceback.extract_stack(stack)) print(&#39;thread {}:&#39;.format(id2thread[thread_id])) print(&#39;&#39;.join(stack_list)) 运行结果: $ python test.py thread &lt;Thread(thread-2, started 123145466843136)&gt;: File &#34;/xxx/lib/python3.6/threading.py&#34;, line 884, in _bootstrap self._bootstrap_inner() File &#34;/xxx/lib/python3.6/threading.py&#34;, line 916, in _bootstrap_inner self.run() File &#34;/xxx/lib/python3.6/threading.py&#34;, line 864, in run self._target(*self._args, **self._kwargs) File &#34;test.py&#34;, line 9, in do time.sleep(x * 60) thread &lt;Thread(thread-1, started 123145461587968)&gt;: File &#34;/xxx/lib/python3.6/threading.py&#34;, line 884, in _bootstrap self._bootstrap_inner() File &#34;/xxx/lib/python3.6/threading.py&#34;, line 916, in _bootstrap_inner self.run() File &#34;/xxx/lib/python3.6/threading.py&#34;, line 864, in run self._target(*self._args, **self._kwargs) File &#34;test.py&#34;, line 9, in do time.sleep(x * 60) thread &lt;_MainThread(MainThread, started 140736955184064)&gt;: File &#34;test.py&#34;, line 27, in &lt;module&gt; stack_list = traceback.format_list(traceback.extract_stack(stack)) 获取所有协程（gevent）的 traceback 信息¶ 可以通过 gc.get_objects() 获取所有对象，然后从中过滤出所有的协程对象(greenlet.greenlet)， 然后通过 greenlet 对象的 gr_frame 属性获取 traceback 信息。 测试程序: import gc import traceback import gevent import greenlet def foo(): while True: for x in range(10): gevent.sleep(x * 10) def bar(): while True: for x in range(5): gevent.sleep(x * 20) def main(): for func in [foo, bar]: t = gevent.spawn(func) t.start() def get_traceback(): for obj in gc.get_objects(): if isinstance(obj, greenlet.greenlet): stack_list = traceback.format_list( traceback.extract_stack(obj.gr_frame) ) print(&#39;greenlet {}:&#39;.format(obj)) print(&#39;&#39;.join(stack_list)) if __name__ == &#39;__main__&#39;: main() gevent.spawn(get_traceback).join() 运行结果如下: $ python test.py greenlet &lt;Greenlet at 0x103f4ca60: bar&gt;: File &#34;/xxx/lib/python3.6/site-packages/gevent/greenlet.py&#34;, line 536, in run result = self._run(*self.args, **self.kwargs) File &#34;test.py&#34;, line 17, in bar gevent.sleep(x * 20) File &#34;/xxx/lib/python3.6/site-packages/gevent/hub.py&#34;, line 167, in sleep waiter.get() File &#34;/xxx/lib/python3.6/site-packages/gevent/hub.py&#34;, line 898, in get return self.hub.switch() File &#34;/xxx/lib/python3.6/site-packages/gevent/hub.py&#34;, line 630, in switch return RawGreenlet.switch(self) greenlet &lt;Greenlet at 0x103f4caf8: get_traceback&gt;: File &#34;/xxx/lib/python3.6/site-packages/gevent/greenlet.py&#34;, line 536, in run result = self._run(*self.args, **self.kwargs) File &#34;test.py&#34;, line 30, in get_traceback traceback.extract_stack(obj.gr_frame) greenlet &lt;greenlet.greenlet object at 0x103f4c0e0&gt;: File &#34;test.py&#34;, line 38, in &lt;module&gt; gevent.spawn(get_traceback).join() File &#34;/xxx/lib/python3.6/site-packages/gevent/greenlet.py&#34;, line 496, in join result = self.parent.switch() File &#34;/xxx/lib/python3.6/site-packages/gevent/hub.py&#34;, line 630, in switch return RawGreenlet.switch(self) greenlet &lt;Greenlet at 0x103f4c930: foo&gt;: File &#34;/xxx/lib/python3.6/site-packages/gevent/greenlet.py&#34;, line 536, in run result = self._run(*self.args, **self.kwargs) File &#34;test.py&#34;, line 11, in foo gevent.sleep(x * 10) File &#34;/xxx/lib/python3.6/site-packages/gevent/hub.py&#34;, line 167, in sleep waiter.get() File &#34;/xxx/lib/python3.6/site-packages/gevent/hub.py&#34;, line 898, in get return self.hub.switch() File &#34;/xxx/lib/python3.6/site-packages/gevent/hub.py&#34;, line 630, in switch return RawGreenlet.switch(self) greenlet &lt;Hub at 0x103f4c9c8 select default pending=0 ref=2&gt;: File &#34;/xxx/lib/python3.6/site-packages/gevent/hub.py&#34;, line 688, in run loop.run() 获取所有 asyncio task 的 traceback 信息¶ 可以通过 asyncio.Task.all_tasks() 获取所有 asyncio task 对象， 然后通过 task 对象的 get_stack() 方法获取 traceback 信息。 测试程序: import asyncio import traceback async def foo(): while True: for x in range(10): print(&#39;foo&#39;) await asyncio.sleep(x * 10) async def bar(): while True: for x in range(5): print(&#39;bar&#39;) await asyncio.sleep(x * 20) async def get_traceback(loop): await asyncio.sleep(1) for task in asyncio.Task.all_tasks(loop): stack_list = [] for stack in task.get_stack(): stack_list.extend( traceback.format_list(traceback.extract_stack(stack)) ) print(&#39;asyncio task {}:&#39;.format(task)) print(&#39;&#39;.join(stack_list)) if __name__ == &#39;__main__&#39;: event_loop = asyncio.get_event_loop() try: tasks = [foo(), bar(), get_traceback(event_loop)] event_loop.run_until_complete(asyncio.wait(tasks)) finally: event_loop.close() 运行结果如下: bar foo bar foo asyncio task &lt;Task pending coro=&lt;wait() running at /xxx/lib/python3.6/asyncio/tasks.py:307&gt; wait_for=&lt;Future pending cb=[&lt;TaskWakeupMethWrapper object at 0x10c57c258&gt;()]&gt; cb=[_run_until_complete_cb() at /xxx/lib/python3.6/asyncio/base_events.py:176]&gt;: File &#34;/xxx/lib/python3.6/asyncio/tasks.py&#34;, line 307, in wait return (yield from _wait(fs, timeout, return_when, loop)) asyncio task &lt;Task pending coro=&lt;bar() running at test.py:16&gt; wait_for=&lt;Future pending cb=[&lt;TaskWakeupMethWrapper object at 0x10c57c378&gt;()]&gt; cb=[_wait.&lt;locals&gt;._on_completion() at /xxx/lib/python3.6/asyncio/tasks.py:374]&gt;: File &#34;test.py&#34;, line 16, in bar await asyncio.sleep(x * 20) asyncio task &lt;Task pending coro=&lt;get_traceback() running at test.py:27&gt; cb=[_wait.&lt;locals&gt;._on_completion() at /xxx/lib/python3.6/asyncio/tasks.py:374]&gt;: File &#34;test.py&#34;, line 35, in &lt;module&gt; event_loop.run_until_complete(asyncio.wait(tasks)) File &#34;test.py&#34;, line 35, in &lt;module&gt; event_loop.run_until_complete(asyncio.wait(tasks)) File &#34;/xxx/lib/python3.6/asyncio/base_events.py&#34;, line 454, in run_until_complete self.run_forever() File &#34;test.py&#34;, line 35, in &lt;module&gt; event_loop.run_until_complete(asyncio.wait(tasks)) File &#34;/xxx/lib/python3.6/asyncio/base_events.py&#34;, line 454, in run_until_complete self.run_forever() File &#34;/xxx/lib/python3.6/asyncio/base_events.py&#34;, line 421, in run_forever self._run_once() File &#34;test.py&#34;, line 35, in &lt;module&gt; event_loop.run_until_complete(asyncio.wait(tasks)) File &#34;/xxx/lib/python3.6/asyncio/base_events.py&#34;, line 454, in run_until_complete self.run_forever() File &#34;/xxx/lib/python3.6/asyncio/base_events.py&#34;, line 421, in run_forever self._run_once() File &#34;/xxx/lib/python3.6/asyncio/base_events.py&#34;, line 1425, in _run_once handle._run() File &#34;test.py&#34;, line 35, in &lt;module&gt; event_loop.run_until_complete(asyncio.wait(tasks)) File &#34;/xxx/lib/python3.6/asyncio/base_events.py&#34;, line 454, in run_until_complete self.run_forever() File &#34;/xxx/lib/python3.6/asyncio/base_events.py&#34;, line 421, in run_forever self._run_once() File &#34;/xxx/lib/python3.6/asyncio/base_events.py&#34;, line 1425, in _run_once handle._run() File &#34;/xxx/lib/python3.6/asyncio/events.py&#34;, line 126, in _run self._callback(*self._args) File &#34;test.py&#34;, line 35, in &lt;module&gt; event_loop.run_until_complete(asyncio.wait(tasks)) File &#34;/xxx/lib/python3.6/asyncio/base_events.py&#34;, line 454, in run_until_complete self.run_forever() File &#34;/xxx/lib/python3.6/asyncio/base_events.py&#34;, line 421, in run_forever self._run_once() File &#34;/xxx/lib/python3.6/asyncio/base_events.py&#34;, line 1425, in _run_once handle._run() File &#34;/xxx/lib/python3.6/asyncio/events.py&#34;, line 126, in _run self._callback(*self._args) File &#34;test.py&#34;, line 25, in get_traceback traceback.format_list(traceback.extract_stack(stack)) asyncio task &lt;Task pending coro=&lt;foo() running at test.py:9&gt; wait_for=&lt;Future pending cb=[&lt;TaskWakeupMethWrapper object at 0x10c57c3d8&gt;()]&gt; cb=[_wait.&lt;locals&gt;._on_completion() at /xxx/lib/python3.6/asyncio/tasks.py:374]&gt;: File &#34;test.py&#34;, line 9, in foo await asyncio.sleep(x * 10) 知道了获取 traceback 信息的方法后有啥用呢？traceback 信息对我们调试程序有非常大的帮助，尤其是调试运行中的进程。 如果觉得 traceback 信息里包含的东西有点少的话，可以对 traceback 进行加工： 使用 raven 展开 traceback 信息，并把这些信息发送到 sentry 。 使用 raven 展开和收集 traceback 信息¶ 通过 raven 可以获取 traceback 信息中的源代码及局部变量， 这些信息对应快速诊断问题非常的有帮助。同时我们还可以通过 raven 把信息发送到 sentry 中方便归档及可视化查看 traceback 信息。 测试程序： import sys import threading import time import traceback from raven import Client from raven.utils.stacks import get_stack_info def foo(n): while True: for x in range(n): print(&#39;foo&#39;) time.sleep(x * 0.5) def bar(): foo(233) def main(): t = threading.Thread(target=bar, name=&#39;bar&#39;) return t def get_traceback(raven_client): id2thread = {} for thread in threading.enumerate(): id2thread[thread.ident] = thread for thread_id, stack in sys._current_frames().items(): frames = traceback.walk_stack(stack) stacktrace = get_stack_info(frames) thread = id2thread[thread_id] print(&#39;thread: {}&#39;.format(thread)) print(raven_client.captureMessage( &#39;traceback from {}&#39;.format(thread), stack=True, data={ &#39;stacktrace&#39;: stacktrace, }, extra={ &#39;thread&#39;: thread, } )) if __name__ == &#39;__main__&#39;: raven_client = Client() t = main() t.start() time.sleep(1) get_traceback(raven_client) t.join() 测试结果： $ python test2.py foo foo foo thread: &lt;Thread(bar, started 123145482194944)&gt; e800cefdc2ce4a00bb716b8342c75a96 thread: &lt;_MainThread(MainThread, started 140736955184064)&gt; 86b0cb00d5884cb49ba033d83e21040f foo foo sentry 上的信息: 参考资料¶ 17.1. threading — Thread-based parallelism — Python 3.6.4rc1 documentation 29.1. sys — System-specific parameters and functions — Python 3.6.4rc1 documentation 29.9. traceback — Print or retrieve a stack traceback — Python 3.6.4rc1 documentation greenlet: Lightweight concurrent programming — greenlet 0.4.0 documentation 29.11. gc — Garbage Collector interface — Python 3.6.4rc1 documentation 18.5.3. Tasks and coroutines — Python 3.6.4rc1 documentation getsentry/raven-python: Raven is a Python client for Sentry (getsentry.com)" />
     <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-4941850466486001"
      crossorigin="anonymous"></script>
@@ -41,6 +41,7 @@
         <meta property="og:description" content="本文记录如何获取多线程、多协程(gevent)、asyncio 程序中所有线程/协程的 traceback 信息。 获取所有线程的 traceback 信息¶ 可以通过 threading.enumerate() 获取所有线程信息， 通过 sys._current_frames() 获取线程 traceback 信息。 测试程序： import sys import traceback import threading import time def do(x): x = x * 3 time.sleep(x * 60) def main(): threads = [] for x in range(3): t = threading.Thread(target=do, args=(x,), name=&#39;thread-{}&#39;.format(x)) t.start() if __name__ == &#39;__main__&#39;: main() id2thread = {} for thread in threading.enumerate(): id2thread[thread.ident] = thread for thread_id, stack in sys._current_frames().items(): stack_list = traceback.format_list(traceback.extract_stack(stack)) print(&#39;thread {}:&#39;.format(id2thread[thread_id])) print(&#39;&#39;.join(stack_list)) 运行结果: $ python test.py thread &lt;Thread(thread-2, started 123145466843136)&gt;: File &#34;/xxx/lib/python3.6/threading.py&#34;, line 884, in _bootstrap self._bootstrap_inner() File &#34;/xxx/lib/python3.6/threading.py&#34;, line 916, in _bootstrap_inner self.run() File &#34;/xxx/lib/python3.6/threading.py&#34;, line 864, in run self._target(*self._args, **self._kwargs) File &#34;test.py&#34;, line 9, in do time.sleep(x * 60) thread &lt;Thread(thread-1, started 123145461587968)&gt;: File &#34;/xxx/lib/python3.6/threading.py&#34;, line 884, in _bootstrap self._bootstrap_inner() File &#34;/xxx/lib/python3.6/threading.py&#34;, line 916, in _bootstrap_inner self.run() File &#34;/xxx/lib/python3.6/threading.py&#34;, line 864, in run self._target(*self._args, **self._kwargs) File &#34;test.py&#34;, line 9, in do time.sleep(x * 60) thread &lt;_MainThread(MainThread, started 140736955184064)&gt;: File &#34;test.py&#34;, line 27, in &lt;module&gt; stack_list = traceback.format_list(traceback.extract_stack(stack)) 获取所有协程（gevent）的 traceback 信息¶ 可以通过 gc.get_objects() 获取所有对象，然后从中过滤出所有的协程对象(greenlet.greenlet)， 然后通过 greenlet 对象的 gr_frame 属性获取 traceback 信息。 测试程序: import gc import traceback import gevent import greenlet def foo(): while True: for x in range(10): gevent.sleep(x * 10) def bar(): while True: for x in range(5): gevent.sleep(x * 20) def main(): for func in [foo, bar]: t = gevent.spawn(func) t.start() def get_traceback(): for obj in gc.get_objects(): if isinstance(obj, greenlet.greenlet): stack_list = traceback.format_list( traceback.extract_stack(obj.gr_frame) ) print(&#39;greenlet {}:&#39;.format(obj)) print(&#39;&#39;.join(stack_list)) if __name__ == &#39;__main__&#39;: main() gevent.spawn(get_traceback).join() 运行结果如下: $ python test.py greenlet &lt;Greenlet at 0x103f4ca60: bar&gt;: File &#34;/xxx/lib/python3.6/site-packages/gevent/greenlet.py&#34;, line 536, in run result = self._run(*self.args, **self.kwargs) File &#34;test.py&#34;, line 17, in bar gevent.sleep(x * 20) File &#34;/xxx/lib/python3.6/site-packages/gevent/hub.py&#34;, line 167, in sleep waiter.get() File &#34;/xxx/lib/python3.6/site-packages/gevent/hub.py&#34;, line 898, in get return self.hub.switch() File &#34;/xxx/lib/python3.6/site-packages/gevent/hub.py&#34;, line 630, in switch return RawGreenlet.switch(self) greenlet &lt;Greenlet at 0x103f4caf8: get_traceback&gt;: File &#34;/xxx/lib/python3.6/site-packages/gevent/greenlet.py&#34;, line 536, in run result = self._run(*self.args, **self.kwargs) File &#34;test.py&#34;, line 30, in get_traceback traceback.extract_stack(obj.gr_frame) greenlet &lt;greenlet.greenlet object at 0x103f4c0e0&gt;: File &#34;test.py&#34;, line 38, in &lt;module&gt; gevent.spawn(get_traceback).join() File &#34;/xxx/lib/python3.6/site-packages/gevent/greenlet.py&#34;, line 496, in join result = self.parent.switch() File &#34;/xxx/lib/python3.6/site-packages/gevent/hub.py&#34;, line 630, in switch return RawGreenlet.switch(self) greenlet &lt;Greenlet at 0x103f4c930: foo&gt;: File &#34;/xxx/lib/python3.6/site-packages/gevent/greenlet.py&#34;, line 536, in run result = self._run(*self.args, **self.kwargs) File &#34;test.py&#34;, line 11, in foo gevent.sleep(x * 10) File &#34;/xxx/lib/python3.6/site-packages/gevent/hub.py&#34;, line 167, in sleep waiter.get() File &#34;/xxx/lib/python3.6/site-packages/gevent/hub.py&#34;, line 898, in get return self.hub.switch() File &#34;/xxx/lib/python3.6/site-packages/gevent/hub.py&#34;, line 630, in switch return RawGreenlet.switch(self) greenlet &lt;Hub at 0x103f4c9c8 select default pending=0 ref=2&gt;: File &#34;/xxx/lib/python3.6/site-packages/gevent/hub.py&#34;, line 688, in run loop.run() 获取所有 asyncio task 的 traceback 信息¶ 可以通过 asyncio.Task.all_tasks() 获取所有 asyncio task 对象， 然后通过 task 对象的 get_stack() 方法获取 traceback 信息。 测试程序: import asyncio import traceback async def foo(): while True: for x in range(10): print(&#39;foo&#39;) await asyncio.sleep(x * 10) async def bar(): while True: for x in range(5): print(&#39;bar&#39;) await asyncio.sleep(x * 20) async def get_traceback(loop): await asyncio.sleep(1) for task in asyncio.Task.all_tasks(loop): stack_list = [] for stack in task.get_stack(): stack_list.extend( traceback.format_list(traceback.extract_stack(stack)) ) print(&#39;asyncio task {}:&#39;.format(task)) print(&#39;&#39;.join(stack_list)) if __name__ == &#39;__main__&#39;: event_loop = asyncio.get_event_loop() try: tasks = [foo(), bar(), get_traceback(event_loop)] event_loop.run_until_complete(asyncio.wait(tasks)) finally: event_loop.close() 运行结果如下: bar foo bar foo asyncio task &lt;Task pending coro=&lt;wait() running at /xxx/lib/python3.6/asyncio/tasks.py:307&gt; wait_for=&lt;Future pending cb=[&lt;TaskWakeupMethWrapper object at 0x10c57c258&gt;()]&gt; cb=[_run_until_complete_cb() at /xxx/lib/python3.6/asyncio/base_events.py:176]&gt;: File &#34;/xxx/lib/python3.6/asyncio/tasks.py&#34;, line 307, in wait return (yield from _wait(fs, timeout, return_when, loop)) asyncio task &lt;Task pending coro=&lt;bar() running at test.py:16&gt; wait_for=&lt;Future pending cb=[&lt;TaskWakeupMethWrapper object at 0x10c57c378&gt;()]&gt; cb=[_wait.&lt;locals&gt;._on_completion() at /xxx/lib/python3.6/asyncio/tasks.py:374]&gt;: File &#34;test.py&#34;, line 16, in bar await asyncio.sleep(x * 20) asyncio task &lt;Task pending coro=&lt;get_traceback() running at test.py:27&gt; cb=[_wait.&lt;locals&gt;._on_completion() at /xxx/lib/python3.6/asyncio/tasks.py:374]&gt;: File &#34;test.py&#34;, line 35, in &lt;module&gt; event_loop.run_until_complete(asyncio.wait(tasks)) File &#34;test.py&#34;, line 35, in &lt;module&gt; event_loop.run_until_complete(asyncio.wait(tasks)) File &#34;/xxx/lib/python3.6/asyncio/base_events.py&#34;, line 454, in run_until_complete self.run_forever() File &#34;test.py&#34;, line 35, in &lt;module&gt; event_loop.run_until_complete(asyncio.wait(tasks)) File &#34;/xxx/lib/python3.6/asyncio/base_events.py&#34;, line 454, in run_until_complete self.run_forever() File &#34;/xxx/lib/python3.6/asyncio/base_events.py&#34;, line 421, in run_forever self._run_once() File &#34;test.py&#34;, line 35, in &lt;module&gt; event_loop.run_until_complete(asyncio.wait(tasks)) File &#34;/xxx/lib/python3.6/asyncio/base_events.py&#34;, line 454, in run_until_complete self.run_forever() File &#34;/xxx/lib/python3.6/asyncio/base_events.py&#34;, line 421, in run_forever self._run_once() File &#34;/xxx/lib/python3.6/asyncio/base_events.py&#34;, line 1425, in _run_once handle._run() File &#34;test.py&#34;, line 35, in &lt;module&gt; event_loop.run_until_complete(asyncio.wait(tasks)) File &#34;/xxx/lib/python3.6/asyncio/base_events.py&#34;, line 454, in run_until_complete self.run_forever() File &#34;/xxx/lib/python3.6/asyncio/base_events.py&#34;, line 421, in run_forever self._run_once() File &#34;/xxx/lib/python3.6/asyncio/base_events.py&#34;, line 1425, in _run_once handle._run() File &#34;/xxx/lib/python3.6/asyncio/events.py&#34;, line 126, in _run self._callback(*self._args) File &#34;test.py&#34;, line 35, in &lt;module&gt; event_loop.run_until_complete(asyncio.wait(tasks)) File &#34;/xxx/lib/python3.6/asyncio/base_events.py&#34;, line 454, in run_until_complete self.run_forever() File &#34;/xxx/lib/python3.6/asyncio/base_events.py&#34;, line 421, in run_forever self._run_once() File &#34;/xxx/lib/python3.6/asyncio/base_events.py&#34;, line 1425, in _run_once handle._run() File &#34;/xxx/lib/python3.6/asyncio/events.py&#34;, line 126, in _run self._callback(*self._args) File &#34;test.py&#34;, line 25, in get_traceback traceback.format_list(traceback.extract_stack(stack)) asyncio task &lt;Task pending coro=&lt;foo() running at test.py:9&gt; wait_for=&lt;Future pending cb=[&lt;TaskWakeupMethWrapper object at 0x10c57c3d8&gt;()]&gt; cb=[_wait.&lt;locals&gt;._on_completion() at /xxx/lib/python3.6/asyncio/tasks.py:374]&gt;: File &#34;test.py&#34;, line 9, in foo await asyncio.sleep(x * 10) 知道了获取 traceback 信息的方法后有啥用呢？traceback 信息对我们调试程序有非常大的帮助，尤其是调试运行中的进程。 如果觉得 traceback 信息里包含的东西有点少的话，可以对 traceback 进行加工： 使用 raven 展开 traceback 信息，并把这些信息发送到 sentry 。 使用 raven 展开和收集 traceback 信息¶ 通过 raven 可以获取 traceback 信息中的源代码及局部变量， 这些信息对应快速诊断问题非常的有帮助。同时我们还可以通过 raven 把信息发送到 sentry 中方便归档及可视化查看 traceback 信息。 测试程序： import sys import threading import time import traceback from raven import Client from raven.utils.stacks import get_stack_info def foo(n): while True: for x in range(n): print(&#39;foo&#39;) time.sleep(x * 0.5) def bar(): foo(233) def main(): t = threading.Thread(target=bar, name=&#39;bar&#39;) return t def get_traceback(raven_client): id2thread = {} for thread in threading.enumerate(): id2thread[thread.ident] = thread for thread_id, stack in sys._current_frames().items(): frames = traceback.walk_stack(stack) stacktrace = get_stack_info(frames) thread = id2thread[thread_id] print(&#39;thread: {}&#39;.format(thread)) print(raven_client.captureMessage( &#39;traceback from {}&#39;.format(thread), stack=True, data={ &#39;stacktrace&#39;: stacktrace, }, extra={ &#39;thread&#39;: thread, } )) if __name__ == &#39;__main__&#39;: raven_client = Client() t = main() t.start() time.sleep(1) get_traceback(raven_client) t.join() 测试结果： $ python test2.py foo foo foo thread: &lt;Thread(bar, started 123145482194944)&gt; e800cefdc2ce4a00bb716b8342c75a96 thread: &lt;_MainThread(MainThread, started 140736955184064)&gt; 86b0cb00d5884cb49ba033d83e21040f foo foo sentry 上的信息: 参考资料¶ 17.1. threading — Thread-based parallelism — Python 3.6.4rc1 documentation 29.1. sys — System-specific parameters and functions — Python 3.6.4rc1 documentation 29.9. traceback — Print or retrieve a stack traceback — Python 3.6.4rc1 documentation greenlet: Lightweight concurrent programming — greenlet 0.4.0 documentation 29.11. gc — Garbage Collector interface — Python 3.6.4rc1 documentation 18.5.3. Tasks and coroutines — Python 3.6.4rc1 documentation getsentry/raven-python: Raven is a Python client for Sentry (getsentry.com)"/>
         <meta property="article:published_time" content="2017-12-10" />
             <meta property="article:section" content="python" />
+            <meta property="article:tag" content="python" />
             <meta property="article:tag" content="debug" />
             <meta property="article:author" content="mozillazg" />
             <meta property="og:image"
@@ -76,7 +77,7 @@
     <script type="application/ld+json">
     {
         "@context": "https://schema.org",
-        "@type": "Website",
+        "@type": "BlogPosting",
         "publisher": {
             "@type": "Person",
             "name": "mozillazg",
@@ -89,367 +90,13 @@
             "url": "https://mozillazg.com",
             "sameAs": []
         },
-        // "headline": "",
+        "headline": "Python: 获取并发程序的 traceback 信息（threading/gevent/asyncio）",
         "url": "https://mozillazg.com/2017/12/python-get-concurrency-programm-all-tracebacks-threading-gevent-asyncio-etc.html",
-        "datePublished": "2017-12-10",
-        // "dateModified": "",
-        "image": "https://mozillazg.com/static/avatar.jpeg",
-        "keywords": "debug",
-        // "description": "本文记录如何获取多线程、多协程(gevent)、asyncio 程序中所有线程/协程的 traceback 信息。 获取所有线程的 traceback 信息¶ 可以通过 threading.enumerate() 获取所有线程信息， 通过 sys._current_frames() 获取线程 traceback 信息。 测试程序： import sys import traceback import threading import time def do(x): x = x * 3 time.sleep(x * 60) def main(): threads = [] for x in range(3): t = threading.Thread(target=do, args=(x,), name=&#39;thread-{}&#39;.format(x)) t.start() if __name__ == &#39;__main__&#39;: main() id2thread = {} for thread in threading.enumerate(): id2thread[thread.ident] = thread for thread_id, stack in sys._current_frames().items(): stack_list = traceback.format_list(traceback.extract_stack(stack)) print(&#39;thread {}:&#39;.format(id2thread[thread_id])) print(&#39;&#39;.join(stack_list)) 运行结果: $ python test.py thread &lt;Thread(thread-2, started 123145466843136)&gt;: File &#34;/xxx/lib/python3.6/threading.py&#34;, line 884, in _bootstrap self._bootstrap_inner() File &#34;/xxx/lib/python3.6/threading.py&#34;, line 916, in _bootstrap_inner self.run() File &#34;/xxx/lib/python3.6/threading.py&#34;, line 864, in run self._target(*self._args, **self._kwargs) File &#34;test.py&#34;, line 9, in do time.sleep(x * 60) thread &lt;Thread(thread-1, started 123145461587968)&gt;: File &#34;/xxx/lib/python3.6/threading.py&#34;, line 884, in _bootstrap self._bootstrap_inner() File &#34;/xxx/lib/python3.6/threading.py&#34;, line 916, in _bootstrap_inner self.run() File &#34;/xxx/lib/python3.6/threading.py&#34;, line 864, in run self._target(*self._args, **self._kwargs) File &#34;test.py&#34;, line 9, in do time.sleep(x * 60) thread &lt;_MainThread(MainThread, started 140736955184064)&gt;: File &#34;test.py&#34;, line 27, in &lt;module&gt; stack_list = traceback.format_list(traceback.extract_stack(stack)) 获取所有协程（gevent）的 traceback 信息¶ 可以通过 gc.get_objects() 获取所有对象，然后从中过滤出所有的协程对象(greenlet.greenlet)， 然后通过 greenlet 对象的 gr_frame 属性获取 traceback 信息。 测试程序: import gc import traceback import gevent import greenlet def foo(): while True: for x in range(10): gevent.sleep(x * 10) def bar(): while True: for x in range(5): gevent.sleep(x * 20) def main(): for func in [foo, bar]: t = gevent.spawn(func) t.start() def get_traceback(): for obj in gc.get_objects(): if isinstance(obj, greenlet.greenlet): stack_list = traceback.format_list( traceback.extract_stack(obj.gr_frame) ) print(&#39;greenlet {}:&#39;.format(obj)) print(&#39;&#39;.join(stack_list)) if __name__ == &#39;__main__&#39;: main() gevent.spawn(get_traceback).join() 运行结果如下: $ python test.py greenlet &lt;Greenlet at 0x103f4ca60: bar&gt;: File &#34;/xxx/lib/python3.6/site-packages/gevent/greenlet.py&#34;, line 536, in run result = self._run(*self.args, **self.kwargs) File &#34;test.py&#34;, line 17, in bar gevent.sleep(x * 20) File &#34;/xxx/lib/python3.6/site-packages/gevent/hub.py&#34;, line 167, in sleep waiter.get() File &#34;/xxx/lib/python3.6/site-packages/gevent/hub.py&#34;, line 898, in get return self.hub.switch() File &#34;/xxx/lib/python3.6/site-packages/gevent/hub.py&#34;, line 630, in switch return RawGreenlet.switch(self) greenlet &lt;Greenlet at 0x103f4caf8: get_traceback&gt;: File &#34;/xxx/lib/python3.6/site-packages/gevent/greenlet.py&#34;, line 536, in run result = self._run(*self.args, **self.kwargs) File &#34;test.py&#34;, line 30, in get_traceback traceback.extract_stack(obj.gr_frame) greenlet &lt;greenlet.greenlet object at 0x103f4c0e0&gt;: File &#34;test.py&#34;, line 38, in &lt;module&gt; gevent.spawn(get_traceback).join() File &#34;/xxx/lib/python3.6/site-packages/gevent/greenlet.py&#34;, line 496, in join result = self.parent.switch() File &#34;/xxx/lib/python3.6/site-packages/gevent/hub.py&#34;, line 630, in switch return RawGreenlet.switch(self) greenlet &lt;Greenlet at 0x103f4c930: foo&gt;: File &#34;/xxx/lib/python3.6/site-packages/gevent/greenlet.py&#34;, line 536, in run result = self._run(*self.args, **self.kwargs) File &#34;test.py&#34;, line 11, in foo gevent.sleep(x * 10) File &#34;/xxx/lib/python3.6/site-packages/gevent/hub.py&#34;, line 167, in sleep waiter.get() File &#34;/xxx/lib/python3.6/site-packages/gevent/hub.py&#34;, line 898, in get return self.hub.switch() File &#34;/xxx/lib/python3.6/site-packages/gevent/hub.py&#34;, line 630, in switch return RawGreenlet.switch(self) greenlet &lt;Hub at 0x103f4c9c8 select default pending=0 ref=2&gt;: File &#34;/xxx/lib/python3.6/site-packages/gevent/hub.py&#34;, line 688, in run loop.run() 获取所有 asyncio task 的 traceback 信息¶ 可以通过 asyncio.Task.all_tasks() 获取所有 asyncio task 对象， 然后通过 task 对象的 get_stack() 方法获取 traceback 信息。 测试程序: import asyncio import traceback async def foo(): while True: for x in range(10): print(&#39;foo&#39;) await asyncio.sleep(x * 10) async def bar(): while True: for x in range(5): print(&#39;bar&#39;) await asyncio.sleep(x * 20) async def get_traceback(loop): await asyncio.sleep(1) for task in asyncio.Task.all_tasks(loop): stack_list = [] for stack in task.get_stack(): stack_list.extend( traceback.format_list(traceback.extract_stack(stack)) ) print(&#39;asyncio task {}:&#39;.format(task)) print(&#39;&#39;.join(stack_list)) if __name__ == &#39;__main__&#39;: event_loop = asyncio.get_event_loop() try: tasks = [foo(), bar(), get_traceback(event_loop)] event_loop.run_until_complete(asyncio.wait(tasks)) finally: event_loop.close() 运行结果如下: bar foo bar foo asyncio task &lt;Task pending coro=&lt;wait() running at /xxx/lib/python3.6/asyncio/tasks.py:307&gt; wait_for=&lt;Future pending cb=[&lt;TaskWakeupMethWrapper object at 0x10c57c258&gt;()]&gt; cb=[_run_until_complete_cb() at /xxx/lib/python3.6/asyncio/base_events.py:176]&gt;: File &#34;/xxx/lib/python3.6/asyncio/tasks.py&#34;, line 307, in wait return (yield from _wait(fs, timeout, return_when, loop)) asyncio task &lt;Task pending coro=&lt;bar() running at test.py:16&gt; wait_for=&lt;Future pending cb=[&lt;TaskWakeupMethWrapper object at 0x10c57c378&gt;()]&gt; cb=[_wait.&lt;locals&gt;._on_completion() at /xxx/lib/python3.6/asyncio/tasks.py:374]&gt;: File &#34;test.py&#34;, line 16, in bar await asyncio.sleep(x * 20) asyncio task &lt;Task pending coro=&lt;get_traceback() running at test.py:27&gt; cb=[_wait.&lt;locals&gt;._on_completion() at /xxx/lib/python3.6/asyncio/tasks.py:374]&gt;: File &#34;test.py&#34;, line 35, in &lt;module&gt; event_loop.run_until_complete(asyncio.wait(tasks)) File &#34;test.py&#34;, line 35, in &lt;module&gt; event_loop.run_until_complete(asyncio.wait(tasks)) File &#34;/xxx/lib/python3.6/asyncio/base_events.py&#34;, line 454, in run_until_complete self.run_forever() File &#34;test.py&#34;, line 35, in &lt;module&gt; event_loop.run_until_complete(asyncio.wait(tasks)) File &#34;/xxx/lib/python3.6/asyncio/base_events.py&#34;, line 454, in run_until_complete self.run_forever() File &#34;/xxx/lib/python3.6/asyncio/base_events.py&#34;, line 421, in run_forever self._run_once() File &#34;test.py&#34;, line 35, in &lt;module&gt; event_loop.run_until_complete(asyncio.wait(tasks)) File &#34;/xxx/lib/python3.6/asyncio/base_events.py&#34;, line 454, in run_until_complete self.run_forever() File &#34;/xxx/lib/python3.6/asyncio/base_events.py&#34;, line 421, in run_forever self._run_once() File &#34;/xxx/lib/python3.6/asyncio/base_events.py&#34;, line 1425, in _run_once handle._run() File &#34;test.py&#34;, line 35, in &lt;module&gt; event_loop.run_until_complete(asyncio.wait(tasks)) File &#34;/xxx/lib/python3.6/asyncio/base_events.py&#34;, line 454, in run_until_complete self.run_forever() File &#34;/xxx/lib/python3.6/asyncio/base_events.py&#34;, line 421, in run_forever self._run_once() File &#34;/xxx/lib/python3.6/asyncio/base_events.py&#34;, line 1425, in _run_once handle._run() File &#34;/xxx/lib/python3.6/asyncio/events.py&#34;, line 126, in _run self._callback(*self._args) File &#34;test.py&#34;, line 35, in &lt;module&gt; event_loop.run_until_complete(asyncio.wait(tasks)) File &#34;/xxx/lib/python3.6/asyncio/base_events.py&#34;, line 454, in run_until_complete self.run_forever() File &#34;/xxx/lib/python3.6/asyncio/base_events.py&#34;, line 421, in run_forever self._run_once() File &#34;/xxx/lib/python3.6/asyncio/base_events.py&#34;, line 1425, in _run_once handle._run() File &#34;/xxx/lib/python3.6/asyncio/events.py&#34;, line 126, in _run self._callback(*self._args) File &#34;test.py&#34;, line 25, in get_traceback traceback.format_list(traceback.extract_stack(stack)) asyncio task &lt;Task pending coro=&lt;foo() running at test.py:9&gt; wait_for=&lt;Future pending cb=[&lt;TaskWakeupMethWrapper object at 0x10c57c3d8&gt;()]&gt; cb=[_wait.&lt;locals&gt;._on_completion() at /xxx/lib/python3.6/asyncio/tasks.py:374]&gt;: File &#34;test.py&#34;, line 9, in foo await asyncio.sleep(x * 10) 知道了获取 traceback 信息的方法后有啥用呢？traceback 信息对我们调试程序有非常大的帮助，尤其是调试运行中的进程。 如果觉得 traceback 信息里包含的东西有点少的话，可以对 traceback 进行加工： 使用 raven 展开 traceback 信息，并把这些信息发送到 sentry 。 使用 raven 展开和收集 traceback 信息¶ 通过 raven 可以获取 traceback 信息中的源代码及局部变量， 这些信息对应快速诊断问题非常的有帮助。同时我们还可以通过 raven 把信息发送到 sentry 中方便归档及可视化查看 traceback 信息。 测试程序： import sys import threading import time import traceback from raven import Client from raven.utils.stacks import get_stack_info def foo(n): while True: for x in range(n): print(&#39;foo&#39;) time.sleep(x * 0.5) def bar(): foo(233) def main(): t = threading.Thread(target=bar, name=&#39;bar&#39;) return t def get_traceback(raven_client): id2thread = {} for thread in threading.enumerate(): id2thread[thread.ident] = thread for thread_id, stack in sys._current_frames().items(): frames = traceback.walk_stack(stack) stacktrace = get_stack_info(frames) thread = id2thread[thread_id] print(&#39;thread: {}&#39;.format(thread)) print(raven_client.captureMessage( &#39;traceback from {}&#39;.format(thread), stack=True, data={ &#39;stacktrace&#39;: stacktrace, }, extra={ &#39;thread&#39;: thread, } )) if __name__ == &#39;__main__&#39;: raven_client = Client() t = main() t.start() time.sleep(1) get_traceback(raven_client) t.join() 测试结果： $ python test2.py foo foo foo thread: &lt;Thread(bar, started 123145482194944)&gt; e800cefdc2ce4a00bb716b8342c75a96 thread: &lt;_MainThread(MainThread, started 140736955184064)&gt; 86b0cb00d5884cb49ba033d83e21040f foo foo sentry 上的信息: 参考资料¶ 17.1. threading — Thread-based parallelism — Python 3.6.4rc1 documentation 29.1. sys — System-specific parameters and functions — Python 3.6.4rc1 documentation 29.9. traceback — Print or retrieve a stack traceback — Python 3.6.4rc1 documentation greenlet: Lightweight concurrent programming — greenlet 0.4.0 documentation 29.11. gc — Garbage Collector interface — Python 3.6.4rc1 documentation 18.5.3. Tasks and coroutines — Python 3.6.4rc1 documentation getsentry/raven-python: Raven is a Python client for Sentry (getsentry.com)",
-        "description": "<p>本文记录如何获取多线程、多协程(gevent)、asyncio 程序中所有线程/协程的 traceback 信息。</p>
-<div class="section" id="traceback">
-<h2 id="hidtraceback">获取所有线程的 traceback 信息<a class="headerlink" href="#hidtraceback" title="Permalink to this headline">¶</a></h2>
-<p>可以通过 <a class="reference external" href="https://docs.python.org/3/library/threading.html#threading.enumerate">threading.enumerate()</a> 获取所有线程信息，
-通过 <a class="reference external" href="https://docs.python.org/3/library/sys.html#sys._current_frames">sys._current_frames()</a> 获取线程 traceback 信息。</p>
-<p>测试程序：</p>
-<div class="highlight"><pre><span></span><span class="kn">import</span> <span class="nn">sys</span>
-<span class="kn">import</span> <span class="nn">traceback</span>
-<span class="kn">import</span> <span class="nn">threading</span>
-<span class="kn">import</span> <span class="nn">time</span>
-
-
-<span class="k">def</span> <span class="nf">do</span><span class="p">(</span><span class="n">x</span><span class="p">):</span>
-    <span class="n">x</span> <span class="o">=</span> <span class="n">x</span> <span class="o">*</span> <span class="mi">3</span>
-    <span class="n">time</span><span class="o">.</span><span class="n">sleep</span><span class="p">(</span><span class="n">x</span> <span class="o">*</span> <span class="mi">60</span><span class="p">)</span>
-
-
-<span class="k">def</span> <span class="nf">main</span><span class="p">():</span>
-    <span class="n">threads</span> <span class="o">=</span> <span class="p">[]</span>
-    <span class="k">for</span> <span class="n">x</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">3</span><span class="p">):</span>
-        <span class="n">t</span> <span class="o">=</span> <span class="n">threading</span><span class="o">.</span><span class="n">Thread</span><span class="p">(</span><span class="n">target</span><span class="o">=</span><span class="n">do</span><span class="p">,</span> <span class="n">args</span><span class="o">=</span><span class="p">(</span><span class="n">x</span><span class="p">,),</span> <span class="n">name</span><span class="o">=</span><span class="s1">&#39;thread-{}&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">x</span><span class="p">))</span>
-        <span class="n">t</span><span class="o">.</span><span class="n">start</span><span class="p">()</span>
-
-
-<span class="k">if</span> <span class="n">__name__</span> <span class="o">==</span> <span class="s1">&#39;__main__&#39;</span><span class="p">:</span>
-    <span class="n">main</span><span class="p">()</span>
-    <span class="n">id2thread</span> <span class="o">=</span> <span class="p">{}</span>
-    <span class="k">for</span> <span class="n">thread</span> <span class="ow">in</span> <span class="n">threading</span><span class="o">.</span><span class="n">enumerate</span><span class="p">():</span>
-        <span class="n">id2thread</span><span class="p">[</span><span class="n">thread</span><span class="o">.</span><span class="n">ident</span><span class="p">]</span> <span class="o">=</span> <span class="n">thread</span>
-    <span class="k">for</span> <span class="n">thread_id</span><span class="p">,</span> <span class="n">stack</span> <span class="ow">in</span> <span class="n">sys</span><span class="o">.</span><span class="n">_current_frames</span><span class="p">()</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
-        <span class="n">stack_list</span> <span class="o">=</span> <span class="n">traceback</span><span class="o">.</span><span class="n">format_list</span><span class="p">(</span><span class="n">traceback</span><span class="o">.</span><span class="n">extract_stack</span><span class="p">(</span><span class="n">stack</span><span class="p">))</span>
-        <span class="k">print</span><span class="p">(</span><span class="s1">&#39;thread {}:&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">id2thread</span><span class="p">[</span><span class="n">thread_id</span><span class="p">]))</span>
-        <span class="k">print</span><span class="p">(</span><span class="s1">&#39;&#39;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">stack_list</span><span class="p">))</span>
-</pre></div>
-<p>运行结果:</p>
-<pre class="literal-block">
-$ python test.py
-thread &lt;Thread(thread-2, started 123145466843136)&gt;:
-  File &quot;/xxx/lib/python3.6/threading.py&quot;, line 884, in _bootstrap
-    self._bootstrap_inner()
-  File &quot;/xxx/lib/python3.6/threading.py&quot;, line 916, in _bootstrap_inner
-    self.run()
-  File &quot;/xxx/lib/python3.6/threading.py&quot;, line 864, in run
-    self._target(*self._args, **self._kwargs)
-  File &quot;test.py&quot;, line 9, in do
-    time.sleep(x * 60)
-
-thread &lt;Thread(thread-1, started 123145461587968)&gt;:
-  File &quot;/xxx/lib/python3.6/threading.py&quot;, line 884, in _bootstrap
-    self._bootstrap_inner()
-  File &quot;/xxx/lib/python3.6/threading.py&quot;, line 916, in _bootstrap_inner
-    self.run()
-  File &quot;/xxx/lib/python3.6/threading.py&quot;, line 864, in run
-    self._target(*self._args, **self._kwargs)
-  File &quot;test.py&quot;, line 9, in do
-    time.sleep(x * 60)
-
-thread &lt;_MainThread(MainThread, started 140736955184064)&gt;:
-  File &quot;test.py&quot;, line 27, in &lt;module&gt;
-    stack_list = traceback.format_list(traceback.extract_stack(stack))
-</pre>
-</div>
-<div class="section" id="gevent-traceback">
-<h2 id="hidgevent-traceback">获取所有协程（gevent）的 traceback 信息<a class="headerlink" href="#hidgevent-traceback" title="Permalink to this headline">¶</a></h2>
-<p>可以通过 <tt class="docutils literal">gc.get_objects()</tt> 获取所有对象，然后从中过滤出所有的协程对象(<tt class="docutils literal">greenlet.greenlet</tt>)，
-然后通过 greenlet 对象的 <tt class="docutils literal">gr_frame</tt> 属性获取 traceback 信息。</p>
-<p>测试程序:</p>
-<div class="highlight"><pre><span></span><span class="kn">import</span> <span class="nn">gc</span>
-<span class="kn">import</span> <span class="nn">traceback</span>
-
-<span class="kn">import</span> <span class="nn">gevent</span>
-<span class="kn">import</span> <span class="nn">greenlet</span>
-
-
-<span class="k">def</span> <span class="nf">foo</span><span class="p">():</span>
-    <span class="k">while</span> <span class="bp">True</span><span class="p">:</span>
-        <span class="k">for</span> <span class="n">x</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">10</span><span class="p">):</span>
-            <span class="n">gevent</span><span class="o">.</span><span class="n">sleep</span><span class="p">(</span><span class="n">x</span> <span class="o">*</span> <span class="mi">10</span><span class="p">)</span>
-
-
-<span class="k">def</span> <span class="nf">bar</span><span class="p">():</span>
-    <span class="k">while</span> <span class="bp">True</span><span class="p">:</span>
-        <span class="k">for</span> <span class="n">x</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">5</span><span class="p">):</span>
-            <span class="n">gevent</span><span class="o">.</span><span class="n">sleep</span><span class="p">(</span><span class="n">x</span> <span class="o">*</span> <span class="mi">20</span><span class="p">)</span>
-
-
-<span class="k">def</span> <span class="nf">main</span><span class="p">():</span>
-    <span class="k">for</span> <span class="n">func</span> <span class="ow">in</span> <span class="p">[</span><span class="n">foo</span><span class="p">,</span> <span class="n">bar</span><span class="p">]:</span>
-        <span class="n">t</span> <span class="o">=</span> <span class="n">gevent</span><span class="o">.</span><span class="n">spawn</span><span class="p">(</span><span class="n">func</span><span class="p">)</span>
-        <span class="n">t</span><span class="o">.</span><span class="n">start</span><span class="p">()</span>
-
-
-<span class="k">def</span> <span class="nf">get_traceback</span><span class="p">():</span>
-    <span class="k">for</span> <span class="n">obj</span> <span class="ow">in</span> <span class="n">gc</span><span class="o">.</span><span class="n">get_objects</span><span class="p">():</span>
-        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">obj</span><span class="p">,</span> <span class="n">greenlet</span><span class="o">.</span><span class="n">greenlet</span><span class="p">):</span>
-            <span class="n">stack_list</span> <span class="o">=</span> <span class="n">traceback</span><span class="o">.</span><span class="n">format_list</span><span class="p">(</span>
-                <span class="n">traceback</span><span class="o">.</span><span class="n">extract_stack</span><span class="p">(</span><span class="n">obj</span><span class="o">.</span><span class="n">gr_frame</span><span class="p">)</span>
-            <span class="p">)</span>
-            <span class="k">print</span><span class="p">(</span><span class="s1">&#39;greenlet {}:&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">obj</span><span class="p">))</span>
-            <span class="k">print</span><span class="p">(</span><span class="s1">&#39;&#39;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">stack_list</span><span class="p">))</span>
-
-
-<span class="k">if</span> <span class="n">__name__</span> <span class="o">==</span> <span class="s1">&#39;__main__&#39;</span><span class="p">:</span>
-    <span class="n">main</span><span class="p">()</span>
-    <span class="n">gevent</span><span class="o">.</span><span class="n">spawn</span><span class="p">(</span><span class="n">get_traceback</span><span class="p">)</span><span class="o">.</span><span class="n">join</span><span class="p">()</span>
-</pre></div>
-<p>运行结果如下:</p>
-<pre class="literal-block">
-$ python test.py
-greenlet &lt;Greenlet at 0x103f4ca60: bar&gt;:
-  File &quot;/xxx/lib/python3.6/site-packages/gevent/greenlet.py&quot;, line 536, in run
-    result = self._run(*self.args, **self.kwargs)
-  File &quot;test.py&quot;, line 17, in bar
-    gevent.sleep(x * 20)
-  File &quot;/xxx/lib/python3.6/site-packages/gevent/hub.py&quot;, line 167, in sleep
-    waiter.get()
-  File &quot;/xxx/lib/python3.6/site-packages/gevent/hub.py&quot;, line 898, in get
-    return self.hub.switch()
-  File &quot;/xxx/lib/python3.6/site-packages/gevent/hub.py&quot;, line 630, in switch
-    return RawGreenlet.switch(self)
-
-greenlet &lt;Greenlet at 0x103f4caf8: get_traceback&gt;:
-  File &quot;/xxx/lib/python3.6/site-packages/gevent/greenlet.py&quot;, line 536, in run
-    result = self._run(*self.args, **self.kwargs)
-  File &quot;test.py&quot;, line 30, in get_traceback
-    traceback.extract_stack(obj.gr_frame)
-
-greenlet &lt;greenlet.greenlet object at 0x103f4c0e0&gt;:
-  File &quot;test.py&quot;, line 38, in &lt;module&gt;
-    gevent.spawn(get_traceback).join()
-  File &quot;/xxx/lib/python3.6/site-packages/gevent/greenlet.py&quot;, line 496, in join
-    result = self.parent.switch()
-  File &quot;/xxx/lib/python3.6/site-packages/gevent/hub.py&quot;, line 630, in switch
-    return RawGreenlet.switch(self)
-
-greenlet &lt;Greenlet at 0x103f4c930: foo&gt;:
-  File &quot;/xxx/lib/python3.6/site-packages/gevent/greenlet.py&quot;, line 536, in run
-    result = self._run(*self.args, **self.kwargs)
-  File &quot;test.py&quot;, line 11, in foo
-    gevent.sleep(x * 10)
-  File &quot;/xxx/lib/python3.6/site-packages/gevent/hub.py&quot;, line 167, in sleep
-    waiter.get()
-  File &quot;/xxx/lib/python3.6/site-packages/gevent/hub.py&quot;, line 898, in get
-    return self.hub.switch()
-  File &quot;/xxx/lib/python3.6/site-packages/gevent/hub.py&quot;, line 630, in switch
-    return RawGreenlet.switch(self)
-
-greenlet &lt;Hub at 0x103f4c9c8 select default pending=0 ref=2&gt;:
-  File &quot;/xxx/lib/python3.6/site-packages/gevent/hub.py&quot;, line 688, in run
-    loop.run()
-</pre>
-</div>
-<div class="section" id="asyncio-task-traceback">
-<h2 id="hidasyncio-task-traceback">获取所有 asyncio task 的 traceback 信息<a class="headerlink" href="#hidasyncio-task-traceback" title="Permalink to this headline">¶</a></h2>
-<p>可以通过 <tt class="docutils literal">asyncio.Task.all_tasks()</tt> 获取所有 asyncio task 对象，
-然后通过 task 对象的 <tt class="docutils literal">get_stack()</tt> 方法获取 traceback 信息。</p>
-<p>测试程序:</p>
-<div class="highlight"><pre><span></span><span class="kn">import</span> <span class="nn">asyncio</span>
-<span class="kn">import</span> <span class="nn">traceback</span>
-
-
-<span class="n">async</span> <span class="k">def</span> <span class="nf">foo</span><span class="p">():</span>
-    <span class="k">while</span> <span class="bp">True</span><span class="p">:</span>
-        <span class="k">for</span> <span class="n">x</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">10</span><span class="p">):</span>
-            <span class="k">print</span><span class="p">(</span><span class="s1">&#39;foo&#39;</span><span class="p">)</span>
-            <span class="n">await</span> <span class="n">asyncio</span><span class="o">.</span><span class="n">sleep</span><span class="p">(</span><span class="n">x</span> <span class="o">*</span> <span class="mi">10</span><span class="p">)</span>
-
-
-<span class="n">async</span> <span class="k">def</span> <span class="nf">bar</span><span class="p">():</span>
-    <span class="k">while</span> <span class="bp">True</span><span class="p">:</span>
-        <span class="k">for</span> <span class="n">x</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">5</span><span class="p">):</span>
-            <span class="k">print</span><span class="p">(</span><span class="s1">&#39;bar&#39;</span><span class="p">)</span>
-            <span class="n">await</span> <span class="n">asyncio</span><span class="o">.</span><span class="n">sleep</span><span class="p">(</span><span class="n">x</span> <span class="o">*</span> <span class="mi">20</span><span class="p">)</span>
-
-
-<span class="n">async</span> <span class="k">def</span> <span class="nf">get_traceback</span><span class="p">(</span><span class="n">loop</span><span class="p">):</span>
-    <span class="n">await</span> <span class="n">asyncio</span><span class="o">.</span><span class="n">sleep</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span>
-    <span class="k">for</span> <span class="n">task</span> <span class="ow">in</span> <span class="n">asyncio</span><span class="o">.</span><span class="n">Task</span><span class="o">.</span><span class="n">all_tasks</span><span class="p">(</span><span class="n">loop</span><span class="p">):</span>
-        <span class="n">stack_list</span> <span class="o">=</span> <span class="p">[]</span>
-        <span class="k">for</span> <span class="n">stack</span> <span class="ow">in</span> <span class="n">task</span><span class="o">.</span><span class="n">get_stack</span><span class="p">():</span>
-            <span class="n">stack_list</span><span class="o">.</span><span class="n">extend</span><span class="p">(</span>
-                <span class="n">traceback</span><span class="o">.</span><span class="n">format_list</span><span class="p">(</span><span class="n">traceback</span><span class="o">.</span><span class="n">extract_stack</span><span class="p">(</span><span class="n">stack</span><span class="p">))</span>
-            <span class="p">)</span>
-        <span class="k">print</span><span class="p">(</span><span class="s1">&#39;asyncio task {}:&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">task</span><span class="p">))</span>
-        <span class="k">print</span><span class="p">(</span><span class="s1">&#39;&#39;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">stack_list</span><span class="p">))</span>
-
-
-<span class="k">if</span> <span class="n">__name__</span> <span class="o">==</span> <span class="s1">&#39;__main__&#39;</span><span class="p">:</span>
-    <span class="n">event_loop</span> <span class="o">=</span> <span class="n">asyncio</span><span class="o">.</span><span class="n">get_event_loop</span><span class="p">()</span>
-    <span class="k">try</span><span class="p">:</span>
-        <span class="n">tasks</span> <span class="o">=</span> <span class="p">[</span><span class="n">foo</span><span class="p">(),</span> <span class="n">bar</span><span class="p">(),</span> <span class="n">get_traceback</span><span class="p">(</span><span class="n">event_loop</span><span class="p">)]</span>
-        <span class="n">event_loop</span><span class="o">.</span><span class="n">run_until_complete</span><span class="p">(</span><span class="n">asyncio</span><span class="o">.</span><span class="n">wait</span><span class="p">(</span><span class="n">tasks</span><span class="p">))</span>
-    <span class="k">finally</span><span class="p">:</span>
-        <span class="n">event_loop</span><span class="o">.</span><span class="n">close</span><span class="p">()</span>
-</pre></div>
-<p>运行结果如下:</p>
-<pre class="literal-block">
-bar
-foo
-bar
-foo
-asyncio task &lt;Task pending coro=&lt;wait() running at /xxx/lib/python3.6/asyncio/tasks.py:307&gt; wait_for=&lt;Future pending cb=[&lt;TaskWakeupMethWrapper object at 0x10c57c258&gt;()]&gt; cb=[_run_until_complete_cb() at /xxx/lib/python3.6/asyncio/base_events.py:176]&gt;:
-  File &quot;/xxx/lib/python3.6/asyncio/tasks.py&quot;, line 307, in wait
-    return (yield from _wait(fs, timeout, return_when, loop))
-
-asyncio task &lt;Task pending coro=&lt;bar() running at test.py:16&gt; wait_for=&lt;Future pending cb=[&lt;TaskWakeupMethWrapper object at 0x10c57c378&gt;()]&gt; cb=[_wait.&lt;locals&gt;._on_completion() at /xxx/lib/python3.6/asyncio/tasks.py:374]&gt;:
-  File &quot;test.py&quot;, line 16, in bar
-    await asyncio.sleep(x * 20)
-
-asyncio task &lt;Task pending coro=&lt;get_traceback() running at test.py:27&gt; cb=[_wait.&lt;locals&gt;._on_completion() at /xxx/lib/python3.6/asyncio/tasks.py:374]&gt;:
-  File &quot;test.py&quot;, line 35, in &lt;module&gt;
-    event_loop.run_until_complete(asyncio.wait(tasks))
-  File &quot;test.py&quot;, line 35, in &lt;module&gt;
-    event_loop.run_until_complete(asyncio.wait(tasks))
-  File &quot;/xxx/lib/python3.6/asyncio/base_events.py&quot;, line 454, in run_until_complete
-    self.run_forever()
-  File &quot;test.py&quot;, line 35, in &lt;module&gt;
-    event_loop.run_until_complete(asyncio.wait(tasks))
-  File &quot;/xxx/lib/python3.6/asyncio/base_events.py&quot;, line 454, in run_until_complete
-    self.run_forever()
-  File &quot;/xxx/lib/python3.6/asyncio/base_events.py&quot;, line 421, in run_forever
-    self._run_once()
-  File &quot;test.py&quot;, line 35, in &lt;module&gt;
-    event_loop.run_until_complete(asyncio.wait(tasks))
-  File &quot;/xxx/lib/python3.6/asyncio/base_events.py&quot;, line 454, in run_until_complete
-    self.run_forever()
-  File &quot;/xxx/lib/python3.6/asyncio/base_events.py&quot;, line 421, in run_forever
-    self._run_once()
-  File &quot;/xxx/lib/python3.6/asyncio/base_events.py&quot;, line 1425, in _run_once
-    handle._run()
-  File &quot;test.py&quot;, line 35, in &lt;module&gt;
-    event_loop.run_until_complete(asyncio.wait(tasks))
-  File &quot;/xxx/lib/python3.6/asyncio/base_events.py&quot;, line 454, in run_until_complete
-    self.run_forever()
-  File &quot;/xxx/lib/python3.6/asyncio/base_events.py&quot;, line 421, in run_forever
-    self._run_once()
-  File &quot;/xxx/lib/python3.6/asyncio/base_events.py&quot;, line 1425, in _run_once
-    handle._run()
-  File &quot;/xxx/lib/python3.6/asyncio/events.py&quot;, line 126, in _run
-    self._callback(*self._args)
-  File &quot;test.py&quot;, line 35, in &lt;module&gt;
-    event_loop.run_until_complete(asyncio.wait(tasks))
-  File &quot;/xxx/lib/python3.6/asyncio/base_events.py&quot;, line 454, in run_until_complete
-    self.run_forever()
-  File &quot;/xxx/lib/python3.6/asyncio/base_events.py&quot;, line 421, in run_forever
-    self._run_once()
-  File &quot;/xxx/lib/python3.6/asyncio/base_events.py&quot;, line 1425, in _run_once
-    handle._run()
-  File &quot;/xxx/lib/python3.6/asyncio/events.py&quot;, line 126, in _run
-    self._callback(*self._args)
-  File &quot;test.py&quot;, line 25, in get_traceback
-    traceback.format_list(traceback.extract_stack(stack))
-
-asyncio task &lt;Task pending coro=&lt;foo() running at test.py:9&gt; wait_for=&lt;Future pending cb=[&lt;TaskWakeupMethWrapper object at 0x10c57c3d8&gt;()]&gt; cb=[_wait.&lt;locals&gt;._on_completion() at /xxx/lib/python3.6/asyncio/tasks.py:374]&gt;:
-  File &quot;test.py&quot;, line 9, in foo
-    await asyncio.sleep(x * 10)
-</pre>
-<p>知道了获取 traceback 信息的方法后有啥用呢？traceback 信息对我们调试程序有非常大的帮助，尤其是调试运行中的进程。</p>
-<p>如果觉得 traceback 信息里包含的东西有点少的话，可以对 traceback 进行加工：
-使用 <a class="reference external" href="https://github.com/getsentry/raven-python">raven</a> 展开 traceback 信息，并把这些信息发送到 <a class="reference external" href="https://sentry.io/">sentry</a> 。</p>
-</div>
-<div class="section" id="raven-traceback">
-<h2 id="hidraven-traceback">使用 raven 展开和收集 traceback 信息<a class="headerlink" href="#hidraven-traceback" title="Permalink to this headline">¶</a></h2>
-<p>通过 <a class="reference external" href="https://github.com/getsentry/raven-python">raven</a> 可以获取 traceback 信息中的源代码及局部变量，
-这些信息对应快速诊断问题非常的有帮助。同时我们还可以通过 <a class="reference external" href="https://github.com/getsentry/raven-python">raven</a> 把信息发送到
-<a class="reference external" href="https://sentry.io/">sentry</a> 中方便归档及可视化查看 traceback 信息。</p>
-<p>测试程序：</p>
-<div class="highlight"><pre><span></span><span class="kn">import</span> <span class="nn">sys</span>
-<span class="kn">import</span> <span class="nn">threading</span>
-<span class="kn">import</span> <span class="nn">time</span>
-<span class="kn">import</span> <span class="nn">traceback</span>
-
-<span class="kn">from</span> <span class="nn">raven</span> <span class="kn">import</span> <span class="n">Client</span>
-<span class="kn">from</span> <span class="nn">raven.utils.stacks</span> <span class="kn">import</span> <span class="n">get_stack_info</span>
-
-
-<span class="k">def</span> <span class="nf">foo</span><span class="p">(</span><span class="n">n</span><span class="p">):</span>
-    <span class="k">while</span> <span class="bp">True</span><span class="p">:</span>
-        <span class="k">for</span> <span class="n">x</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">n</span><span class="p">):</span>
-            <span class="k">print</span><span class="p">(</span><span class="s1">&#39;foo&#39;</span><span class="p">)</span>
-            <span class="n">time</span><span class="o">.</span><span class="n">sleep</span><span class="p">(</span><span class="n">x</span> <span class="o">*</span> <span class="mf">0.5</span><span class="p">)</span>
-
-
-<span class="k">def</span> <span class="nf">bar</span><span class="p">():</span>
-    <span class="n">foo</span><span class="p">(</span><span class="mi">233</span><span class="p">)</span>
-
-
-<span class="k">def</span> <span class="nf">main</span><span class="p">():</span>
-    <span class="n">t</span> <span class="o">=</span> <span class="n">threading</span><span class="o">.</span><span class="n">Thread</span><span class="p">(</span><span class="n">target</span><span class="o">=</span><span class="n">bar</span><span class="p">,</span> <span class="n">name</span><span class="o">=</span><span class="s1">&#39;bar&#39;</span><span class="p">)</span>
-    <span class="k">return</span> <span class="n">t</span>
-
-
-<span class="k">def</span> <span class="nf">get_traceback</span><span class="p">(</span><span class="n">raven_client</span><span class="p">):</span>
-    <span class="n">id2thread</span> <span class="o">=</span> <span class="p">{}</span>
-    <span class="k">for</span> <span class="n">thread</span> <span class="ow">in</span> <span class="n">threading</span><span class="o">.</span><span class="n">enumerate</span><span class="p">():</span>
-        <span class="n">id2thread</span><span class="p">[</span><span class="n">thread</span><span class="o">.</span><span class="n">ident</span><span class="p">]</span> <span class="o">=</span> <span class="n">thread</span>
-    <span class="k">for</span> <span class="n">thread_id</span><span class="p">,</span> <span class="n">stack</span> <span class="ow">in</span> <span class="n">sys</span><span class="o">.</span><span class="n">_current_frames</span><span class="p">()</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
-        <span class="n">frames</span> <span class="o">=</span> <span class="n">traceback</span><span class="o">.</span><span class="n">walk_stack</span><span class="p">(</span><span class="n">stack</span><span class="p">)</span>
-        <span class="n">stacktrace</span> <span class="o">=</span> <span class="n">get_stack_info</span><span class="p">(</span><span class="n">frames</span><span class="p">)</span>
-        <span class="n">thread</span> <span class="o">=</span> <span class="n">id2thread</span><span class="p">[</span><span class="n">thread_id</span><span class="p">]</span>
-        <span class="k">print</span><span class="p">(</span><span class="s1">&#39;thread: {}&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">thread</span><span class="p">))</span>
-        <span class="k">print</span><span class="p">(</span><span class="n">raven_client</span><span class="o">.</span><span class="n">captureMessage</span><span class="p">(</span>
-            <span class="s1">&#39;traceback from {}&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">thread</span><span class="p">),</span>
-            <span class="n">stack</span><span class="o">=</span><span class="bp">True</span><span class="p">,</span>
-            <span class="n">data</span><span class="o">=</span><span class="p">{</span>
-                <span class="s1">&#39;stacktrace&#39;</span><span class="p">:</span> <span class="n">stacktrace</span><span class="p">,</span>
-            <span class="p">},</span>
-            <span class="n">extra</span><span class="o">=</span><span class="p">{</span>
-                <span class="s1">&#39;thread&#39;</span><span class="p">:</span> <span class="n">thread</span><span class="p">,</span>
-            <span class="p">}</span>
-        <span class="p">))</span>
-
-
-<span class="k">if</span> <span class="n">__name__</span> <span class="o">==</span> <span class="s1">&#39;__main__&#39;</span><span class="p">:</span>
-    <span class="n">raven_client</span> <span class="o">=</span> <span class="n">Client</span><span class="p">()</span>
-    <span class="n">t</span> <span class="o">=</span> <span class="n">main</span><span class="p">()</span>
-    <span class="n">t</span><span class="o">.</span><span class="n">start</span><span class="p">()</span>
-    <span class="n">time</span><span class="o">.</span><span class="n">sleep</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span>
-    <span class="n">get_traceback</span><span class="p">(</span><span class="n">raven_client</span><span class="p">)</span>
-    <span class="n">t</span><span class="o">.</span><span class="n">join</span><span class="p">()</span>
-</pre></div>
-<p>测试结果：</p>
-<pre class="literal-block">
-$ python test2.py
-foo
-foo
-foo
-thread: &lt;Thread(bar, started 123145482194944)&gt;
-e800cefdc2ce4a00bb716b8342c75a96
-thread: &lt;_MainThread(MainThread, started 140736955184064)&gt;
-86b0cb00d5884cb49ba033d83e21040f
-foo
-foo
-</pre>
-<p>sentry 上的信息:</p>
-<p><img alt="sentry" src="/static/images/python/sentry-traceback-233.jpg" /></p>
-</div>
-<div class="section" id="id1">
-<h2 id="hidid1">参考资料<a class="headerlink" href="#hidid1" title="Permalink to this headline">¶</a></h2>
-<ul class="simple">
-<li><a class="reference external" href="https://docs.python.org/3/library/threading.html#threading.enumerate">17.1. threading — Thread-based parallelism — Python 3.6.4rc1 documentation</a></li>
-<li><a class="reference external" href="https://docs.python.org/3/library/sys.html#sys._current_frames">29.1. sys — System-specific parameters and functions — Python 3.6.4rc1 documentation</a></li>
-<li><a class="reference external" href="https://docs.python.org/3/library/traceback.html#module-traceback">29.9. traceback — Print or retrieve a stack traceback — Python 3.6.4rc1 documentation</a></li>
-<li><a class="reference external" href="https://greenlet.readthedocs.io/en/latest/#methods-and-attributes-of-greenlets">greenlet: Lightweight concurrent programming — greenlet 0.4.0 documentation</a></li>
-<li><a class="reference external" href="https://docs.python.org/3/library/gc.html#gc.get_objects">29.11. gc — Garbage Collector interface — Python 3.6.4rc1 documentation</a></li>
-<li><a class="reference external" href="https://docs.python.org/3/library/asyncio-task.html#task">18.5.3. Tasks and coroutines — Python 3.6.4rc1 documentation</a></li>
-<li><a class="reference external" href="https://github.com/getsentry/raven-python">getsentry/raven-python: Raven is a Python client for Sentry (getsentry.com)</a></li>
-</ul>
-</div>
-",
-        "mainEntityOfPage": {
-            "@type": "WebPage",
-            "@id": "https://mozillazg.com"
-        }
+        "image": [
+            "https://mozillazg.com/static/avatar.jpeg"
+         ],
+        "keywords": "python, debug",
+        "datePublished": "2017-12-10"
     }
     </script>
 
@@ -879,10 +526,10 @@ foo
 <section class="well" id="related-posts">
     <p>Related Posts:</p>
     <ul>
-        <li><a href="https://mozillazg.com/2020/04/nsenter-usage.html">nsenter 常用操作</a></li>
         <li><a href="https://mozillazg.com/2020/04/use-tcpdump-for-a-container-but-outside-container.html">一个在容器外用 tcpdump 命令对容器内的网络请求抓包的方法</a></li>
-        <li><a href="https://mozillazg.com/2019/03/linux-debug-with-strace-cookbook-examples.html">strace 常用操作</a></li>
+        <li><a href="https://mozillazg.com/2017/07/debug-running-python-process-with-gdb.html">使用 gdb 调试运行中的 Python 进程</a></li>
         <li><a href="https://mozillazg.com/2017/12/python-use-faulthandler-to-debug-running-process-with-dumping-traceback.html">Python: 使用 faulthandler 模块获取运行中进程的 traceback 信息</a></li>
+        <li><a href="https://mozillazg.com/2018/07/python-some-ways-to-debug-running-process.html">Python: 调试运行中进程的几种方法（总结）</a></li>
         <li><a href="https://mozillazg.com/2019/05/go-read-and-understand-info-from-stack-trace-traceback.html">Go: traceback 中包含的信息</a></li>
     </ul>
 </section>

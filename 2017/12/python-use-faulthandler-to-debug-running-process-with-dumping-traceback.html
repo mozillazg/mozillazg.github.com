@@ -16,7 +16,7 @@
 <link rel="canonical" href="https://mozillazg.com/2017/12/python-use-faulthandler-to-debug-running-process-with-dumping-traceback.html">
 
         <meta name="author" content="mozillazg" />
-        <meta name="keywords" content="debug,faulthandler" />
+        <meta name="keywords" content="python,debug,faulthandler" />
     <meta name="description" content="Python 3.3 新增了一个 faulthandler 模块，可以输出运行中进程的 traceback 信息，可以用来作为调试运行中的 Python 进程的一种手段。 特点及限制¶ 模块本身是使用 C 实现的，所以有如下特点和限制： 特点¶ 在 Segmentation fault 或者 Python 死锁时仍然可以输出 traceback 信息 限制¶ 只能用于信号安全的函数 只支持 ASCII 字符。程序使用 backslashreplace 作为编码时的 error handler 每个字符串最长只能包含 500 个字符 只显示文件名，函数名和行号（不显示源码） 最大支持 100 个 frame 和 100 个线程 显示顺序是翻转的：最近的调用显示在前面 安装¶ Python 3.3 自带了这个模块，Python 2.x 可以通过一下方式安装: pip install faulthandler 使用示例¶ 手动输出 traceback 信息¶ 测试函数: from threading import Thread import time def do(x): x = x * 3 time.sleep(x * 60) def main(): threads = [] for x in range(1, 3): t = Thread(target=do, args=(x,)) t.start() for x in threads: x.join() 使用 faulthandler 输出所有线程的 traceback 信息: In [1]: import test In [2]: test.main() In [3]: import faulthandler In [4]: faulthandler.dump_traceback() Thread 0x0000700009d66000 (most recent call first): File &#34;/Users/xxx/tmp/test_faulthandler/test.py&#34;, line 7 in do File &#34;/xxx/lib/python3.6/threading.py&#34;, line 864 in run File &#34;/xxx/lib/python3.6/threading.py&#34;, line 916 in _bootstrap_inner File &#34;/xxx/lib/python3.6/threading.py&#34;, line 884 in _bootstrap Thread 0x0000700009863000 (most recent call first): File &#34;/Users/xxx/tmp/test_faulthandler/test.py&#34;, line 7 in do File &#34;/xxx/lib/python3.6/threading.py&#34;, line 864 in run File &#34;/xxx/lib/python3.6/threading.py&#34;, line 916 in _bootstrap_inner File &#34;/xxx/lib/python3.6/threading.py&#34;, line 884 in _bootstrap Thread 0x0000700009360000 (most recent call first): File &#34;/xxx/lib/python3.6/threading.py&#34;, line 295 in wait File &#34;/xxx/lib/python3.6/threading.py&#34;, line 551 in wait File &#34;/xxx/lib/python3.6/site-packages/IPython/core/history.py&#34;, line 834 in run File &#34;/xxx/lib/python3.6/site-packages/IPython/core/history.py&#34;, line 60 in needs_sqlite File &#34;&lt;decorator-gen-23&gt;&#34;, line 2 in run File &#34;/xxx/lib/python3.6/threading.py&#34;, line 916 in _bootstrap_inner File &#34;/xxx/lib/python3.6/threading.py&#34;, line 884 in _bootstrap Current thread 0x00007fffe03873c0 (most recent call first): File &#34;&lt;ipython-input-4-6b8299023d33&gt;&#34;, line 1 in &lt;module&gt; File &#34;/xxx/lib/python3.6/site-packages/IPython/core/interactiveshell.py&#34;, line 2881 in run_code File &#34;/xxx/lib/python3.6/site-packages/IPython/core/interactiveshell.py&#34;, line 2827 in run_ast_nodes File &#34;/xxx/lib/python3.6/site-packages/IPython/core/interactiveshell.py&#34;, line 2717 in run_cell File &#34;/xxx/lib/python3.6/site-packages/IPython/terminal/interactiveshell.py&#34;, line 446 in interact File &#34;/xxx/lib/python3.6/site-packages/IPython/terminal/interactiveshell.py&#34;, line 455 in mainloop File &#34;/xxx/lib/python3.6/site-packages/IPython/terminal/ipapp.py&#34;, line 348 in start File &#34;/xxx/lib/python3.6/site-packages/traitlets/config/application.py&#34;, line 658 in launch_instance File &#34;/xxx/lib/python3.6/site-packages/IPython/__init__.py&#34;, line 119 in start_ipython File &#34;/xxx/bin/ipython&#34;, line 11 in &lt;module&gt; In [5]: 可以通过 all_threads=False 参数指定只输出当前线程， file=sys.stderr 参数指定输出到哪里（默认是标准错误）， 详见 faulthandler 官方文档。 通过信号自动输出 traceback 信息¶ 给前面的测试函数增加信号处理，增加通过 USR1 信号输出 traceback 信息的功能： import faulthandler import signal from threading import Thread import time def do(x): x = x * 3 time.sleep(x * 60) def main(): threads = [] for x in range(1, 3): t = Thread(target=do, args=(x,)) t.start() for x in threads: x.join() if __name__ == &#39;__main__&#39;: faulthandler.register(signal.SIGUSR1) main() 运行程序，然后就可以通过向进程发送 USR1 信号来获取运行中进程的 traceback 信息了: $ python test.py &amp; [1] 21924 $ kill -s USR1 21924 Thread 0x0000700001c03000 (most recent call first): File &#34;test.py&#34;, line 9 in do File &#34;/xxx/lib/python3.6/threading.py&#34;, line 864 in run File &#34;/xxx/lib/python3.6/threading.py&#34;, line 916 in _bootstrap_inner File &#34;/xxx/lib/python3.6/threading.py&#34;, line 884 in _bootstrap Thread 0x0000700001700000 (most recent call first): File &#34;test.py&#34;, line 9 in do File &#34;/xxx/lib/python3.6/threading.py&#34;, line 864 in run File &#34;/xxx/lib/python3.6/threading.py&#34;, line 916 in _bootstrap_inner File &#34;/xxx/lib/python3.6/threading.py&#34;, line 884 in _bootstrap Current thread 0x00007fffe03873c0 (most recent call first): File &#34;/xxx/lib/python3.6/threading.py&#34;, line 1072 in _wait_for_tstate_lock File &#34;/xxx/lib/python3.6/threading.py&#34;, line 1056 in join File &#34;/xxx/lib/python3.6/threading.py&#34;, line 1290 in _shutdown 更多用法以及其他的信息请阅读 官方文档 。 参考资料¶ 27.2. faulthandler — Dump the Python traceback — Python 3.6.4rc1 documentation vstinner/faulthandler: Fault handler for Python: display the Python backtrace on SIGSEGV, SIGFPE, SIGABRT, SIGBUS and SIGILL signals" />
     <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-4941850466486001"
      crossorigin="anonymous"></script>
@@ -41,6 +41,7 @@
         <meta property="og:description" content="Python 3.3 新增了一个 faulthandler 模块，可以输出运行中进程的 traceback 信息，可以用来作为调试运行中的 Python 进程的一种手段。 特点及限制¶ 模块本身是使用 C 实现的，所以有如下特点和限制： 特点¶ 在 Segmentation fault 或者 Python 死锁时仍然可以输出 traceback 信息 限制¶ 只能用于信号安全的函数 只支持 ASCII 字符。程序使用 backslashreplace 作为编码时的 error handler 每个字符串最长只能包含 500 个字符 只显示文件名，函数名和行号（不显示源码） 最大支持 100 个 frame 和 100 个线程 显示顺序是翻转的：最近的调用显示在前面 安装¶ Python 3.3 自带了这个模块，Python 2.x 可以通过一下方式安装: pip install faulthandler 使用示例¶ 手动输出 traceback 信息¶ 测试函数: from threading import Thread import time def do(x): x = x * 3 time.sleep(x * 60) def main(): threads = [] for x in range(1, 3): t = Thread(target=do, args=(x,)) t.start() for x in threads: x.join() 使用 faulthandler 输出所有线程的 traceback 信息: In [1]: import test In [2]: test.main() In [3]: import faulthandler In [4]: faulthandler.dump_traceback() Thread 0x0000700009d66000 (most recent call first): File &#34;/Users/xxx/tmp/test_faulthandler/test.py&#34;, line 7 in do File &#34;/xxx/lib/python3.6/threading.py&#34;, line 864 in run File &#34;/xxx/lib/python3.6/threading.py&#34;, line 916 in _bootstrap_inner File &#34;/xxx/lib/python3.6/threading.py&#34;, line 884 in _bootstrap Thread 0x0000700009863000 (most recent call first): File &#34;/Users/xxx/tmp/test_faulthandler/test.py&#34;, line 7 in do File &#34;/xxx/lib/python3.6/threading.py&#34;, line 864 in run File &#34;/xxx/lib/python3.6/threading.py&#34;, line 916 in _bootstrap_inner File &#34;/xxx/lib/python3.6/threading.py&#34;, line 884 in _bootstrap Thread 0x0000700009360000 (most recent call first): File &#34;/xxx/lib/python3.6/threading.py&#34;, line 295 in wait File &#34;/xxx/lib/python3.6/threading.py&#34;, line 551 in wait File &#34;/xxx/lib/python3.6/site-packages/IPython/core/history.py&#34;, line 834 in run File &#34;/xxx/lib/python3.6/site-packages/IPython/core/history.py&#34;, line 60 in needs_sqlite File &#34;&lt;decorator-gen-23&gt;&#34;, line 2 in run File &#34;/xxx/lib/python3.6/threading.py&#34;, line 916 in _bootstrap_inner File &#34;/xxx/lib/python3.6/threading.py&#34;, line 884 in _bootstrap Current thread 0x00007fffe03873c0 (most recent call first): File &#34;&lt;ipython-input-4-6b8299023d33&gt;&#34;, line 1 in &lt;module&gt; File &#34;/xxx/lib/python3.6/site-packages/IPython/core/interactiveshell.py&#34;, line 2881 in run_code File &#34;/xxx/lib/python3.6/site-packages/IPython/core/interactiveshell.py&#34;, line 2827 in run_ast_nodes File &#34;/xxx/lib/python3.6/site-packages/IPython/core/interactiveshell.py&#34;, line 2717 in run_cell File &#34;/xxx/lib/python3.6/site-packages/IPython/terminal/interactiveshell.py&#34;, line 446 in interact File &#34;/xxx/lib/python3.6/site-packages/IPython/terminal/interactiveshell.py&#34;, line 455 in mainloop File &#34;/xxx/lib/python3.6/site-packages/IPython/terminal/ipapp.py&#34;, line 348 in start File &#34;/xxx/lib/python3.6/site-packages/traitlets/config/application.py&#34;, line 658 in launch_instance File &#34;/xxx/lib/python3.6/site-packages/IPython/__init__.py&#34;, line 119 in start_ipython File &#34;/xxx/bin/ipython&#34;, line 11 in &lt;module&gt; In [5]: 可以通过 all_threads=False 参数指定只输出当前线程， file=sys.stderr 参数指定输出到哪里（默认是标准错误）， 详见 faulthandler 官方文档。 通过信号自动输出 traceback 信息¶ 给前面的测试函数增加信号处理，增加通过 USR1 信号输出 traceback 信息的功能： import faulthandler import signal from threading import Thread import time def do(x): x = x * 3 time.sleep(x * 60) def main(): threads = [] for x in range(1, 3): t = Thread(target=do, args=(x,)) t.start() for x in threads: x.join() if __name__ == &#39;__main__&#39;: faulthandler.register(signal.SIGUSR1) main() 运行程序，然后就可以通过向进程发送 USR1 信号来获取运行中进程的 traceback 信息了: $ python test.py &amp; [1] 21924 $ kill -s USR1 21924 Thread 0x0000700001c03000 (most recent call first): File &#34;test.py&#34;, line 9 in do File &#34;/xxx/lib/python3.6/threading.py&#34;, line 864 in run File &#34;/xxx/lib/python3.6/threading.py&#34;, line 916 in _bootstrap_inner File &#34;/xxx/lib/python3.6/threading.py&#34;, line 884 in _bootstrap Thread 0x0000700001700000 (most recent call first): File &#34;test.py&#34;, line 9 in do File &#34;/xxx/lib/python3.6/threading.py&#34;, line 864 in run File &#34;/xxx/lib/python3.6/threading.py&#34;, line 916 in _bootstrap_inner File &#34;/xxx/lib/python3.6/threading.py&#34;, line 884 in _bootstrap Current thread 0x00007fffe03873c0 (most recent call first): File &#34;/xxx/lib/python3.6/threading.py&#34;, line 1072 in _wait_for_tstate_lock File &#34;/xxx/lib/python3.6/threading.py&#34;, line 1056 in join File &#34;/xxx/lib/python3.6/threading.py&#34;, line 1290 in _shutdown 更多用法以及其他的信息请阅读 官方文档 。 参考资料¶ 27.2. faulthandler — Dump the Python traceback — Python 3.6.4rc1 documentation vstinner/faulthandler: Fault handler for Python: display the Python backtrace on SIGSEGV, SIGFPE, SIGABRT, SIGBUS and SIGILL signals"/>
         <meta property="article:published_time" content="2017-12-09" />
             <meta property="article:section" content="python" />
+            <meta property="article:tag" content="python" />
             <meta property="article:tag" content="debug" />
             <meta property="article:tag" content="faulthandler" />
             <meta property="article:author" content="mozillazg" />
@@ -77,7 +78,7 @@
     <script type="application/ld+json">
     {
         "@context": "https://schema.org",
-        "@type": "Website",
+        "@type": "BlogPosting",
         "publisher": {
             "@type": "Person",
             "name": "mozillazg",
@@ -90,175 +91,13 @@
             "url": "https://mozillazg.com",
             "sameAs": []
         },
-        // "headline": "",
+        "headline": "Python: 使用 faulthandler 模块获取运行中进程的 traceback 信息",
         "url": "https://mozillazg.com/2017/12/python-use-faulthandler-to-debug-running-process-with-dumping-traceback.html",
-        "datePublished": "2017-12-09",
-        // "dateModified": "",
-        "image": "https://mozillazg.com/static/avatar.jpeg",
-        "keywords": "debug, faulthandler",
-        // "description": "Python 3.3 新增了一个 faulthandler 模块，可以输出运行中进程的 traceback 信息，可以用来作为调试运行中的 Python 进程的一种手段。 特点及限制¶ 模块本身是使用 C 实现的，所以有如下特点和限制： 特点¶ 在 Segmentation fault 或者 Python 死锁时仍然可以输出 traceback 信息 限制¶ 只能用于信号安全的函数 只支持 ASCII 字符。程序使用 backslashreplace 作为编码时的 error handler 每个字符串最长只能包含 500 个字符 只显示文件名，函数名和行号（不显示源码） 最大支持 100 个 frame 和 100 个线程 显示顺序是翻转的：最近的调用显示在前面 安装¶ Python 3.3 自带了这个模块，Python 2.x 可以通过一下方式安装: pip install faulthandler 使用示例¶ 手动输出 traceback 信息¶ 测试函数: from threading import Thread import time def do(x): x = x * 3 time.sleep(x * 60) def main(): threads = [] for x in range(1, 3): t = Thread(target=do, args=(x,)) t.start() for x in threads: x.join() 使用 faulthandler 输出所有线程的 traceback 信息: In [1]: import test In [2]: test.main() In [3]: import faulthandler In [4]: faulthandler.dump_traceback() Thread 0x0000700009d66000 (most recent call first): File &#34;/Users/xxx/tmp/test_faulthandler/test.py&#34;, line 7 in do File &#34;/xxx/lib/python3.6/threading.py&#34;, line 864 in run File &#34;/xxx/lib/python3.6/threading.py&#34;, line 916 in _bootstrap_inner File &#34;/xxx/lib/python3.6/threading.py&#34;, line 884 in _bootstrap Thread 0x0000700009863000 (most recent call first): File &#34;/Users/xxx/tmp/test_faulthandler/test.py&#34;, line 7 in do File &#34;/xxx/lib/python3.6/threading.py&#34;, line 864 in run File &#34;/xxx/lib/python3.6/threading.py&#34;, line 916 in _bootstrap_inner File &#34;/xxx/lib/python3.6/threading.py&#34;, line 884 in _bootstrap Thread 0x0000700009360000 (most recent call first): File &#34;/xxx/lib/python3.6/threading.py&#34;, line 295 in wait File &#34;/xxx/lib/python3.6/threading.py&#34;, line 551 in wait File &#34;/xxx/lib/python3.6/site-packages/IPython/core/history.py&#34;, line 834 in run File &#34;/xxx/lib/python3.6/site-packages/IPython/core/history.py&#34;, line 60 in needs_sqlite File &#34;&lt;decorator-gen-23&gt;&#34;, line 2 in run File &#34;/xxx/lib/python3.6/threading.py&#34;, line 916 in _bootstrap_inner File &#34;/xxx/lib/python3.6/threading.py&#34;, line 884 in _bootstrap Current thread 0x00007fffe03873c0 (most recent call first): File &#34;&lt;ipython-input-4-6b8299023d33&gt;&#34;, line 1 in &lt;module&gt; File &#34;/xxx/lib/python3.6/site-packages/IPython/core/interactiveshell.py&#34;, line 2881 in run_code File &#34;/xxx/lib/python3.6/site-packages/IPython/core/interactiveshell.py&#34;, line 2827 in run_ast_nodes File &#34;/xxx/lib/python3.6/site-packages/IPython/core/interactiveshell.py&#34;, line 2717 in run_cell File &#34;/xxx/lib/python3.6/site-packages/IPython/terminal/interactiveshell.py&#34;, line 446 in interact File &#34;/xxx/lib/python3.6/site-packages/IPython/terminal/interactiveshell.py&#34;, line 455 in mainloop File &#34;/xxx/lib/python3.6/site-packages/IPython/terminal/ipapp.py&#34;, line 348 in start File &#34;/xxx/lib/python3.6/site-packages/traitlets/config/application.py&#34;, line 658 in launch_instance File &#34;/xxx/lib/python3.6/site-packages/IPython/__init__.py&#34;, line 119 in start_ipython File &#34;/xxx/bin/ipython&#34;, line 11 in &lt;module&gt; In [5]: 可以通过 all_threads=False 参数指定只输出当前线程， file=sys.stderr 参数指定输出到哪里（默认是标准错误）， 详见 faulthandler 官方文档。 通过信号自动输出 traceback 信息¶ 给前面的测试函数增加信号处理，增加通过 USR1 信号输出 traceback 信息的功能： import faulthandler import signal from threading import Thread import time def do(x): x = x * 3 time.sleep(x * 60) def main(): threads = [] for x in range(1, 3): t = Thread(target=do, args=(x,)) t.start() for x in threads: x.join() if __name__ == &#39;__main__&#39;: faulthandler.register(signal.SIGUSR1) main() 运行程序，然后就可以通过向进程发送 USR1 信号来获取运行中进程的 traceback 信息了: $ python test.py &amp; [1] 21924 $ kill -s USR1 21924 Thread 0x0000700001c03000 (most recent call first): File &#34;test.py&#34;, line 9 in do File &#34;/xxx/lib/python3.6/threading.py&#34;, line 864 in run File &#34;/xxx/lib/python3.6/threading.py&#34;, line 916 in _bootstrap_inner File &#34;/xxx/lib/python3.6/threading.py&#34;, line 884 in _bootstrap Thread 0x0000700001700000 (most recent call first): File &#34;test.py&#34;, line 9 in do File &#34;/xxx/lib/python3.6/threading.py&#34;, line 864 in run File &#34;/xxx/lib/python3.6/threading.py&#34;, line 916 in _bootstrap_inner File &#34;/xxx/lib/python3.6/threading.py&#34;, line 884 in _bootstrap Current thread 0x00007fffe03873c0 (most recent call first): File &#34;/xxx/lib/python3.6/threading.py&#34;, line 1072 in _wait_for_tstate_lock File &#34;/xxx/lib/python3.6/threading.py&#34;, line 1056 in join File &#34;/xxx/lib/python3.6/threading.py&#34;, line 1290 in _shutdown 更多用法以及其他的信息请阅读 官方文档 。 参考资料¶ 27.2. faulthandler — Dump the Python traceback — Python 3.6.4rc1 documentation vstinner/faulthandler: Fault handler for Python: display the Python backtrace on SIGSEGV, SIGFPE, SIGABRT, SIGBUS and SIGILL signals",
-        "description": "<p>Python 3.3 新增了一个 <a class="reference external" href="https://docs.python.org/3/library/faulthandler.html">faulthandler</a> 模块，可以输出运行中进程的 traceback 信息，可以用来作为调试运行中的 Python 进程的一种手段。</p>
-<div class="section" id="id1">
-<h2 id="hidid1">特点及限制<a class="headerlink" href="#hidid1" title="Permalink to this headline">¶</a></h2>
-<p>模块本身是使用 C 实现的，所以有如下特点和限制：</p>
-<div class="section" id="id2">
-<h3 id="hidid2">特点<a class="headerlink" href="#hidid2" title="Permalink to this headline">¶</a></h3>
-<ul class="simple">
-<li>在 Segmentation fault 或者 Python 死锁时仍然可以输出 traceback 信息</li>
-</ul>
-</div>
-<div class="section" id="id3">
-<h3 id="hidid3">限制<a class="headerlink" href="#hidid3" title="Permalink to this headline">¶</a></h3>
-<ul class="simple">
-<li>只能用于信号安全的函数</li>
-<li>只支持 ASCII 字符。程序使用 <tt class="docutils literal">backslashreplace</tt> 作为编码时的 error handler</li>
-<li>每个字符串最长只能包含 500 个字符</li>
-<li>只显示文件名，函数名和行号（不显示源码）</li>
-<li>最大支持 100 个 frame 和 100 个线程</li>
-<li>显示顺序是翻转的：最近的调用显示在前面</li>
-</ul>
-</div>
-</div>
-<div class="section" id="id4">
-<h2 id="hidid4">安装<a class="headerlink" href="#hidid4" title="Permalink to this headline">¶</a></h2>
-<p>Python 3.3 自带了这个模块，Python 2.x 可以通过一下方式安装:</p>
-<pre class="literal-block">
-pip install faulthandler
-</pre>
-</div>
-<div class="section" id="id5">
-<h2 id="hidid5">使用示例<a class="headerlink" href="#hidid5" title="Permalink to this headline">¶</a></h2>
-<div class="section" id="traceback">
-<h3 id="hidtraceback">手动输出 traceback 信息<a class="headerlink" href="#hidtraceback" title="Permalink to this headline">¶</a></h3>
-<p>测试函数:</p>
-<div class="highlight"><pre><span></span><span class="kn">from</span> <span class="nn">threading</span> <span class="kn">import</span> <span class="n">Thread</span>
-<span class="kn">import</span> <span class="nn">time</span>
-
-
-<span class="k">def</span> <span class="nf">do</span><span class="p">(</span><span class="n">x</span><span class="p">):</span>
-    <span class="n">x</span> <span class="o">=</span> <span class="n">x</span> <span class="o">*</span> <span class="mi">3</span>
-    <span class="n">time</span><span class="o">.</span><span class="n">sleep</span><span class="p">(</span><span class="n">x</span> <span class="o">*</span> <span class="mi">60</span><span class="p">)</span>
-
-
-<span class="k">def</span> <span class="nf">main</span><span class="p">():</span>
-    <span class="n">threads</span> <span class="o">=</span> <span class="p">[]</span>
-    <span class="k">for</span> <span class="n">x</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="mi">3</span><span class="p">):</span>
-        <span class="n">t</span> <span class="o">=</span> <span class="n">Thread</span><span class="p">(</span><span class="n">target</span><span class="o">=</span><span class="n">do</span><span class="p">,</span> <span class="n">args</span><span class="o">=</span><span class="p">(</span><span class="n">x</span><span class="p">,))</span>
-        <span class="n">t</span><span class="o">.</span><span class="n">start</span><span class="p">()</span>
-    <span class="k">for</span> <span class="n">x</span> <span class="ow">in</span> <span class="n">threads</span><span class="p">:</span>
-        <span class="n">x</span><span class="o">.</span><span class="n">join</span><span class="p">()</span>
-</pre></div>
-<p>使用 faulthandler 输出所有线程的 traceback 信息:</p>
-<div class="highlight"><pre><span></span><span class="n">In</span> <span class="p">[</span><span class="mi">1</span><span class="p">]:</span> <span class="kn">import</span> <span class="nn">test</span>
-
-<span class="n">In</span> <span class="p">[</span><span class="mi">2</span><span class="p">]:</span> <span class="n">test</span><span class="o">.</span><span class="n">main</span><span class="p">()</span>
-
-<span class="n">In</span> <span class="p">[</span><span class="mi">3</span><span class="p">]:</span> <span class="kn">import</span> <span class="nn">faulthandler</span>
-
-<span class="n">In</span> <span class="p">[</span><span class="mi">4</span><span class="p">]:</span> <span class="n">faulthandler</span><span class="o">.</span><span class="n">dump_traceback</span><span class="p">()</span>
-<span class="n">Thread</span> <span class="mh">0x0000700009d66000</span> <span class="p">(</span><span class="n">most</span> <span class="n">recent</span> <span class="n">call</span> <span class="n">first</span><span class="p">):</span>
-  <span class="n">File</span> <span class="s2">&quot;/Users/xxx/tmp/test_faulthandler/test.py&quot;</span><span class="p">,</span> <span class="n">line</span> <span class="mi">7</span> <span class="ow">in</span> <span class="n">do</span>
-  <span class="n">File</span> <span class="s2">&quot;/xxx/lib/python3.6/threading.py&quot;</span><span class="p">,</span> <span class="n">line</span> <span class="mi">864</span> <span class="ow">in</span> <span class="n">run</span>
-  <span class="n">File</span> <span class="s2">&quot;/xxx/lib/python3.6/threading.py&quot;</span><span class="p">,</span> <span class="n">line</span> <span class="mi">916</span> <span class="ow">in</span> <span class="n">_bootstrap_inner</span>
-  <span class="n">File</span> <span class="s2">&quot;/xxx/lib/python3.6/threading.py&quot;</span><span class="p">,</span> <span class="n">line</span> <span class="mi">884</span> <span class="ow">in</span> <span class="n">_bootstrap</span>
-
-<span class="n">Thread</span> <span class="mh">0x0000700009863000</span> <span class="p">(</span><span class="n">most</span> <span class="n">recent</span> <span class="n">call</span> <span class="n">first</span><span class="p">):</span>
-  <span class="n">File</span> <span class="s2">&quot;/Users/xxx/tmp/test_faulthandler/test.py&quot;</span><span class="p">,</span> <span class="n">line</span> <span class="mi">7</span> <span class="ow">in</span> <span class="n">do</span>
-  <span class="n">File</span> <span class="s2">&quot;/xxx/lib/python3.6/threading.py&quot;</span><span class="p">,</span> <span class="n">line</span> <span class="mi">864</span> <span class="ow">in</span> <span class="n">run</span>
-  <span class="n">File</span> <span class="s2">&quot;/xxx/lib/python3.6/threading.py&quot;</span><span class="p">,</span> <span class="n">line</span> <span class="mi">916</span> <span class="ow">in</span> <span class="n">_bootstrap_inner</span>
-  <span class="n">File</span> <span class="s2">&quot;/xxx/lib/python3.6/threading.py&quot;</span><span class="p">,</span> <span class="n">line</span> <span class="mi">884</span> <span class="ow">in</span> <span class="n">_bootstrap</span>
-
-<span class="n">Thread</span> <span class="mh">0x0000700009360000</span> <span class="p">(</span><span class="n">most</span> <span class="n">recent</span> <span class="n">call</span> <span class="n">first</span><span class="p">):</span>
-  <span class="n">File</span> <span class="s2">&quot;/xxx/lib/python3.6/threading.py&quot;</span><span class="p">,</span> <span class="n">line</span> <span class="mi">295</span> <span class="ow">in</span> <span class="n">wait</span>
-  <span class="n">File</span> <span class="s2">&quot;/xxx/lib/python3.6/threading.py&quot;</span><span class="p">,</span> <span class="n">line</span> <span class="mi">551</span> <span class="ow">in</span> <span class="n">wait</span>
-  <span class="n">File</span> <span class="s2">&quot;/xxx/lib/python3.6/site-packages/IPython/core/history.py&quot;</span><span class="p">,</span> <span class="n">line</span> <span class="mi">834</span> <span class="ow">in</span> <span class="n">run</span>
-  <span class="n">File</span> <span class="s2">&quot;/xxx/lib/python3.6/site-packages/IPython/core/history.py&quot;</span><span class="p">,</span> <span class="n">line</span> <span class="mi">60</span> <span class="ow">in</span> <span class="n">needs_sqlite</span>
-  <span class="n">File</span> <span class="s2">&quot;&lt;decorator-gen-23&gt;&quot;</span><span class="p">,</span> <span class="n">line</span> <span class="mi">2</span> <span class="ow">in</span> <span class="n">run</span>
-  <span class="n">File</span> <span class="s2">&quot;/xxx/lib/python3.6/threading.py&quot;</span><span class="p">,</span> <span class="n">line</span> <span class="mi">916</span> <span class="ow">in</span> <span class="n">_bootstrap_inner</span>
-  <span class="n">File</span> <span class="s2">&quot;/xxx/lib/python3.6/threading.py&quot;</span><span class="p">,</span> <span class="n">line</span> <span class="mi">884</span> <span class="ow">in</span> <span class="n">_bootstrap</span>
-
-<span class="n">Current</span> <span class="n">thread</span> <span class="mh">0x00007fffe03873c0</span> <span class="p">(</span><span class="n">most</span> <span class="n">recent</span> <span class="n">call</span> <span class="n">first</span><span class="p">):</span>
-  <span class="n">File</span> <span class="s2">&quot;&lt;ipython-input-4-6b8299023d33&gt;&quot;</span><span class="p">,</span> <span class="n">line</span> <span class="mi">1</span> <span class="ow">in</span> <span class="o">&lt;</span><span class="n">module</span><span class="o">&gt;</span>
-  <span class="n">File</span> <span class="s2">&quot;/xxx/lib/python3.6/site-packages/IPython/core/interactiveshell.py&quot;</span><span class="p">,</span> <span class="n">line</span> <span class="mi">2881</span> <span class="ow">in</span> <span class="n">run_code</span>
-  <span class="n">File</span> <span class="s2">&quot;/xxx/lib/python3.6/site-packages/IPython/core/interactiveshell.py&quot;</span><span class="p">,</span> <span class="n">line</span> <span class="mi">2827</span> <span class="ow">in</span> <span class="n">run_ast_nodes</span>
-  <span class="n">File</span> <span class="s2">&quot;/xxx/lib/python3.6/site-packages/IPython/core/interactiveshell.py&quot;</span><span class="p">,</span> <span class="n">line</span> <span class="mi">2717</span> <span class="ow">in</span> <span class="n">run_cell</span>
-  <span class="n">File</span> <span class="s2">&quot;/xxx/lib/python3.6/site-packages/IPython/terminal/interactiveshell.py&quot;</span><span class="p">,</span> <span class="n">line</span> <span class="mi">446</span> <span class="ow">in</span> <span class="n">interact</span>
-  <span class="n">File</span> <span class="s2">&quot;/xxx/lib/python3.6/site-packages/IPython/terminal/interactiveshell.py&quot;</span><span class="p">,</span> <span class="n">line</span> <span class="mi">455</span> <span class="ow">in</span> <span class="n">mainloop</span>
-  <span class="n">File</span> <span class="s2">&quot;/xxx/lib/python3.6/site-packages/IPython/terminal/ipapp.py&quot;</span><span class="p">,</span> <span class="n">line</span> <span class="mi">348</span> <span class="ow">in</span> <span class="n">start</span>
-  <span class="n">File</span> <span class="s2">&quot;/xxx/lib/python3.6/site-packages/traitlets/config/application.py&quot;</span><span class="p">,</span> <span class="n">line</span> <span class="mi">658</span> <span class="ow">in</span> <span class="n">launch_instance</span>
-  <span class="n">File</span> <span class="s2">&quot;/xxx/lib/python3.6/site-packages/IPython/__init__.py&quot;</span><span class="p">,</span> <span class="n">line</span> <span class="mi">119</span> <span class="ow">in</span> <span class="n">start_ipython</span>
-  <span class="n">File</span> <span class="s2">&quot;/xxx/bin/ipython&quot;</span><span class="p">,</span> <span class="n">line</span> <span class="mi">11</span> <span class="ow">in</span> <span class="o">&lt;</span><span class="n">module</span><span class="o">&gt;</span>
-
-<span class="n">In</span> <span class="p">[</span><span class="mi">5</span><span class="p">]:</span>
-</pre></div>
-<p>可以通过 <tt class="docutils literal">all_threads=False</tt> 参数指定只输出当前线程，
-<tt class="docutils literal">file=sys.stderr</tt> 参数指定输出到哪里（默认是标准错误），
-详见 <a class="reference external" href="https://docs.python.org/3/library/faulthandler.html">faulthandler</a> 官方文档。</p>
-</div>
-<div class="section" id="id6">
-<h3 id="hidid6">通过信号自动输出 traceback 信息<a class="headerlink" href="#hidid6" title="Permalink to this headline">¶</a></h3>
-<p>给前面的测试函数增加信号处理，增加通过 <tt class="docutils literal">USR1</tt> 信号输出 traceback 信息的功能：</p>
-<div class="highlight"><pre><span></span><span class="kn">import</span> <span class="nn">faulthandler</span>
-<span class="kn">import</span> <span class="nn">signal</span>
-<span class="kn">from</span> <span class="nn">threading</span> <span class="kn">import</span> <span class="n">Thread</span>
-<span class="kn">import</span> <span class="nn">time</span>
-
-
-<span class="k">def</span> <span class="nf">do</span><span class="p">(</span><span class="n">x</span><span class="p">):</span>
-    <span class="n">x</span> <span class="o">=</span> <span class="n">x</span> <span class="o">*</span> <span class="mi">3</span>
-    <span class="n">time</span><span class="o">.</span><span class="n">sleep</span><span class="p">(</span><span class="n">x</span> <span class="o">*</span> <span class="mi">60</span><span class="p">)</span>
-
-
-<span class="k">def</span> <span class="nf">main</span><span class="p">():</span>
-    <span class="n">threads</span> <span class="o">=</span> <span class="p">[]</span>
-    <span class="k">for</span> <span class="n">x</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="mi">3</span><span class="p">):</span>
-        <span class="n">t</span> <span class="o">=</span> <span class="n">Thread</span><span class="p">(</span><span class="n">target</span><span class="o">=</span><span class="n">do</span><span class="p">,</span> <span class="n">args</span><span class="o">=</span><span class="p">(</span><span class="n">x</span><span class="p">,))</span>
-        <span class="n">t</span><span class="o">.</span><span class="n">start</span><span class="p">()</span>
-    <span class="k">for</span> <span class="n">x</span> <span class="ow">in</span> <span class="n">threads</span><span class="p">:</span>
-        <span class="n">x</span><span class="o">.</span><span class="n">join</span><span class="p">()</span>
-
-
-<span class="k">if</span> <span class="n">__name__</span> <span class="o">==</span> <span class="s1">&#39;__main__&#39;</span><span class="p">:</span>
-    <span class="n">faulthandler</span><span class="o">.</span><span class="n">register</span><span class="p">(</span><span class="n">signal</span><span class="o">.</span><span class="n">SIGUSR1</span><span class="p">)</span>
-    <span class="n">main</span><span class="p">()</span>
-</pre></div>
-<p>运行程序，然后就可以通过向进程发送 <tt class="docutils literal">USR1</tt> 信号来获取运行中进程的 traceback 信息了:</p>
-<pre class="literal-block">
-$ python test.py &amp;
-[1] 21924
-$ kill -s USR1 21924
-Thread 0x0000700001c03000 (most recent call first):
-  File &quot;test.py&quot;, line 9 in do
-  File &quot;/xxx/lib/python3.6/threading.py&quot;, line 864 in run
-  File &quot;/xxx/lib/python3.6/threading.py&quot;, line 916 in _bootstrap_inner
-  File &quot;/xxx/lib/python3.6/threading.py&quot;, line 884 in _bootstrap
-
-Thread 0x0000700001700000 (most recent call first):
-  File &quot;test.py&quot;, line 9 in do
-  File &quot;/xxx/lib/python3.6/threading.py&quot;, line 864 in run
-  File &quot;/xxx/lib/python3.6/threading.py&quot;, line 916 in _bootstrap_inner
-  File &quot;/xxx/lib/python3.6/threading.py&quot;, line 884 in _bootstrap
-
-Current thread 0x00007fffe03873c0 (most recent call first):
-  File &quot;/xxx/lib/python3.6/threading.py&quot;, line 1072 in _wait_for_tstate_lock
-  File &quot;/xxx/lib/python3.6/threading.py&quot;, line 1056 in join
-  File &quot;/xxx/lib/python3.6/threading.py&quot;, line 1290 in _shutdown
-</pre>
-<p>更多用法以及其他的信息请阅读 <a class="reference external" href="https://docs.python.org/3/library/faulthandler.html">官方文档</a> 。</p>
-</div>
-</div>
-<div class="section" id="id8">
-<h2 id="hidid8">参考资料<a class="headerlink" href="#hidid8" title="Permalink to this headline">¶</a></h2>
-<ul class="simple">
-<li><a class="reference external" href="https://docs.python.org/3/library/faulthandler.html">27.2. faulthandler — Dump the Python traceback — Python 3.6.4rc1 documentation</a></li>
-<li><a class="reference external" href="https://github.com/vstinner/faulthandler">vstinner/faulthandler: Fault handler for Python: display the Python backtrace on SIGSEGV, SIGFPE, SIGABRT, SIGBUS and SIGILL signals</a></li>
-</ul>
-</div>
-",
-        "mainEntityOfPage": {
-            "@type": "WebPage",
-            "@id": "https://mozillazg.com"
-        }
+        "image": [
+            "https://mozillazg.com/static/avatar.jpeg"
+         ],
+        "keywords": "python, debug, faulthandler",
+        "datePublished": "2017-12-09"
     }
     </script>
 
@@ -498,10 +337,10 @@ Current thread 0x00007fffe03873c0 (most recent call first):
 <section class="well" id="related-posts">
     <p>Related Posts:</p>
     <ul>
-        <li><a href="https://mozillazg.com/2020/04/nsenter-usage.html">nsenter 常用操作</a></li>
-        <li><a href="https://mozillazg.com/2017/12/python-get-concurrency-programm-all-tracebacks-threading-gevent-asyncio-etc.html">Python: 获取并发程序的 traceback 信息（threading/gevent/asyncio）</a></li>
         <li><a href="https://mozillazg.com/2020/04/use-tcpdump-for-a-container-but-outside-container.html">一个在容器外用 tcpdump 命令对容器内的网络请求抓包的方法</a></li>
-        <li><a href="https://mozillazg.com/2019/03/linux-debug-with-strace-cookbook-examples.html">strace 常用操作</a></li>
+        <li><a href="https://mozillazg.com/2017/12/python-get-concurrency-programm-all-tracebacks-threading-gevent-asyncio-etc.html">Python: 获取并发程序的 traceback 信息（threading/gevent/asyncio）</a></li>
+        <li><a href="https://mozillazg.com/2017/07/debug-running-python-process-with-gdb.html">使用 gdb 调试运行中的 Python 进程</a></li>
+        <li><a href="https://mozillazg.com/2018/07/python-some-ways-to-debug-running-process.html">Python: 调试运行中进程的几种方法（总结）</a></li>
         <li><a href="https://mozillazg.com/2019/05/go-read-and-understand-info-from-stack-trace-traceback.html">Go: traceback 中包含的信息</a></li>
     </ul>
 </section>
