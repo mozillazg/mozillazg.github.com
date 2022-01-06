@@ -1,0 +1,643 @@
+<!DOCTYPE html>
+<html lang="zh-hans" prefix="og: http://ogp.me/ns# fb: https://www.facebook.com/2008/fbml" class="han-init">
+<head>
+    <title>jq usage examples - Huang Huang 的博客</title>
+    <!-- Using the latest rendering mode for IE -->
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <!-- share.css -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/social-share.js@1.0.16/dist/css/share.min.css">
+
+
+    <link href="https://mozillazg.com/favicon.ico" rel="icon">
+
+<link rel="canonical" href="https://mozillazg.com/2018/01/jq-use-examples-cookbook-en.html">
+
+        <meta name="author" content="mozillazg" />
+        <meta name="keywords" content="others,jq,en-version" />
+    <meta name="description" content="jq is a very powerful command line tool for processing JSON data. Here is a record of some of the operations used by jq recently, for direct reference when you have similar needs in the future. Basic operation¶ The command line usage of jq is as follows: $ jq -h jq - commandline JSON processor [version 1.5] Usage: jq [options] &lt;jq filter&gt; [file...] This article focuses on the commonly used &lt;jq filter&gt;. Most of the operations can be tested directly online with jq play . Output raw JSON data¶ The default is to output as is without specifying a filter, or you can use the . filter $ echo &#39;{&#34;url&#34;: &#34;mozillazg.com&#34;}&#39; |jq . { &#34;url&#34;: &#34;mozillazg.com&#34; } jq play online running link：https://jqplay.org/s/KhRuUFCP2h object operation¶ Get the value of a key¶ .key, .foo.bar, .[&#34;key&#34;] $ echo &#39;{&#34;url&#34;: &#34;mozillazg.com&#34;}&#39; |jq .url &#34;mozillazg.com&#34; $ echo &#39;{&#34;url&#34;: &#34;mozillazg.com&#34;}&#39; | jq &#39;.[&#34;url&#34;]&#39; &#34;mozillazg.com&#34; jq play: https://jqplay.org/s/Tn7NUbP4Dr You can put a question mark after it to indicate that no error will be reported when the input is not an object .key? : $ echo &#39;1&#39; |jq &#39;.a&#39; jq: error (at &lt;stdin&gt;:1): Cannot index number with string &#34;a&#34; $ echo &#39;1&#39; |jq &#39;.a?&#39; $ The ? rule fits all correct filters, and adding ? can ignore the error message An array of all the keys¶ keys $ echo &#39;{&#34;url&#34;: &#34;mozillazg.com&#34;, &#34;name&#34;: &#34;mozillazg&#34;}&#39; |jq keys [ &#34;name&#34;, &#34;url&#34; ] jq play: https://jqplay.org/s/_5KiPRS75r All values¶ .[] $ echo &#39;{&#34;url&#34;: &#34;mozillazg.com&#34;, &#34;name&#34;: &#34;mozillazg&#34;}&#39; |jq .[] &#34;mozillazg.com&#34; &#34;mozillazg&#34; jq play: https://jqplay.org/s/6HRvEND8AB An array of all values¶ [.[]] $ echo &#39;{&#34;url&#34;: &#34;mozillazg.com&#34;, &#34;name&#34;: &#34;mozillazg&#34;}&#39; |jq [.[]] [ &#34;mozillazg.com&#34;, &#34;mozillazg&#34; ] jq play: https://jqplay.org/s/JGIX6hTt_8 Array operations¶ Fetch all elements¶ .[] $ echo &#39;[{&#34;name&#34;: &#34;tom&#34;}, {&#34;name&#34;: &#34;mozillazg&#34;}]&#39; |jq .[] { &#34;name&#34;: &#34;tom&#34; } { &#34;name&#34;: &#34;mozillazg&#34; } jq play: https://jqplay.org/s/Y9UgK_4xxE slice¶ .[1], .[0:2] $ echo &#39;[{&#34;name&#34;: &#34;tom&#34;}, {&#34;name&#34;: &#34;mozillazg&#34;}, {&#34;name&#34;: &#34;jim&#34;}]&#39; |jq .[1] { &#34;name&#34;: &#34;mozillazg&#34; } $ echo &#39;[{&#34;name&#34;: &#34;tom&#34;}, {&#34;name&#34;: &#34;mozillazg&#34;}, {&#34;name&#34;: &#34;jim&#34;}]&#39; |jq .[0:2] [ { &#34;name&#34;: &#34;tom&#34; }, { &#34;name&#34;: &#34;mozillazg&#34; } ] jq play: https://jqplay.org/s/seNL7hW38W Manipulating arrays of objects¶ For example, to retrieve the value of name from an array element: $ echo &#39;[{&#34;name&#34;: &#34;foo&#34;},{&#34;name&#34;: &#34;bar&#34;},{&#34;name&#34;: &#34;foobar&#34;}]&#39; |jq .[].name &#34;foo&#34; &#34;bar&#34; &#34;foobar&#34; jq play: https://jqplay.org/s/Z5qjhJnRyn It is also possible to use the following pipeline operations that will be mentioned below.: $ echo &#39;[{&#34;name&#34;: &#34;foo&#34;},{&#34;name&#34;: &#34;bar&#34;},{&#34;name&#34;: &#34;foobar&#34;}]&#39; |jq &#39;.[]|.name&#39; &#34;foo&#34; &#34;bar&#34; &#34;foobar&#34; If you want to recompose the result into an array, you can do so: $ echo &#39;[{&#34;name&#34;: &#34;foo&#34;},{&#34;name&#34;: &#34;bar&#34;},{&#34;name&#34;: &#34;foobar&#34;}]&#39; |jq [.[].name] [ &#34;foo&#34;, &#34;bar&#34;, &#34;foobar&#34; ] You can also use the map that will be mentioned below: $ echo &#39;[{&#34;name&#34;: &#34;foo&#34;},{&#34;name&#34;: &#34;bar&#34;},{&#34;name&#34;: &#34;foobar&#34;}]&#39; |jq &#39;map(.name)&#39; [ &#34;foo&#34;, &#34;bar&#34;, &#34;foobar&#34; ] Use multiple filters¶ , $ echo &#39;{&#34;url&#34;: &#34;mozillazg.com&#34;, &#34;name&#34;: &#34;mozillazg&#34;}&#39; |jq &#39;.url, .name&#39; &#34;mozillazg.com&#34; &#34;mozillazg&#34; jq play: https://jqplay.org/s/02CPHO1ESj Advanced Operations¶ Pipeline (to do secondary or multiple processing of the processed results)¶ You can use | to implement a pipeline like function: $ echo &#39;{&#34;url&#34;: &#34;mozillazg.com&#34;, &#34;name&#34;: &#34;mozillazg&#34;}&#39; |jq &#39;.|.url&#39; &#34;mozillazg.com&#34; jq play: https://jqplay.org/s/L5bu1ovLr- $ echo &#39;{&#34;url&#34;: &#34;mozillazg.com&#34;, &#34;tests&#34;: [{&#34;foobar&#34;: &#34;v1&#34;}, {&#34;foobar&#34;: &#34;v2&#34;}]}&#39; |jq &#39;.tests |.[] |.foobar&#39; &#34;v1&#34; &#34;v2&#34; jq play: https://jqplay.org/s/9UcLXKEgaT You can also use the shell&#39;s | implementation directly: $ echo &#39;{&#34;url&#34;: &#34;mozillazg.com&#34;, &#34;name&#34;: &#34;mozillazg&#34;}&#39; |jq &#39;.&#39; | jq &#39;.url&#39; &#34;mozillazg.com&#34; $ echo &#39;{&#34;url&#34;: &#34;mozillazg.com&#34;, &#34;tests&#34;: [{&#34;foobar&#34;: &#34;v1&#34;}, {&#34;foobar&#34;: &#34;v2&#34;}]}&#39; |jq &#39;.tests&#39; | jq &#39;.[]&#39; | jq &#39;.foobar&#39; &#34;v1&#34; &#34;v2&#34; Get the length of the content (string, length of an array)¶ length can get the length of a string or an array: $ echo &#39;{&#34;url&#34;: &#34;mozillazg.com&#34;, &#34;name&#34;: &#34;mozillazg&#34;}&#39; |jq &#39;.url|length&#39; 13 $ echo &#39;[&#34;mozillazg.com&#34;, &#34;mozillazg&#34;]&#39; |jq &#39;.|length&#39; 2 jq play: https://jqplay.org/s/9TqdXbe0lo map¶ map(foo) can operate on each item of an array and then merge the results: $ echo &#39;[&#34;mozillazg.com&#34;, &#34;mozillazg&#34;]&#39; | jq &#39;map(length)&#39; [ 13, 9 ] jq play: https://jqplay.org/s/BjgdGsjPem filter(select)¶ select(foo) can be used to select an input item and return only the items that match the conditions: $ echo &#39;[&#34;mozillazg.com&#34;, &#34;mozillazg&#34;]&#39; | jq &#39;map(select(.|length &gt; 9))&#39; [ &#34;mozillazg.com&#34; ] jq play: https://jqplay.org/s/8Zrwy7dDxW String interpolation, splicing/join¶ You can use \(foo) to implement the string interpolation function: $ echo &#39;{&#34;url&#34;: &#34;mozillazg.com&#34;, &#34;name&#34;: &#34;mozillazg&#34;}&#39; |jq &#39;&#34;hi \(.name)&#34;&#39; &#34;hi mozillazg&#34; Note that it should be enclosed in double quotes to indicate that it is a string. jq play: https://jqplay.org/s/k90JFcDqPz String concatenation using + : $ echo &#39;{&#34;url&#34;: &#34;mozillazg.com&#34;, &#34;name&#34;: &#34;mozillazg&#34;}&#39; |jq &#39;&#34;hi &#34; + .name&#39; &#34;hi mozillazg&#34; Output the raw string value instead of the JSON serialized string value¶ Use the -r option to output the raw value of the string instead of the serialized value of json: $ echo &#39;{&#34;value&#34;: &#34;{\&#34;url\&#34;: \&#34;mozillazg.com\&#34;}&#34;}&#39; |jq .value &#34;{\&#34;url\&#34;: \&#34;mozillazg.com\&#34;}&#34; echo &#39;{&#34;value&#34;: &#34;{\&#34;url\&#34;: \&#34;mozillazg.com\&#34;}&#34;}&#39; |jq -r .value {&#34;url&#34;: &#34;mozillazg.com&#34;} if/elif/else¶ You can use if ... then ... elif ... then ... else ... end to implement conditional judgments: $ echo &#39;[0, 1, 2, 3]&#39; \ | jq &#39;map(if . == 0 then &#34;zero&#34; elif . == 1 then &#34;one&#34; elif . == 2 then &#34;two&#34; else &#34;many&#34; end)&#39; [ &#34;zero&#34;, &#34;one&#34;, &#34;two&#34;, &#34;many&#34; ] jq play: https://jqplay.org/s/y8WwvHISH4 Constructing objects or arrays¶ New objects or arrays can be constructed with {} and [] . object: $ echo &#39;[&#34;mozillazg.com&#34;, &#34;mozillazg&#34;]&#39; |jq &#39;{name: .[1]}&#39; { &#34;name&#34;: &#34;mozillazg&#34; } jq play: https://jqplay.org/s/sccwJi75jb Array: $ echo &#39;{&#34;url&#34;: &#34;mozillazg.com&#34;, &#34;name&#34;: &#34;mozillazg&#34;}&#39; |jq &#39;[.name, .url]&#39; [ &#34;mozillazg&#34;, &#34;mozillazg.com&#34; ] jq play: https://jqplay.org/s/LYflwM4kJM $ echo &#39;{&#34;name&#34;: &#34;mozillazg&#34;, &#34;ages&#34;: [1, 2]}&#39; | jq &#39;{name, age: .ages[]}&#39; { &#34;name&#34;: &#34;mozillazg&#34;, &#34;age&#34;: 1 } { &#34;name&#34;: &#34;mozillazg&#34;, &#34;age&#34;: 2 } jq play: https://jqplay.org/s/s1GiNkp_Ed Array join¶ join: $ echo &#39;[&#34;mozillazg.com&#34;, &#34;mozillazg&#34;]&#39; | jq &#39;.|join(&#34; | &#34;)&#39; &#34;mozillazg.com | mozillazg&#34; jq play: https://jqplay.org/s/1ckAfiLKA3 String split¶ split: $ echo &#39;&#34;mozillazg.com | mozillazg&#34;&#39; |jq &#39;split(&#34; | &#34;)&#39; [ &#34;mozillazg.com&#34;, &#34;mozillazg&#34; ] jq play: https://jqplay.org/s/_7uGMWvmUh For more functions and usage, see the official docs 参考资料¶ jq jq play" />
+    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-4941850466486001"
+     crossorigin="anonymous"></script>
+
+    <style>
+      .js-toc {
+        margin-bottom: 20px;
+      }
+      .donate-modal {
+        text-align: center;
+      }
+      #donate-modal-container .donate-image {
+        max-height: 300px !important;
+        min-height: inherit !important;
+      }
+    </style>
+
+        <meta property="og:site_name" content="Huang Huang 的博客" />
+        <meta property="og:type" content="article"/>
+        <meta property="og:title" content="jq usage examples"/>
+        <meta property="og:url" content="https://mozillazg.com/2018/01/jq-use-examples-cookbook-en.html"/>
+        <meta property="og:description" content="jq is a very powerful command line tool for processing JSON data. Here is a record of some of the operations used by jq recently, for direct reference when you have similar needs in the future. Basic operation¶ The command line usage of jq is as follows: $ jq -h jq - commandline JSON processor [version 1.5] Usage: jq [options] &lt;jq filter&gt; [file...] This article focuses on the commonly used &lt;jq filter&gt;. Most of the operations can be tested directly online with jq play . Output raw JSON data¶ The default is to output as is without specifying a filter, or you can use the . filter $ echo &#39;{&#34;url&#34;: &#34;mozillazg.com&#34;}&#39; |jq . { &#34;url&#34;: &#34;mozillazg.com&#34; } jq play online running link：https://jqplay.org/s/KhRuUFCP2h object operation¶ Get the value of a key¶ .key, .foo.bar, .[&#34;key&#34;] $ echo &#39;{&#34;url&#34;: &#34;mozillazg.com&#34;}&#39; |jq .url &#34;mozillazg.com&#34; $ echo &#39;{&#34;url&#34;: &#34;mozillazg.com&#34;}&#39; | jq &#39;.[&#34;url&#34;]&#39; &#34;mozillazg.com&#34; jq play: https://jqplay.org/s/Tn7NUbP4Dr You can put a question mark after it to indicate that no error will be reported when the input is not an object .key? : $ echo &#39;1&#39; |jq &#39;.a&#39; jq: error (at &lt;stdin&gt;:1): Cannot index number with string &#34;a&#34; $ echo &#39;1&#39; |jq &#39;.a?&#39; $ The ? rule fits all correct filters, and adding ? can ignore the error message An array of all the keys¶ keys $ echo &#39;{&#34;url&#34;: &#34;mozillazg.com&#34;, &#34;name&#34;: &#34;mozillazg&#34;}&#39; |jq keys [ &#34;name&#34;, &#34;url&#34; ] jq play: https://jqplay.org/s/_5KiPRS75r All values¶ .[] $ echo &#39;{&#34;url&#34;: &#34;mozillazg.com&#34;, &#34;name&#34;: &#34;mozillazg&#34;}&#39; |jq .[] &#34;mozillazg.com&#34; &#34;mozillazg&#34; jq play: https://jqplay.org/s/6HRvEND8AB An array of all values¶ [.[]] $ echo &#39;{&#34;url&#34;: &#34;mozillazg.com&#34;, &#34;name&#34;: &#34;mozillazg&#34;}&#39; |jq [.[]] [ &#34;mozillazg.com&#34;, &#34;mozillazg&#34; ] jq play: https://jqplay.org/s/JGIX6hTt_8 Array operations¶ Fetch all elements¶ .[] $ echo &#39;[{&#34;name&#34;: &#34;tom&#34;}, {&#34;name&#34;: &#34;mozillazg&#34;}]&#39; |jq .[] { &#34;name&#34;: &#34;tom&#34; } { &#34;name&#34;: &#34;mozillazg&#34; } jq play: https://jqplay.org/s/Y9UgK_4xxE slice¶ .[1], .[0:2] $ echo &#39;[{&#34;name&#34;: &#34;tom&#34;}, {&#34;name&#34;: &#34;mozillazg&#34;}, {&#34;name&#34;: &#34;jim&#34;}]&#39; |jq .[1] { &#34;name&#34;: &#34;mozillazg&#34; } $ echo &#39;[{&#34;name&#34;: &#34;tom&#34;}, {&#34;name&#34;: &#34;mozillazg&#34;}, {&#34;name&#34;: &#34;jim&#34;}]&#39; |jq .[0:2] [ { &#34;name&#34;: &#34;tom&#34; }, { &#34;name&#34;: &#34;mozillazg&#34; } ] jq play: https://jqplay.org/s/seNL7hW38W Manipulating arrays of objects¶ For example, to retrieve the value of name from an array element: $ echo &#39;[{&#34;name&#34;: &#34;foo&#34;},{&#34;name&#34;: &#34;bar&#34;},{&#34;name&#34;: &#34;foobar&#34;}]&#39; |jq .[].name &#34;foo&#34; &#34;bar&#34; &#34;foobar&#34; jq play: https://jqplay.org/s/Z5qjhJnRyn It is also possible to use the following pipeline operations that will be mentioned below.: $ echo &#39;[{&#34;name&#34;: &#34;foo&#34;},{&#34;name&#34;: &#34;bar&#34;},{&#34;name&#34;: &#34;foobar&#34;}]&#39; |jq &#39;.[]|.name&#39; &#34;foo&#34; &#34;bar&#34; &#34;foobar&#34; If you want to recompose the result into an array, you can do so: $ echo &#39;[{&#34;name&#34;: &#34;foo&#34;},{&#34;name&#34;: &#34;bar&#34;},{&#34;name&#34;: &#34;foobar&#34;}]&#39; |jq [.[].name] [ &#34;foo&#34;, &#34;bar&#34;, &#34;foobar&#34; ] You can also use the map that will be mentioned below: $ echo &#39;[{&#34;name&#34;: &#34;foo&#34;},{&#34;name&#34;: &#34;bar&#34;},{&#34;name&#34;: &#34;foobar&#34;}]&#39; |jq &#39;map(.name)&#39; [ &#34;foo&#34;, &#34;bar&#34;, &#34;foobar&#34; ] Use multiple filters¶ , $ echo &#39;{&#34;url&#34;: &#34;mozillazg.com&#34;, &#34;name&#34;: &#34;mozillazg&#34;}&#39; |jq &#39;.url, .name&#39; &#34;mozillazg.com&#34; &#34;mozillazg&#34; jq play: https://jqplay.org/s/02CPHO1ESj Advanced Operations¶ Pipeline (to do secondary or multiple processing of the processed results)¶ You can use | to implement a pipeline like function: $ echo &#39;{&#34;url&#34;: &#34;mozillazg.com&#34;, &#34;name&#34;: &#34;mozillazg&#34;}&#39; |jq &#39;.|.url&#39; &#34;mozillazg.com&#34; jq play: https://jqplay.org/s/L5bu1ovLr- $ echo &#39;{&#34;url&#34;: &#34;mozillazg.com&#34;, &#34;tests&#34;: [{&#34;foobar&#34;: &#34;v1&#34;}, {&#34;foobar&#34;: &#34;v2&#34;}]}&#39; |jq &#39;.tests |.[] |.foobar&#39; &#34;v1&#34; &#34;v2&#34; jq play: https://jqplay.org/s/9UcLXKEgaT You can also use the shell&#39;s | implementation directly: $ echo &#39;{&#34;url&#34;: &#34;mozillazg.com&#34;, &#34;name&#34;: &#34;mozillazg&#34;}&#39; |jq &#39;.&#39; | jq &#39;.url&#39; &#34;mozillazg.com&#34; $ echo &#39;{&#34;url&#34;: &#34;mozillazg.com&#34;, &#34;tests&#34;: [{&#34;foobar&#34;: &#34;v1&#34;}, {&#34;foobar&#34;: &#34;v2&#34;}]}&#39; |jq &#39;.tests&#39; | jq &#39;.[]&#39; | jq &#39;.foobar&#39; &#34;v1&#34; &#34;v2&#34; Get the length of the content (string, length of an array)¶ length can get the length of a string or an array: $ echo &#39;{&#34;url&#34;: &#34;mozillazg.com&#34;, &#34;name&#34;: &#34;mozillazg&#34;}&#39; |jq &#39;.url|length&#39; 13 $ echo &#39;[&#34;mozillazg.com&#34;, &#34;mozillazg&#34;]&#39; |jq &#39;.|length&#39; 2 jq play: https://jqplay.org/s/9TqdXbe0lo map¶ map(foo) can operate on each item of an array and then merge the results: $ echo &#39;[&#34;mozillazg.com&#34;, &#34;mozillazg&#34;]&#39; | jq &#39;map(length)&#39; [ 13, 9 ] jq play: https://jqplay.org/s/BjgdGsjPem filter(select)¶ select(foo) can be used to select an input item and return only the items that match the conditions: $ echo &#39;[&#34;mozillazg.com&#34;, &#34;mozillazg&#34;]&#39; | jq &#39;map(select(.|length &gt; 9))&#39; [ &#34;mozillazg.com&#34; ] jq play: https://jqplay.org/s/8Zrwy7dDxW String interpolation, splicing/join¶ You can use \(foo) to implement the string interpolation function: $ echo &#39;{&#34;url&#34;: &#34;mozillazg.com&#34;, &#34;name&#34;: &#34;mozillazg&#34;}&#39; |jq &#39;&#34;hi \(.name)&#34;&#39; &#34;hi mozillazg&#34; Note that it should be enclosed in double quotes to indicate that it is a string. jq play: https://jqplay.org/s/k90JFcDqPz String concatenation using + : $ echo &#39;{&#34;url&#34;: &#34;mozillazg.com&#34;, &#34;name&#34;: &#34;mozillazg&#34;}&#39; |jq &#39;&#34;hi &#34; + .name&#39; &#34;hi mozillazg&#34; Output the raw string value instead of the JSON serialized string value¶ Use the -r option to output the raw value of the string instead of the serialized value of json: $ echo &#39;{&#34;value&#34;: &#34;{\&#34;url\&#34;: \&#34;mozillazg.com\&#34;}&#34;}&#39; |jq .value &#34;{\&#34;url\&#34;: \&#34;mozillazg.com\&#34;}&#34; echo &#39;{&#34;value&#34;: &#34;{\&#34;url\&#34;: \&#34;mozillazg.com\&#34;}&#34;}&#39; |jq -r .value {&#34;url&#34;: &#34;mozillazg.com&#34;} if/elif/else¶ You can use if ... then ... elif ... then ... else ... end to implement conditional judgments: $ echo &#39;[0, 1, 2, 3]&#39; \ | jq &#39;map(if . == 0 then &#34;zero&#34; elif . == 1 then &#34;one&#34; elif . == 2 then &#34;two&#34; else &#34;many&#34; end)&#39; [ &#34;zero&#34;, &#34;one&#34;, &#34;two&#34;, &#34;many&#34; ] jq play: https://jqplay.org/s/y8WwvHISH4 Constructing objects or arrays¶ New objects or arrays can be constructed with {} and [] . object: $ echo &#39;[&#34;mozillazg.com&#34;, &#34;mozillazg&#34;]&#39; |jq &#39;{name: .[1]}&#39; { &#34;name&#34;: &#34;mozillazg&#34; } jq play: https://jqplay.org/s/sccwJi75jb Array: $ echo &#39;{&#34;url&#34;: &#34;mozillazg.com&#34;, &#34;name&#34;: &#34;mozillazg&#34;}&#39; |jq &#39;[.name, .url]&#39; [ &#34;mozillazg&#34;, &#34;mozillazg.com&#34; ] jq play: https://jqplay.org/s/LYflwM4kJM $ echo &#39;{&#34;name&#34;: &#34;mozillazg&#34;, &#34;ages&#34;: [1, 2]}&#39; | jq &#39;{name, age: .ages[]}&#39; { &#34;name&#34;: &#34;mozillazg&#34;, &#34;age&#34;: 1 } { &#34;name&#34;: &#34;mozillazg&#34;, &#34;age&#34;: 2 } jq play: https://jqplay.org/s/s1GiNkp_Ed Array join¶ join: $ echo &#39;[&#34;mozillazg.com&#34;, &#34;mozillazg&#34;]&#39; | jq &#39;.|join(&#34; | &#34;)&#39; &#34;mozillazg.com | mozillazg&#34; jq play: https://jqplay.org/s/1ckAfiLKA3 String split¶ split: $ echo &#39;&#34;mozillazg.com | mozillazg&#34;&#39; |jq &#39;split(&#34; | &#34;)&#39; [ &#34;mozillazg.com&#34;, &#34;mozillazg&#34; ] jq play: https://jqplay.org/s/_7uGMWvmUh For more functions and usage, see the official docs 参考资料¶ jq jq play"/>
+        <meta property="article:published_time" content="2018-01-28" />
+            <meta property="article:section" content="others" />
+            <meta property="article:tag" content="others" />
+            <meta property="article:tag" content="jq" />
+            <meta property="article:tag" content="en-version" />
+            <meta property="article:author" content="mozillazg" />
+            <meta property="og:image"
+                  content="https://mozillazg.com/static/avatar.jpeg"/>
+
+
+    <meta name="twitter:card" content="summary">
+        <meta name="twitter:site" content="@mozillazg">
+        <meta name="twitter:creator" content="@mozillazg">
+    <meta name="twitter:domain" content="https://mozillazg.com">
+            <meta property="twitter:image"
+                  content="https://mozillazg.com/static/avatar.jpeg"/>
+
+    <!-- Bootstrap -->
+        <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@3.3.4/dist/css/bootstrap.min.css" type="text/css"/>
+    <link href="https://cdn.jsdelivr.net/npm/font-awesome@4.3.0/css/font-awesome.min.css" rel="stylesheet">
+
+    <link href="https://cdn.jsdelivr.net/npm/pygments-css@1.0.0/github.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://mozillazg.com/theme/css/style.css" type="text/css"/>
+            <link href="https://mozillazg.com/static/custom.css" rel="stylesheet">
+
+        <link href="https://mozillazg.com/feeds/all.atom.xml" type="application/atom+xml" rel="alternate"
+              title="Huang Huang 的博客 ATOM Feed"/>
+
+        <link href="https://mozillazg.com/feeds/all.rss.xml" type="application/rss+xml" rel="alternate"
+              title="Huang Huang 的博客 RSS Feed"/>
+
+
+        <link href="https://mozillazg.com/feeds/others.atom.xml" type="application/atom+xml" rel="alternate"
+              title="Huang Huang 的博客 others ATOM Feed"/>
+
+
+    <script type="application/ld+json">
+    {
+        "@context": "https://schema.org",
+        "@type": "BlogPosting",
+        "publisher": {
+            "@type": "Person",
+            "name": "mozillazg",
+            "logo": "https://mozillazg.com/static/avatar.jpeg"
+        },
+        "author": {
+            "@type": "Person",
+            "name": "mozillazg",
+            "image": "https://mozillazg.com/static/avatar.jpeg",
+            "url": "https://mozillazg.com",
+            "sameAs": []
+        },
+        "headline": "jq usage examples",
+        "url": "https://mozillazg.com/2018/01/jq-use-examples-cookbook-en.html",
+        "image": [
+            "https://mozillazg.com/static/avatar.jpeg"
+         ],
+        "keywords": "others, jq, en-version",
+        "datePublished": "2018-01-28"
+    }
+    </script>
+
+</head>
+<body>
+
+<div class="navbar" role="navigation">
+	<div class="container">
+        <div class="navbar-header">
+            <button type="button" class="navbar-toggle" data-toggle="collapse" data-target=".navbar-ex1-collapse">
+                <span class="sr-only">Toggle navigation</span>
+                <span class="icon-bar"></span>
+                <span class="icon-bar"></span>
+                <span class="icon-bar"></span>
+            </button>
+            <a href="https://mozillazg.com/" class="navbar-brand">
+Huang Huang 的博客            </a>
+        </div>
+        <div class="collapse navbar-collapse navbar-ex1-collapse">
+            <ul class="nav navbar-nav">
+                    <li><a href="https://mozillazg.com/feeds/all.atom.xml">Feed</a></li>
+                    <li><a href="/2014/10/pages/about-me.html">About</a></li>
+            </ul>
+            <ul class="nav navbar-nav navbar-right">
+              <li><a href="https://mozillazg.com/archives.html"><i class="fa fa-th-list"></i><span class="icon-label">Archives</span></a></li>
+            </ul>
+        </div>
+        <!-- /.navbar-collapse -->
+    </div>
+</div> <!-- /.navbar -->
+<!-- Banner -->
+<!-- End Banner -->
+<div class="container">
+    <div class="row">
+        <div class="col-lg-12">
+    <section id="content" class="yue">
+        <article>
+            <header class="text-center">
+                <h1>
+                    <a href="https://mozillazg.com/2018/01/jq-use-examples-cookbook-en.html"
+                       rel="bookmark"
+                       title="Permalink to jq usage examples">
+                        jq usage examples
+                    </a>
+                </h1>
+                <p class="published">
+                    <time datetime="2018-01-28T00:00:00+00:00">
+                    2018-01-28
+                    </time>
+                </p>
+            </header>
+            <div class="entry-content">
+                <div class="well-sm article-info">
+<footer class="post-info">
+        <a href="https://mozillazg.com/category/others.html">others</a>
+
+
+<span class="label label-default hide">Tags</span>
+	<a href="https://mozillazg.com/tag/jq.html">jq</a>
+        /
+	<a href="https://mozillazg.com/tag/en-version.html">en-version</a>
+    
+</footer><!-- /.post-info -->                </div>
+                <div class="js-toc"></div>
+                <div>
+                <p><a class="reference external" href="https://stedolan.github.io/jq/">jq</a> is a very powerful command line tool for processing JSON data. Here is a record of some of the operations used by jq recently, for direct reference when you have similar needs in the future.</p>
+<div class="section" id="basic-operation">
+<h2 id="hidbasic-operation">Basic operation<a class="headerlink" href="#hidbasic-operation" title="Permalink to this headline">¶</a></h2>
+<p>The command line usage of jq is as follows:</p>
+<div class="highlight"><pre><span></span>$ jq -h
+jq - commandline JSON processor <span class="o">[</span>version 1.5<span class="o">]</span>
+Usage: jq <span class="o">[</span>options<span class="o">]</span> &lt;jq filter&gt; <span class="o">[</span>file...<span class="o">]</span>
+</pre></div>
+<p>This article focuses on the commonly used <tt class="docutils literal">&lt;jq filter&gt;</tt>. Most of the operations can be tested directly online with <a class="reference external" href="https://jqplay.org">jq play</a> .</p>
+<div class="section" id="output-raw-json-data">
+<h3 id="hidoutput-raw-json-data">Output raw JSON data<a class="headerlink" href="#hidoutput-raw-json-data" title="Permalink to this headline">¶</a></h3>
+<p>The default is to output as is without specifying a filter, or you can use the
+<tt class="docutils literal">.</tt> filter</p>
+<div class="highlight"><pre><span></span>$ <span class="nb">echo</span> <span class="s1">&#39;{&quot;url&quot;: &quot;mozillazg.com&quot;}&#39;</span> <span class="p">|</span>jq .
+<span class="o">{</span>
+  <span class="s2">&quot;url&quot;</span>: <span class="s2">&quot;mozillazg.com&quot;</span>
+<span class="o">}</span>
+</pre></div>
+<p>jq play online running link：<a class="reference external" href="https://jqplay.org/s/KhRuUFCP2h">https://jqplay.org/s/KhRuUFCP2h</a></p>
+</div>
+<div class="section" id="object-operation">
+<h3 id="hidobject-operation">object operation<a class="headerlink" href="#hidobject-operation" title="Permalink to this headline">¶</a></h3>
+<div class="section" id="get-the-value-of-a-key">
+<h4 id="hidget-the-value-of-a-key">Get the value of a key<a class="headerlink" href="#hidget-the-value-of-a-key" title="Permalink to this headline">¶</a></h4>
+<p><tt class="docutils literal">.key</tt>, <tt class="docutils literal">.foo.bar</tt>, <tt class="docutils literal"><span class="pre">.[&quot;key&quot;]</span></tt></p>
+<div class="highlight"><pre><span></span>$ <span class="nb">echo</span> <span class="s1">&#39;{&quot;url&quot;: &quot;mozillazg.com&quot;}&#39;</span> <span class="p">|</span>jq .url
+<span class="s2">&quot;mozillazg.com&quot;</span>
+$ <span class="nb">echo</span> <span class="s1">&#39;{&quot;url&quot;: &quot;mozillazg.com&quot;}&#39;</span> <span class="p">|</span> jq <span class="s1">&#39;.[&quot;url&quot;]&#39;</span>
+<span class="s2">&quot;mozillazg.com&quot;</span>
+</pre></div>
+<p>jq play: <a class="reference external" href="https://jqplay.org/s/Tn7NUbP4Dr">https://jqplay.org/s/Tn7NUbP4Dr</a></p>
+<p>You can put a question mark after it to indicate that no error will be reported
+when the input is not an object <tt class="docutils literal">.key?</tt> :</p>
+<div class="highlight"><pre><span></span>$ <span class="nb">echo</span> <span class="s1">&#39;1&#39;</span> <span class="p">|</span>jq <span class="s1">&#39;.a&#39;</span>
+jq: error <span class="o">(</span>at &lt;stdin&gt;:1<span class="o">)</span>: Cannot index number with string <span class="s2">&quot;a&quot;</span>
+$ <span class="nb">echo</span> <span class="s1">&#39;1&#39;</span> <span class="p">|</span>jq <span class="s1">&#39;.a?&#39;</span>
+$
+</pre></div>
+<p>The <tt class="docutils literal">?</tt> rule fits all correct filters, and adding <tt class="docutils literal">?</tt> can ignore the error message</p>
+</div>
+<div class="section" id="an-array-of-all-the-keys">
+<h4 id="hidan-array-of-all-the-keys">An array of all the keys<a class="headerlink" href="#hidan-array-of-all-the-keys" title="Permalink to this headline">¶</a></h4>
+<p><tt class="docutils literal">keys</tt></p>
+<div class="highlight"><pre><span></span>$ <span class="nb">echo</span> <span class="s1">&#39;{&quot;url&quot;: &quot;mozillazg.com&quot;, &quot;name&quot;: &quot;mozillazg&quot;}&#39;</span> <span class="p">|</span>jq keys
+<span class="o">[</span>
+  <span class="s2">&quot;name&quot;</span>,
+  <span class="s2">&quot;url&quot;</span>
+<span class="o">]</span>
+</pre></div>
+<p>jq play: <a class="reference external" href="https://jqplay.org/s/_5KiPRS75r">https://jqplay.org/s/_5KiPRS75r</a></p>
+</div>
+<div class="section" id="all-values">
+<h4 id="hidall-values">All values<a class="headerlink" href="#hidall-values" title="Permalink to this headline">¶</a></h4>
+<p><tt class="docutils literal">.[]</tt></p>
+<div class="highlight"><pre><span></span>$ <span class="nb">echo</span> <span class="s1">&#39;{&quot;url&quot;: &quot;mozillazg.com&quot;, &quot;name&quot;: &quot;mozillazg&quot;}&#39;</span> <span class="p">|</span>jq .<span class="o">[]</span>
+<span class="s2">&quot;mozillazg.com&quot;</span>
+<span class="s2">&quot;mozillazg&quot;</span>
+</pre></div>
+<p>jq play: <a class="reference external" href="https://jqplay.org/s/6HRvEND8AB">https://jqplay.org/s/6HRvEND8AB</a></p>
+</div>
+<div class="section" id="an-array-of-all-values">
+<h4 id="hidan-array-of-all-values">An array of all values<a class="headerlink" href="#hidan-array-of-all-values" title="Permalink to this headline">¶</a></h4>
+<p><tt class="docutils literal"><span class="pre">[.[]]</span></tt></p>
+<div class="highlight"><pre><span></span>$ <span class="nb">echo</span> <span class="s1">&#39;{&quot;url&quot;: &quot;mozillazg.com&quot;, &quot;name&quot;: &quot;mozillazg&quot;}&#39;</span> <span class="p">|</span>jq <span class="o">[</span>.<span class="o">[]]</span>
+<span class="o">[</span>
+  <span class="s2">&quot;mozillazg.com&quot;</span>,
+  <span class="s2">&quot;mozillazg&quot;</span>
+<span class="o">]</span>
+</pre></div>
+<p>jq play: <a class="reference external" href="https://jqplay.org/s/JGIX6hTt_8">https://jqplay.org/s/JGIX6hTt_8</a></p>
+</div>
+</div>
+<div class="section" id="array-operations">
+<h3 id="hidarray-operations">Array operations<a class="headerlink" href="#hidarray-operations" title="Permalink to this headline">¶</a></h3>
+<div class="section" id="fetch-all-elements">
+<h4 id="hidfetch-all-elements">Fetch all elements<a class="headerlink" href="#hidfetch-all-elements" title="Permalink to this headline">¶</a></h4>
+<p><tt class="docutils literal">.[]</tt></p>
+<div class="highlight"><pre><span></span>$ <span class="nb">echo</span> <span class="s1">&#39;[{&quot;name&quot;: &quot;tom&quot;}, {&quot;name&quot;: &quot;mozillazg&quot;}]&#39;</span> <span class="p">|</span>jq .<span class="o">[]</span>
+<span class="o">{</span>
+  <span class="s2">&quot;name&quot;</span>: <span class="s2">&quot;tom&quot;</span>
+<span class="o">}</span>
+<span class="o">{</span>
+  <span class="s2">&quot;name&quot;</span>: <span class="s2">&quot;mozillazg&quot;</span>
+<span class="o">}</span>
+</pre></div>
+<p>jq play: <a class="reference external" href="https://jqplay.org/s/Y9UgK_4xxE">https://jqplay.org/s/Y9UgK_4xxE</a></p>
+</div>
+<div class="section" id="slice">
+<h4 id="hidslice">slice<a class="headerlink" href="#hidslice" title="Permalink to this headline">¶</a></h4>
+<p><tt class="docutils literal">.[1]</tt>, <tt class="docutils literal">.[0:2]</tt></p>
+<div class="highlight"><pre><span></span>$ <span class="nb">echo</span> <span class="s1">&#39;[{&quot;name&quot;: &quot;tom&quot;}, {&quot;name&quot;: &quot;mozillazg&quot;}, {&quot;name&quot;: &quot;jim&quot;}]&#39;</span> <span class="p">|</span>jq .<span class="o">[</span>1<span class="o">]</span>
+<span class="o">{</span>
+  <span class="s2">&quot;name&quot;</span>: <span class="s2">&quot;mozillazg&quot;</span>
+<span class="o">}</span>
+$ <span class="nb">echo</span> <span class="s1">&#39;[{&quot;name&quot;: &quot;tom&quot;}, {&quot;name&quot;: &quot;mozillazg&quot;}, {&quot;name&quot;: &quot;jim&quot;}]&#39;</span> <span class="p">|</span>jq .<span class="o">[</span>0:2<span class="o">]</span>
+<span class="o">[</span>
+  <span class="o">{</span>
+    <span class="s2">&quot;name&quot;</span>: <span class="s2">&quot;tom&quot;</span>
+  <span class="o">}</span>,
+  <span class="o">{</span>
+    <span class="s2">&quot;name&quot;</span>: <span class="s2">&quot;mozillazg&quot;</span>
+  <span class="o">}</span>
+<span class="o">]</span>
+</pre></div>
+<p>jq play: <a class="reference external" href="https://jqplay.org/s/seNL7hW38W">https://jqplay.org/s/seNL7hW38W</a></p>
+</div>
+<div class="section" id="manipulating-arrays-of-objects">
+<h4 id="hidmanipulating-arrays-of-objects">Manipulating arrays of objects<a class="headerlink" href="#hidmanipulating-arrays-of-objects" title="Permalink to this headline">¶</a></h4>
+<p>For example, to retrieve the value of name from an array element:</p>
+<div class="highlight"><pre><span></span>$ <span class="nb">echo</span> <span class="s1">&#39;[{&quot;name&quot;: &quot;foo&quot;},{&quot;name&quot;: &quot;bar&quot;},{&quot;name&quot;: &quot;foobar&quot;}]&#39;</span> <span class="p">|</span>jq .<span class="o">[]</span>.name
+<span class="s2">&quot;foo&quot;</span>
+<span class="s2">&quot;bar&quot;</span>
+<span class="s2">&quot;foobar&quot;</span>
+</pre></div>
+<p>jq play: <a class="reference external" href="https://jqplay.org/s/Z5qjhJnRyn">https://jqplay.org/s/Z5qjhJnRyn</a></p>
+<p>It is also possible to use the following pipeline operations that will be mentioned below.:</p>
+<div class="highlight"><pre><span></span>$ <span class="nb">echo</span> <span class="s1">&#39;[{&quot;name&quot;: &quot;foo&quot;},{&quot;name&quot;: &quot;bar&quot;},{&quot;name&quot;: &quot;foobar&quot;}]&#39;</span> <span class="p">|</span>jq <span class="s1">&#39;.[]|.name&#39;</span>
+<span class="s2">&quot;foo&quot;</span>
+<span class="s2">&quot;bar&quot;</span>
+<span class="s2">&quot;foobar&quot;</span>
+</pre></div>
+<p>If you want to recompose the result into an array, you can do so:</p>
+<div class="highlight"><pre><span></span>$ <span class="nb">echo</span> <span class="s1">&#39;[{&quot;name&quot;: &quot;foo&quot;},{&quot;name&quot;: &quot;bar&quot;},{&quot;name&quot;: &quot;foobar&quot;}]&#39;</span> <span class="p">|</span>jq <span class="o">[</span>.<span class="o">[]</span>.name<span class="o">]</span>
+<span class="o">[</span>
+  <span class="s2">&quot;foo&quot;</span>,
+  <span class="s2">&quot;bar&quot;</span>,
+  <span class="s2">&quot;foobar&quot;</span>
+<span class="o">]</span>
+</pre></div>
+<p>You can also use the <tt class="docutils literal">map</tt> that will be mentioned below:</p>
+<div class="highlight"><pre><span></span>$ <span class="nb">echo</span> <span class="s1">&#39;[{&quot;name&quot;: &quot;foo&quot;},{&quot;name&quot;: &quot;bar&quot;},{&quot;name&quot;: &quot;foobar&quot;}]&#39;</span> <span class="p">|</span>jq <span class="s1">&#39;map(.name)&#39;</span>
+<span class="o">[</span>
+  <span class="s2">&quot;foo&quot;</span>,
+  <span class="s2">&quot;bar&quot;</span>,
+  <span class="s2">&quot;foobar&quot;</span>
+<span class="o">]</span>
+</pre></div>
+</div>
+</div>
+<div class="section" id="use-multiple-filters">
+<h3 id="hiduse-multiple-filters">Use multiple filters<a class="headerlink" href="#hiduse-multiple-filters" title="Permalink to this headline">¶</a></h3>
+<p><tt class="docutils literal">,</tt></p>
+<div class="highlight"><pre><span></span>$ <span class="nb">echo</span> <span class="s1">&#39;{&quot;url&quot;: &quot;mozillazg.com&quot;, &quot;name&quot;: &quot;mozillazg&quot;}&#39;</span> <span class="p">|</span>jq <span class="s1">&#39;.url, .name&#39;</span>
+<span class="s2">&quot;mozillazg.com&quot;</span>
+<span class="s2">&quot;mozillazg&quot;</span>
+</pre></div>
+<p>jq play: <a class="reference external" href="https://jqplay.org/s/02CPHO1ESj">https://jqplay.org/s/02CPHO1ESj</a></p>
+</div>
+</div>
+<div class="section" id="advanced-operations">
+<h2 id="hidadvanced-operations">Advanced Operations<a class="headerlink" href="#hidadvanced-operations" title="Permalink to this headline">¶</a></h2>
+<div class="section" id="pipeline-to-do-secondary-or-multiple-processing-of-the-processed-results">
+<h3 id="hidpipeline-to-do-secondary-or-multiple-processing-of-the-processed-results">Pipeline (to do secondary or multiple processing of the processed results)<a class="headerlink" href="#hidpipeline-to-do-secondary-or-multiple-processing-of-the-processed-results" title="Permalink to this headline">¶</a></h3>
+<p>You can use <tt class="docutils literal">|</tt> to implement a pipeline like function:</p>
+<div class="highlight"><pre><span></span>$ <span class="nb">echo</span> <span class="s1">&#39;{&quot;url&quot;: &quot;mozillazg.com&quot;, &quot;name&quot;: &quot;mozillazg&quot;}&#39;</span> <span class="p">|</span>jq <span class="s1">&#39;.|.url&#39;</span>
+<span class="s2">&quot;mozillazg.com&quot;</span>
+</pre></div>
+<p>jq play: <a class="reference external" href="https://jqplay.org/s/L5bu1ovLr-">https://jqplay.org/s/L5bu1ovLr-</a></p>
+<div class="highlight"><pre><span></span>$ <span class="nb">echo</span> <span class="s1">&#39;{&quot;url&quot;: &quot;mozillazg.com&quot;, &quot;tests&quot;: [{&quot;foobar&quot;: &quot;v1&quot;}, {&quot;foobar&quot;: &quot;v2&quot;}]}&#39;</span> <span class="p">|</span>jq <span class="s1">&#39;.tests |.[] |.foobar&#39;</span>
+<span class="s2">&quot;v1&quot;</span>
+<span class="s2">&quot;v2&quot;</span>
+</pre></div>
+<p>jq play: <a class="reference external" href="https://jqplay.org/s/9UcLXKEgaT">https://jqplay.org/s/9UcLXKEgaT</a></p>
+<p>You can also use the shell's <tt class="docutils literal">|</tt> implementation directly:</p>
+<div class="highlight"><pre><span></span>$ <span class="nb">echo</span> <span class="s1">&#39;{&quot;url&quot;: &quot;mozillazg.com&quot;, &quot;name&quot;: &quot;mozillazg&quot;}&#39;</span> <span class="p">|</span>jq <span class="s1">&#39;.&#39;</span> <span class="p">|</span> jq <span class="s1">&#39;.url&#39;</span>
+<span class="s2">&quot;mozillazg.com&quot;</span>
+
+$ <span class="nb">echo</span> <span class="s1">&#39;{&quot;url&quot;: &quot;mozillazg.com&quot;, &quot;tests&quot;: [{&quot;foobar&quot;: &quot;v1&quot;}, {&quot;foobar&quot;: &quot;v2&quot;}]}&#39;</span> <span class="p">|</span>jq <span class="s1">&#39;.tests&#39;</span> <span class="p">|</span> jq <span class="s1">&#39;.[]&#39;</span> <span class="p">|</span> jq <span class="s1">&#39;.foobar&#39;</span>
+<span class="s2">&quot;v1&quot;</span>
+<span class="s2">&quot;v2&quot;</span>
+</pre></div>
+</div>
+<div class="section" id="get-the-length-of-the-content-string-length-of-an-array">
+<h3 id="hidget-the-length-of-the-content-string-length-of-an-array">Get the length of the content (string, length of an array)<a class="headerlink" href="#hidget-the-length-of-the-content-string-length-of-an-array" title="Permalink to this headline">¶</a></h3>
+<p><tt class="docutils literal">length</tt> can get the length of a string or an array:</p>
+<div class="highlight"><pre><span></span>$ <span class="nb">echo</span> <span class="s1">&#39;{&quot;url&quot;: &quot;mozillazg.com&quot;, &quot;name&quot;: &quot;mozillazg&quot;}&#39;</span> <span class="p">|</span>jq <span class="s1">&#39;.url|length&#39;</span>
+13
+$ <span class="nb">echo</span> <span class="s1">&#39;[&quot;mozillazg.com&quot;, &quot;mozillazg&quot;]&#39;</span> <span class="p">|</span>jq <span class="s1">&#39;.|length&#39;</span>
+2
+</pre></div>
+<p>jq play: <a class="reference external" href="https://jqplay.org/s/9TqdXbe0lo">https://jqplay.org/s/9TqdXbe0lo</a></p>
+</div>
+<div class="section" id="map">
+<h3 id="hidmap">map<a class="headerlink" href="#hidmap" title="Permalink to this headline">¶</a></h3>
+<p><tt class="docutils literal">map(foo)</tt> can operate on each item of an array and then merge the results:</p>
+<div class="highlight"><pre><span></span>$ <span class="nb">echo</span> <span class="s1">&#39;[&quot;mozillazg.com&quot;, &quot;mozillazg&quot;]&#39;</span> <span class="p">|</span> jq <span class="s1">&#39;map(length)&#39;</span>
+<span class="o">[</span>
+  13,
+  9
+<span class="o">]</span>
+</pre></div>
+<p>jq play: <a class="reference external" href="https://jqplay.org/s/BjgdGsjPem">https://jqplay.org/s/BjgdGsjPem</a></p>
+</div>
+<div class="section" id="filter-select">
+<h3 id="hidfilter-select">filter(select)<a class="headerlink" href="#hidfilter-select" title="Permalink to this headline">¶</a></h3>
+<p><tt class="docutils literal">select(foo)</tt> can be used to select an input item and return
+only the items that match the conditions:</p>
+<div class="highlight"><pre><span></span>$ <span class="nb">echo</span> <span class="s1">&#39;[&quot;mozillazg.com&quot;, &quot;mozillazg&quot;]&#39;</span> <span class="p">|</span> jq <span class="s1">&#39;map(select(.|length &gt; 9))&#39;</span>
+<span class="o">[</span>
+  <span class="s2">&quot;mozillazg.com&quot;</span>
+<span class="o">]</span>
+</pre></div>
+<p>jq play: <a class="reference external" href="https://jqplay.org/s/8Zrwy7dDxW">https://jqplay.org/s/8Zrwy7dDxW</a></p>
+</div>
+<div class="section" id="string-interpolation-splicing-join">
+<h3 id="hidstring-interpolation-splicing-join">String interpolation, splicing/join<a class="headerlink" href="#hidstring-interpolation-splicing-join" title="Permalink to this headline">¶</a></h3>
+<p>You can use <tt class="docutils literal">\(foo)</tt> to implement the string interpolation function:</p>
+<div class="highlight"><pre><span></span>$ <span class="nb">echo</span> <span class="s1">&#39;{&quot;url&quot;: &quot;mozillazg.com&quot;, &quot;name&quot;: &quot;mozillazg&quot;}&#39;</span> <span class="p">|</span>jq <span class="s1">&#39;&quot;hi \(.name)&quot;&#39;</span>
+<span class="s2">&quot;hi mozillazg&quot;</span>
+</pre></div>
+<p>Note that it should be enclosed in double quotes to indicate that it is a string.</p>
+<p>jq play: <a class="reference external" href="https://jqplay.org/s/k90JFcDqPz">https://jqplay.org/s/k90JFcDqPz</a></p>
+<p>String concatenation using <tt class="docutils literal">+</tt> :</p>
+<div class="highlight"><pre><span></span>$ <span class="nb">echo</span> <span class="s1">&#39;{&quot;url&quot;: &quot;mozillazg.com&quot;, &quot;name&quot;: &quot;mozillazg&quot;}&#39;</span> <span class="p">|</span>jq <span class="s1">&#39;&quot;hi &quot; + .name&#39;</span>
+<span class="s2">&quot;hi mozillazg&quot;</span>
+</pre></div>
+</div>
+<div class="section" id="output-the-raw-string-value-instead-of-the-json-serialized-string-value">
+<h3 id="hidoutput-the-raw-string-value-instead-of-the-json-serialized-string-value">Output the raw string value instead of the JSON serialized string value<a class="headerlink" href="#hidoutput-the-raw-string-value-instead-of-the-json-serialized-string-value" title="Permalink to this headline">¶</a></h3>
+<p>Use the <tt class="docutils literal"><span class="pre">-r</span></tt> option to output the raw value of the string instead of
+the serialized value of json:</p>
+<div class="highlight"><pre><span></span>$ <span class="nb">echo</span> <span class="s1">&#39;{&quot;value&quot;: &quot;{\&quot;url\&quot;: \&quot;mozillazg.com\&quot;}&quot;}&#39;</span> <span class="p">|</span>jq .value
+<span class="s2">&quot;{\&quot;url\&quot;: \&quot;mozillazg.com\&quot;}&quot;</span>
+
+<span class="nb">echo</span> <span class="s1">&#39;{&quot;value&quot;: &quot;{\&quot;url\&quot;: \&quot;mozillazg.com\&quot;}&quot;}&#39;</span> <span class="p">|</span>jq -r .value
+<span class="o">{</span><span class="s2">&quot;url&quot;</span>: <span class="s2">&quot;mozillazg.com&quot;</span><span class="o">}</span>
+</pre></div>
+</div>
+<div class="section" id="if-elif-else">
+<h3 id="hidif-elif-else">if/elif/else<a class="headerlink" href="#hidif-elif-else" title="Permalink to this headline">¶</a></h3>
+<p>You can use <tt class="docutils literal">if ... then ... elif ... then ... else ... end</tt>
+to implement conditional judgments:</p>
+<div class="highlight"><pre><span></span>$ <span class="nb">echo</span> <span class="s1">&#39;[0, 1, 2, 3]&#39;</span> <span class="se">\</span>
+<span class="p">|</span> jq <span class="s1">&#39;map(if . == 0 then &quot;zero&quot; elif . == 1 then &quot;one&quot; elif . == 2 then &quot;two&quot; else &quot;many&quot; end)&#39;</span>
+<span class="o">[</span>
+  <span class="s2">&quot;zero&quot;</span>,
+  <span class="s2">&quot;one&quot;</span>,
+  <span class="s2">&quot;two&quot;</span>,
+  <span class="s2">&quot;many&quot;</span>
+<span class="o">]</span>
+</pre></div>
+<p>jq play: <a class="reference external" href="https://jqplay.org/s/y8WwvHISH4">https://jqplay.org/s/y8WwvHISH4</a></p>
+</div>
+<div class="section" id="constructing-objects-or-arrays">
+<h3 id="hidconstructing-objects-or-arrays">Constructing objects or arrays<a class="headerlink" href="#hidconstructing-objects-or-arrays" title="Permalink to this headline">¶</a></h3>
+<p>New objects or arrays can be constructed with <tt class="docutils literal">{}</tt> and <tt class="docutils literal">[]</tt> .</p>
+<p>object:</p>
+<div class="highlight"><pre><span></span>$ <span class="nb">echo</span> <span class="s1">&#39;[&quot;mozillazg.com&quot;, &quot;mozillazg&quot;]&#39;</span> <span class="p">|</span>jq <span class="s1">&#39;{name: .[1]}&#39;</span>
+<span class="o">{</span>
+  <span class="s2">&quot;name&quot;</span>: <span class="s2">&quot;mozillazg&quot;</span>
+<span class="o">}</span>
+</pre></div>
+<p>jq play: <a class="reference external" href="https://jqplay.org/s/sccwJi75jb">https://jqplay.org/s/sccwJi75jb</a></p>
+<p>Array:</p>
+<div class="highlight"><pre><span></span>$ <span class="nb">echo</span> <span class="s1">&#39;{&quot;url&quot;: &quot;mozillazg.com&quot;, &quot;name&quot;: &quot;mozillazg&quot;}&#39;</span> <span class="p">|</span>jq <span class="s1">&#39;[.name, .url]&#39;</span>
+<span class="o">[</span>
+  <span class="s2">&quot;mozillazg&quot;</span>,
+  <span class="s2">&quot;mozillazg.com&quot;</span>
+<span class="o">]</span>
+</pre></div>
+<p>jq play: <a class="reference external" href="https://jqplay.org/s/LYflwM4kJM">https://jqplay.org/s/LYflwM4kJM</a></p>
+<div class="highlight"><pre><span></span>$ <span class="nb">echo</span> <span class="s1">&#39;{&quot;name&quot;: &quot;mozillazg&quot;, &quot;ages&quot;: [1, 2]}&#39;</span> <span class="p">|</span> jq <span class="s1">&#39;{name, age: .ages[]}&#39;</span>
+<span class="o">{</span>
+  <span class="s2">&quot;name&quot;</span>: <span class="s2">&quot;mozillazg&quot;</span>,
+  <span class="s2">&quot;age&quot;</span>: 1
+<span class="o">}</span>
+<span class="o">{</span>
+  <span class="s2">&quot;name&quot;</span>: <span class="s2">&quot;mozillazg&quot;</span>,
+  <span class="s2">&quot;age&quot;</span>: 2
+<span class="o">}</span>
+</pre></div>
+<p>jq play: <a class="reference external" href="https://jqplay.org/s/s1GiNkp_Ed">https://jqplay.org/s/s1GiNkp_Ed</a></p>
+</div>
+<div class="section" id="array-join">
+<h3 id="hidarray-join">Array join<a class="headerlink" href="#hidarray-join" title="Permalink to this headline">¶</a></h3>
+<p><tt class="docutils literal">join</tt>:</p>
+<div class="highlight"><pre><span></span>$ <span class="nb">echo</span> <span class="s1">&#39;[&quot;mozillazg.com&quot;, &quot;mozillazg&quot;]&#39;</span> <span class="p">|</span> jq <span class="s1">&#39;.|join(&quot; | &quot;)&#39;</span>
+<span class="s2">&quot;mozillazg.com | mozillazg&quot;</span>
+</pre></div>
+<p>jq play: <a class="reference external" href="https://jqplay.org/s/1ckAfiLKA3">https://jqplay.org/s/1ckAfiLKA3</a></p>
+</div>
+<div class="section" id="string-split">
+<h3 id="hidstring-split">String split<a class="headerlink" href="#hidstring-split" title="Permalink to this headline">¶</a></h3>
+<p><tt class="docutils literal">split</tt>:</p>
+<div class="highlight"><pre><span></span>$ <span class="nb">echo</span> <span class="s1">&#39;&quot;mozillazg.com | mozillazg&quot;&#39;</span> <span class="p">|</span>jq <span class="s1">&#39;split(&quot; | &quot;)&#39;</span>
+<span class="o">[</span>
+  <span class="s2">&quot;mozillazg.com&quot;</span>,
+  <span class="s2">&quot;mozillazg&quot;</span>
+<span class="o">]</span>
+</pre></div>
+<p>jq play: <a class="reference external" href="https://jqplay.org/s/_7uGMWvmUh">https://jqplay.org/s/_7uGMWvmUh</a></p>
+<p>For more functions and usage, see the <a class="reference external" href="https://stedolan.github.io/jq/manual/">official docs</a></p>
+</div>
+</div>
+<div class="section" id="id1">
+<h2 id="hidid1">参考资料<a class="headerlink" href="#hidid1" title="Permalink to this headline">¶</a></h2>
+<ul class="simple">
+<li><a class="reference external" href="https://stedolan.github.io/jq/">jq</a></li>
+<li><a class="reference external" href="https://jqplay.org/">jq play</a></li>
+</ul>
+</div>
+
+                </div>
+            </div>
+            <!-- /.entry-content -->
+<section class="text-center">
+  
+<div id="donate"></div>
+
+<div class="social-share"></div>
+<div class="social-comment-note">
+<p>有任何建议和想法欢迎在下方评论区留言或者加我<a href="/static/wechat.png">微信</a>交流</p>
+</div>
+
+</section>
+<section class="well" id="related-posts">
+    <p>Related Posts:</p>
+    <ul>
+        <li><a href="https://mozillazg.com/2018/01/jq-use-examples-cookbook.html">jq 常用操作</a></li>
+        <li><a href="https://mozillazg.com/2015/11/git-view-one-commit-diff-en.html">see what has changed in a git commit</a></li>
+    </ul>
+</section>
+    <hr/>
+    <section class="comments" id="comments">
+        <h2>Comments</h2>
+
+        <div id="disqus_thread"></div>
+        <script type="text/javascript">
+            /* * * CONFIGURATION VARIABLES: EDIT BEFORE PASTING INTO YOUR WEBPAGE * * */
+            var disqus_shortname = 'my-github-blog'; // required: replace example with your forum shortname
+
+                    var disqus_identifier = 'jq-use-examples-cookbook-en';
+                var disqus_url = 'https://mozillazg.com/2018/01/jq-use-examples-cookbook-en.html';
+
+            var disqus_config = function () {
+                this.language = "zh-hans";
+            };
+
+            /* * * DON'T EDIT BELOW THIS LINE * * */
+            (function () {
+                var dsq = document.createElement('script');
+                dsq.type = 'text/javascript';
+                dsq.async = true;
+                dsq.src = '//' + disqus_shortname + '.disqus.com/embed.js';
+                (document.getElementsByTagName('head')[0] || document.getElementsByTagName('body')[0]).appendChild(dsq);
+            })();
+        </script>
+        <noscript>Please enable JavaScript to view the <a href="http://disqus.com/?ref_noscript">comments powered by
+            Disqus.</a></noscript>
+        <a href="http://disqus.com" class="dsq-brlink">comments powered by <span class="logo-disqus">Disqus</span></a>
+
+    </section>
+        </article>
+    </section>
+
+        </div>
+    </div>
+</div>
+<footer>
+   <div class="container">
+      <hr>
+      <div class="row">
+         <div class="col-xs-10">&copy; 2021 mozillazg
+            &middot; Powered by <a href="https://github.com/DandyDev/pelican-bootstrap3" target="_blank">pelican-bootstrap3</a>,
+            <a href="http://docs.getpelican.com/" target="_blank">Pelican</a>,
+            <a href="http://getbootstrap.com" target="_blank">Bootstrap</a>
+            &middot; <a href="/privacy-policy.html" target="_blank">Privacy</a>              <p><small>  <a rel="license" href="http://creativecommons.org/licenses/by-sa/4.0/"><img alt="Creative Commons License" style="border-width:0" src="/static/images/by-sa-80x15.png" /></a>
+    &quot;<span xmlns:dct="http://purl.org/dc/terms/" property="dct:title">Huang Huang 的博客</span>&quot; by <a xmlns:cc="http://creativecommons.org/ns#" href="https://mozillazg.com" property="cc:attributionName" rel="cc:attributionURL">mozillazg</a> is
+  licensed under a <a rel="license" href="http://creativecommons.org/licenses/by-sa/4.0/">Creative Commons Attribution-ShareAlike 4.0 International License</a>, except where indicated otherwise.
+</small></p>
+         </div>
+         <div class="col-xs-2"><p class="pull-right"><i class="fa fa-arrow-up"></i> <a href="#">Back to top</a></p></div>
+      </div>
+   </div>
+</footer>
+<script src="https://cdn.jsdelivr.net/npm/jquery@2.1.1/dist/jquery.min.js"></script>
+
+<!-- Include all compiled plugins (below), or include individual files as needed -->
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@3.3.4/dist/js/bootstrap.min.js"></script>
+
+<!-- Enable responsive features in IE8 with Respond.js (https://github.com/scottjehl/Respond) -->
+
+    <!-- Disqus -->
+    <script type="text/javascript">
+        /* * * CONFIGURATION VARIABLES: EDIT BEFORE PASTING INTO YOUR WEBPAGE * * */
+        var disqus_shortname = 'my-github-blog'; // required: replace example with your forum shortname
+
+        /* * * DON'T EDIT BELOW THIS LINE * * */
+        (function () {
+            var s = document.createElement('script');
+            s.async = true;
+            s.type = 'text/javascript';
+            s.src = '//' + disqus_shortname + '.disqus.com/count.js';
+            (document.getElementsByTagName('HEAD')[0] || document.getElementsByTagName('BODY')[0]).appendChild(s);
+        }());
+    </script>
+    <!-- End Disqus Code -->
+    <!-- Google Analytics Universal -->
+    <script type="text/javascript">
+        (function(i,s,o,g,r,a,m){i['GoogleAnalyticsObject']=r;i[r]=i[r]||function(){
+        (i[r].q=i[r].q||[]).push(arguments)},i[r].l=1*new Date();a=s.createElement(o),
+        m=s.getElementsByTagName(o)[0];a.async=1;a.src=g;m.parentNode.insertBefore(a,m)
+        })(window,document,'script','//www.google-analytics.com/analytics.js','ga');
+
+        ga('create', 'UA-77172981-1', 'auto');
+        ga('send', 'pageview');
+    </script>
+    <!-- End Google Analytics Universal Code -->
+
+<!-- share.js -->
+<script src="https://cdn.jsdelivr.net/npm/social-share.js@1.0.16/dist/js/social-share.min.js"></script>
+
+
+
+<script src="https://cdn.jsdelivr.net/npm/tocbot@3.0.2/dist/tocbot.min.js"></script>
+<script>
+$(document).ready(function(){
+  tocbot.init({
+    // Where to render the table of contents.
+    tocSelector: '.js-toc',
+    // Where to grab the headings to build the table of contents.
+    contentSelector: '.entry-content',
+    // Which headings to grab inside of the contentSelector element.
+    headingSelector: 'h2, h3, h4,h5',
+    // Headings that match the ignoreSelector will be skipped.
+    ignoreSelector: '.js-toc-ignore',
+    // Main class to add to links.
+    linkClass: 'toc-link',
+    // Extra classes to add to links.
+    extraLinkClasses: '',
+    // Class to add to active links,
+    // the link corresponding to the top most heading on the page.
+    activeLinkClass: 'is-active-link',
+    // Main class to add to lists.
+    listClass: 'toc-list',
+    // Extra classes to add to lists.
+    extraListClasses: '',
+    // Class that gets added when a list should be collapsed.
+    isCollapsedClass: 'is-collapsed',
+    // Class that gets added when a list should be able
+    // to be collapsed but isn't necessarily collpased.
+    collapsibleClass: 'is-collapsible',
+    // Class to add to list items.
+    listItemClass: 'toc-list-item',
+    // How many heading levels should not be collpased.
+    // For example, number 6 will show everything since
+    // there are only 6 heading levels and number 0 will collpase them all.
+    // The sections that are hidden will open
+    // and close as you scroll to headings within them.
+    collapseDepth: 6,
+    // Smooth scrolling enabled.
+    smoothScroll: true,
+    // Smooth scroll duration.
+    smoothScrollDuration: 420,
+    // Callback for scroll end (requires: smoothScroll).
+    scrollEndCallback: function (e) {},
+    // Headings offset between the headings and the top of the document (this is meant for minor adjustments).
+    headingsOffset: 0,
+    // Timeout between events firing to make sure it's
+    // not too rapid (for performance reasons).
+    throttleTimeout: 50,
+    // Element to add the positionFixedClass to.
+    positionFixedSelector: null,
+    // Fixed position class to add to make sidebar fixed after scrolling
+    // down past the fixedSidebarOffset.
+    positionFixedClass: 'is-position-fixed',
+    // fixedSidebarOffset can be any number but by default is set
+    // to auto which sets the fixedSidebarOffset to the sidebar
+    // element's offsetTop from the top of the document on init.
+    fixedSidebarOffset: 'auto',
+    // includeHtml can be set to true to include the HTML markup from the
+    // heading node instead of just including the textContent.
+    includeHtml: false
+  });
+});
+</script>
+</body>
+</html>
