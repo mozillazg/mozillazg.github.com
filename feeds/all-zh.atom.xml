@@ -1,0 +1,1184 @@
+<?xml version="1.0" encoding="utf-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom"><title>Huang Huang 的博客</title><link href="https://mozillazg.com/" rel="alternate"></link><link href="https://mozillazg.com/feeds/all-zh.atom.xml" rel="self"></link><id>https://mozillazg.com/</id><updated>2021-12-31T00:00:00+00:00</updated><entry><title>通过编写自定义内置函数的方式扩展 OPA/Rego 运行时</title><link href="https://mozillazg.com/2021/12/opa-openpolicyagent-extend-opa-via-add-new-built-in-functions-to-rego-go-runtime.html" rel="alternate"></link><updated>2021-12-31T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2021-12-31:2021/12/opa-openpolicyagent-extend-opa-via-add-new-built-in-functions-to-rego-go-runtime.html</id><summary type="html">&lt;div class="section" id="id1"&gt;
+&lt;h2 id="hidid1"&gt;前言&lt;a class="headerlink" href="#hidid1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;本文记录一下如何通过编写自定义内置函数的函数扩展 OPA/Rego 运行时，使得在编写 OPA/Rego 策略语言的时候
+可以直接使用自定义的这个内置函数实现更复杂的策略需求。&lt;/p&gt;
+&lt;div class="section" id="id2"&gt;
+&lt;h3 id="hidid2"&gt;编写自定义内置函数&lt;a class="headerlink" href="#hidid2" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
+&lt;p&gt;我们将要编写的一个自定义内置函数名为 &lt;tt class="docutils literal"&gt;auth.get_user_info&lt;/tt&gt; ，这个函数的作用是，获取自定义 uid 的用户信息：&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+user := auth.get_user_info(uid)
+&lt;/pre&gt;
+&lt;p&gt;并且将使用 &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;github.com/open-policy-agent/opa&amp;#64;v0.35.0&lt;/span&gt;&lt;/tt&gt; 这个 opa 运行时库来编写这个自定义函数，
+我们可以使用这个库提供的 &lt;tt class="docutils literal"&gt;rego.RegisterBuiltin1&lt;/tt&gt; 函数来实现我们的需求：&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="kn"&gt;package&lt;/span&gt; &lt;span class="nx"&gt;main&lt;/span&gt;
+
+&lt;span class="kn"&gt;import&lt;/span&gt; &lt;span class="p"&gt;(&lt;/span&gt;
+        &lt;span class="s"&gt;&amp;quot;fmt&amp;quot;&lt;/span&gt;
+        &lt;span class="s"&gt;&amp;quot;os&amp;quot;&lt;/span&gt;
+
+        &lt;span class="s"&gt;&amp;quot;github.com/open-policy-agent/opa/ast&amp;quot;&lt;/span&gt;
+        &lt;span class="s"&gt;&amp;quot;github.com/open-policy-agent/opa/cmd&amp;quot;&lt;/span&gt;
+        &lt;span class="s"&gt;&amp;quot;github.com/open-policy-agent/opa/rego&amp;quot;&lt;/span&gt;
+        &lt;span class="s"&gt;&amp;quot;github.com/open-policy-agent/opa/types&amp;quot;&lt;/span&gt;
+&lt;span class="p"&gt;)&lt;/span&gt;
+
+&lt;span class="kd"&gt;type&lt;/span&gt; &lt;span class="nx"&gt;User&lt;/span&gt; &lt;span class="kd"&gt;struct&lt;/span&gt; &lt;span class="p"&gt;{&lt;/span&gt;
+        &lt;span class="nx"&gt;Name&lt;/span&gt; &lt;span class="kt"&gt;string&lt;/span&gt;
+        &lt;span class="nx"&gt;Age&lt;/span&gt; &lt;span class="kt"&gt;int&lt;/span&gt;
+&lt;span class="p"&gt;}&lt;/span&gt;
+
+&lt;span class="kd"&gt;func&lt;/span&gt; &lt;span class="nx"&gt;main&lt;/span&gt;&lt;span class="p"&gt;()&lt;/span&gt; &lt;span class="p"&gt;{&lt;/span&gt;
+        &lt;span class="nx"&gt;users&lt;/span&gt; &lt;span class="o"&gt;:=&lt;/span&gt; &lt;span class="kd"&gt;map&lt;/span&gt;&lt;span class="p"&gt;[&lt;/span&gt;&lt;span class="kt"&gt;string&lt;/span&gt;&lt;span class="p"&gt;]&lt;/span&gt;&lt;span class="nx"&gt;User&lt;/span&gt;&lt;span class="p"&gt;{&lt;/span&gt;
+                &lt;span class="s"&gt;&amp;quot;uid-1&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt; &lt;span class="p"&gt;{&lt;/span&gt;
+                        &lt;span class="nx"&gt;Name&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt; &lt;span class="s"&gt;&amp;quot;tom&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;
+                        &lt;span class="nx"&gt;Age&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;  &lt;span class="mi"&gt;25&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;
+                &lt;span class="p"&gt;},&lt;/span&gt;
+                &lt;span class="s"&gt;&amp;quot;uid-2&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt; &lt;span class="p"&gt;{&lt;/span&gt;
+                        &lt;span class="nx"&gt;Name&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt; &lt;span class="s"&gt;&amp;quot;eric&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;
+                        &lt;span class="nx"&gt;Age&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;  &lt;span class="mi"&gt;30&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;
+                &lt;span class="p"&gt;},&lt;/span&gt;
+        &lt;span class="p"&gt;}&lt;/span&gt;
+        &lt;span class="nx"&gt;rego&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;RegisterBuiltin1&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;
+                &lt;span class="o"&gt;&amp;amp;&lt;/span&gt;&lt;span class="nx"&gt;rego&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Function&lt;/span&gt;&lt;span class="p"&gt;{&lt;/span&gt;
+                        &lt;span class="nx"&gt;Name&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;    &lt;span class="s"&gt;&amp;quot;auth.get_user_info&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;
+                        &lt;span class="nx"&gt;Decl&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;    &lt;span class="nx"&gt;types&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;NewFunction&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="nx"&gt;types&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Args&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="nx"&gt;types&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;S&lt;/span&gt;&lt;span class="p"&gt;),&lt;/span&gt; &lt;span class="nx"&gt;types&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;A&lt;/span&gt;&lt;span class="p"&gt;),&lt;/span&gt;
+                        &lt;span class="nx"&gt;Memoize&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt; &lt;span class="kc"&gt;true&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;
+                &lt;span class="p"&gt;},&lt;/span&gt;
+                &lt;span class="kd"&gt;func&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="nx"&gt;bctx&lt;/span&gt; &lt;span class="nx"&gt;rego&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;BuiltinContext&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="nx"&gt;op1&lt;/span&gt; &lt;span class="o"&gt;*&lt;/span&gt;&lt;span class="nx"&gt;ast&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Term&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt; &lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="o"&gt;*&lt;/span&gt;&lt;span class="nx"&gt;ast&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Term&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="kt"&gt;error&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt; &lt;span class="p"&gt;{&lt;/span&gt;
+                        &lt;span class="kd"&gt;var&lt;/span&gt; &lt;span class="nx"&gt;uid&lt;/span&gt; &lt;span class="kt"&gt;string&lt;/span&gt;
+                        &lt;span class="k"&gt;if&lt;/span&gt; &lt;span class="nx"&gt;err&lt;/span&gt; &lt;span class="o"&gt;:=&lt;/span&gt; &lt;span class="nx"&gt;ast&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;As&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="nx"&gt;op1&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Value&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="o"&gt;&amp;amp;&lt;/span&gt;&lt;span class="nx"&gt;uid&lt;/span&gt;&lt;span class="p"&gt;);&lt;/span&gt; &lt;span class="nx"&gt;err&lt;/span&gt; &lt;span class="o"&gt;!=&lt;/span&gt; &lt;span class="kc"&gt;nil&lt;/span&gt; &lt;span class="p"&gt;{&lt;/span&gt;
+                                &lt;span class="k"&gt;return&lt;/span&gt; &lt;span class="kc"&gt;nil&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="nx"&gt;err&lt;/span&gt;
+                        &lt;span class="p"&gt;}&lt;/span&gt;
+                        &lt;span class="nx"&gt;user&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="nx"&gt;ok&lt;/span&gt; &lt;span class="o"&gt;:=&lt;/span&gt; &lt;span class="nx"&gt;users&lt;/span&gt;&lt;span class="p"&gt;[&lt;/span&gt;&lt;span class="nx"&gt;uid&lt;/span&gt;&lt;span class="p"&gt;]&lt;/span&gt;
+                        &lt;span class="k"&gt;if&lt;/span&gt; &lt;span class="p"&gt;!&lt;/span&gt;&lt;span class="nx"&gt;ok&lt;/span&gt; &lt;span class="p"&gt;{&lt;/span&gt;
+                                &lt;span class="k"&gt;return&lt;/span&gt; &lt;span class="kc"&gt;nil&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="nx"&gt;fmt&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Errorf&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="s"&gt;&amp;quot;user %s is not found&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="nx"&gt;uid&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+                        &lt;span class="p"&gt;}&lt;/span&gt;
+                        &lt;span class="nx"&gt;v&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="nx"&gt;err&lt;/span&gt; &lt;span class="o"&gt;:=&lt;/span&gt; &lt;span class="nx"&gt;ast&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;InterfaceToValue&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="nx"&gt;user&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+                        &lt;span class="k"&gt;if&lt;/span&gt; &lt;span class="nx"&gt;err&lt;/span&gt; &lt;span class="o"&gt;!=&lt;/span&gt; &lt;span class="kc"&gt;nil&lt;/span&gt; &lt;span class="p"&gt;{&lt;/span&gt;
+                                &lt;span class="k"&gt;return&lt;/span&gt; &lt;span class="kc"&gt;nil&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="nx"&gt;err&lt;/span&gt;
+                        &lt;span class="p"&gt;}&lt;/span&gt;
+                        &lt;span class="k"&gt;return&lt;/span&gt; &lt;span class="nx"&gt;ast&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;NewTerm&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="nx"&gt;v&lt;/span&gt;&lt;span class="p"&gt;),&lt;/span&gt; &lt;span class="kc"&gt;nil&lt;/span&gt;
+                &lt;span class="p"&gt;},&lt;/span&gt;
+        &lt;span class="p"&gt;)&lt;/span&gt;
+
+        &lt;span class="k"&gt;if&lt;/span&gt; &lt;span class="nx"&gt;err&lt;/span&gt; &lt;span class="o"&gt;:=&lt;/span&gt; &lt;span class="nx"&gt;cmd&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;RootCommand&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Execute&lt;/span&gt;&lt;span class="p"&gt;();&lt;/span&gt; &lt;span class="nx"&gt;err&lt;/span&gt; &lt;span class="o"&gt;!=&lt;/span&gt; &lt;span class="kc"&gt;nil&lt;/span&gt; &lt;span class="p"&gt;{&lt;/span&gt;
+                &lt;span class="nx"&gt;fmt&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Println&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="nx"&gt;err&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+                &lt;span class="nx"&gt;os&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Exit&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="mi"&gt;1&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+        &lt;span class="p"&gt;}&lt;/span&gt;
+&lt;span class="p"&gt;}&lt;/span&gt;
+&lt;/pre&gt;&lt;/div&gt;
+&lt;p&gt;测试：&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;$ go build -o custom-built-functions
+
+$ ./custom-built-functions run
+OPA 0.35.0 &lt;span class="o"&gt;(&lt;/span&gt;commit , built at &lt;span class="o"&gt;)&lt;/span&gt;
+
+Run &lt;span class="s1"&gt;&amp;#39;help&amp;#39;&lt;/span&gt; to see a list of commands and check &lt;span class="k"&gt;for&lt;/span&gt; updates.
+
+&amp;gt; uid :&lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="s2"&gt;&amp;quot;uid-1&amp;quot;&lt;/span&gt;
+Rule &lt;span class="s1"&gt;&amp;#39;uid&amp;#39;&lt;/span&gt; defined in package repl. Type &lt;span class="s1"&gt;&amp;#39;show&amp;#39;&lt;/span&gt; to see rules.
+&amp;gt; uid
+&lt;span class="s2"&gt;&amp;quot;uid-1&amp;quot;&lt;/span&gt;
+&amp;gt; user :&lt;span class="o"&gt;=&lt;/span&gt; auth.get_user_info&lt;span class="o"&gt;(&lt;/span&gt;uid&lt;span class="o"&gt;)&lt;/span&gt;
+Rule &lt;span class="s1"&gt;&amp;#39;user&amp;#39;&lt;/span&gt; defined in package repl. Type &lt;span class="s1"&gt;&amp;#39;show&amp;#39;&lt;/span&gt; to see rules.
+&amp;gt; user
+&lt;span class="o"&gt;{&lt;/span&gt;
+  &lt;span class="s2"&gt;&amp;quot;Age&amp;quot;&lt;/span&gt;: 25,
+  &lt;span class="s2"&gt;&amp;quot;Name&amp;quot;&lt;/span&gt;: &lt;span class="s2"&gt;&amp;quot;tom&amp;quot;&lt;/span&gt;
+&lt;span class="o"&gt;}&lt;/span&gt;
+&amp;gt; user.Age
+25
+&amp;gt; user.Name
+&lt;span class="s2"&gt;&amp;quot;tom&amp;quot;&lt;/span&gt;
+&amp;gt;
+Do you want to &lt;span class="nb"&gt;exit&lt;/span&gt; &lt;span class="o"&gt;([&lt;/span&gt;y&lt;span class="o"&gt;]&lt;/span&gt;/n&lt;span class="o"&gt;)&lt;/span&gt;? y
+&lt;/pre&gt;&lt;/div&gt;
+&lt;p&gt;通过上面的测试可以看到，我们已经实现了自定义内置函数的需求，并且测试结果也符合预期结果。&lt;/p&gt;
+&lt;p&gt;通过上面的示例代码中的 &lt;tt class="docutils literal"&gt;rego.RegisterBuiltin1&lt;/tt&gt; 这个函数名称可能已经猜到了，如果要定义接受两个参数
+的函数的话应该使用 &lt;tt class="docutils literal"&gt;rego.RegisterBuiltin2&lt;/tt&gt; 函数，同理还有 &lt;tt class="docutils literal"&gt;rego.RegisterBuiltin3&lt;/tt&gt; 和 &lt;tt class="docutils literal"&gt;reg.RegisterBuiltin4&lt;/tt&gt; 函数
+可供使用。以及还有一个定义不定长参数的 &lt;tt class="docutils literal"&gt;rego.RegisterBuiltinDyn&lt;/tt&gt; 可以用来满足跟复杂的函数需求。&lt;/p&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;div class="section" id="id3"&gt;
+&lt;h2 id="hidid3"&gt;参考资料&lt;a class="headerlink" href="#hidid3" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;ul class="simple"&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://www.openpolicyagent.org/"&gt;Open Policy Agent&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://github.com/open-policy-agent/opa"&gt;open-policy-agent/opa: An open source, general-purpose policy engine.&lt;/a&gt;&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/div&gt;
+</summary><category term="openpolicyagent"></category><category term="rego"></category></entry><entry><title>Github Action 的 context 功能容易被攻击者利用实施脚本注入攻击</title><link href="https://mozillazg.com/2021/12/security-script-injection-attack-via-github-action-context.html" rel="alternate"></link><updated>2021-12-12T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2021-12-12:2021/12/security-script-injection-attack-via-github-action-context.html</id><summary type="html">&lt;p&gt;Github Action 提供了一个叫 &lt;a class="reference external" href="https://docs.github.com/en/actions/learn-github-actions/contexts"&gt;context&lt;/a&gt; 的功能，通过 context 可以在 workflow 中应用当前仓库、当前 job 等等
+上下文 metadata 信息，其中通过 &lt;a class="reference external" href="https://docs.github.com/en/actions/learn-github-actions/contexts#github-context"&gt;github context&lt;/a&gt; 可以获取当前 workflow 的运行信息，比如分支名称、issue/PR 标题，
+commit id, issue/PR message 等等。&lt;/p&gt;
+&lt;p&gt;github context 获取到的很多信息其实是第三方控制的信息，
+比如贡献者通过 PR 触发 CI 时，github context 中的很多信息就是贡献者提交 PR
+的那个贡献者所控制的分支的相关信息。&lt;/p&gt;
+&lt;p&gt;基于 github context 的这个特点，攻击者可以通过 PR 流程来实施脚本注入攻击。
+比如，攻击者可以通过构造一个 shell 语句作为一个分支的名称，然后提交 PR 以触发 CI，
+如果 CI 中 github action workflow 有直接在 shell 命令中使用分支名的逻辑话，
+就会触发执行攻击者构造的 shell 语句的操作，攻击者就成功实施了脚本注入攻击。&lt;/p&gt;
+&lt;p&gt;下面演示一个在 github action 中会存在脚本注入攻击问题的 workflow 语法的例子：&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+- name: test
+  run: |
+    echo 'show branch name: '
+    echo &amp;quot;${{ github.ref_name }}&amp;quot;
+&lt;/pre&gt;
+&lt;p&gt;上面这个 run 指令中，通过 echo 输出了执行当前 workflow 的分支名称，看起来没啥问题。
+但是，但我创建一个名为 &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;$(ls$IFS$(echo$IFS'UkVBRE1FLm1kCg=='|base64$IFS'-d'))&lt;/span&gt;&lt;/tt&gt; 的分支
+然后在这个分支下触发 workflow 的时候， 结果就会跟预期的不一样了：&lt;/p&gt;
+&lt;p&gt;&lt;img alt="image" src="/static/images/security/github-action-script-injection.png" /&gt;&lt;/p&gt;
+&lt;blockquote&gt;
+&lt;/blockquote&gt;
+&lt;div class="section" id="id1"&gt;
+&lt;h2 id="hidid1"&gt;参考资料&lt;a class="headerlink" href="#hidid1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;ul class="simple"&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://docs.github.com/en/actions/security-guides/security-hardening-for-github-actions#understanding-the-risk-of-script-injections"&gt;Security hardening for GitHub Actions - GitHub Docs&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://python-security.readthedocs.io/pypi-vuln/index-2021-07-27-combine-prs-workflow.html"&gt;Vulnerability in GitHub Actions workflow for PyPI — Python Security 0.0 documentation&lt;/a&gt;&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/div&gt;
+</summary></entry><entry><title>容器特权模式与非特权模式的区别</title><link href="https://mozillazg.com/2021/11/docker-container-difference-between-privileged-mode-and-non-privileged-mode.html" rel="alternate"></link><updated>2021-11-21T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2021-11-21:2021/11/docker-container-difference-between-privileged-mode-and-non-privileged-mode.html</id><summary type="html">&lt;div class="section" id="id2"&gt;
+&lt;h2 id="hidid2"&gt;前言&lt;a class="headerlink" href="#hidid2" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;本文尝试解答容器特权模式和非特权模式的区别，
+以及通过它们之间的区别找出哪些场景下必需使用特权模式才能实现业务需求。&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class="section" id="id3"&gt;
+&lt;h2 id="hidid3"&gt;特权模式&lt;a class="headerlink" href="#hidid3" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;&lt;a class="reference external" href="https://github.com/kubernetes/cri-api"&gt;CRI(Container Runtime Interface)&lt;/a&gt; 中特权模式的说明如下：&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+// If set, run container in privileged mode.
+// Privileged mode is incompatible with the following options. If
+// privileged is set, the following features MAY have no effect:
+// 1. capabilities
+// 2. selinux_options
+// 4. seccomp
+// 5. apparmor
+//
+// Privileged mode implies the following specific options are applied:
+// 1. All capabilities are added.
+// 2. Sensitive paths, such as kernel module paths within sysfs, are not masked.
+// 3. Any sysfs and procfs mounts are mounted RW.
+// 4. AppArmor confinement is not applied.
+// 5. Seccomp restrictions are not applied.
+// 6. The device cgroup does not restrict access to any devices.
+// 7. All devices from the host's /dev are available within the container.
+// 8. SELinux restrictions are not applied (e.g. label=disabled).
+&lt;/pre&gt;
+&lt;!-- 通过上面的说明，可以得出如下信息： --&gt;
+&lt;!--  --&gt;
+&lt;!-- * 开启特权模式后，linux capabilities、SELinux、Seccomp、AppArmor 等限制容器内进程权限的功能可能不会再生效。 --&gt;
+&lt;!-- * 开启特权模式时，将： --&gt;
+&lt;!--  --&gt;
+&lt;!-- * 启用所有的 `linux capabilities &lt;https://man7.org/linux/man-pages/man7/capabilities.7.html&gt;`__ --&gt;
+&lt;!-- * 将不再对容器内进程屏蔽主机上的敏感目录，比如 sysfs 下的内核模块文件 --&gt;
+&lt;!-- * 任何的 sysfs 和 procfs 挂载目录将以 ``RW`` 读写模式进行挂载 --&gt;
+&lt;!-- * 不再应用 AppArmor 安全配置 --&gt;
+&lt;!-- * 不再应用 Seccomp 安全约束 --&gt;
+&lt;!-- * cgroup 设备将不再禁止访问任何的设备 --&gt;
+&lt;!-- * 容器将可以操作主机上的 /dev 下的设备 --&gt;
+&lt;!-- * 不再应用 SELinux 安全约束 --&gt;
+&lt;p&gt;下面我们将通过示例说明一下每一项的效果。&lt;/p&gt;
+&lt;div class="section" id="all-capabilities-are-added"&gt;
+&lt;h3 id="hidall-capabilities-are-added"&gt;All capabilities are added&lt;a class="headerlink" href="#hidall-capabilities-are-added" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
+&lt;p&gt;普通模式下容器内进程只可以使用有限的一些 linux capabilities:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+$ docker run --rm -it  r.j3ss.co/amicontained bash
+
+Capabilities:
+    BOUNDING -&amp;gt; chown dac_override fowner fsetid kill setgid setuid setpcap net_bind_service net_raw sys_chroot mknod audit_write setfcap
+&lt;/pre&gt;
+&lt;p&gt;但是，特权模式下的容器内进程可以使用所有的 linux capabilities:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+$ docker run --privileged --rm -it  r.j3ss.co/amicontained bash
+
+Capabilities:
+    BOUNDING -&amp;gt; chown dac_override dac_read_search fowner fsetid kill setgid setuid setpcap linux_immutable net_bind_service net_broadcast net_admin net_raw ipc_lock ipc_owner sys_module sys_rawio sys_chroot sys_ptrace sys_pacct sys_admin sys_boot sys_nice sys_resource sys_time sys_tty_config mknod lease audit_write audit_control setfcap mac_override mac_admin syslog wake_alarm block_suspend audit_read
+&lt;/pre&gt;
+&lt;p&gt;也可以通过手动自定义 &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;--cap-add&lt;/span&gt;&lt;/tt&gt; 参数的方式，在普通模式下实现类似的需求:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+$ docker run --cap-add=ALL  --rm -it  r.j3ss.co/amicontained bash
+Capabilities:
+        BOUNDING -&amp;gt; chown dac_override dac_read_search fowner fsetid kill setgid setuid setpcap linux_immutable net_bind_service net_broadcast net_admin net_raw ipc_lock ipc_owner sys_module sys_rawio sys_chroot sys_ptrace sys_pacct sys_admin sys_boot sys_nice sys_resource sys_time sys_tty_config mknod lease audit_write audit_control setfcap mac_override mac_admin syslog wake_alarm block_suspend audit_read
+&lt;/pre&gt;
+&lt;p&gt;BTW，特权模式下，容器内进程拥有使用所有的 linux capabilities 的能力，但是，
+不表示进程就一定有使用某些 linux capabilities 的权限。比如，如果容器是以非 root 用户启动的，
+就算它是以特权模式启动的容器，也不表示它就能够做一些无权限做的事情:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+$ docker run --rm -it debian:buster chown 65534 /var/log/lastlog
+
+$ docker run -u 65534 --rm -it debian:buster chown 65534 /var/log/lastlog
+chown: changing ownership of '/var/log/lastlog': Operation not permitted
+
+$ docker run --privileged -u 65534 --rm -it debian:buster chown 65534 /var/log/lastlog
+chown: changing ownership of '/var/log/lastlog': Operation not permitted
+&lt;/pre&gt;
+&lt;/div&gt;
+&lt;div class="section" id="sensitive-paths-such-as-kernel-module-paths-within-sysfs-are-not-masked"&gt;
+&lt;h3 id="hidsensitive-paths-such-as-kernel-module-paths-within-sysfs-are-not-masked"&gt;Sensitive paths, such as kernel module paths within sysfs, are not masked.&lt;a class="headerlink" href="#hidsensitive-paths-such-as-kernel-module-paths-within-sysfs-are-not-masked" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
+&lt;p&gt;普通模式下，部分内核模块路径比如 /proc 下的一些目录需要阻止写入、有些又需要允许读写，
+这些文件目录将会以 tmpfs 文件系统的方式挂载到容器中，以实现目录 mask 的需求
+（TODO: 待进一步更新说明）:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+$ docker run --rm -it debian:buster mount |grep '/proc.*tmpfs'
+tmpfs on /proc/acpi type tmpfs (ro,relatime)
+tmpfs on /proc/kcore type tmpfs (rw,nosuid,size=65536k,mode=755)
+tmpfs on /proc/keys type tmpfs (rw,nosuid,size=65536k,mode=755)
+tmpfs on /proc/timer_list type tmpfs (rw,nosuid,size=65536k,mode=755)
+tmpfs on /proc/sched_debug type tmpfs (rw,nosuid,size=65536k,mode=755)
+tmpfs on /proc/scsi type tmpfs (ro,relatime)
+&lt;/pre&gt;
+&lt;p&gt;特权模式下，这些目录将不再以 tmpfs 文件系统的方式挂载:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+$ docker run --privileged --rm -it debian:buster mount |grep '/proc.*tmpfs'
+$
+&lt;/pre&gt;
+&lt;/div&gt;
+&lt;div class="section" id="any-sysfs-and-procfs-mounts-are-mounted-rw"&gt;
+&lt;h3 id="hidany-sysfs-and-procfs-mounts-are-mounted-rw"&gt;Any sysfs and procfs mounts are mounted RW.&lt;a class="headerlink" href="#hidany-sysfs-and-procfs-mounts-are-mounted-rw" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
+&lt;p&gt;普通模式下，部分内核文件系统(sysfs、procfs)会被以只读的方式挂载到容器中，以阻止容器内进程随意修改系统内核:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+$ docker run --rm -it debian:buster mount |grep '(ro'
+sysfs on /sys type sysfs (ro,nosuid,nodev,noexec,relatime)
+cgroup on /sys/fs/cgroup/systemd type cgroup (ro,nosuid,nodev,noexec,relatime,xattr,release_agent=/usr/lib/systemd/systemd-cgroups-agent,name=systemd)
+cgroup on /sys/fs/cgroup/memory type cgroup (ro,nosuid,nodev,noexec,relatime,memory)
+cgroup on /sys/fs/cgroup/rdma type cgroup (ro,nosuid,nodev,noexec,relatime,rdma)
+cgroup on /sys/fs/cgroup/cpuset type cgroup (ro,nosuid,nodev,noexec,relatime,cpuset)
+cgroup on /sys/fs/cgroup/net_cls,net_prio type cgroup (ro,nosuid,nodev,noexec,relatime,net_cls,net_prio)
+cgroup on /sys/fs/cgroup/cpu,cpuacct type cgroup (ro,nosuid,nodev,noexec,relatime,cpu,cpuacct)
+cgroup on /sys/fs/cgroup/hugetlb type cgroup (ro,nosuid,nodev,noexec,relatime,hugetlb)
+cgroup on /sys/fs/cgroup/freezer type cgroup (ro,nosuid,nodev,noexec,relatime,freezer)
+cgroup on /sys/fs/cgroup/blkio type cgroup (ro,nosuid,nodev,noexec,relatime,blkio)
+cgroup on /sys/fs/cgroup/perf_event type cgroup (ro,nosuid,nodev,noexec,relatime,perf_event)
+cgroup on /sys/fs/cgroup/devices type cgroup (ro,nosuid,nodev,noexec,relatime,devices)
+cgroup on /sys/fs/cgroup/pids type cgroup (ro,nosuid,nodev,noexec,relatime,pids)
+proc on /proc/bus type proc (ro,nosuid,nodev,noexec,relatime)
+proc on /proc/fs type proc (ro,nosuid,nodev,noexec,relatime)
+proc on /proc/irq type proc (ro,nosuid,nodev,noexec,relatime)
+proc on /proc/sys type proc (ro,nosuid,nodev,noexec,relatime)
+proc on /proc/sysrq-trigger type proc (ro,nosuid,nodev,noexec,relatime)
+tmpfs on /proc/acpi type tmpfs (ro,relatime)
+tmpfs on /proc/scsi type tmpfs (ro,relatime)
+tmpfs on /sys/firmware type tmpfs (ro,relatime)
+&lt;/pre&gt;
+&lt;p&gt;但是在特权模式下，内核文件系统将不再以只读的方式被挂载:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+$ docker run --privileged --rm -it debian:buster mount |grep '(ro'
+$
+&lt;/pre&gt;
+&lt;/div&gt;
+&lt;div class="section" id="apparmor-confinement-is-not-applied"&gt;
+&lt;h3 id="hidapparmor-confinement-is-not-applied"&gt;AppArmor confinement is not applied.&lt;a class="headerlink" href="#hidapparmor-confinement-is-not-applied" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
+&lt;/div&gt;
+&lt;div class="section" id="seccomp-restrictions-are-not-applied"&gt;
+&lt;h3 id="hidseccomp-restrictions-are-not-applied"&gt;Seccomp restrictions are not applied.&lt;a class="headerlink" href="#hidseccomp-restrictions-are-not-applied" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
+&lt;p&gt;普通模式下，可以通过配置 AppArmor 或 Seccomp 相关安全选项
+（如果未配置的话，容器引擎默认也会启用一些对应的默认配置）
+对容器进行加固:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+$ docker run --rm -it  r.j3ss.co/amicontained bash
+AppArmor Profile: unconfined
+Seccomp: filtering
+Blocked Syscalls (63):
+        MSGRCV SYSLOG SETPGID SETSID USELIB USTAT SYSFS VHANGUP PIVOT_ROOT _SYSCTL ACCT SETTIMEOFDAY MOUNT UMOUNT2 SWAPON SWAPOFF REBOOT SETHOSTNAME SETDOMAINNAME IOPL IOPERM CREATE_MODULE INIT_MODULE DELETE_MODULE GET_KERNEL_SYMS QUERY_MODULE QUOTACTL NFSSERVCTL GETPMSG PUTPMSG AFS_SYSCALL TUXCALL SECURITY LOOKUP_DCOOKIE CLOCK_SETTIME VSERVER MBIND SET_MEMPOLICY GET_MEMPOLICY KEXEC_LOAD ADD_KEY REQUEST_KEY KEYCTL MIGRATE_PAGES UNSHARE MOVE_PAGES PERF_EVENT_OPEN FANOTIFY_INIT NAME_TO_HANDLE_AT OPEN_BY_HANDLE_AT SETNS PROCESS_VM_READV PROCESS_VM_WRITEV KCMP FINIT_MODULE KEXEC_FILE_LOAD BPF USERFAULTFD PREADV2 PWRITEV2 PKEY_MPROTECT PKEY_ALLOC PKEY_FREE
+&lt;/pre&gt;
+&lt;p&gt;特权模式下，这些 AppArmor 或 Seccomp 相关配置将不再生效:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+$ docker run --privileged --rm -it  r.j3ss.co/amicontained bash
+AppArmor Profile: unconfined
+Seccomp: disabled
+&lt;/pre&gt;
+&lt;p&gt;普通模式下也可以通过对应的安全选项来禁用 AppArmor 或 Seccomp 特性。&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class="section" id="the-device-cgroup-does-not-restrict-access-to-any-devices"&gt;
+&lt;h3 id="hidthe-device-cgroup-does-not-restrict-access-to-any-devices"&gt;The device cgroup does not restrict access to any devices.&lt;a class="headerlink" href="#hidthe-device-cgroup-does-not-restrict-access-to-any-devices" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
+&lt;p&gt;默认模式下，只能以只读模式操作 cgroup&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+$ docker run --rm -it debian:buster mount | grep 'cgroup'
+tmpfs on /sys/fs/cgroup type tmpfs (rw,nosuid,nodev,noexec,relatime,mode=755)
+cgroup on /sys/fs/cgroup/systemd type cgroup (ro,nosuid,nodev,noexec,relatime,xattr,release_agent=/usr/lib/systemd/systemd-cgroups-agent,name=systemd)
+cgroup on /sys/fs/cgroup/memory type cgroup (ro,nosuid,nodev,noexec,relatime,memory)
+cgroup on /sys/fs/cgroup/rdma type cgroup (ro,nosuid,nodev,noexec,relatime,rdma)
+cgroup on /sys/fs/cgroup/cpuset type cgroup (ro,nosuid,nodev,noexec,relatime,cpuset)
+cgroup on /sys/fs/cgroup/net_cls,net_prio type cgroup (ro,nosuid,nodev,noexec,relatime,net_cls,net_prio)
+cgroup on /sys/fs/cgroup/cpu,cpuacct type cgroup (ro,nosuid,nodev,noexec,relatime,cpu,cpuacct)
+cgroup on /sys/fs/cgroup/hugetlb type cgroup (ro,nosuid,nodev,noexec,relatime,hugetlb)
+cgroup on /sys/fs/cgroup/freezer type cgroup (ro,nosuid,nodev,noexec,relatime,freezer)
+cgroup on /sys/fs/cgroup/blkio type cgroup (ro,nosuid,nodev,noexec,relatime,blkio)
+cgroup on /sys/fs/cgroup/perf_event type cgroup (ro,nosuid,nodev,noexec,relatime,perf_event)
+cgroup on /sys/fs/cgroup/devices type cgroup (ro,nosuid,nodev,noexec,relatime,devices)
+cgroup on /sys/fs/cgroup/pids type cgroup (ro,nosuid,nodev,noexec,relatime,pids)
+&lt;/pre&gt;
+&lt;p&gt;特权模式下，将可以对 cgroup 进行读写操作:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+$ docker run --privileged --rm -it debian:buster mount | grep 'cgroup'
+tmpfs on /sys/fs/cgroup type tmpfs (rw,nosuid,nodev,noexec,relatime,mode=755)
+cgroup on /sys/fs/cgroup/systemd type cgroup (rw,nosuid,nodev,noexec,relatime,xattr,release_agent=/usr/lib/systemd/systemd-cgroups-agent,name=systemd)
+cgroup on /sys/fs/cgroup/memory type cgroup (rw,nosuid,nodev,noexec,relatime,memory)
+cgroup on /sys/fs/cgroup/rdma type cgroup (rw,nosuid,nodev,noexec,relatime,rdma)
+cgroup on /sys/fs/cgroup/cpuset type cgroup (rw,nosuid,nodev,noexec,relatime,cpuset)
+cgroup on /sys/fs/cgroup/net_cls,net_prio type cgroup (rw,nosuid,nodev,noexec,relatime,net_cls,net_prio)
+cgroup on /sys/fs/cgroup/cpu,cpuacct type cgroup (rw,nosuid,nodev,noexec,relatime,cpu,cpuacct)
+cgroup on /sys/fs/cgroup/hugetlb type cgroup (rw,nosuid,nodev,noexec,relatime,hugetlb)
+cgroup on /sys/fs/cgroup/freezer type cgroup (rw,nosuid,nodev,noexec,relatime,freezer)
+cgroup on /sys/fs/cgroup/blkio type cgroup (rw,nosuid,nodev,noexec,relatime,blkio)
+cgroup on /sys/fs/cgroup/perf_event type cgroup (rw,nosuid,nodev,noexec,relatime,perf_event)
+cgroup on /sys/fs/cgroup/devices type cgroup (rw,nosuid,nodev,noexec,relatime,devices)
+cgroup on /sys/fs/cgroup/pids type cgroup (rw,nosuid,nodev,noexec,relatime,pids)
+&lt;/pre&gt;
+&lt;/div&gt;
+&lt;div class="section" id="all-devices-from-the-host-s-dev-are-available-within-the-container"&gt;
+&lt;h3 id="hidall-devices-from-the-host-s-dev-are-available-within-the-container"&gt;All devices from the host's /dev are available within the container.&lt;a class="headerlink" href="#hidall-devices-from-the-host-s-dev-are-available-within-the-container" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
+&lt;p&gt;普通模式下，容器内 /dev 目录下看不到节点 /dev 目录下特有的 devices&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+# docker run --rm -it debian:buster ls /dev
+console  fd    mqueue  ptmx  random  stderr  stdout  urandom
+core     full  null    pts   shm     stdin   tty     zero
+&lt;/pre&gt;
+&lt;p&gt;特权模式下，容器内的 /dev 目录会包含这些来自节点 /dev 目录下的那些内容:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+$ docker run --privileged --rm -it debian:buster ls /dev
+autofs           mapper              stdin   tty25  tty44  tty63    vcsa1
+btrfs-control    mcelog              stdout  tty26  tty45  tty7     vcsa2
+bus              mem                 tty     tty27  tty46  tty8     vcsa3
+console          memory_bandwidth    tty0    tty28  tty47  tty9     vcsa4
+core             mqueue              tty1    tty29  tty48  ttyS0    vcsa5
+cpu              net                 tty10   tty3   tty49  ttyS1    vcsa6
+cpu_dma_latency  network_latency     tty11   tty30  tty5   ttyS2    vcsu
+cuse             network_throughput  tty12   tty31  tty50  ttyS3    vcsu1
+dri              null                tty13   tty32  tty51  uhid     vcsu2
+fb0              nvram               tty14   tty33  tty52  uinput   vcsu3
+fd               port                tty15   tty34  tty53  urandom  vcsu4
+full             ppp                 tty16   tty35  tty54  usbmon0  vcsu5
+fuse             ptmx                tty17   tty36  tty55  usbmon1  vcsu6
+hidraw0          ptp0                tty18   tty37  tty56  vcs      vda
+hpet             pts                 tty19   tty38  tty57  vcs1     vda1
+hwrng            random              tty2    tty39  tty58  vcs2     vfio
+infiniband       raw                 tty20   tty4   tty59  vcs3     vga_arbiter
+input            rtc0                tty21   tty40  tty6   vcs4     vhost-net
+kmsg             shm                 tty22   tty41  tty60  vcs5     vhost-vsock
+lightnvm         snapshot            tty23   tty42  tty61  vcs6     zero
+loop-control     stderr              tty24   tty43  tty62  vcsa
+&lt;/pre&gt;
+&lt;/div&gt;
+&lt;div class="section" id="selinux-restrictions-are-not-applied-e-g-label-disabled"&gt;
+&lt;h3 id="hidselinux-restrictions-are-not-applied-e-g-label-disabled"&gt;SELinux restrictions are not applied (e.g. label=disabled).&lt;a class="headerlink" href="#hidselinux-restrictions-are-not-applied-e-g-label-disabled" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
+&lt;p&gt;特权模式下，SELinux 相关的安全加固配置将被禁用。&lt;/p&gt;
+&lt;p&gt;普通模式下也可以通过对应的安全选项来禁用 SELinux 特性。&lt;/p&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;div class="section" id="id4"&gt;
+&lt;h2 id="hidid4"&gt;参考资料&lt;a class="headerlink" href="#hidid4" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;ul class="simple"&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://github.com/kubernetes/cri-api"&gt;kubernetes/cri-api: Container Runtime Interface (CRI) – a plugin interface which enables kubelet to use a wide variety of container runtimes.&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://man7.org/linux/man-pages/man7/capabilities.7.html"&gt;capabilities(7) - Linux manual page&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://docs.docker.com/engine/reference/run/#runtime-privilege-and-linux-capabilities"&gt;Docker run reference | Docker Documentation&lt;/a&gt;&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/div&gt;
+</summary><category term="privileged"></category><category term="security"></category></entry><entry><title>通过向 DNS 服务发送 SRV 查询请求获取 kubernetes 集群内所有 Service 信息</title><link href="https://mozillazg.com/2021/11/security-use-dns-srv-to-get-all-service-info.html" rel="alternate"></link><updated>2021-11-14T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2021-11-14:2021/11/security-use-dns-srv-to-get-all-service-info.html</id><summary type="html">&lt;p&gt;coredns 的 &lt;a class="reference external" href="https://github.com/coredns/coredns/blob/v1.8.6/plugin/kubernetes/README.md#wildcards"&gt;Wildcards&lt;/a&gt; 功能能够让我们通过一个简单的 SRV 查询就可以获取到整个 kubernetes 集群内的所有 service 信息。&lt;/p&gt;
+&lt;p&gt;获取 service 和对应的 service ip 和端口信息（其中 &lt;tt class="docutils literal"&gt;*&lt;/tt&gt; 可以替换为 &lt;tt class="docutils literal"&gt;any&lt;/tt&gt; ）：&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+$ dig srv *.*.svc.cluster.local
+
+; &amp;lt;&amp;lt;&amp;gt;&amp;gt; DiG 9.16.20 &amp;lt;&amp;lt;&amp;gt;&amp;gt; srv *.*.svc.cluster.local
+;; global options: +cmd
+;; Got answer:
+;; WARNING: .local is reserved for Multicast DNS
+;; You are currently testing what happens when an mDNS query is leaked to DNS
+;; -&amp;gt;&amp;gt;HEADER&amp;lt;&amp;lt;- opcode: QUERY, status: NOERROR, id: 41570
+;; flags: qr aa rd; QUERY: 1, ANSWER: 4, AUTHORITY: 0, ADDITIONAL: 4
+;; WARNING: recursion requested but not available
+
+;; OPT PSEUDOSECTION:
+; EDNS: version: 0, flags:; udp: 4096
+; COOKIE: 54380f3a1b0cb590 (echoed)
+;; QUESTION SECTION:
+;*.*.svc.cluster.local.             IN      SRV
+
+;; ANSWER SECTION:
+*.*.svc.cluster.local.      30      IN      SRV     0 20 443 kubernetes.default.svc.cluster.local.
+*.*.svc.cluster.local.      30      IN      SRV     0 20 53 kube-dns.kube-system.svc.cluster.local.
+*.*.svc.cluster.local.      30      IN      SRV     0 20 9153 kube-dns.kube-system.svc.cluster.local.
+*.*.svc.cluster.local.      30      IN      SRV     0 20 80 my-service.ns-1.svc.cluster.local.
+
+;; ADDITIONAL SECTION:
+my-service.ns-1.svc.cluster.local. 30 IN A  10.96.146.96
+kube-dns.kube-system.svc.cluster.local.     30 IN A 10.96.0.10
+kubernetes.default.svc.cluster.local. 30 IN A       10.96.0.1
+
+;; Query time: 2 msec
+;; SERVER: 10.96.0.10#53(10.96.0.10)
+;; WHEN: Sun Nov 14 07:08:27 UTC 2021
+;; MSG SIZE  rcvd: 526
+&lt;/pre&gt;
+&lt;p&gt;上面的 &lt;tt class="docutils literal"&gt;0 20 53 &lt;span class="pre"&gt;kube-dns.kube-system.svc.cluster.local.&lt;/span&gt;&lt;/tt&gt; 记录中，
+&lt;tt class="docutils literal"&gt;53&lt;/tt&gt; 是端口信息， &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;kube-dns.kube-system.svc.cluster.local&lt;/span&gt;&lt;/tt&gt; 是
+service 的域名其中包含了 service 名称、namspace 等信息:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+$ kubectl -n kube-system get svc kube-dns
+NAME       TYPE        CLUSTER-IP   EXTERNAL-IP   PORT(S)                  AGE
+kube-dns   ClusterIP   10.96.0.10   &amp;lt;none&amp;gt;        53/UDP,53/TCP,9153/TCP   92m
+&lt;/pre&gt;
+&lt;p&gt;获取 service 以及对应的 endpoints 信息:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+$ dig srv *.*.*.svc.cluster.local
+
+; &amp;lt;&amp;lt;&amp;gt;&amp;gt; DiG 9.16.20 &amp;lt;&amp;lt;&amp;gt;&amp;gt; srv *.*.*.svc.cluster.local
+;; global options: +cmd
+;; Got answer:
+;; WARNING: .local is reserved for Multicast DNS
+;; You are currently testing what happens when an mDNS query is leaked to DNS
+;; -&amp;gt;&amp;gt;HEADER&amp;lt;&amp;lt;- opcode: QUERY, status: NOERROR, id: 55650
+;; flags: qr aa rd; QUERY: 1, ANSWER: 5, AUTHORITY: 0, ADDITIONAL: 4
+;; WARNING: recursion requested but not available
+
+;; OPT PSEUDOSECTION:
+; EDNS: version: 0, flags:; udp: 4096
+; COOKIE: 8d5836f2b43e3675 (echoed)
+;; QUESTION SECTION:
+;*.*.*.svc.cluster.local.   IN      SRV
+
+;; ANSWER SECTION:
+*.*.*.svc.cluster.local. 30 IN      SRV     0 14 6443 172-18-0-3.kubernetes.default.svc.cluster.local.
+*.*.*.svc.cluster.local. 30 IN      SRV     0 14 53 10-244-0-3.kube-dns.kube-system.svc.cluster.local.
+*.*.*.svc.cluster.local. 30 IN      SRV     0 14 9153 10-244-0-3.kube-dns.kube-system.svc.cluster.local.
+*.*.*.svc.cluster.local. 30 IN      SRV     0 14 53 10-244-0-4.kube-dns.kube-system.svc.cluster.local.
+*.*.*.svc.cluster.local. 30 IN      SRV     0 14 9153 10-244-0-4.kube-dns.kube-system.svc.cluster.local.
+
+;; ADDITIONAL SECTION:
+10-244-0-4.kube-dns.kube-system.svc.cluster.local. 30 IN A 10.244.0.4
+10-244-0-3.kube-dns.kube-system.svc.cluster.local. 30 IN A 10.244.0.3
+172-18-0-3.kubernetes.default.svc.cluster.local. 30 IN A 172.18.0.3
+
+;; Query time: 2 msec
+;; SERVER: 10.96.0.10#53(10.96.0.10)
+;; WHEN: Sun Nov 14 07:09:38 UTC 2021
+;; MSG SIZE  rcvd: 715
+&lt;/pre&gt;
+&lt;p&gt;上面的 &lt;tt class="docutils literal"&gt;0 14 53 &lt;span class="pre"&gt;10-244-0-3.kube-dns.kube-system.svc.cluster.local.&lt;/span&gt;&lt;/tt&gt; 记录中
+&lt;tt class="docutils literal"&gt;53&lt;/tt&gt; 是其中一个 endpoint 的端口信息， &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;10-244-0-3&lt;/span&gt;&lt;/tt&gt; 是 endpoint 的 ip 地址:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+$ kubectl -n kube-system describe svc kube-dns
+Name:              kube-dns
+Namespace:         kube-system
+...
+IP:                10.96.0.10
+Port:              dns  53/UDP
+TargetPort:        53/UDP
+Endpoints:         10.244.0.3:53,10.244.0.4:53
+Port:              dns-tcp  53/TCP
+TargetPort:        53/TCP
+Endpoints:         10.244.0.3:53,10.244.0.4:53
+Port:              metrics  9153/TCP
+TargetPort:        9153/TCP
+Endpoints:         10.244.0.3:9153,10.244.0.4:9153
+...
+&lt;/pre&gt;
+&lt;div class="section" id="id1"&gt;
+&lt;h2 id="hidid1"&gt;参考资料&lt;a class="headerlink" href="#hidid1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;ul class="simple"&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://github.com/coredns/coredns/blob/v1.8.6/plugin/kubernetes/README.md#wildcards"&gt;coredns/README.md at v1.8.6 · coredns/coredns&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://kubernetes.io/docs/concepts/services-networking/dns-pod-service/"&gt;DNS for Services and Pods | Kubernetes&lt;/a&gt;&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/div&gt;
+</summary><category term="kubernetes"></category><category term="coredns"></category><category term="dns"></category></entry><entry><title>从编译后的二进制可执行文件中解析 Go 项目的依赖包信息</title><link href="https://mozillazg.com/2021/10/go-find-package-info-from-binary-file.html" rel="alternate"></link><updated>2021-10-07T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2021-10-07:2021/10/go-find-package-info-from-binary-file.html</id><summary type="html">&lt;p&gt;本文介绍从编译后的二进制可执行文件中解析原 Go 项目中的依赖包信息的一些方法，
+解决类似：接手一个老项目但是这个老项目中又依赖了另一个老项目的二进制可执行文件，
+导致无法知道这个二进制可执行文件具体是其对应源代码仓库的哪个版本的代码编译出来的尴尬情况，
+通过依赖包信息间接定位源码版本（无法完全实现这个需求，还需要结合代码仓库变更历史等手段）。&lt;/p&gt;
+&lt;!-- 使用 Go module 的项目 --&gt;
+&lt;!-- ========================== --&gt;
+&lt;div class="section" id="go-version"&gt;
+&lt;h2 id="hidgo-version"&gt;go version 命令&lt;a class="headerlink" href="#hidgo-version" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;可以先尝试使用 &lt;tt class="docutils literal"&gt;go version&lt;/tt&gt; 命令获取二进制文件中包含的依赖包信息：&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;$ go version -m go-bin
+go-bin: go1.17.1
+        path    github.com/mozillazg/go-bin-dep-sample/gomodule
+        mod     github.com/mozillazg/go-bin-dep-sample/gomodule &lt;span class="o"&gt;(&lt;/span&gt;devel&lt;span class="o"&gt;)&lt;/span&gt;
+        dep     github.com/mozillazg/go-pinyin  v0.18.0 h1:hQompXO23/0ohH8YNjvfsAITnCQImCiR/Fny8EhIeW0&lt;span class="o"&gt;=&lt;/span&gt;
+&lt;/pre&gt;&lt;/div&gt;
+&lt;/div&gt;
+&lt;div class="section" id="strings"&gt;
+&lt;h2&gt;&lt;tt class="docutils literal"&gt;strings&lt;/tt&gt; 命令&lt;/h2&gt;
+&lt;p&gt;也可以使用 &lt;tt class="docutils literal"&gt;strings&lt;/tt&gt; 命令获取二进制文件中的信息:&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;$ strings go-bin &lt;span class="p"&gt;|&lt;/span&gt;grep github.com
+github.com/mozillazg/go-bin-dep-sample/gomodule
+github.com/mozillazg/go-bin-dep-sample/gomodule
+github.com/mozillazg/go-pinyin
+github.com/mozillazg/go-pinyin.initial
+...
+github.com/mozillazg/go-pinyin.NewArgs
+/go/pkg/mod/github.com/mozillazg/go-pinyin@v0.18.0/pinyin.go
+/go/pkg/mod/github.com/mozillazg/go-pinyin@v0.18.0/phonetic_symbol.go
+/go/pkg/mod/github.com/mozillazg/go-pinyin@v0.18.0/pinyin_dict.go
+/go/src/github.com/mozillazg/go-bin-dep-sample/gomodule/main.go
+github.com/mozillazg/go-pinyin.initial
+...
+github.com/mozillazg/go-pinyin.PinyinDict
+&lt;/pre&gt;&lt;/div&gt;
+&lt;/div&gt;
+&lt;div class="section" id="go-tool-nm"&gt;
+&lt;h2 id="hidgo-tool-nm"&gt;go tool nm 命令&lt;a class="headerlink" href="#hidgo-tool-nm" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;&lt;tt class="docutils literal"&gt;go tool nm&lt;/tt&gt; 命令也可以得到相关信息:&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;$ go tool nm go-bin &lt;span class="p"&gt;|&lt;/span&gt;grep github.com
+  64ab00 D github.com/mozillazg/go-pinyin..inittask
+  65b588 D github.com/mozillazg/go-pinyin.Fallback
+  ...
+  49ba60 T github.com/mozillazg/go-pinyin.toFixed.func1
+&lt;/pre&gt;&lt;/div&gt;
+&lt;/div&gt;
+&lt;div class="section" id="go-tool-objdump"&gt;
+&lt;h2 id="hidgo-tool-objdump"&gt;go tool objdump 命令&lt;a class="headerlink" href="#hidgo-tool-objdump" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;&lt;tt class="docutils literal"&gt;go tool objdump&lt;/tt&gt; 命令也可以间接得到相关信息:&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;$ go tool objdump go-bin &lt;span class="p"&gt;|&lt;/span&gt;grep github.com
+TEXT github.com/mozillazg/go-pinyin.initial&lt;span class="o"&gt;(&lt;/span&gt;SB&lt;span class="o"&gt;)&lt;/span&gt; /go/pkg/mod/github.com/mozillazg/go-pinyin@v0.18.0/pinyin.go
+  pinyin.go:108             0x49b37d                488b1534831c00          MOVQ github.com/mozillazg/go-pinyin.initialArray+8&lt;span class="o"&gt;(&lt;/span&gt;SB&lt;span class="o"&gt;)&lt;/span&gt;, DX
+  pinyin.go:108             0x49b384                488b3525831c00          MOVQ github.com/mozillazg/go-pinyin.initialArray&lt;span class="o"&gt;(&lt;/span&gt;SB&lt;span class="o"&gt;)&lt;/span&gt;, SI
+  pinyin.go:106             0x49b44f                e90cffffff              JMP github.com/mozillazg/go-pinyin.initial&lt;span class="o"&gt;(&lt;/span&gt;SB&lt;span class="o"&gt;)&lt;/span&gt;
+TEXT github.com/mozillazg/go-pinyin.final&lt;span class="o"&gt;(&lt;/span&gt;SB&lt;span class="o"&gt;)&lt;/span&gt; /go/pkg/mod/github.com/mozillazg/go-pinyin@v0.18.0/pinyin.go
+  pinyin.go:119             0x49b482                e8d9feffff              CALL github.com/mozillazg/go-pinyin.initial&lt;span class="o"&gt;(&lt;/span&gt;SB&lt;span class="o"&gt;)&lt;/span&gt;
+  ...
+  phonetic_symbol.go:4      0x49c6a7                e974fbffff              JMP github.com/mozillazg/go-pinyin.init&lt;span class="o"&gt;(&lt;/span&gt;SB&lt;span class="o"&gt;)&lt;/span&gt;
+TEXT main.main&lt;span class="o"&gt;(&lt;/span&gt;SB&lt;span class="o"&gt;)&lt;/span&gt; /go/src/github.com/mozillazg/go-bin-dep-sample/gomodule/main.go
+  pinyin.go:102             0x49c6f3                488b15be5c1f00          MOVQ github.com/mozillazg/go-pinyin.Style&lt;span class="o"&gt;(&lt;/span&gt;SB&lt;span class="o"&gt;)&lt;/span&gt;, DX
+  pinyin.go:102             0x49c70a                488b350ff61b00          MOVQ github.com/mozillazg/go-pinyin.Separator&lt;span class="o"&gt;(&lt;/span&gt;SB&lt;span class="o"&gt;)&lt;/span&gt;, SI
+  pinyin.go:102             0x49c711                4c8b0510f61b00          MOVQ github.com/mozillazg/go-pinyin.Separator+8&lt;span class="o"&gt;(&lt;/span&gt;SB&lt;span class="o"&gt;)&lt;/span&gt;, R8
+  pinyin.go:102             0x49c722                4c8b0d5fee1b00          MOVQ github.com/mozillazg/go-pinyin.Fallback&lt;span class="o"&gt;(&lt;/span&gt;SB&lt;span class="o"&gt;)&lt;/span&gt;, R9
+  main.go:10                0x49c744                e897f7ffff              CALL github.com/mozillazg/go-pinyin.Pinyin&lt;span class="o"&gt;(&lt;/span&gt;SB&lt;span class="o"&gt;)&lt;/span&gt;
+&lt;/pre&gt;&lt;/div&gt;
+&lt;/div&gt;
+&lt;div class="section" id="redress"&gt;
+&lt;h2 id="hidredress"&gt;redress 工具&lt;a class="headerlink" href="#hidredress" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;&lt;a class="reference external" href="https://github.com/goretk/redress"&gt;redress&lt;/a&gt; 是一个专门用于分析 Go 二进制可执行文件的开源软件，通过这个工具也可以得到想要的包信息：&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;$ redress -pkg -filepath -vendor -unknown go-bin
+Packages:
+main &lt;span class="p"&gt;|&lt;/span&gt; /go/src/github.com/mozillazg/go-bin-dep-sample/gomodule
+
+Vendors:
+github.com/mozillazg/go-pinyin &lt;span class="p"&gt;|&lt;/span&gt; /go/pkg/mod/github.com/mozillazg/go-pinyin@v0.18.0
+
+Unknown Libraries:
+&lt;/pre&gt;&lt;/div&gt;
+&lt;!--  --&gt;
+&lt;!-- go-bin 文件的源代码： https://github.com/mozillazg/go-bin-dep-sample/tree/master/gomodule --&gt;
+&lt;!--  --&gt;
+&lt;!--  --&gt;
+&lt;!-- 使用 Go module + vendor 的项目 --&gt;
+&lt;!-- ==================================== --&gt;
+&lt;!--  --&gt;
+&lt;!-- 对于使用了 Go module + vendor 的项目，同样既可以使用 ``go version`` ： --&gt;
+&lt;!--  --&gt;
+&lt;!-- .. code:: bash --&gt;
+&lt;!--  --&gt;
+&lt;!-- $ go version -m go-bin --&gt;
+&lt;!-- go-bin: go1.17.1 --&gt;
+&lt;!-- path    github.com/mozillazg/go-bin-dep-sample/gomodulevendor --&gt;
+&lt;!-- mod     github.com/mozillazg/go-bin-dep-sample/gomodulevendor   (devel) --&gt;
+&lt;!-- dep     github.com/mozillazg/go-pinyin  v0.18.0 --&gt;
+&lt;!--  --&gt;
+&lt;!--  --&gt;
+&lt;!-- 也可以使用 ``strings`` 命令: --&gt;
+&lt;!--  --&gt;
+&lt;!-- .. code-block:: bash --&gt;
+&lt;!--  --&gt;
+&lt;!-- $ strings go-bin |grep github.com --&gt;
+&lt;!-- github.com/mozillazg/go-bin-dep-sample/gomodulevendor --&gt;
+&lt;!-- github.com/mozillazg/go-bin-dep-sample/gomodulevendor --&gt;
+&lt;!-- github.com/mozillazg/go-pinyin --&gt;
+&lt;!-- github.com/mozillazg/go-pinyin.initial --&gt;
+&lt;!-- ... --&gt;
+&lt;!-- github.com/mozillazg/go-pinyin.NewArgs --&gt;
+&lt;!-- /go/src/github.com/mozillazg/go-bin-dep-sample/gomodulevendor/vendor/github.com/mozillazg/go-pinyin/pinyin.go --&gt;
+&lt;!-- /go/src/github.com/mozillazg/go-bin-dep-sample/gomodulevendor/vendor/github.com/mozillazg/go-pinyin/phonetic_symbol.go --&gt;
+&lt;!-- /go/src/github.com/mozillazg/go-bin-dep-sample/gomodulevendor/vendor/github.com/mozillazg/go-pinyin/pinyin_dict.go --&gt;
+&lt;!-- /go/src/github.com/mozillazg/go-bin-dep-sample/gomodulevendor/main.go --&gt;
+&lt;!-- github.com/mozillazg/go-pinyin.initial --&gt;
+&lt;!-- ... --&gt;
+&lt;!-- github.com/mozillazg/go-pinyin.PinyinDict --&gt;
+&lt;!--  --&gt;
+&lt;!-- go-bin 文件的源代码： https://github.com/mozillazg/go-bin-dep-sample/tree/master/gomodulevendor --&gt;
+&lt;!--  --&gt;
+&lt;!--  --&gt;
+&lt;!-- 只使用 vendor 的项目 --&gt;
+&lt;!-- ====================== --&gt;
+&lt;!--  --&gt;
+&lt;!-- 只使用 vendor 但是未使用 Go module 的项目（老版本的 Go 编译的二进制，比如 Go 1.12），不能直接使用 ``go version``: --&gt;
+&lt;!--  --&gt;
+&lt;!-- .. code-block:: bash --&gt;
+&lt;!--  --&gt;
+&lt;!-- $ go version -m go-bin --&gt;
+&lt;!-- go-bin: go version not found --&gt;
+&lt;!--  --&gt;
+&lt;!-- 通过 ``strings`` 命令来查找二进制文件中的信息： --&gt;
+&lt;!--  --&gt;
+&lt;!-- .. code-block:: bash --&gt;
+&lt;!--  --&gt;
+&lt;!-- $ strings go-bin |grep github.com --&gt;
+&lt;!-- Wgithub.com/mozillazg/go-bin-dep-sample/onlyvendor/vendor/github.com/mozillazg/go-pinyin --&gt;
+&lt;!-- github.com/mozillazg/go-bin-dep-sample/onlyvendor/vendor/github.com/mozillazg/go-pinyin.initial --&gt;
+&lt;!-- ... --&gt;
+&lt;!-- github.com/mozillazg/go-bin-dep-sample/onlyvendor/vendor/github.com/mozillazg/go-pinyin.init --&gt;
+&lt;!-- /go/src/github.com/mozillazg/go-bin-dep-sample/onlyvendor/main.go --&gt;
+&lt;!-- /go/src/github.com/mozillazg/go-bin-dep-sample/onlyvendor/vendor/github.com/mozillazg/go-pinyin/pinyin_dict.go --&gt;
+&lt;!-- /go/src/github.com/mozillazg/go-bin-dep-sample/onlyvendor/vendor/github.com/mozillazg/go-pinyin/phonetic_symbol.go --&gt;
+&lt;!-- /go/src/github.com/mozillazg/go-bin-dep-sample/onlyvendor/vendor/github.com/mozillazg/go-pinyin/pinyin.go --&gt;
+&lt;!-- github.com/mozillazg/go-bin-dep-sample/onlyvendor/vendor/github.com/mozillazg/go-pinyin.Style --&gt;
+&lt;!-- github.com/mozillazg/go-bin-dep-sample/onlyvendor/vendor/github.com/mozillazg/go-pinyin.Heteronym --&gt;
+&lt;!-- ... --&gt;
+&lt;!-- github.com/mozillazg/go-bin-dep-sample/onlyvendor/vendor/github.com/mozillazg/go-pinyin.init --&gt;
+&lt;!--  --&gt;
+&lt;!--  --&gt;
+&lt;!-- go-bin 文件的源代码：https://github.com/mozillazg/go-bin-dep-sample/tree/master/onlyvendor --&gt;
+&lt;!--  --&gt;
+&lt;!--  --&gt;
+&lt;!-- 即不使用 Go module 也不使用 vendor 的项目 --&gt;
+&lt;!-- ========================================== --&gt;
+&lt;!--  --&gt;
+&lt;!-- 既不使用 Go module 也不使用 vendor 的项目（老版本的 Go 编译的二进制，比如 Go 1.12. 如果是新版本的 Go 默认会使用 Go module），同样不能使用 ``go version``: --&gt;
+&lt;!--  --&gt;
+&lt;!-- .. code-block:: bash --&gt;
+&lt;!--  --&gt;
+&lt;!-- $ go version -m go-bin --&gt;
+&lt;!-- go-bin: go version not found --&gt;
+&lt;!--  --&gt;
+&lt;!-- 可以使用 ``strings`` 命令: --&gt;
+&lt;!--  --&gt;
+&lt;!-- .. code-block:: bash --&gt;
+&lt;!--  --&gt;
+&lt;!-- $ strings go-bin |grep github.com --&gt;
+&lt;!-- github.com/mozillazg/go-pinyin --&gt;
+&lt;!-- github.com/mozillazg/go-pinyin.initial --&gt;
+&lt;!-- ... --&gt;
+&lt;!-- github.com/mozillazg/go-pinyin.init --&gt;
+&lt;!-- /go/src/github.com/mozillazg/go-bin-dep-sample/oldnovendor/main.go --&gt;
+&lt;!-- /go/src/github.com/mozillazg/go-pinyin/pinyin_dict.go --&gt;
+&lt;!-- /go/src/github.com/mozillazg/go-pinyin/phonetic_symbol.go --&gt;
+&lt;!-- /go/src/github.com/mozillazg/go-pinyin/pinyin.go --&gt;
+&lt;!-- github.com/mozillazg/go-pinyin.Style --&gt;
+&lt;!-- ... --&gt;
+&lt;!-- github.com/mozillazg/go-pinyin.init --&gt;
+&lt;!--  --&gt;
+&lt;!--  --&gt;
+&lt;!-- go-bin 文件的源代码：https://github.com/mozillazg/go-bin-dep-sample/tree/master/oldnovendor --&gt;
+&lt;!--  --&gt;
+&lt;!--  --&gt;
+&lt;!-- 参考资料 --&gt;
+&lt;!-- ======== --&gt;
+&lt;!--  --&gt;
+&lt;!--  --&gt;
+&lt;/div&gt;
+</summary></entry><entry><title>IP 地址解析库的不同实现导致应用存在安全隐患</title><link href="https://mozillazg.com/2021/10/security-ipaddress-risk-with-leading-zeros.html" rel="alternate"></link><updated>2021-10-07T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2021-10-07:2021/10/security-ipaddress-risk-with-leading-zeros.html</id><summary type="html">&lt;p&gt;先来看一个例子，对于 &lt;tt class="docutils literal"&gt;0177.0.0.1&lt;/tt&gt; 这个 IP 地址不同的程序会解析出不同的结果：&lt;/p&gt;
+&lt;p&gt;curl&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+curl 0177.0.0.1 -v
+* Rebuilt URL to: 0177.0.0.1/
+*   Trying 177.0.0.1...
+* TCP_NODELAY set
+&lt;/pre&gt;
+&lt;p&gt;ping&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+$ ping 0177.0.0.1
+PING 0177.0.0.1 (127.0.0.1): 56 data bytes
+64 bytes from 127.0.0.1: icmp_seq=0 ttl=64 time=0.059 ms
+64 bytes from 127.0.0.1: icmp_seq=1 ttl=64 time=0.084 ms
+^C
+&lt;/pre&gt;
+&lt;p&gt;可以看到，对于 &lt;tt class="docutils literal"&gt;0177.0.0.1&lt;/tt&gt; 这个 IP 地址，
+&lt;tt class="docutils literal"&gt;curl&lt;/tt&gt; 将它解析为 &lt;tt class="docutils literal"&gt;177.0.0.1&lt;/tt&gt; ，而 &lt;tt class="docutils literal"&gt;ping&lt;/tt&gt; 却解析为了 &lt;tt class="docutils literal"&gt;127.0.0.1&lt;/tt&gt; 。&lt;/p&gt;
+&lt;p&gt;之所以会有这种不一样的结果，是因为对于应该如何解析 IP 地址中数字前面的 0 并没有一个统一的标准，
+有的程序将这种情况标记为无效 IP ，有些程序将 &lt;tt class="docutils literal"&gt;0xx&lt;/tt&gt; 解析为 8 进制数字，有些程序将它解析为 10 进制数字。&lt;/p&gt;
+&lt;p&gt;正因为存在这种不统一的情况，也就导致应用程序对 IP 地址的校验逻辑存在安全隐患。&lt;/p&gt;
+&lt;p&gt;假设有一个服务的功能是访问用户输入的地址然后返回相应的响应信息，处于安全上的考虑，
+会校验用户的输入，拦截访问服务内部 IP 的地址：&lt;/p&gt;
+&lt;ol class="arabic simple"&gt;
+&lt;li&gt;用户输入 &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;http://0177.0.0.1:8080/path/to/secret&lt;/span&gt;&lt;/tt&gt;&lt;/li&gt;
+&lt;li&gt;服务端的校验程序使用的 IP 解析库将地址中包含的 IP 地址解析为 &lt;tt class="docutils literal"&gt;177.0.0.1&lt;/tt&gt; ，然后放行了该请求&lt;/li&gt;
+&lt;li&gt;实际执行这个请求用户输入的服务，在请求这个地址时，使用的 IP 地址相关库将它解析为了 &lt;tt class="docutils literal"&gt;127.0.0.1&lt;/tt&gt; ，
+此时就会存在安全隐患，导致出现了非预期的结果。&lt;/li&gt;
+&lt;/ol&gt;
+&lt;p&gt;基于 IP 黑名单的 ACL 或者过滤逻辑都有潜在的受这个问题影响的安全隐患， 这一问题的相关 CVE 可以参考【参考资料】中列出的部分 CVE 。&lt;/p&gt;
+&lt;div class="section" id="id1"&gt;
+&lt;h2 id="hidid1"&gt;参考资料&lt;a class="headerlink" href="#hidid1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;ul class="simple"&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://sick.codes/sick-2021-014/"&gt;CVE-2021-29921 - python stdlib &amp;quot;ipaddress&amp;quot; - Improper Input Validation of octal literals in python 3.8.0 thru v3.10 results in indeterminate SSRF &amp;amp; RFI vulnerabilities. - &amp;quot;ipaddress leading zeros in IPv4 address&amp;quot; - Sick Codes - Security Research, Hardware &amp;amp; Software Hacking, Consulting, Linux, IoT, Cloud, Embedded, Arch, Tweaks &amp;amp; Tips!&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://sick.codes/sick-2021-015/"&gt;CVE-2021-29922 - rust standard library &amp;quot;net&amp;quot; - Improper Input Validation of octal literals in rust 1.52.0 std::net and below results in indeterminate SSRF &amp;amp; RFI vulnerabilities. - Sick Codes - Security Research, Hardware &amp;amp; Software Hacking, Consulting, Linux, IoT, Cloud, Embedded, Arch, Tweaks &amp;amp; Tips!&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://sick.codes/sick-2021-016/"&gt;CVE-2021-29923 - golang standard library &amp;quot;net&amp;quot; - Improper Input Validation of octal literals in golang 1.16.2 and below standard library &amp;quot;net&amp;quot; results in indeterminate SSRF &amp;amp; RFI vulnerabilities. - Sick Codes - Security Research, Hardware &amp;amp; Software Hacking, Consulting, Linux, IoT, Cloud, Embedded, Arch, Tweaks &amp;amp; Tips!&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2021-33571"&gt;CVE-2021-33571 – In Django 2.2 before 2.2.24, 3.x before 3.1.12, and 3.2 before 3.2.4, URLValidator, validate_ipv4_address, and validate_ipv46_address do not prohibit leading zero characters in octal literals. This may allow a bypass of access control that is based on IP addresses. (validate_ipv4_address and validate_ipv46_address are unaffected with Python 3.9.5+..) .&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2019-12161"&gt;CVE-2019-12161 – CVE-2019-12161 WPO WebPageTest 19.04 allows SSRF because ValidateURL in www/runtest.php does not consider octal encoding of IP addresses (such as 0300.0250 as a replacement for 192.168).&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2016-4029"&gt;CVE-2016-4029 – WordPress before 4.5 does not consider octal and hexadecimal IP address formats when determining an intranet address, which allows remote attackers to bypass an intended SSRF protection mechanism via a crafted address.&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://bugs.python.org/issue36384"&gt;Issue 36384: [security] CVE-2021-29921: ipaddress Should not reject IPv4 addresses with leading zeroes as ambiguously octal - Python tracker&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://github.com/golang/go/issues/30999"&gt;net: reject leading zeros in IP address parsers [freeze exception] · Issue #30999 · golang/go&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://johnjhacking.com/blog/cve-2020-28360/"&gt;cve-2020-28360 - John J Hacking&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://sick.codes/universal-netmask-npm-package-used-by-270000-projects-vulnerable-to-octal-input-data-server-side-request-forgery-remote-file-inclusion-local-file-inclusion-and-more-cve-2021-28918/"&gt;Universal &amp;quot;netmask&amp;quot; npm package, used by 270,000+ projects, vulnerable to octal input data: server-side request forgery, remote file inclusion, local file inclusion, and more (CVE-2021-28918) - Sick Codes - Security Research, Hardware &amp;amp; Software Hacking, Consulting, Linux, IoT, Cloud, Embedded, Arch, Tweaks &amp;amp; Tips!&lt;/a&gt;&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/div&gt;
+</summary><category term="安全"></category></entry><entry><title>通过给开源项目提交 PR 然后触发 CI 流程的方式获取敏感信息</title><link href="https://mozillazg.com/2021/10/security-the-way-of-sofeware-supply-chain-attack-via-pull-request.html" rel="alternate"></link><updated>2021-10-06T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2021-10-06:2021/10/security-the-way-of-sofeware-supply-chain-attack-via-pull-request.html</id><summary type="html">&lt;p&gt;开源项目的使用越来越广泛，各大公司和个人也积极的参与和开发了不同的开源项目。
+同时开源项目的安全问题也越来越受到广泛的关注，其中即有开源项目代码方面的安全问题，
+也有开源项目使用的第三方服务、开发流程导致的安全问题。&lt;/p&gt;
+&lt;p&gt;这篇文章介绍的是 CI 流程中可能会出现的安全问题：攻击者可以通过给开源项目提交 PR 的方式获取项目开发流程中涉及的 CI 系统中的敏感信息。&lt;/p&gt;
+&lt;p&gt;整个流程如下：&lt;/p&gt;
+&lt;ol class="arabic simple"&gt;
+&lt;li&gt;攻击者 fork 目标开源项目仓库，修改仓库代码增加可以获取 CI 环境中敏感信息代码或者可以在 CI 环境中运行恶意脚本和软件的代码&lt;/li&gt;
+&lt;li&gt;然后工具者将修改后的代码通过 Pull Request 的方式提交到上游项目中（不需要合并代码）&lt;/li&gt;
+&lt;li&gt;一般上游项目在 PR 提交时都会触发项目中设置的 CI 流程，此时 CI 流程中就会运行攻击者修改好的恶意代码&lt;/li&gt;
+&lt;li&gt;如果 CI 环境设置不当或者 CI 服务有安全隐患的话，攻击者就可以通过 CI job 窃取环境中的敏感信息（比如密码、token、ak、证书等信息）、 入侵整个 CI job 所在节点、整个 CI 服务甚至整个公司所有资产。&lt;/li&gt;
+&lt;/ol&gt;
+&lt;p&gt;相关案例可以阅读参考资料中最近爆出的几个安全事项。&lt;/p&gt;
+&lt;div class="section" id="id1"&gt;
+&lt;h2 id="hidid1"&gt;参考资料&lt;a class="headerlink" href="#hidid1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;ul class="simple"&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://arstechnica.com/information-technology/2021/09/travis-ci-flaw-exposed-secrets-for-thousands-of-open-source-projects/"&gt;Travis CI flaw exposed secrets of thousands of open source projects | Ars Technica&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://goteleport.com/blog/hack-via-pull-request/"&gt;How to attack cloud infrastructure via a malicious pull request | Teleport&lt;/a&gt;&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/div&gt;
+</summary><category term="软件供应链安全"></category><category term="supply-chain-security"></category></entry><entry><title>binaryless 容器基础镜像</title><link href="https://mozillazg.com/2021/08/security-binaryless-base-image.html" rel="alternate"></link><updated>2021-08-01T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2021-08-01:2021/08/security-binaryless-base-image.html</id><summary type="html">&lt;p&gt;&lt;a class="reference external" href="https://mozillazg.com/2021/05/security-use-shell-less-and-binary-less-distroless-container-with-root-less-container.html"&gt;前面&lt;/a&gt; 说过会维护一个 binaryless 容器基础镜像的项目，这个基础镜像的项目今天正式发布第一个版本。&lt;/p&gt;
+&lt;p&gt;项目地址：&lt;/p&gt;
+&lt;p&gt;&lt;a class="reference external" href="https://github.com/mozillazg/binaryless"&gt;https://github.com/mozillazg/binaryless&lt;/a&gt;&lt;/p&gt;
+&lt;p&gt;目前提供如下基础镜像:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+* binaryless/alpine:3.13
+* binaryless/debian:10
+&lt;/pre&gt;
+&lt;p&gt;每个基础镜像都是多架构镜像，支持如下架构&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+linux/amd64, linux/arm, linux/arm64, linux/ppc64le, linux/s390x
+&lt;/pre&gt;
+&lt;p&gt;更多信息详见项目 README，欢迎大家试用。&lt;/p&gt;
+</summary><category term="container"></category><category term="容器"></category><category term="容器安全"></category></entry><entry><title>echo-k8s-webhook: 记录 k8s Admission Webhook 的请求内容</title><link href="https://mozillazg.com/2021/07/introduce-echo-k8s-webhook-project.html" rel="alternate"></link><updated>2021-07-31T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2021-07-31:2021/07/introduce-echo-k8s-webhook-project.html</id><summary type="html">&lt;p&gt;最近开发了一个项目可以用来记录 k8s Admission Webhook 中 apiserver 调用 webhook server 时发送的请求内容，
+用于辅助开发 Admission Webhook 组件或依赖需要了解各种资源变更时的 webhook 请求内容的需求（比如对于 Policy 类型的 webhook 我们需要事先知道各种资源的变更请求的内容，以便基于请求内容来写相应的 policy 逻辑）：&lt;/p&gt;
+&lt;p&gt;&lt;a class="reference external" href="https://github.com/mozillazg/echo-k8s-webhook"&gt;https://github.com/mozillazg/echo-k8s-webhook&lt;/a&gt;&lt;/p&gt;
+&lt;p&gt;具体使用方法详见项目 README。&lt;/p&gt;
+</summary><category term="kubernetes"></category></entry><entry><title>Pod 从创建到 Running 背后发生了什么</title><link href="https://mozillazg.com/2021/07/k8s-kubernetes-what-happen-when-pod-from-create-to-running.html" rel="alternate"></link><updated>2021-07-25T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2021-07-25:2021/07/k8s-kubernetes-what-happen-when-pod-from-create-to-running.html</id><summary type="html">&lt;div class="section" id="id1"&gt;
+&lt;h2 id="hidid1"&gt;前言&lt;a class="headerlink" href="#hidid1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;简单记录一下 Pod 从创建到最终 Running 背后发生的事情，
+以便对 k8s 的一些工作机制有一个更深入一点的了解。&lt;/p&gt;
+&lt;p&gt;本文内容所针对的 Kubernetes 版本为 &lt;a class="reference external" href="https://github.com/kubernetes/kubernetes/tree/v1.21.3"&gt;v1.21.3&lt;/a&gt;&lt;/p&gt;
+&lt;div class="section" id="pod-pod-etcd"&gt;
+&lt;h3 id="hidpod-pod-etcd"&gt;从发送创建 Pod 的请求到 Pod 信息存入 etcd&lt;a class="headerlink" href="#hidpod-pod-etcd" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
+&lt;p&gt;先讲一下从客户端发送创建 Pod 的请求到 apiserver 然后 apiserver 把数据存入 etcd 过程中发生的事情：&lt;/p&gt;
+&lt;ol class="arabic simple"&gt;
+&lt;li&gt;客户端向 apiserver 发送创建 Pod 的请求: &lt;tt class="docutils literal"&gt;POST &lt;span class="pre"&gt;/api/v1/namespaces/{namespace}/pods&lt;/span&gt;&lt;/tt&gt;&lt;/li&gt;
+&lt;li&gt;apiserver 收到请求后&lt;ol class="arabic"&gt;
+&lt;li&gt;首先会对请求做 &lt;a class="reference external" href="https://github.com/kubernetes/kubernetes/blob/ca643a4d1f7bfe34773c74f79527be4afd95bf39/staging/src/k8s.io/apiserver/pkg/endpoints/filters/authentication.go#L45-L82"&gt;认证（authentication）&lt;/a&gt; ，解析请求所携带的认证信息得到 User 信息，然后将 User 信息写入请求的 Context 中。
+支持的认证方法详见 &lt;a class="reference external" href="https://kubernetes.io/docs/reference/access-authn-authz/authentication/"&gt;官方文档&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;认证通过后，再对 User 做 &lt;a class="reference external" href="https://github.com/kubernetes/kubernetes/blob/ca643a4d1f7bfe34773c74f79527be4afd95bf39/staging/src/k8s.io/apiserver/pkg/endpoints/filters/authorization.go#L45-L78"&gt;鉴权（Authorization）&lt;/a&gt; ，检查当前 User 对这个请求所操作的资源是否有相应的操作权限。
+支持的鉴权方法详见 &lt;a class="reference external" href="https://kubernetes.io/docs/reference/access-authn-authz/authorization/"&gt;官方文档&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;认证和鉴权都通过后，请求的 body 将会被反序列化为 &lt;tt class="docutils literal"&gt;runtime.Object&lt;/tt&gt; 对象。&lt;/li&gt;
+&lt;li&gt;在 &lt;a class="reference external" href="https://github.com/kubernetes/kubernetes/blob/f86b59ab79227929e7f283b859b4c59317399807/staging/src/k8s.io/apiserver/pkg/endpoints/handlers/create.go#L50-L201"&gt;存入&lt;/a&gt; &lt;a class="reference external" href="https://github.com/kubernetes/kubernetes/blob/a1fac8cbd9289d95db4831a83239292ed56ce59d/staging/src/k8s.io/apiserver/pkg/registry/generic/registry/store.go#L365-L377"&gt;etcd 之前&lt;/a&gt; ，
+反序列化后的对象会 &lt;a class="reference external" href="https://github.com/kubernetes/kubernetes/blob/34cab8f80a9104be7fe5d8a5a22c3207dab46268/staging/src/k8s.io/apiserver/pkg/registry/rest/create.go#L74-L119"&gt;先被&lt;/a&gt; &lt;a class="reference external" href="https://github.com/kubernetes/kubernetes/blob/a1fac8cbd9289d95db4831a83239292ed56ce59d/pkg/registry/core/pod/strategy.go#L82-L92"&gt;填充默认值&lt;/a&gt; 和进行 &lt;a class="reference external" href="https://github.com/kubernetes/kubernetes/blob/a1fac8cbd9289d95db4831a83239292ed56ce59d/pkg/registry/core/pod/strategy.go#L104-L108"&gt;字段校验&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;然后这个请求和对象还会被 Admission Controllers 处理一遍。
+Admission Controllers 即包括 kube-apiserver 内置的 &lt;a class="reference external" href="https://kubernetes.io/docs/reference/access-authn-authz/admission-controllers/"&gt;admission controllers&lt;/a&gt; 也包括用户自行实现的 &lt;a class="reference external" href="https://kubernetes.io/docs/reference/access-authn-authz/extensible-admission-controllers/"&gt;admission webhooks&lt;/a&gt; 。&lt;ul&gt;
+&lt;li&gt;Admission Controllers 既可以实现对请求做进一步的校验（比如按一定策略对请求校验，拦截未使用指定 docker registory 的 Pod）（ validating admission ）） 也可以实现修改请求创建/修改的对象的属性的需求（比如给 Pod 注入 sidecar 容器）（ mutating admission ））。&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://github.com/kubernetes/kubernetes/blob/f86b59ab79227929e7f283b859b4c59317399807/staging/src/k8s.io/apiserver/pkg/endpoints/handlers/create.go#L169-L177"&gt;先处理 mutating admission&lt;/a&gt; 然后 &lt;a class="reference external" href="https://github.com/kubernetes/kubernetes/blob/a1fac8cbd9289d95db4831a83239292ed56ce59d/staging/src/k8s.io/apiserver/pkg/registry/generic/registry/store.go#L379-L385"&gt;再处理 validating admission&lt;/a&gt; )&lt;/li&gt;
+&lt;li&gt;只要有一个 Admission Controller 返回失败，请求就会失败。&lt;/li&gt;
+&lt;li&gt;多个 Admission Controller &lt;a class="reference external" href="https://github.com/kubernetes/kubernetes/blob/61774cd7176cae0c0324d23ab20e6c6b3038153f/staging/src/k8s.io/apiserver/pkg/admission/chain.go#L30-L60"&gt;串行执行&lt;/a&gt; ，
+每个 Admission Controller 内部都有自己的逻辑，比如，&lt;ul&gt;
+&lt;li&gt;ValidatingAdmissionWebhook Controller 内部会 &lt;a class="reference external" href="https://github.com/kubernetes/kubernetes/blob/b3aeaa4ed7bf8d419a96b4456a97bdf4c29e4330/staging/src/k8s.io/apiserver/pkg/admission/plugin/webhook/validating/dispatcher.go#L94-L147"&gt;并发执行&lt;/a&gt; 定义的多个 validating admission webhook ，执行完成后只返回 &lt;a class="reference external" href="https://github.com/kubernetes/kubernetes/blob/b3aeaa4ed7bf8d419a96b4456a97bdf4c29e4330/staging/src/k8s.io/apiserver/pkg/admission/plugin/webhook/validating/dispatcher.go#L149-L162"&gt;第一个错误&lt;/a&gt; （未被忽略的那个错误，因为 webhook 可以配置忽略错误）&lt;/li&gt;
+&lt;li&gt;MutatingAdmissionWebhook Controller 内部会 &lt;a class="reference external" href="https://github.com/kubernetes/kubernetes/blob/b3aeaa4ed7bf8d419a96b4456a97bdf4c29e4330/staging/src/k8s.io/apiserver/pkg/admission/plugin/webhook/mutating/dispatcher.go#L94-L189"&gt;串行执行&lt;/a&gt; 定义的多个 mutating webhook ，出错（未被忽略的错误，因为 webhook 可以配置忽略错误）就 &lt;a class="reference external" href="https://github.com/kubernetes/kubernetes/blob/b3aeaa4ed7bf8d419a96b4456a97bdf4c29e4330/staging/src/k8s.io/apiserver/pkg/admission/plugin/webhook/mutating/dispatcher.go#L168-L184"&gt;返回&lt;/a&gt;&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/li&gt;
+&lt;li&gt;Admission controllers 处理完以后， &lt;a class="reference external" href="https://github.com/kubernetes/kubernetes/blob/a1fac8cbd9289d95db4831a83239292ed56ce59d/staging/src/k8s.io/apiserver/pkg/registry/generic/registry/store.go#L401-L419"&gt;对象被存入到 etcd 中&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;最后根据执行结果方法相应的 Response。&lt;/li&gt;
+&lt;/ol&gt;
+&lt;/li&gt;
+&lt;li&gt;此时 Pod 就创建成功了，但是还没有被调度到某个节点并且状态是 Pending。&lt;/li&gt;
+&lt;/ol&gt;
+&lt;/div&gt;
+&lt;div class="section" id="pod"&gt;
+&lt;h3 id="hidpod"&gt;Pod 调度&lt;a class="headerlink" href="#hidpod" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
+&lt;p&gt;kube-scheduler 组件负责 Pod 的调度工作，具体过程如下：&lt;/p&gt;
+&lt;ol class="arabic simple"&gt;
+&lt;li&gt;kube-scheduler 通过 Informer 机制 &lt;a class="reference external" href="https://github.com/kubernetes/kubernetes/blob/22a8a9ab455e23a841952872bdc7e042c75a878f/pkg/scheduler/eventhandlers.go#L358-L461"&gt;监控 Pod 等资源的变更事件并注册相应的回调函数&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;当上面的 Pod 创建成功后， &lt;a class="reference external" href="https://github.com/kubernetes/kubernetes/blob/22a8a9ab455e23a841952872bdc7e042c75a878f/pkg/scheduler/eventhandlers.go#L388-L411"&gt;触发了 Pod 的变更事件&lt;/a&gt; ，因为此时这个 Pod 满足 &lt;tt class="docutils literal"&gt;nodeName&lt;/tt&gt; 的值为空并且 &lt;tt class="docutils literal"&gt;schedulerName&lt;/tt&gt; 中指定的是已知的 Scheduler Framework Name，所以这个 Pod 对象会被放入到 &lt;tt class="docutils literal"&gt;SchedulingQueue&lt;/tt&gt; 队列中等待处理。&lt;/li&gt;
+&lt;li&gt;kube-scheduler 中 &lt;tt class="docutils literal"&gt;SchedulingQueue&lt;/tt&gt; 中的待调度 Pod 会由 &lt;a class="reference external" href="https://github.com/kubernetes/kubernetes/blob/318677cc93e281f4c78e94c58562d1f1b2e34061/pkg/scheduler/scheduler.go#L441-L614"&gt;scheduleOne&lt;/a&gt; 函数进行处理，Pod 调度逻辑就在这个函数里:&lt;ol class="arabic"&gt;
+&lt;li&gt;根据 Pod 的 &lt;tt class="docutils literal"&gt;schedulerName&lt;/tt&gt; 字段的值找到 Pod 指定要使用的 Scheduler Framework (fwk)&lt;/li&gt;
+&lt;li&gt;根据调度算法（内置的策略加 fwk 实现的策略）得出适合这个 Pod 的最佳节点（调度算法的详细说明以后再单独细说）&lt;/li&gt;
+&lt;li&gt;如果调度算法失败了：&lt;ol class="arabic"&gt;
+&lt;li&gt;执行 fwk.RunPostFilterPlugins 函数，获取可能的 nominatedNode&lt;/li&gt;
+&lt;li&gt;产生一个 &lt;tt class="docutils literal"&gt;FailedScheduling&lt;/tt&gt; Event、 更新 Pod 的 &lt;tt class="docutils literal"&gt;status.conditions&lt;/tt&gt; 字段增加一个 &lt;tt class="docutils literal"&gt;type&lt;/tt&gt; 为 &lt;tt class="docutils literal"&gt;PodScheduled&lt;/tt&gt; &lt;tt class="docutils literal"&gt;status&lt;/tt&gt; 为 &lt;tt class="docutils literal"&gt;False&lt;/tt&gt; 的 PodCondition 以及更新 &lt;tt class="docutils literal"&gt;status.nominatedNodeName&lt;/tt&gt; 字段的值为前面获取的 &lt;tt class="docutils literal"&gt;nominatedNode&lt;/tt&gt;&lt;/li&gt;
+&lt;/ol&gt;
+&lt;/li&gt;
+&lt;li&gt;如果调度算法成功返回了节点信息，首先执行 &lt;tt class="docutils literal"&gt;fwk.RunReservePluginsReserve&lt;/tt&gt; 如果失败了执行 &lt;tt class="docutils literal"&gt;fwk.RunReservePluginsUnreserve&lt;/tt&gt; 然后按上面 3.2 的操作记录调度失败&lt;/li&gt;
+&lt;li&gt;然后再执行 &lt;tt class="docutils literal"&gt;fwk.RunPermitPlugins `` 如果失败了执行 ``fwk.RunReservePluginsUnreserve&lt;/tt&gt; 然后按上面 3.2 的操作记录调度失败&lt;/li&gt;
+&lt;li&gt;最后执行 binding 操作&lt;ol class="arabic"&gt;
+&lt;li&gt;执行 &lt;tt class="docutils literal"&gt;fwk.WaitOnPermit&lt;/tt&gt; 如果失败了执行 &lt;tt class="docutils literal"&gt;fwk.RunReservePluginsUnreserve&lt;/tt&gt; 然后按上面 3.2 的操作记录调度失败&lt;/li&gt;
+&lt;li&gt;执行 &lt;tt class="docutils literal"&gt;fwk.RunPreBindPlugins&lt;/tt&gt; 如果失败了执行 &lt;tt class="docutils literal"&gt;fwk.RunReservePluginsUnreserve&lt;/tt&gt; 然后按上面 3.2 的操作记录调度失败&lt;/li&gt;
+&lt;li&gt;执行真正的 binding 操作 &lt;tt class="docutils literal"&gt;sched.bind&lt;/tt&gt; ， &lt;a class="reference external" href="https://github.com/kubernetes/kubernetes/blob/c03b4c78507be4e6d50a2549e2c337bbda1aa87e/pkg/scheduler/framework/plugins/defaultbinder/default_binder.go#L50-L61"&gt;默认的 Bind 实现&lt;/a&gt; 会去 post 当前 Pod 的 &lt;tt class="docutils literal"&gt;binding&lt;/tt&gt; &lt;a class="reference external" href="https://github.com/kubernetes/kubernetes/blob/72ab11193a419f0e0e66e86c4e6be9991c3682f2/staging/src/k8s.io/client-go/kubernetes/typed/core/v1/pod_expansion.go#L38-L41"&gt;子资源&lt;/a&gt;  记录 Pod 被调度到哪个节点上了， 如果失败了执行 &lt;tt class="docutils literal"&gt;fwk.RunReservePluginsUnreserve&lt;/tt&gt; 然后按上面 3.2 的操作记录调度失败&lt;/li&gt;
+&lt;li&gt;执行 &lt;tt class="docutils literal"&gt;fwk.RunPostBindPlugins&lt;/tt&gt;&lt;/li&gt;
+&lt;/ol&gt;
+&lt;/li&gt;
+&lt;/ol&gt;
+&lt;/li&gt;
+&lt;/ol&gt;
+&lt;p&gt;当 apiserver 收到对 Pod &lt;tt class="docutils literal"&gt;binding&lt;/tt&gt; 子资源的 post 请求的时候，会触发 binding 的 &lt;a class="reference external" href="https://github.com/kubernetes/kubernetes/blob/a1fac8cbd9289d95db4831a83239292ed56ce59d/pkg/registry/core/pod/storage/storage.go#L161-L186"&gt;create&lt;/a&gt; 逻辑， &lt;a class="reference external" href="https://github.com/kubernetes/kubernetes/blob/a1fac8cbd9289d95db4831a83239292ed56ce59d/pkg/registry/core/pod/storage/storage.go#L188-L234"&gt;更新 Pod&lt;/a&gt; 的 &lt;tt class="docutils literal"&gt;nodeName&lt;/tt&gt; 字段为请求中包含的 NodeName 以及 更新 Pod 的 &lt;tt class="docutils literal"&gt;status.conditions&lt;/tt&gt; 字段增加一个 type 为 &lt;tt class="docutils literal"&gt;PodScheduled&lt;/tt&gt; status 为 &lt;tt class="docutils literal"&gt;True&lt;/tt&gt; 的 pod condition 。&lt;/p&gt;
+&lt;p&gt;此时 Pod 就被调度到一个节点上了，但是 Pod 的还是 Pending 因为 Pod 内的容器还没有在被调度的节点上运行。&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class="section" id="id2"&gt;
+&lt;h3 id="hidid2"&gt;节点上运行 Pod 中的容器&lt;a class="headerlink" href="#hidid2" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
+&lt;p&gt;kubelet 组件负责在节点上运行 Pod 中定义的容器，具体的过程如下：&lt;/p&gt;
+&lt;ol class="arabic simple"&gt;
+&lt;li&gt;kubelet 组件启动后会 &lt;a class="reference external" href="https://github.com/kubernetes/kubernetes/blob/d10d7e8dc94dc58bb432039f99e902115e66d4cc/pkg/kubelet/config/apiserver.go#L36-L55"&gt;watch&lt;/a&gt; 所有 &lt;tt class="docutils literal"&gt;nodeName&lt;/tt&gt; 字段的值是当前节点名称的 Pod 的 &lt;a class="reference external" href="https://github.com/kubernetes/kubernetes/blob/d10d7e8dc94dc58bb432039f99e902115e66d4cc/pkg/kubelet/kubelet.go#L1887-L2016"&gt;变更事件&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;当 Pod 经过调度后，它的 &lt;tt class="docutils literal"&gt;nodeName&lt;/tt&gt; 字段会被设置为被选中的节点的名称，此时会触发 kubelet 中 pod &lt;a class="reference external" href="https://github.com/kubernetes/kubernetes/blob/d10d7e8dc94dc58bb432039f99e902115e66d4cc/pkg/kubelet/kubelet.go#L2075-L2111"&gt;ADD&lt;/a&gt; 事件（因为之前没在这个节点上处理过）:&lt;ol class="arabic"&gt;
+&lt;li&gt;触发 Pod &lt;a class="reference external" href="https://github.com/kubernetes/kubernetes/blob/d10d7e8dc94dc58bb432039f99e902115e66d4cc/pkg/kubelet/kubelet.go#L2030-L2063"&gt;更新&lt;/a&gt; 的 &lt;a class="reference external" href="https://github.com/kubernetes/kubernetes/blob/01a4e4facebda8a643383625d3cece724efe2a66/pkg/kubelet/pod_workers.go#L196-L234"&gt;处理&lt;/a&gt; &lt;a class="reference external" href="https://github.com/kubernetes/kubernetes/blob/01a4e4facebda8a643383625d3cece724efe2a66/pkg/kubelet/pod_workers.go#L157-L194"&gt;逻&lt;/a&gt; &lt;a class="reference external" href="https://github.com/kubernetes/kubernetes/blob/d10d7e8dc94dc58bb432039f99e902115e66d4cc/pkg/kubelet/kubelet.go#L1463-L1726"&gt;辑&lt;/a&gt; :&lt;ol class="arabic"&gt;
+&lt;li&gt;首先执行 &lt;a class="reference external" href="https://github.com/kubernetes/kubernetes/blob/d10d7e8dc94dc58bb432039f99e902115e66d4cc/pkg/kubelet/kubelet.go#L1826-L1838"&gt;canRunPod&lt;/a&gt; 检查（ &lt;a class="reference external" href="https://github.com/kubernetes/kubernetes/blob/d10d7e8dc94dc58bb432039f99e902115e66d4cc/pkg/kubelet/kubelet.go#L809-L815"&gt;检查&lt;/a&gt;  AppArmor 、 NoNewPrivs  以及 ProcMount 这三个特性），如果检查不通过的话，不会进行后续的操作&lt;/li&gt;
+&lt;li&gt;如果网络插件未就绪并且当前 Pod 未使用 Host 网络的话，返回 &lt;tt class="docutils literal"&gt;network is not ready&lt;/tt&gt; 的错误以及产生一个 &lt;tt class="docutils literal"&gt;NetworkNotReady&lt;/tt&gt; 的 Event&lt;/li&gt;
+&lt;li&gt;如果启用了 &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;cgroups-per-qos&lt;/span&gt;&lt;/tt&gt; 功能，将为 Pod 创建 Cgroups&lt;/li&gt;
+&lt;li&gt;创建存放 Pod 容器数据的目录：&lt;ul&gt;
+&lt;li&gt;Pod 目录，比如 &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;/var/run/kubelet/pods/{PodUID}&lt;/span&gt;&lt;/tt&gt;&lt;/li&gt;
+&lt;li&gt;PodVolumes 目录，比如 &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;{PodDir}/volumes&lt;/span&gt;&lt;/tt&gt;&lt;/li&gt;
+&lt;li&gt;PodPlugins 目录，比如 &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;{PodDir}/plugins&lt;/span&gt;&lt;/tt&gt;&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/li&gt;
+&lt;li&gt;通过 &lt;a class="reference external" href="https://github.com/kubernetes/kubernetes/blob/d10d7e8dc94dc58bb432039f99e902115e66d4cc/pkg/kubelet/kubelet.go#L1699-L1702"&gt;volumeManager.WaitForAttachAndMount&lt;/a&gt; 等待 Pod 中所有容器的 &lt;tt class="docutils literal"&gt;volumeMounts&lt;/tt&gt; 和 &lt;tt class="docutils literal"&gt;volumeDevices&lt;/tt&gt; 中使用的 volume 被成功 attatch 和 mount （关于 volumeManager 相关内容以后再单独细说）。 如果失败的话，返回 mount 失败的 event 和错误&lt;/li&gt;
+&lt;li&gt;获取 Pod 中指定的 &lt;tt class="docutils literal"&gt;imagePullSecrets&lt;/tt&gt; 所使用的那些 secret 数据的内容。&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://github.com/kubernetes/kubernetes/blob/461c0c1656994cbf393ea6f0ca9cf2454db93e7b/pkg/kubelet/kuberuntime/kuberuntime_manager.go#L693-L899"&gt;容器运行时创建容器&lt;/a&gt; :&lt;ol class="arabic"&gt;
+&lt;li&gt;执行 &lt;a class="reference external" href="https://github.com/kubernetes/kubernetes/blob/629d5ab21349021cf7d38236620785071ee541b4/pkg/kubelet/kuberuntime/kuberuntime_sandbox.go#L36-L73"&gt;createPodSandbox&lt;/a&gt; 方法创建一个 pod sandbox&lt;ul&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://github.com/kubernetes/kubernetes/blob/8d86470417a3641e1971364902d172ad3026bda3/pkg/kubelet/cri/remote/remote_runtime.go#L99-L130"&gt;内部&lt;/a&gt; 会通过 gRPC 调用不同 CRI（Container Runtime Interface） 所实现的 &lt;tt class="docutils literal"&gt;RunPodSandbox&lt;/tt&gt; 接口&lt;/li&gt;
+&lt;li&gt;不同 CRI 实现 &lt;tt class="docutils literal"&gt;RunPodSandbox&lt;/tt&gt; 接口的方法可能会不尽相同。以 Docker 为例，dockershim 中实现的 &lt;tt class="docutils literal"&gt;RunPodSandbox&lt;/tt&gt; 接口的 &lt;a class="reference external" href="https://github.com/kubernetes/kubernetes/blob/7735cf7f2674627283db081d61a2c45f4b70ee8f/pkg/kubelet/dockershim/docker_sandbox.go#L84-L205"&gt;内部操作&lt;/a&gt; 如下：&lt;ol class="arabic"&gt;
+&lt;li&gt;pull sandbox 容器（pause 容器）所用的镜像（默认是 &lt;tt class="docutils literal"&gt;k8s.gcr.io/pause:3.4.1&lt;/tt&gt; ，）&lt;/li&gt;
+&lt;li&gt;调用 docker client api 创建 sandbox 容器&lt;/li&gt;
+&lt;li&gt;创建 sandbox checkpoint&lt;/li&gt;
+&lt;li&gt;启动 sandbox 容器&lt;/li&gt;
+&lt;li&gt;更新容器内的 resolv.conf 文件的内容&lt;/li&gt;
+&lt;li&gt;如果 Pod 使用的是 Host 网络，直接返回, 如果不是用的 Host 网络的话，继续&lt;/li&gt;
+&lt;li&gt;通过 CNI 插件 &lt;a class="reference external" href="https://github.com/kubernetes/kubernetes/blob/7735cf7f2674627283db081d61a2c45f4b70ee8f/pkg/kubelet/dockershim/network/plugins.go#L410-L424"&gt;配置容器网络&lt;/a&gt; :&lt;ul&gt;
+&lt;li&gt;实际上是调用 CNI 插件的二进制可执行文件， &lt;a class="reference external" href="https://github.com/kubernetes/kubernetes/blob/6f79600e73584bbf600b414f8a79846f30fdf457/vendor/github.com/containernetworking/cni/libcni/api.go#L400-L422"&gt;执行&lt;/a&gt; 一个 &lt;tt class="docutils literal"&gt;ADD&lt;/tt&gt; 指令&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/li&gt;
+&lt;li&gt;如果网络配置失败&lt;ol class="arabic"&gt;
+&lt;li&gt;清理网络资源：执行 CNI 插件的 &lt;tt class="docutils literal"&gt;DEL&lt;/tt&gt; 指令&lt;/li&gt;
+&lt;li&gt;停止前面启动的容器&lt;/li&gt;
+&lt;/ol&gt;
+&lt;/li&gt;
+&lt;/ol&gt;
+&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/li&gt;
+&lt;li&gt;然后再通过调用 CRI 的 &lt;tt class="docutils literal"&gt;PodSandboxStatus&lt;/tt&gt; 接口查询一下创建的 pod sandbox 的状态，确保创建的 pod sandbox 无异常，同时获取 status 中包含的 pod IP 信息。&lt;/li&gt;
+&lt;li&gt;启动 ephemeral 容器， &lt;a class="reference external" href="https://github.com/kubernetes/kubernetes/blob/e781d2a672f044d47e75f0ec7015666d06164410/pkg/kubelet/kuberuntime/kuberuntime_container.go#L130-L239"&gt;启动容器&lt;/a&gt; 的步骤如下：&lt;ol class="arabic"&gt;
+&lt;li&gt;使用前面 6 获取的 secret 数据 pull image&lt;/li&gt;
+&lt;li&gt;调用 CRI 的 &lt;tt class="docutils literal"&gt;CreateContainer&lt;/tt&gt; 接口创建容器&lt;/li&gt;
+&lt;li&gt;调用 CRI 的 &lt;tt class="docutils literal"&gt;StartContainer&lt;/tt&gt; 接口启动容器&lt;/li&gt;
+&lt;li&gt;执行 container 中定义的 &lt;tt class="docutils literal"&gt;lifecycle.postStart&lt;/tt&gt; hook&lt;/li&gt;
+&lt;/ol&gt;
+&lt;/li&gt;
+&lt;li&gt;启动 init 容器&lt;/li&gt;
+&lt;li&gt;启动剩下的容器&lt;/li&gt;
+&lt;/ol&gt;
+&lt;/li&gt;
+&lt;/ol&gt;
+&lt;/li&gt;
+&lt;li&gt;容器启动完成后，将当前 Pod &lt;a class="reference external" href="https://github.com/kubernetes/kubernetes/blob/d10d7e8dc94dc58bb432039f99e902115e66d4cc/pkg/kubelet/kubelet.go#L2109"&gt;注册&lt;/a&gt; &lt;a class="reference external" href="https://github.com/kubernetes/kubernetes/blob/6af7eb6d494d8f742e18a3b965053e3a518bf6d7/pkg/kubelet/prober/prober_manager.go#L153-L197"&gt;到&lt;/a&gt;  probeManager 中。 probeManager 负责异步执行容器中定义的 &lt;tt class="docutils literal"&gt;startupProbe&lt;/tt&gt; 、 &lt;tt class="docutils literal"&gt;readinessProbe&lt;/tt&gt; 以及 &lt;tt class="docutils literal"&gt;livenessProbe&lt;/tt&gt; 操作。&lt;ul&gt;
+&lt;li&gt;这些 probe 操作的结果会发送到 &lt;tt class="docutils literal"&gt;startupManager&lt;/tt&gt; 、 &lt;tt class="docutils literal"&gt;readinessManager&lt;/tt&gt; 以及 &lt;tt class="docutils literal"&gt;livenessManager&lt;/tt&gt; 中，从而触发响应的 &lt;a class="reference external" href="https://github.com/kubernetes/kubernetes/blob/d10d7e8dc94dc58bb432039f99e902115e66d4cc/pkg/kubelet/kubelet.go#L1991-L2002"&gt;事件响应逻辑&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;比如 readinessProbe 执行成功了会触发更新 &lt;a class="reference external" href="https://github.com/kubernetes/kubernetes/blob/6af7eb6d494d8f742e18a3b965053e3a518bf6d7/pkg/kubelet/status/status_manager.go#L61-L72"&gt;statusManager&lt;/a&gt; 中记录的 Pod 的 status 信息，更新 ContainersReady 和 Ready 信息，以及 &lt;a class="reference external" href="https://github.com/kubernetes/kubernetes/blob/d10d7e8dc94dc58bb432039f99e902115e66d4cc/pkg/kubelet/kubelet.go#L1998"&gt;触发&lt;/a&gt; Pod 信息同步操作（这里会有更新 &lt;a class="reference external" href="https://github.com/kubernetes/kubernetes/blob/d10d7e8dc94dc58bb432039f99e902115e66d4cc/pkg/kubelet/kubelet.go#L1585-L1586"&gt;statusManager&lt;/a&gt; 把 statusManager 中的Pod 状态 &lt;a class="reference external" href="https://github.com/kubernetes/kubernetes/blob/6af7eb6d494d8f742e18a3b965053e3a518bf6d7/pkg/kubelet/kubelet_pods.go#L1517-L1576"&gt;更新&lt;/a&gt; 为 Running 的 &lt;a class="reference external" href="https://github.com/kubernetes/kubernetes/blob/6af7eb6d494d8f742e18a3b965053e3a518bf6d7/pkg/kubelet/kubelet_pods.go#L1415-L1515"&gt;逻辑&lt;/a&gt; ）。&lt;/li&gt;
+&lt;li&gt;statusManager 里有个 &lt;a class="reference external" href="https://github.com/kubernetes/kubernetes/blob/6af7eb6d494d8f742e18a3b965053e3a518bf6d7/pkg/kubelet/status/status_manager.go#L161-L179"&gt;协程&lt;/a&gt; 会定期把待更新的 pod 状态通过 apiserver 进行 &lt;a class="reference external" href="https://github.com/kubernetes/kubernetes/blob/6af7eb6d494d8f742e18a3b965053e3a518bf6d7/pkg/kubelet/status/status_manager.go#L548-L617"&gt;更新&lt;/a&gt; 。&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/li&gt;
+&lt;/ol&gt;
+&lt;/li&gt;
+&lt;/ol&gt;
+&lt;p&gt;经过 kubelet 中一些列的处理后，此时 Pod 的状态就变成 Running 了。&lt;/p&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;div class="section" id="id3"&gt;
+&lt;h2 id="hidid3"&gt;总结&lt;a class="headerlink" href="#hidid3" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;简单记录了一下 Pod 从创建到最终 Running 背后发生的事情，其中有些细节没有展开，
+后面再补充或者另写一些文章说一下那些没展开的内容。&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class="section" id="id4"&gt;
+&lt;h2 id="hidid4"&gt;参考资料&lt;a class="headerlink" href="#hidid4" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;ul class="simple"&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://github.com/kubernetes/kubernetes/tree/v1.21.3"&gt;kubernetes/kubernetes at v1.21.3&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://kubernetes.io/docs/home/"&gt;Kubernetes Documentation | Kubernetes&lt;/a&gt;&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/div&gt;
+</summary><category term="kubernetes"></category></entry><entry><title>在 Kubernetes RBAC Role/ClusterRole 规则中使用通配符 *</title><link href="https://mozillazg.com/2021/06/k8s-kubernetes-rbac-rules-use-star-wildcard.html" rel="alternate"></link><updated>2021-06-06T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2021-06-06:2021/06/k8s-kubernetes-rbac-rules-use-star-wildcard.html</id><summary type="html">&lt;p&gt;在编写 Kubernetes RBAC Role/ClusterRole 中 &lt;tt class="docutils literal"&gt;rules&lt;/tt&gt; 字段中定义的规则时，我们可以通过通配符 &lt;tt class="docutils literal"&gt;*&lt;/tt&gt;
+来实现规则中匹配任意字符的需求。&lt;/p&gt;
+&lt;p&gt;不过通配符 &lt;tt class="docutils literal"&gt;*&lt;/tt&gt; 也不是可以任意使用的，下面是 &lt;tt class="docutils literal"&gt;rules&lt;/tt&gt; 字段使用的 &lt;tt class="docutils literal"&gt;PolicyRule&lt;/tt&gt; 的定义:&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="c1"&gt;// PolicyRule holds information that describes a policy rule, but does not contain information&lt;/span&gt;
+&lt;span class="c1"&gt;// about who the rule applies to or which namespace the rule applies to.&lt;/span&gt;
+&lt;span class="kd"&gt;type&lt;/span&gt; &lt;span class="nx"&gt;PolicyRule&lt;/span&gt; &lt;span class="kd"&gt;struct&lt;/span&gt; &lt;span class="p"&gt;{&lt;/span&gt;
+        &lt;span class="c1"&gt;// Verbs is a list of Verbs that apply to ALL the ResourceKinds and AttributeRestrictions contained in this rule. &amp;#39;*&amp;#39; represents all verbs.&lt;/span&gt;
+        &lt;span class="nx"&gt;Verbs&lt;/span&gt; &lt;span class="p"&gt;[]&lt;/span&gt;&lt;span class="kt"&gt;string&lt;/span&gt; &lt;span class="s"&gt;`json:&amp;quot;verbs&amp;quot; protobuf:&amp;quot;bytes,1,rep,name=verbs&amp;quot;`&lt;/span&gt;
+
+        &lt;span class="c1"&gt;// APIGroups is the name of the APIGroup that contains the resources.  If multiple API groups are specified, any action requested against one of&lt;/span&gt;
+        &lt;span class="c1"&gt;// the enumerated resources in any API group will be allowed.&lt;/span&gt;
+        &lt;span class="c1"&gt;// +optional&lt;/span&gt;
+        &lt;span class="nx"&gt;APIGroups&lt;/span&gt; &lt;span class="p"&gt;[]&lt;/span&gt;&lt;span class="kt"&gt;string&lt;/span&gt; &lt;span class="s"&gt;`json:&amp;quot;apiGroups,omitempty&amp;quot; protobuf:&amp;quot;bytes,2,rep,name=apiGroups&amp;quot;`&lt;/span&gt;
+        &lt;span class="c1"&gt;// Resources is a list of resources this rule applies to. &amp;#39;*&amp;#39; represents all resources.&lt;/span&gt;
+        &lt;span class="c1"&gt;// +optional&lt;/span&gt;
+        &lt;span class="nx"&gt;Resources&lt;/span&gt; &lt;span class="p"&gt;[]&lt;/span&gt;&lt;span class="kt"&gt;string&lt;/span&gt; &lt;span class="s"&gt;`json:&amp;quot;resources,omitempty&amp;quot; protobuf:&amp;quot;bytes,3,rep,name=resources&amp;quot;`&lt;/span&gt;
+        &lt;span class="c1"&gt;// ResourceNames is an optional white list of names that the rule applies to.  An empty set means that everything is allowed.&lt;/span&gt;
+        &lt;span class="c1"&gt;// +optional&lt;/span&gt;
+        &lt;span class="nx"&gt;ResourceNames&lt;/span&gt; &lt;span class="p"&gt;[]&lt;/span&gt;&lt;span class="kt"&gt;string&lt;/span&gt; &lt;span class="s"&gt;`json:&amp;quot;resourceNames,omitempty&amp;quot; protobuf:&amp;quot;bytes,4,rep,name=resourceNames&amp;quot;`&lt;/span&gt;
+
+        &lt;span class="c1"&gt;// NonResourceURLs is a set of partial urls that a user should have access to.  *s are allowed, but only as the full, final step in the path&lt;/span&gt;
+        &lt;span class="c1"&gt;// Since non-resource URLs are not namespaced, this field is only applicable for ClusterRoles referenced from a ClusterRoleBinding.&lt;/span&gt;
+        &lt;span class="c1"&gt;// Rules can either apply to API resources (such as &amp;quot;pods&amp;quot; or &amp;quot;secrets&amp;quot;) or non-resource URL paths (such as &amp;quot;/api&amp;quot;),  but not both.&lt;/span&gt;
+        &lt;span class="c1"&gt;// +optional&lt;/span&gt;
+        &lt;span class="nx"&gt;NonResourceURLs&lt;/span&gt; &lt;span class="p"&gt;[]&lt;/span&gt;&lt;span class="kt"&gt;string&lt;/span&gt; &lt;span class="s"&gt;`json:&amp;quot;nonResourceURLs,omitempty&amp;quot; protobuf:&amp;quot;bytes,5,rep,name=nonResourceURLs&amp;quot;`&lt;/span&gt;
+&lt;span class="p"&gt;}&lt;/span&gt;
+&lt;/pre&gt;&lt;/div&gt;
+&lt;p&gt;通过阅读 kubernetes 中 PolicyRule 匹配逻辑的 &lt;a class="reference external" href="https://github.com/kubernetes/kubernetes/blob/v1.21.1/plugin/pkg/auth/authorizer/rbac/rbac.go#L178-L193"&gt;源&lt;/a&gt; &lt;a class="reference external" href="https://github.com/kubernetes/kubernetes/blob/v1.21.1/pkg/apis/rbac/v1/evaluation_helpers.go"&gt;代码&lt;/a&gt;
+可以知道 &lt;tt class="docutils literal"&gt;PolicyRule&lt;/tt&gt; 中各个字段使用通配符 &lt;tt class="docutils literal"&gt;*&lt;/tt&gt; 时有如下限制：&lt;/p&gt;
+&lt;ul class="simple"&gt;
+&lt;li&gt;&lt;tt class="docutils literal"&gt;verbs&lt;/tt&gt; 字段只支持通过使用 &lt;tt class="docutils literal"&gt;*&lt;/tt&gt; 匹配所有 Verb，不支持使用 &lt;tt class="docutils literal"&gt;*&lt;/tt&gt; 跟其他字符实现组合匹配：&lt;ul&gt;
+&lt;li&gt;&lt;tt class="docutils literal"&gt;*&lt;/tt&gt; ： &lt;strong&gt;有效&lt;/strong&gt; ，匹配所有 Verb&lt;/li&gt;
+&lt;li&gt;&lt;tt class="docutils literal"&gt;de*&lt;/tt&gt;: 无效&lt;/li&gt;
+&lt;li&gt;&lt;tt class="docutils literal"&gt;de*te&lt;/tt&gt;: 无效&lt;/li&gt;
+&lt;li&gt;&lt;tt class="docutils literal"&gt;*te&lt;/tt&gt;: 无效&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/li&gt;
+&lt;li&gt;&lt;tt class="docutils literal"&gt;apiGroups&lt;/tt&gt; 字段只支持通过使用 &lt;tt class="docutils literal"&gt;*&lt;/tt&gt; 匹配所有 APIGroup ，不支持使用 &lt;tt class="docutils literal"&gt;*&lt;/tt&gt; 跟其他字符实现组合匹配：&lt;ul&gt;
+&lt;li&gt;&lt;tt class="docutils literal"&gt;*&lt;/tt&gt; ： &lt;strong&gt;有效&lt;/strong&gt; ，匹配所有 APIGroup&lt;/li&gt;
+&lt;li&gt;&lt;tt class="docutils literal"&gt;co*&lt;/tt&gt;: 无效&lt;/li&gt;
+&lt;li&gt;&lt;tt class="docutils literal"&gt;c*e&lt;/tt&gt;: 无效&lt;/li&gt;
+&lt;li&gt;&lt;tt class="docutils literal"&gt;*re&lt;/tt&gt;: 无效&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/li&gt;
+&lt;li&gt;&lt;tt class="docutils literal"&gt;resources&lt;/tt&gt; 字段只支持通过使用 &lt;tt class="docutils literal"&gt;*&lt;/tt&gt; 匹配所有 resource，以及通过 &lt;tt class="docutils literal"&gt;*&lt;/tt&gt; 匹配所有 resource 的特定 &lt;a class="reference external" href="https://kubernetes.io/docs/reference/access-authn-authz/rbac/#referring-to-resources"&gt;subresource&lt;/a&gt; ：&lt;ul&gt;
+&lt;li&gt;&lt;tt class="docutils literal"&gt;*&lt;/tt&gt; ： &lt;strong&gt;有效&lt;/strong&gt; ，匹配所有 resource&lt;/li&gt;
+&lt;li&gt;&lt;tt class="docutils literal"&gt;po*&lt;/tt&gt;: 无效&lt;/li&gt;
+&lt;li&gt;&lt;tt class="docutils literal"&gt;po*s&lt;/tt&gt;: 无效&lt;/li&gt;
+&lt;li&gt;&lt;tt class="docutils literal"&gt;*ts&lt;/tt&gt;: 无效&lt;/li&gt;
+&lt;li&gt;&lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;*/&amp;lt;subresource&amp;gt;&lt;/span&gt;&lt;/tt&gt;:  &lt;strong&gt;有效&lt;/strong&gt; ，匹配所有 resource 的特定 &lt;tt class="docutils literal"&gt;&amp;lt;subresource&amp;gt;&lt;/tt&gt; ，比如 &lt;tt class="docutils literal"&gt;*/status&lt;/tt&gt; 或 &lt;tt class="docutils literal"&gt;*/scale&lt;/tt&gt;&lt;/li&gt;
+&lt;li&gt;&lt;tt class="docutils literal"&gt;*&amp;lt;subresource&amp;gt;&lt;/tt&gt;:  无效&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/li&gt;
+&lt;li&gt;&lt;tt class="docutils literal"&gt;resourceNames&lt;/tt&gt; 字段不支持通配符 &lt;tt class="docutils literal"&gt;*&lt;/tt&gt; ，当 &lt;tt class="docutils literal"&gt;resourceNames&lt;/tt&gt; 字段的值为空时匹配所有 resource name&lt;/li&gt;
+&lt;li&gt;&lt;tt class="docutils literal"&gt;nonResourceURLs&lt;/tt&gt; 字段只支持通过 &lt;tt class="docutils literal"&gt;*&lt;/tt&gt; 匹配所有 nonResourceURL、以及通过字符串末尾的 &lt;tt class="docutils literal"&gt;*&lt;/tt&gt; 匹配以特定字符串开头的任意 nonResourceURL：&lt;ul&gt;
+&lt;li&gt;&lt;tt class="docutils literal"&gt;*&lt;/tt&gt; ： &lt;strong&gt;有效&lt;/strong&gt; ，匹配所有 nonResourceURL&lt;/li&gt;
+&lt;li&gt;&lt;tt class="docutils literal"&gt;/health*&lt;/tt&gt;:  &lt;strong&gt;有效&lt;/strong&gt; ，匹配以 &lt;tt class="docutils literal"&gt;/health&lt;/tt&gt; 开头的任意 nonResourceURL，比如 &lt;tt class="docutils literal"&gt;/health&lt;/tt&gt; 、 &lt;tt class="docutils literal"&gt;/healthy&lt;/tt&gt; 、 &lt;tt class="docutils literal"&gt;/health/foo/bar&lt;/tt&gt;&lt;/li&gt;
+&lt;li&gt;&lt;tt class="docutils literal"&gt;*foo&lt;/tt&gt;: 无效&lt;/li&gt;
+&lt;li&gt;&lt;tt class="docutils literal"&gt;/*foo&lt;/tt&gt;: 无效&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/li&gt;
+&lt;/ul&gt;
+&lt;div class="section" id="id1"&gt;
+&lt;h2 id="hidid1"&gt;参考资料&lt;a class="headerlink" href="#hidid1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;ul class="simple"&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://kubernetes.io/docs/reference/access-authn-authz/rbac/"&gt;Using RBAC Authorization | Kubernetes&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://github.com/kubernetes/kubernetes/blob/v1.21.1/plugin/pkg/auth/authorizer/rbac/rbac.go#L178-L193"&gt;kubernetes/rbac.go at v1.21.1 · kubernetes/kubernetes&lt;/a&gt;&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/div&gt;
+</summary><category term="kubernetes"></category><category term="RBAC"></category></entry><entry><title>shellless 容器、binaryless 容器以及 distroless 容器</title><link href="https://mozillazg.com/2021/05/security-use-shell-less-and-binary-less-distroless-container-with-root-less-container.html" rel="alternate"></link><updated>2021-05-30T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2021-05-30:2021/05/security-use-shell-less-and-binary-less-distroless-container-with-root-less-container.html</id><summary type="html">&lt;p&gt;大家可能对 rootless 容器有一定的了解，rootless 容器说的是不要以 root 用户启动容器，以便简单 限制一下容器内进程的权限，一方面更符合安全上对权限控制的要求，
+另一方面也可以抵御部分容器逃逸问题。&lt;/p&gt;
+&lt;p&gt;这里要介绍另一个容器安全方面的建议，那就是，应当尽可能的使用 shellless/shell-less 容器，
+或使用 binaryless/binary-less 容器，甚至是使用 distroless 容器。&lt;/p&gt;
+&lt;div class="section" id="shellless-shell-less"&gt;
+&lt;h2 id="hidshellless-shell-less"&gt;shellless/shell-less 容器&lt;a class="headerlink" href="#hidshellless-shell-less" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;shellless 或者说 shell-less 容器， 顾名思义指的是 &lt;strong&gt;容器内不包含 shell&lt;/strong&gt; 。&lt;/p&gt;
+&lt;p&gt;因为容器内不包含 shell，所以 shellless 容器可以免疫部分的 get shell 攻击和
+部分利用任意命令执行漏洞进行的攻击以及其他依赖 shell 的攻击
+（依赖 shell 的渗透攻击以及后渗透攻击）。&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class="section" id="binaryless-binary-less"&gt;
+&lt;h2 id="hidbinaryless-binary-less"&gt;binaryless/binary-less 容器&lt;a class="headerlink" href="#hidbinaryless-binary-less" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;binaryless 或者说 binary-less 容器，在 shellless 容器的基础上更进一步，
+&lt;strong&gt;容器内不包含除用户业务程序外的任何其他二进制可执行文件和脚本&lt;/strong&gt; 。&lt;/p&gt;
+&lt;p&gt;因为不包含任何额外的二进制可执行文件，所以 binaryless 容器比 shellless
+容器能够免疫更多的利用任意命令执行漏洞进行的攻击以及其他依赖容器内有二进制执行文件的攻击。&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class="section" id="distroless"&gt;
+&lt;h2 id="hiddistroless"&gt;distroless 容器&lt;a class="headerlink" href="#hiddistroless" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;distroless 容器在 binaryless 容器的基础上又跟进了一步，
+&lt;strong&gt;容器内不包含除用户业务程序及业务程序的运行时依赖外的任何其他程序、库以及非必须的系统文件&lt;/strong&gt; ，&lt;/p&gt;
+&lt;p&gt;因为只包含业务程序及其依赖，所以 distroless 容器又比 binaryless 容器能进一步提升容器安全性。&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class="section" id="id1"&gt;
+&lt;h2 id="hidid1"&gt;实现方案&lt;a class="headerlink" href="#hidid1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;目前社区使用的一些容器方案可以实现 shellless 、 binaryless 或 distroless 容器：&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;p class="first"&gt;一个是使用 &lt;tt class="docutils literal"&gt;scratch&lt;/tt&gt; 作为基础镜像，并且通过多阶段构建的方式 &lt;tt class="docutils literal"&gt;COPY&lt;/tt&gt; 业务所需的内容，类似下面这样：&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="k"&gt;FROM&lt;/span&gt;&lt;span class="s"&gt; golang:1.16 as builder&lt;/span&gt;
+&lt;span class="c"&gt;# ...&lt;/span&gt;
+&lt;span class="k"&gt;RUN&lt;/span&gt; go build xxx
+
+&lt;span class="k"&gt;FROM&lt;/span&gt;&lt;span class="s"&gt; scratch&lt;/span&gt;
+COPY --from&lt;span class="o"&gt;=&lt;/span&gt;builder /path/to/buld-files  /path/to/save
+&lt;span class="c"&gt;# ...&lt;/span&gt;
+&lt;/pre&gt;&lt;/div&gt;
+&lt;/li&gt;
+&lt;li&gt;&lt;p class="first"&gt;一个是使用 &lt;a class="reference external" href="https://github.com/GoogleContainerTools/distroless"&gt;https://github.com/GoogleContainerTools/distroless&lt;/a&gt; 项目提供的镜像作为基础镜像，并且通过多阶段构建的方式 &lt;tt class="docutils literal"&gt;COPY&lt;/tt&gt; 业务所需的内容，类似下面这样：&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="k"&gt;FROM&lt;/span&gt;&lt;span class="s"&gt; golang:1.16 as builder&lt;/span&gt;
+&lt;span class="c"&gt;# ...&lt;/span&gt;
+&lt;span class="k"&gt;RUN&lt;/span&gt; go build xxx
+
+&lt;span class="k"&gt;FROM&lt;/span&gt;&lt;span class="s"&gt; gcr.io/distroless/base-debian10&lt;/span&gt;
+COPY --from&lt;span class="o"&gt;=&lt;/span&gt;builder /path/to/buld-files  /path/to/save
+&lt;span class="c"&gt;# ...&lt;/span&gt;
+&lt;/pre&gt;&lt;/div&gt;
+&lt;/li&gt;
+&lt;li&gt;&lt;p class="first"&gt;还有就是使用 &lt;a class="reference external" href="https://github.com/docker-slim/docker-slim"&gt;docker-slim&lt;/a&gt; 工具对镜像做二次精简，删除不需要的内容。&lt;/p&gt;
+&lt;/li&gt;
+&lt;/ul&gt;
+&lt;p&gt;当然，也可以其他方法实现类似 &lt;tt class="docutils literal"&gt;scratch&lt;/tt&gt; 或 &lt;tt class="docutils literal"&gt;gcr.io/distroless&lt;/tt&gt; 这样的 shellless 、 binaryless 或 distroless 的基础镜像，
+然后按照类似上面的方法使用这些基础镜像来构建相应的业务镜像。&lt;/p&gt;
+&lt;p&gt;大家下次构建镜像的时候，推荐构建一个 shellless 或 binaryless 的镜像，也可以尝试 distroless 镜像或者使用 docker-slim 工具对镜像进行二次精简。&lt;/p&gt;
+&lt;p&gt;我后面也会根据自己的实践维护一个类似 &lt;a class="reference external" href="https://github.com/GoogleContainerTools/distroless"&gt;https://github.com/GoogleContainerTools/distroless&lt;/a&gt; 的项目，
+提供一些 binaryless 的基础镜像，以及相应的各个场景下使用 binaryless 可能会面临的一些问题的可行的解决方法。&lt;/p&gt;
+&lt;p&gt;更新：&lt;/p&gt;
+&lt;p&gt;我维护的 binaryless 基础镜像项目地址： &lt;a class="reference external" href="https://github.com/mozillazg/binaryless"&gt;https://github.com/mozillazg/binaryless&lt;/a&gt;&lt;/p&gt;
+&lt;div class="section" id="id2"&gt;
+&lt;h3 id="hidid2"&gt;参考资料&lt;a class="headerlink" href="#hidid2" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
+&lt;ul class="simple"&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://hub.docker.com/_/scratch"&gt;https://hub.docker.com/_/scratch&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://github.com/GoogleContainerTools/distroless"&gt;https://github.com/GoogleContainerTools/distroless&lt;/a&gt;&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+</summary><category term="container"></category><category term="容器"></category><category term="容器安全"></category></entry><entry><title>gobpf 使用示例：如何找到一个系统调用对应的可用于 kprobe SEC 的内核函数</title><link href="https://mozillazg.com/2021/05/ebpf-gobpf-how-to-find-system-call-kernel-function-for-kprobe-elf-section.html" rel="alternate"></link><updated>2021-05-10T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2021-05-10:2021/05/ebpf-gobpf-how-to-find-system-call-kernel-function-for-kprobe-elf-section.html</id><summary type="html">&lt;div class="section" id="id1"&gt;
+&lt;h2 id="hidid1"&gt;前言&lt;a class="headerlink" href="#hidid1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;前面 do_fchmodat 示例中我们是通过 &lt;tt class="docutils literal"&gt;chmod&lt;/tt&gt; 命令来进行演示程序工作结果的，
+那么是如何知道 &lt;tt class="docutils literal"&gt;chmod&lt;/tt&gt; 命令会调用 &lt;tt class="docutils literal"&gt;fchmodat&lt;/tt&gt; 系统调用并且对应的内核函数是
+&lt;tt class="docutils literal"&gt;do_fchmodat&lt;/tt&gt; 呢，本文记录一下查找方法，这个方法也可以用于其他程序的系统调用。&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class="section" id="strace"&gt;
+&lt;h2 id="hidstrace"&gt;通过 strace 找到程序使用的系统调用&lt;a class="headerlink" href="#hidstrace" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;首先是可以通过 strace 命令找到 chmod 所使用的系统调用:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+$ strace chmod +x a.txt
+...
+fchmodat(AT_FDCWD, &amp;quot;a.txt&amp;quot;, 0775)       = 0
+...
+&lt;/pre&gt;
+&lt;p&gt;通过分析 strace 命令的输出，找到了 &lt;tt class="docutils literal"&gt;fchmodat&lt;/tt&gt; 这个关键的系统调用。
+下面要做的就是找出这个系统调用所使用的内核函数。&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class="section" id="proc-kallsyms"&gt;
+&lt;h2 id="hidproc-kallsyms"&gt;通过 /proc/kallsyms 文件查找内核函数&lt;a class="headerlink" href="#hidproc-kallsyms" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;可以通过  /proc/kallsyms 查找 fchmodat 系统调用相关的函数
+（通过 &lt;tt class="docutils literal"&gt;grep T&lt;/tt&gt; 只显示全局可见的函数)&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+$ cat /proc/kallsyms |grep fchmodat |grep T
+0000000000000000 T do_fchmodat
+0000000000000000 T __x64_sys_fchmodat
+0000000000000000 T __ia32_sys_fchmodat
+&lt;/pre&gt;
+&lt;p&gt;可以看到可选的就是 &lt;tt class="docutils literal"&gt;do_fchmodat&lt;/tt&gt; 和 &lt;tt class="docutils literal"&gt;__x64_sys_fchmodat&lt;/tt&gt; 这两个，
+他们对应的源代码可以通过 linux 源码 &lt;a class="reference external" href="https://github.com/torvalds/linux"&gt;仓库&lt;/a&gt;
+或 &lt;a class="reference external" href="https://elixir.bootlin.com/"&gt;https://elixir.bootlin.com/&lt;/a&gt; 进行查找， 经过尝试后发现实际应当使用 &lt;tt class="docutils literal"&gt;do_fchmodat&lt;/tt&gt; 。&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class="section" id="id2"&gt;
+&lt;h2 id="hidid2"&gt;参考资料&lt;a class="headerlink" href="#hidid2" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;ul class="simple"&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://github.com/iovisor/gobpf"&gt;iovisor/gobpf: Go bindings for creating BPF programs.&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://lwn.net/Articles/804850/"&gt;kallsyms: new /proc/kallmodsyms with builtin modules and symbol sizes [LWN.net]&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://elixir.bootlin.com/linux/v5.4/source/fs/open.c#L591"&gt;open.c - fs/open.c - Linux source code (v5.4) - Bootlin&lt;/a&gt;&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/div&gt;
+</summary><category term="eBPF"></category><category term="gobpf"></category><category term="Go"></category><category term="gobpf 使用示例"></category></entry><entry><title>gobpf 使用示例：从 pt_regs 中获取内核函数的参数的值</title><link href="https://mozillazg.com/2021/05/ebpf-gobpf-get-function-argument-values-from-pt_regs.html" rel="alternate"></link><updated>2021-05-09T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2021-05-09:2021/05/ebpf-gobpf-get-function-argument-values-from-pt_regs.html</id><summary type="html">&lt;div class="section" id="id1"&gt;
+&lt;h2 id="hidid1"&gt;前言&lt;a class="headerlink" href="#hidid1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;前面 pref event 示例中我们是通过 &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;bpf_probe_read(&amp;amp;data.file_name,&lt;/span&gt; sizeof(data.file_name), PT_REGS_PARM2(ctx))&lt;/tt&gt;
+获取的 do_sys_open 函数的 filename 参数的值， 本文简单讲述如何从 &lt;tt class="docutils literal"&gt;struct pt_regs *ctx&lt;/tt&gt; 中获取内核函数的其他参数的值。&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class="section" id="struct-pt-regs-ctx"&gt;
+&lt;h2&gt;从 &lt;tt class="docutils literal"&gt;struct pt_regs *ctx&lt;/tt&gt; 中获取内核函数的参数的值&lt;/h2&gt;
+&lt;p&gt;本次示例将 tracing 内核函数 &lt;tt class="docutils literal"&gt;do_fchmodat&lt;/tt&gt; ，这个函数的函数签名如下：&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="kt"&gt;int&lt;/span&gt; &lt;span class="n"&gt;do_fchmodat&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="kt"&gt;int&lt;/span&gt; &lt;span class="n"&gt;dfd&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="k"&gt;const&lt;/span&gt; &lt;span class="kt"&gt;char&lt;/span&gt; &lt;span class="n"&gt;__user&lt;/span&gt; &lt;span class="o"&gt;*&lt;/span&gt;&lt;span class="n"&gt;filename&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;umode_t&lt;/span&gt; &lt;span class="n"&gt;mode&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+&lt;/pre&gt;&lt;/div&gt;
+&lt;p&gt;下面的代码片段将获取函数的 filename 和 mode 这两个参数的值，即这个函数的第二个参数和第三个参数的值：&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="k"&gt;struct&lt;/span&gt; &lt;span class="n"&gt;data_t&lt;/span&gt; &lt;span class="p"&gt;{&lt;/span&gt;
+    &lt;span class="n"&gt;__u32&lt;/span&gt; &lt;span class="n"&gt;pid&lt;/span&gt;&lt;span class="p"&gt;;&lt;/span&gt;
+    &lt;span class="kt"&gt;char&lt;/span&gt; &lt;span class="n"&gt;file_name&lt;/span&gt;&lt;span class="p"&gt;[&lt;/span&gt;&lt;span class="mi"&gt;256&lt;/span&gt;&lt;span class="p"&gt;];&lt;/span&gt;
+    &lt;span class="n"&gt;__u32&lt;/span&gt; &lt;span class="n"&gt;mode&lt;/span&gt;&lt;span class="p"&gt;;&lt;/span&gt;
+&lt;span class="p"&gt;};&lt;/span&gt;
+
+&lt;span class="n"&gt;SEC&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="s"&gt;&amp;quot;kprobe/do_fchmodat&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+&lt;span class="kt"&gt;int&lt;/span&gt; &lt;span class="n"&gt;kprobe__do_fchmodat&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="k"&gt;struct&lt;/span&gt; &lt;span class="n"&gt;pt_regs&lt;/span&gt; &lt;span class="o"&gt;*&lt;/span&gt;&lt;span class="n"&gt;ctx&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt; &lt;span class="p"&gt;{&lt;/span&gt;
+        &lt;span class="k"&gt;struct&lt;/span&gt; &lt;span class="n"&gt;data_t&lt;/span&gt; &lt;span class="n"&gt;data&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="p"&gt;{&lt;/span&gt;&lt;span class="mi"&gt;0&lt;/span&gt;&lt;span class="p"&gt;};&lt;/span&gt;
+
+        &lt;span class="kt"&gt;char&lt;/span&gt; &lt;span class="o"&gt;*&lt;/span&gt;&lt;span class="n"&gt;filename&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="kt"&gt;char&lt;/span&gt; &lt;span class="o"&gt;*&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;&lt;span class="n"&gt;PT_REGS_PARM2&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;ctx&lt;/span&gt;&lt;span class="p"&gt;);&lt;/span&gt;
+        &lt;span class="kt"&gt;unsigned&lt;/span&gt; &lt;span class="kt"&gt;int&lt;/span&gt; &lt;span class="n"&gt;mode&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;PT_REGS_PARM3&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;ctx&lt;/span&gt;&lt;span class="p"&gt;);&lt;/span&gt;
+
+        &lt;span class="n"&gt;bpf_probe_read&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="o"&gt;&amp;amp;&lt;/span&gt;&lt;span class="n"&gt;data&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="n"&gt;file_name&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="k"&gt;sizeof&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;data&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="n"&gt;file_name&lt;/span&gt;&lt;span class="p"&gt;),&lt;/span&gt; &lt;span class="n"&gt;filename&lt;/span&gt;&lt;span class="p"&gt;);&lt;/span&gt;
+
+        &lt;span class="n"&gt;data&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="n"&gt;mode&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;__u32&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt; &lt;span class="n"&gt;mode&lt;/span&gt;&lt;span class="p"&gt;;&lt;/span&gt;
+
+        &lt;span class="p"&gt;...&lt;/span&gt;
+&lt;span class="p"&gt;}&lt;/span&gt;
+&lt;/pre&gt;&lt;/div&gt;
+&lt;p&gt;上面的代码是通过 &lt;tt class="docutils literal"&gt;PT_REGS_PARM2&lt;/tt&gt; 和 &lt;tt class="docutils literal"&gt;PT_REGS_PARM3&lt;/tt&gt; 这两个宏来分别获取第二个和第三参数的值的，
+从名称就可以推断，第一个参数可以通过 &lt;tt class="docutils literal"&gt;PT_REGS_PARM1&lt;/tt&gt; 来获取。&lt;/p&gt;
+&lt;p&gt;&lt;tt class="docutils literal"&gt;PT_REGS_PARM*&lt;/tt&gt; 是 &lt;tt class="docutils literal"&gt;bpf_helpers.h&lt;/tt&gt; 定义的一些宏，用于快速从 pt_regs 中获取数据，
+包括 &lt;tt class="docutils literal"&gt;PT_REGS_PARM1&lt;/tt&gt; 、 &lt;tt class="docutils literal"&gt;PT_REGS_PARM2&lt;/tt&gt; 、 &lt;tt class="docutils literal"&gt;PT_REGS_PARM3&lt;/tt&gt; 、
+&lt;tt class="docutils literal"&gt;PT_REGS_PARM4&lt;/tt&gt; 、 &lt;tt class="docutils literal"&gt;PT_REGS_PARM5&lt;/tt&gt; 可用于获取第一到第五个参数的值。&lt;/p&gt;
+&lt;p&gt;P.S. 本文的所有代码在 Github 上都有一份完整版： &lt;a class="reference external" href="https://github.com/mozillazg/gobpf-examples"&gt;https://github.com/mozillazg/gobpf-examples&lt;/a&gt;&lt;/p&gt;
+&lt;p&gt;上面的 ebpf 代码完整版运行后的效果如下：&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;$ make
+$ make run
+
+pid &lt;span class="m"&gt;52331&lt;/span&gt; call fchmodat&lt;span class="o"&gt;(&lt;/span&gt;fielname: a.txt, mode: 0775&lt;span class="o"&gt;)&lt;/span&gt;
+
+$ &lt;span class="c1"&gt;# make run 之后在另一个窗口执行&lt;/span&gt;
+$ touch a.txt &lt;span class="o"&gt;&amp;amp;&amp;amp;&lt;/span&gt; strace chmod +x a.txt 2&amp;gt;&lt;span class="p"&gt;&amp;amp;&lt;/span&gt;&lt;span class="m"&gt;1&lt;/span&gt; &lt;span class="p"&gt;|&lt;/span&gt;grep chmod
+execve&lt;span class="o"&gt;(&lt;/span&gt;&lt;span class="s2"&gt;&amp;quot;/usr/bin/chmod&amp;quot;&lt;/span&gt;, &lt;span class="o"&gt;[&lt;/span&gt;&lt;span class="s2"&gt;&amp;quot;chmod&amp;quot;&lt;/span&gt;, &lt;span class="s2"&gt;&amp;quot;+x&amp;quot;&lt;/span&gt;, &lt;span class="s2"&gt;&amp;quot;a.txt&amp;quot;&lt;/span&gt;&lt;span class="o"&gt;]&lt;/span&gt;, 0x7fffd601f570 /* &lt;span class="m"&gt;27&lt;/span&gt; vars */&lt;span class="o"&gt;)&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; 0
+fchmodat&lt;span class="o"&gt;(&lt;/span&gt;AT_FDCWD, &lt;span class="s2"&gt;&amp;quot;a.txt&amp;quot;&lt;/span&gt;, 0775&lt;span class="o"&gt;)&lt;/span&gt;       &lt;span class="o"&gt;=&lt;/span&gt; 0
+&lt;/pre&gt;&lt;/div&gt;
+&lt;p&gt;可以看到获取到的参数的值跟实际的值是一样的，符合预期。&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class="section" id="id2"&gt;
+&lt;h2 id="hidid2"&gt;参考资料&lt;a class="headerlink" href="#hidid2" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;ul class="simple"&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://github.com/iovisor/gobpf"&gt;iovisor/gobpf: Go bindings for creating BPF programs.&lt;/a&gt;&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/div&gt;
+</summary><category term="eBPF"></category><category term="gobpf"></category><category term="Go"></category><category term="gobpf 使用示例"></category></entry><entry><title>LeetCode: 154. Find Minimum in Rotated Sorted Array II</title><link href="https://mozillazg.com/2021/04/leetcode-154-find-minimum-in-rotated-sorted-array-ii.html" rel="alternate"></link><updated>2021-04-18T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2021-04-18:2021/04/leetcode-154-find-minimum-in-rotated-sorted-array-ii.html</id><summary type="html">&lt;div class="section" id="id1"&gt;
+&lt;h2 id="hidid1"&gt;题目&lt;a class="headerlink" href="#hidid1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;原题地址： &lt;a class="reference external" href="https://leetcode.com/problems/find-minimum-in-rotated-sorted-array-ii/"&gt;https://leetcode.com/problems/find-minimum-in-rotated-sorted-array-ii/&lt;/a&gt;&lt;/p&gt;
+&lt;p&gt;Suppose an array of length n sorted in ascending order is rotated between 1 and n times.
+For example, the array nums = &lt;tt class="docutils literal"&gt;[0,1,4,4,5,6,7]&lt;/tt&gt; might become:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+[4,5,6,7,0,1,4] if it was rotated 4 times.
+[0,1,4,4,5,6,7] if it was rotated 7 times.
+&lt;/pre&gt;
+&lt;p&gt;Notice that rotating an array &lt;tt class="docutils literal"&gt;[a[0], a[1], a[2], &lt;span class="pre"&gt;...,&lt;/span&gt; &lt;span class="pre"&gt;a[n-1]]&lt;/span&gt;&lt;/tt&gt;
+1 time results in the array &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;[a[n-1],&lt;/span&gt; a[0], a[1], a[2], &lt;span class="pre"&gt;...,&lt;/span&gt; &lt;span class="pre"&gt;a[n-2]]&lt;/span&gt;&lt;/tt&gt;.&lt;/p&gt;
+&lt;p&gt;Given the sorted rotated array nums that may contain duplicates, return the minimum element of this array.&lt;/p&gt;
+&lt;p&gt;Example 1:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+Input: nums = [1,3,5]
+Output: 1
+&lt;/pre&gt;
+&lt;p&gt;Example 2:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+Input: nums = [2,2,2,0,1]
+Output: 0
+&lt;/pre&gt;
+&lt;p&gt;题目大意是，给一个旋转过的数组（这个数组旋转前是个有序数组，旋转操作会把数组元素按循环往后移。
+比如，旋转一次就是把元素往后移动一次，结果就是原来的最后一个元素后移一位变成了第一个元素，其他元素也都后移了一位），
+找出这个数组中最小的那个元素，数组中的元素的值不是唯一的，可能有重复的值。&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class="section" id="id2"&gt;
+&lt;h2 id="hidid2"&gt;解法&lt;a class="headerlink" href="#hidid2" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;这个题跟前面 153. Find Minimum in Rotated Sorted Array 基本是一样的，区别就是这里数组的元素的值不是唯一的。
+因为数组中元素的值可能有重复的话，所以二分查找的时候不能每次缩短一半而是缩小一个元素的方式去查找&lt;/p&gt;
+&lt;p&gt;这个思路的 Python 代码类似下面这样：&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="k"&gt;class&lt;/span&gt; &lt;span class="nc"&gt;Solution&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;
+    &lt;span class="k"&gt;def&lt;/span&gt; &lt;span class="nf"&gt;findMin&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="bp"&gt;self&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;nums&lt;/span&gt;&lt;span class="p"&gt;):&lt;/span&gt;
+        &lt;span class="k"&gt;if&lt;/span&gt; &lt;span class="nb"&gt;len&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;nums&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt; &lt;span class="o"&gt;&amp;lt;=&lt;/span&gt; &lt;span class="mi"&gt;2&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;
+            &lt;span class="k"&gt;return&lt;/span&gt; &lt;span class="nb"&gt;min&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;nums&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+
+        &lt;span class="n"&gt;left&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="mi"&gt;0&lt;/span&gt;
+        &lt;span class="n"&gt;right&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="nb"&gt;len&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;nums&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt; &lt;span class="o"&gt;-&lt;/span&gt; &lt;span class="mi"&gt;1&lt;/span&gt;
+        &lt;span class="k"&gt;while&lt;/span&gt; &lt;span class="n"&gt;left&lt;/span&gt; &lt;span class="o"&gt;&amp;lt;&lt;/span&gt; &lt;span class="n"&gt;right&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;
+            &lt;span class="n"&gt;mid&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;left&lt;/span&gt; &lt;span class="o"&gt;+&lt;/span&gt; &lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;right&lt;/span&gt; &lt;span class="o"&gt;-&lt;/span&gt; &lt;span class="n"&gt;left&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt; &lt;span class="o"&gt;//&lt;/span&gt; &lt;span class="mi"&gt;2&lt;/span&gt;
+            &lt;span class="k"&gt;if&lt;/span&gt; &lt;span class="n"&gt;nums&lt;/span&gt;&lt;span class="p"&gt;[&lt;/span&gt;&lt;span class="n"&gt;mid&lt;/span&gt;&lt;span class="p"&gt;]&lt;/span&gt; &lt;span class="o"&gt;&amp;lt;&lt;/span&gt; &lt;span class="n"&gt;nums&lt;/span&gt;&lt;span class="p"&gt;[&lt;/span&gt;&lt;span class="n"&gt;right&lt;/span&gt;&lt;span class="p"&gt;]:&lt;/span&gt;
+                &lt;span class="n"&gt;right&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;mid&lt;/span&gt;
+            &lt;span class="c1"&gt;# 虽然相等，但是不一定在左边还是右边，&lt;/span&gt;
+            &lt;span class="c1"&gt;# 比如 [1, 2, 2] [3, 3, 1, 3]&lt;/span&gt;
+            &lt;span class="k"&gt;elif&lt;/span&gt; &lt;span class="n"&gt;nums&lt;/span&gt;&lt;span class="p"&gt;[&lt;/span&gt;&lt;span class="n"&gt;mid&lt;/span&gt;&lt;span class="p"&gt;]&lt;/span&gt; &lt;span class="o"&gt;==&lt;/span&gt; &lt;span class="n"&gt;nums&lt;/span&gt;&lt;span class="p"&gt;[&lt;/span&gt;&lt;span class="n"&gt;right&lt;/span&gt;&lt;span class="p"&gt;]:&lt;/span&gt;
+                &lt;span class="n"&gt;right&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;right&lt;/span&gt; &lt;span class="o"&gt;-&lt;/span&gt; &lt;span class="mi"&gt;1&lt;/span&gt;
+            &lt;span class="k"&gt;else&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;
+                &lt;span class="n"&gt;left&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;mid&lt;/span&gt; &lt;span class="o"&gt;+&lt;/span&gt; &lt;span class="mi"&gt;1&lt;/span&gt;
+
+        &lt;span class="k"&gt;return&lt;/span&gt; &lt;span class="n"&gt;nums&lt;/span&gt;&lt;span class="p"&gt;[&lt;/span&gt;&lt;span class="n"&gt;right&lt;/span&gt;&lt;span class="p"&gt;]&lt;/span&gt;
+&lt;/pre&gt;&lt;/div&gt;
+&lt;/div&gt;
+&lt;div class="section" id="id3"&gt;
+&lt;h2 id="hidid3"&gt;参考资料&lt;a class="headerlink" href="#hidid3" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;ul class="simple"&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://leetcode.com/problems/find-minimum-in-rotated-sorted-array-ii/"&gt;https://leetcode.com/problems/find-minimum-in-rotated-sorted-array-ii/&lt;/a&gt;&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/div&gt;
+</summary><category term="数组"></category><category term="Array"></category></entry></feed>
