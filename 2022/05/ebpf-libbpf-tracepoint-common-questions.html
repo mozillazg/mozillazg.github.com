@@ -1,0 +1,468 @@
+<!DOCTYPE html>
+<html lang="zh"  prefix="og: http://ogp.me/ns# fb: https://www.facebook.com/2008/fbml" class="han-init">
+<head>
+    <title>ebpf/libbpf 程序使用 tracepoint 的常见问题 - mozillazg's blog</title>
+    <!-- Using the latest rendering mode for IE -->
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <!-- share.css -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/social-share.js@1.0.16/dist/css/share.min.css">
+
+
+    <link href="https://mozillazg.com/favicon.ico" rel="icon">
+
+<link rel="canonical" href="https://mozillazg.com/2022/05/ebpf-libbpf-tracepoint-common-questions.html">
+
+        <meta name="author" content="mozillazg" />
+        <meta name="keywords" content="ebpf,tracepoint,libbpf,libbpfgo" />
+    <meta name="description" content="前言¶ 记录一些编写 ebpf/libbpf 程序时涉及到的 tracepoint 相关的常见问题。 tracepoint 可以监控哪些事件¶ 可以通过查看 /sys/kernel/debug/tracing/available_events 文件的内容找到 tracepoint 可监控的事件。 文件中每行内容的格式是: &lt;category&gt;:&lt;name&gt; 比如: syscalls:sys_enter_execve SEC 内容的格式¶ tracepoint 事件对应的 SEC 格式为: SEC(&#34;tracepoint/&lt;category&gt;/&lt;name&gt;&#34;) // 比如: // SEC(&#34;tracepoint/syscalls/sys_enter_openat&#34;) 或: SEC(&#34;tp/&lt;category&gt;/&lt;name&gt;&#34;) // 比如: // SEC(&#34;tp/syscalls/sys_enter_openat&#34;) SEC(&#34;tp/xx/yy&#34;) 跟 SEC(&#34;tracepoint/xx/yy&#34;) 其实是等效的，看个人喜好随便用哪种都行。 确定 tracepoint 事件处理函数的参数类型，获取对应的内核调用参数¶ 假设，我们想监控 chmod 这个命令涉及的 fchmodat 系统调用的 tracepoint 事件， 那么，如何确定ebpf 中事件处理函数的参数类型，以及如何获取到对应的 fchmodat 这个系统调用涉及的参数的内容， 比如拿到操作文件名称以及操作的权限 mode 的值。 第一步，先确定 chmod 所使用的系统调用，这个比较简单，有很多种方法可以做到，比如通过 strace 命令: $ strace chmod 600 a.txt ... fchmodat(AT_FDCWD, &#34;a.txt&#34;, 0600) = 0 ... 第二步，找到针对这个系统调用可以使用的 tracepoint 事件: $ sudo cat /sys/kernel/debug/tracing/available_events |grep fchmodat syscalls:sys_exit_fchmodat syscalls:sys_enter_fchmodat 可以看到，有 sys_enter_fchmodat 和 sys_exit_fchmodat 这两个事件。这里选择 sys_enter_fchmodat 这个事件进行后续的说明。 第三步，确定函数的参数类型。这个需要到 vmlinux.h 文件中进行查找， 一般 sys_enter_xx 对应 trace_event_raw_sys_enter ， sys_exit_xx 对应 trace_event_raw_sys_exit ， 其他的一般对应 trace_event_raw_&lt;name&gt; ，如果没找到的话，可以参考 trace_event_raw_sys_enter 的例子找它相近的 struct。 对于 sys_enter_fchmodat ，我们使用 trace_event_raw_sys_enter 这个 struct: struct trace_event_raw_sys_enter { struct trace_entry ent; long int id; long unsigned int args[6]; char __data[0]; }; 其中 args 中就存储了事件相关的我们可以获取的信息，至于里面包含了哪些信息就是第三步需要确定的信息。 第三步，确定事件本身可以获取到哪些信息，虽然我们指定 fchmodat 系统调用需要提供文件名称和 mode 信息， 但是，我们不确定是否可以在 ebpf 程序中获取到这些信息。可以通过查看 /sys/kernel/debug/tracing/events/&lt;category&gt;/&lt;name&gt;/format 文件获取到我们可以获取哪些信息。 比如 sys_enter_fchmodat 这个事件的 /sys/kernel/debug/tracing/events/syscalls/sys_enter_fchmodat/format 的内容如下: $ sudo cat /sys/kernel/debug/tracing/events/syscalls/sys_enter_fchmodat/format name: sys_enter_fchmodat ID: 647 format: field:unsigned short common_type; offset:0; size:2; signed:0; field:unsigned char common_flags; offset:2; size:1; signed:0; field:unsigned char common_preempt_count; offset:3; size:1; signed:0; field:int common_pid; offset:4; size:4; signed:1; field:int __syscall_nr; offset:8; size:4; signed:1; field:int dfd; offset:16; size:8; signed:0; field:const char * filename; offset:24; size:8; signed:0; field:umode_t mode; offset:32; size:8; signed:0; print fmt: &#34;dfd: 0x%08lx, filename: 0x%08lx, mode: 0x%08lx&#34;, ((unsigned long)(REC-&gt;dfd)), ((unsigned long)(REC-&gt;filename)), ((unsigned long)(REC-&gt;mode)) __syscall_nr 之后的字段都是我们可以在 ebpf 程序中获取的信息。 从上面可以看到，我们可以获取 sys_enter_fchmodat 事件的 dfd 、 filename 以及 mode 信息， 这里就包含了前面所说的文件名称以及权限 mode 信息。 通过 trace_event_raw_sys_enter 的 args 数组获取，通过 args[0] 获取 dfd , args[1] 获取 filename 以此类推。 信息都确定好了，就可以写程序了。比如上面 sys_enter_fchmodat 事件的示例 ebpf 程序如下: SEC(&#34;tracepoint/syscalls/sys_enter_fchmodat&#34;) int tracepoint__syscalls__sys_enter_fchmodat(struct trace_event_raw_sys_enter *ctx) { struct event_t *event; event = bpf_ringbuf_reserve(&amp;events, sizeof(*event), 0); if (!event) { return 0; } char *filename_ptr = (char *) BPF_CORE_READ(ctx, args[1]); bpf_core_read_user_str(&amp;event-&gt;filename, sizeof(event-&gt;filename), filename_ptr); event-&gt;mode = BPF_CORE_READ(ctx, args[2]); bpf_ringbuf_submit(event, 0); return 0; } 完成的示例程序详见：https://github.com/mozillazg/hello-libbpfgo/tree/master/07-tracepoint-args 参考资料¶ BPF CO-RE reference guide" />
+    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-4941850466486001"
+     crossorigin="anonymous"></script>
+
+    <style>
+      .js-toc {
+        margin-bottom: 20px;
+      }
+      .donate-modal {
+        text-align: center;
+      }
+      #donate-modal-container .donate-image {
+        max-height: 300px !important;
+        min-height: inherit !important;
+      }
+    </style>
+
+        <meta property="og:site_name" content="mozillazg's blog" />
+        <meta property="og:type" content="article"/>
+        <meta property="og:title" content="ebpf/libbpf 程序使用 tracepoint 的常见问题"/>
+        <meta property="og:url" content="https://mozillazg.com/2022/05/ebpf-libbpf-tracepoint-common-questions.html"/>
+        <meta property="og:description" content="前言¶ 记录一些编写 ebpf/libbpf 程序时涉及到的 tracepoint 相关的常见问题。 tracepoint 可以监控哪些事件¶ 可以通过查看 /sys/kernel/debug/tracing/available_events 文件的内容找到 tracepoint 可监控的事件。 文件中每行内容的格式是: &lt;category&gt;:&lt;name&gt; 比如: syscalls:sys_enter_execve SEC 内容的格式¶ tracepoint 事件对应的 SEC 格式为: SEC(&#34;tracepoint/&lt;category&gt;/&lt;name&gt;&#34;) // 比如: // SEC(&#34;tracepoint/syscalls/sys_enter_openat&#34;) 或: SEC(&#34;tp/&lt;category&gt;/&lt;name&gt;&#34;) // 比如: // SEC(&#34;tp/syscalls/sys_enter_openat&#34;) SEC(&#34;tp/xx/yy&#34;) 跟 SEC(&#34;tracepoint/xx/yy&#34;) 其实是等效的，看个人喜好随便用哪种都行。 确定 tracepoint 事件处理函数的参数类型，获取对应的内核调用参数¶ 假设，我们想监控 chmod 这个命令涉及的 fchmodat 系统调用的 tracepoint 事件， 那么，如何确定ebpf 中事件处理函数的参数类型，以及如何获取到对应的 fchmodat 这个系统调用涉及的参数的内容， 比如拿到操作文件名称以及操作的权限 mode 的值。 第一步，先确定 chmod 所使用的系统调用，这个比较简单，有很多种方法可以做到，比如通过 strace 命令: $ strace chmod 600 a.txt ... fchmodat(AT_FDCWD, &#34;a.txt&#34;, 0600) = 0 ... 第二步，找到针对这个系统调用可以使用的 tracepoint 事件: $ sudo cat /sys/kernel/debug/tracing/available_events |grep fchmodat syscalls:sys_exit_fchmodat syscalls:sys_enter_fchmodat 可以看到，有 sys_enter_fchmodat 和 sys_exit_fchmodat 这两个事件。这里选择 sys_enter_fchmodat 这个事件进行后续的说明。 第三步，确定函数的参数类型。这个需要到 vmlinux.h 文件中进行查找， 一般 sys_enter_xx 对应 trace_event_raw_sys_enter ， sys_exit_xx 对应 trace_event_raw_sys_exit ， 其他的一般对应 trace_event_raw_&lt;name&gt; ，如果没找到的话，可以参考 trace_event_raw_sys_enter 的例子找它相近的 struct。 对于 sys_enter_fchmodat ，我们使用 trace_event_raw_sys_enter 这个 struct: struct trace_event_raw_sys_enter { struct trace_entry ent; long int id; long unsigned int args[6]; char __data[0]; }; 其中 args 中就存储了事件相关的我们可以获取的信息，至于里面包含了哪些信息就是第三步需要确定的信息。 第三步，确定事件本身可以获取到哪些信息，虽然我们指定 fchmodat 系统调用需要提供文件名称和 mode 信息， 但是，我们不确定是否可以在 ebpf 程序中获取到这些信息。可以通过查看 /sys/kernel/debug/tracing/events/&lt;category&gt;/&lt;name&gt;/format 文件获取到我们可以获取哪些信息。 比如 sys_enter_fchmodat 这个事件的 /sys/kernel/debug/tracing/events/syscalls/sys_enter_fchmodat/format 的内容如下: $ sudo cat /sys/kernel/debug/tracing/events/syscalls/sys_enter_fchmodat/format name: sys_enter_fchmodat ID: 647 format: field:unsigned short common_type; offset:0; size:2; signed:0; field:unsigned char common_flags; offset:2; size:1; signed:0; field:unsigned char common_preempt_count; offset:3; size:1; signed:0; field:int common_pid; offset:4; size:4; signed:1; field:int __syscall_nr; offset:8; size:4; signed:1; field:int dfd; offset:16; size:8; signed:0; field:const char * filename; offset:24; size:8; signed:0; field:umode_t mode; offset:32; size:8; signed:0; print fmt: &#34;dfd: 0x%08lx, filename: 0x%08lx, mode: 0x%08lx&#34;, ((unsigned long)(REC-&gt;dfd)), ((unsigned long)(REC-&gt;filename)), ((unsigned long)(REC-&gt;mode)) __syscall_nr 之后的字段都是我们可以在 ebpf 程序中获取的信息。 从上面可以看到，我们可以获取 sys_enter_fchmodat 事件的 dfd 、 filename 以及 mode 信息， 这里就包含了前面所说的文件名称以及权限 mode 信息。 通过 trace_event_raw_sys_enter 的 args 数组获取，通过 args[0] 获取 dfd , args[1] 获取 filename 以此类推。 信息都确定好了，就可以写程序了。比如上面 sys_enter_fchmodat 事件的示例 ebpf 程序如下: SEC(&#34;tracepoint/syscalls/sys_enter_fchmodat&#34;) int tracepoint__syscalls__sys_enter_fchmodat(struct trace_event_raw_sys_enter *ctx) { struct event_t *event; event = bpf_ringbuf_reserve(&amp;events, sizeof(*event), 0); if (!event) { return 0; } char *filename_ptr = (char *) BPF_CORE_READ(ctx, args[1]); bpf_core_read_user_str(&amp;event-&gt;filename, sizeof(event-&gt;filename), filename_ptr); event-&gt;mode = BPF_CORE_READ(ctx, args[2]); bpf_ringbuf_submit(event, 0); return 0; } 完成的示例程序详见：https://github.com/mozillazg/hello-libbpfgo/tree/master/07-tracepoint-args 参考资料¶ BPF CO-RE reference guide"/>
+        <meta property="article:published_time" content="2022-05-15" />
+            <meta property="article:section" content="ebpf" />
+            <meta property="article:tag" content="ebpf" />
+            <meta property="article:tag" content="tracepoint" />
+            <meta property="article:tag" content="libbpf" />
+            <meta property="article:tag" content="libbpfgo" />
+            <meta property="article:author" content="mozillazg" />
+            <meta property="og:image"
+                  content="https://mozillazg.com/static/avatar.jpeg"/>
+
+
+    <meta name="twitter:card" content="summary">
+        <meta name="twitter:site" content="@mozillazg">
+        <meta name="twitter:creator" content="@mozillazg">
+    <meta name="twitter:domain" content="https://mozillazg.com">
+            <meta property="twitter:image"
+                  content="https://mozillazg.com/static/avatar.jpeg"/>
+
+    <!-- Bootstrap -->
+        <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@3.3.4/dist/css/bootstrap.min.css" type="text/css"/>
+    <link href="https://cdn.jsdelivr.net/npm/font-awesome@4.3.0/css/font-awesome.min.css" rel="stylesheet">
+
+    <link href="https://cdn.jsdelivr.net/npm/pygments-css@1.0.0/github.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://mozillazg.com/theme/css/style.css" type="text/css"/>
+            <link href="https://mozillazg.com/static/custom.css" rel="stylesheet">
+
+        <link href="https://mozillazg.com/feeds/all.atom.xml" type="application/atom+xml" rel="alternate"
+              title="mozillazg's blog ATOM Feed"/>
+
+        <link href="https://mozillazg.com/feeds/all.rss.xml" type="application/rss+xml" rel="alternate"
+              title="mozillazg's blog RSS Feed"/>
+
+
+        <link href="https://mozillazg.com/feeds/ebpf.atom.xml" type="application/atom+xml" rel="alternate"
+              title="mozillazg's blog ebpf ATOM Feed"/>
+
+
+    <script type="application/ld+json">
+    {
+        "@context": "https://schema.org",
+        "@type": "BlogPosting",
+        "publisher": {
+            "@type": "Person",
+            "name": "mozillazg",
+            "logo": "https://mozillazg.com/static/avatar.jpeg"
+        },
+        "author": {
+            "@type": "Person",
+            "name": "mozillazg",
+            "image": "https://mozillazg.com/static/avatar.jpeg",
+            "url": "https://mozillazg.com",
+            "sameAs": []
+        },
+        "headline": "ebpf/libbpf 程序使用 tracepoint 的常见问题",
+        "url": "https://mozillazg.com/2022/05/ebpf-libbpf-tracepoint-common-questions.html",
+        "image": [
+            "https://mozillazg.com/static/avatar.jpeg"
+         ],
+        "keywords": "ebpf, tracepoint, libbpf, libbpfgo",
+        "datePublished": "2022-05-15"
+    }
+    </script>
+
+</head>
+<body>
+
+<div class="navbar" role="navigation">
+	<div class="container">
+        <div class="navbar-header">
+            <button type="button" class="navbar-toggle" data-toggle="collapse" data-target=".navbar-ex1-collapse">
+                <span class="sr-only">Toggle navigation</span>
+                <span class="icon-bar"></span>
+                <span class="icon-bar"></span>
+                <span class="icon-bar"></span>
+            </button>
+            <a href="https://mozillazg.com/" class="navbar-brand">
+mozillazg's blog            </a>
+        </div>
+        <div class="collapse navbar-collapse navbar-ex1-collapse">
+            <ul class="nav navbar-nav">
+                    <li><a href="https://mozillazg.com/feeds/all.atom.xml">Feed</a></li>
+                    <li><a href="/2014/10/pages/about-me.html">About</a></li>
+            </ul>
+            <ul class="nav navbar-nav navbar-right">
+              <li><a href="https://mozillazg.com/archives.html"><i class="fa fa-th-list"></i><span class="icon-label">Archives</span></a></li>
+            </ul>
+        </div>
+        <!-- /.navbar-collapse -->
+    </div>
+</div> <!-- /.navbar -->
+<!-- Banner -->
+<!-- End Banner -->
+<div class="container">
+    <div class="row">
+        <div class="col-lg-12">
+    <section id="content" class="yue">
+        <article>
+            <header class="text-center">
+                <h1>
+                    <a href="https://mozillazg.com/2022/05/ebpf-libbpf-tracepoint-common-questions.html"
+                       rel="bookmark"
+                       title="Permalink to ebpf/libbpf 程序使用 tracepoint 的常见问题">
+                        ebpf/libbpf 程序使用 tracepoint 的常见问题
+                    </a>
+                </h1>
+                <p class="published">
+                    <time datetime="2022-05-15T00:00:00+00:00">
+                    2022-05-15
+                    </time>
+                </p>
+            </header>
+            <div class="entry-content">
+                <div class="well-sm article-info">
+<footer class="post-info">
+        <a href="https://mozillazg.com/category/ebpf.html">ebpf</a>
+
+
+<span class="label label-default hide">Tags</span>
+	<a href="https://mozillazg.com/tag/tracepoint.html">tracepoint</a>
+        /
+	<a href="https://mozillazg.com/tag/libbpf.html">libbpf</a>
+        /
+	<a href="https://mozillazg.com/tag/libbpfgo.html">libbpfgo</a>
+    
+</footer><!-- /.post-info -->                </div>
+                <div class="js-toc"></div>
+                <div>
+                <div class="section" id="id1">
+<h2 id="hidid1">前言<a class="headerlink" href="#hidid1" title="Permalink to this headline">¶</a></h2>
+<p>记录一些编写 ebpf/libbpf 程序时涉及到的 tracepoint 相关的常见问题。</p>
+</div>
+<div class="section" id="tracepoint">
+<h2 id="hidtracepoint">tracepoint 可以监控哪些事件<a class="headerlink" href="#hidtracepoint" title="Permalink to this headline">¶</a></h2>
+<p>可以通过查看 <tt class="docutils literal">/sys/kernel/debug/tracing/available_events</tt> 文件的内容找到 tracepoint 可监控的事件。
+文件中每行内容的格式是:</p>
+<pre class="literal-block">
+&lt;category&gt;:&lt;name&gt;
+</pre>
+<p>比如:</p>
+<pre class="literal-block">
+syscalls:sys_enter_execve
+</pre>
+</div>
+<div class="section" id="sec">
+<h2 id="hidsec">SEC 内容的格式<a class="headerlink" href="#hidsec" title="Permalink to this headline">¶</a></h2>
+<p>tracepoint 事件对应的 SEC 格式为:</p>
+<pre class="literal-block">
+SEC(&quot;tracepoint/&lt;category&gt;/&lt;name&gt;&quot;)
+
+// 比如:
+// SEC(&quot;tracepoint/syscalls/sys_enter_openat&quot;)
+</pre>
+<p>或:</p>
+<pre class="literal-block">
+SEC(&quot;tp/&lt;category&gt;/&lt;name&gt;&quot;)
+
+// 比如:
+// SEC(&quot;tp/syscalls/sys_enter_openat&quot;)
+</pre>
+<p><tt class="docutils literal"><span class="pre">SEC(&quot;tp/xx/yy&quot;)</span></tt> 跟 <tt class="docutils literal"><span class="pre">SEC(&quot;tracepoint/xx/yy&quot;)</span></tt> 其实是等效的，看个人喜好随便用哪种都行。</p>
+</div>
+<div class="section" id="id2">
+<h2 id="hidid2">确定 tracepoint 事件处理函数的参数类型，获取对应的内核调用参数<a class="headerlink" href="#hidid2" title="Permalink to this headline">¶</a></h2>
+<p>假设，我们想监控 <tt class="docutils literal">chmod</tt> 这个命令涉及的 <tt class="docutils literal">fchmodat</tt> 系统调用的 tracepoint 事件，
+那么，如何确定ebpf 中事件处理函数的参数类型，以及如何获取到对应的 <tt class="docutils literal">fchmodat</tt> 这个系统调用涉及的参数的内容，
+比如拿到操作文件名称以及操作的权限 mode 的值。</p>
+<p>第一步，先确定 <tt class="docutils literal">chmod</tt> 所使用的系统调用，这个比较简单，有很多种方法可以做到，比如通过 <tt class="docutils literal">strace</tt> 命令:</p>
+<pre class="literal-block">
+$ strace chmod 600 a.txt
+...
+fchmodat(AT_FDCWD, &quot;a.txt&quot;, 0600)       = 0
+...
+</pre>
+<p>第二步，找到针对这个系统调用可以使用的 tracepoint 事件:</p>
+<pre class="literal-block">
+$ sudo cat /sys/kernel/debug/tracing/available_events |grep fchmodat
+syscalls:sys_exit_fchmodat
+syscalls:sys_enter_fchmodat
+</pre>
+<p>可以看到，有 <tt class="docutils literal">sys_enter_fchmodat</tt> 和 <tt class="docutils literal">sys_exit_fchmodat</tt> 这两个事件。这里选择
+<tt class="docutils literal">sys_enter_fchmodat</tt> 这个事件进行后续的说明。</p>
+<p>第三步，确定函数的参数类型。这个需要到 <tt class="docutils literal">vmlinux.h</tt> 文件中进行查找，
+一般 <tt class="docutils literal">sys_enter_xx</tt> 对应 <tt class="docutils literal">trace_event_raw_sys_enter</tt> ，
+<tt class="docutils literal">sys_exit_xx</tt> 对应 <tt class="docutils literal">trace_event_raw_sys_exit</tt> ，
+其他的一般对应 <tt class="docutils literal">trace_event_raw_&lt;name&gt;</tt> ，如果没找到的话，可以参考 <tt class="docutils literal">trace_event_raw_sys_enter</tt>
+的例子找它相近的 struct。 对于 <tt class="docutils literal">sys_enter_fchmodat</tt> ，我们使用 <tt class="docutils literal">trace_event_raw_sys_enter</tt> 这个 struct:</p>
+<div class="highlight"><pre><span></span><span class="k">struct</span> <span class="n">trace_event_raw_sys_enter</span> <span class="p">{</span>
+    <span class="k">struct</span> <span class="n">trace_entry</span> <span class="n">ent</span><span class="p">;</span>
+    <span class="kt">long</span> <span class="kt">int</span> <span class="n">id</span><span class="p">;</span>
+    <span class="kt">long</span> <span class="kt">unsigned</span> <span class="kt">int</span> <span class="n">args</span><span class="p">[</span><span class="mi">6</span><span class="p">];</span>
+    <span class="kt">char</span> <span class="n">__data</span><span class="p">[</span><span class="mi">0</span><span class="p">];</span>
+<span class="p">};</span>
+</pre></div>
+<p>其中 <tt class="docutils literal">args</tt> 中就存储了事件相关的我们可以获取的信息，至于里面包含了哪些信息就是第三步需要确定的信息。</p>
+<p>第三步，确定事件本身可以获取到哪些信息，虽然我们指定 <tt class="docutils literal">fchmodat</tt> 系统调用需要提供文件名称和 mode 信息，
+但是，我们不确定是否可以在 ebpf 程序中获取到这些信息。可以通过查看
+<tt class="docutils literal"><span class="pre">/sys/kernel/debug/tracing/events/&lt;category&gt;/&lt;name&gt;/format</span></tt> 文件获取到我们可以获取哪些信息。
+比如 <tt class="docutils literal">sys_enter_fchmodat</tt> 这个事件的 <tt class="docutils literal">/sys/kernel/debug/tracing/events/syscalls/sys_enter_fchmodat/format</tt>
+的内容如下:</p>
+<pre class="literal-block">
+$ sudo cat /sys/kernel/debug/tracing/events/syscalls/sys_enter_fchmodat/format
+name: sys_enter_fchmodat
+ID: 647
+format:
+        field:unsigned short common_type;       offset:0;       size:2; signed:0;
+        field:unsigned char common_flags;       offset:2;       size:1; signed:0;
+        field:unsigned char common_preempt_count;       offset:3;       size:1; signed:0;
+        field:int common_pid;   offset:4;       size:4; signed:1;
+
+        field:int __syscall_nr; offset:8;       size:4; signed:1;
+        field:int dfd;  offset:16;      size:8; signed:0;
+        field:const char * filename;    offset:24;      size:8; signed:0;
+        field:umode_t mode;     offset:32;      size:8; signed:0;
+
+print fmt: &quot;dfd: 0x%08lx, filename: 0x%08lx, mode: 0x%08lx&quot;, ((unsigned long)(REC-&gt;dfd)), ((unsigned long)(REC-&gt;filename)), ((unsigned long)(REC-&gt;mode))
+</pre>
+<p><tt class="docutils literal">__syscall_nr</tt> 之后的字段都是我们可以在 ebpf 程序中获取的信息。
+从上面可以看到，我们可以获取 <tt class="docutils literal">sys_enter_fchmodat</tt> 事件的 <tt class="docutils literal">dfd</tt> 、 <tt class="docutils literal">filename</tt> 以及 <tt class="docutils literal">mode</tt> 信息，
+这里就包含了前面所说的文件名称以及权限 mode 信息。
+通过 <tt class="docutils literal">trace_event_raw_sys_enter</tt> 的 <tt class="docutils literal">args</tt> 数组获取，通过 <tt class="docutils literal">args[0]</tt> 获取 <tt class="docutils literal">dfd</tt> , <tt class="docutils literal">args[1]</tt> 获取 <tt class="docutils literal">filename</tt> 以此类推。</p>
+<p>信息都确定好了，就可以写程序了。比如上面 <tt class="docutils literal">sys_enter_fchmodat</tt> 事件的示例 ebpf 程序如下:</p>
+<div class="highlight"><pre><span></span><span class="n">SEC</span><span class="p">(</span><span class="s">&quot;tracepoint/syscalls/sys_enter_fchmodat&quot;</span><span class="p">)</span>
+<span class="kt">int</span> <span class="n">tracepoint__syscalls__sys_enter_fchmodat</span><span class="p">(</span><span class="k">struct</span> <span class="n">trace_event_raw_sys_enter</span> <span class="o">*</span><span class="n">ctx</span><span class="p">)</span>
+<span class="p">{</span>
+        <span class="k">struct</span> <span class="n">event_t</span> <span class="o">*</span><span class="n">event</span><span class="p">;</span>
+        <span class="n">event</span> <span class="o">=</span> <span class="n">bpf_ringbuf_reserve</span><span class="p">(</span><span class="o">&amp;</span><span class="n">events</span><span class="p">,</span> <span class="k">sizeof</span><span class="p">(</span><span class="o">*</span><span class="n">event</span><span class="p">),</span> <span class="mi">0</span><span class="p">);</span>
+        <span class="k">if</span> <span class="p">(</span><span class="o">!</span><span class="n">event</span><span class="p">)</span> <span class="p">{</span>
+            <span class="k">return</span> <span class="mi">0</span><span class="p">;</span>
+        <span class="p">}</span>
+
+
+        <span class="kt">char</span> <span class="o">*</span><span class="n">filename_ptr</span> <span class="o">=</span> <span class="p">(</span><span class="kt">char</span> <span class="o">*</span><span class="p">)</span> <span class="n">BPF_CORE_READ</span><span class="p">(</span><span class="n">ctx</span><span class="p">,</span> <span class="n">args</span><span class="p">[</span><span class="mi">1</span><span class="p">]);</span>
+        <span class="n">bpf_core_read_user_str</span><span class="p">(</span><span class="o">&amp;</span><span class="n">event</span><span class="o">-&gt;</span><span class="n">filename</span><span class="p">,</span> <span class="k">sizeof</span><span class="p">(</span><span class="n">event</span><span class="o">-&gt;</span><span class="n">filename</span><span class="p">),</span> <span class="n">filename_ptr</span><span class="p">);</span>
+        <span class="n">event</span><span class="o">-&gt;</span><span class="n">mode</span> <span class="o">=</span> <span class="n">BPF_CORE_READ</span><span class="p">(</span><span class="n">ctx</span><span class="p">,</span> <span class="n">args</span><span class="p">[</span><span class="mi">2</span><span class="p">]);</span>
+
+        <span class="n">bpf_ringbuf_submit</span><span class="p">(</span><span class="n">event</span><span class="p">,</span> <span class="mi">0</span><span class="p">);</span>
+        <span class="k">return</span> <span class="mi">0</span><span class="p">;</span>
+<span class="p">}</span>
+</pre></div>
+<p>完成的示例程序详见：<a class="reference external" href="https://github.com/mozillazg/hello-libbpfgo/tree/master/07-tracepoint-args">https://github.com/mozillazg/hello-libbpfgo/tree/master/07-tracepoint-args</a></p>
+</div>
+<div class="section" id="id3">
+<h2 id="hidid3">参考资料<a class="headerlink" href="#hidid3" title="Permalink to this headline">¶</a></h2>
+<ul class="simple">
+<li><a class="reference external" href="https://nakryiko.com/posts/bpf-core-reference-guide/">BPF CO-RE reference guide</a></li>
+</ul>
+</div>
+
+                </div>
+            </div>
+            <!-- /.entry-content -->
+<section class="text-center">
+  
+<div id="donate"></div>
+
+<div class="social-share"></div>
+<div class="social-comment-note">
+<p>有任何建议和想法欢迎在下方评论区留言或者加我<a href="/static/wechat.png">微信</a>交流</p>
+</div>
+
+</section>
+<section class="well" id="related-posts">
+    <p>Related Posts:</p>
+    <ul>
+        <li><a href="https://mozillazg.com/2022/05/ebpf-libbpfgo-develop-env-and-hello-world.html">libbpfgo 使用示例：搭建开发环境以及编写第一个 ebpf 程序</a></li>
+        <li><a href="https://mozillazg.com/2022/05/ebpf-libbpfgo-use-ringbuf-map.html">libbpfgo 使用示例：编写使用 ringbuf map 的 ebpf 程序</a></li>
+        <li><a href="https://mozillazg.com/2022/05/ebpf-libbpfgo-use-perfbuf-map.html">libbpfgo 使用示例：编写使用 perfbuf map 的 ebpf 程序</a></li>
+        <li><a href="https://mozillazg.com/2022/05/ebpf-libbpfgo-get-process-info.html">libbpfgo 使用示例：在 ebpf 程序中获取进程信息</a></li>
+        <li><a href="https://mozillazg.com/2022/05/ebpf-libbpfgo-get-container-info-via-process-info.rst.html">根据进程信息获取对应进程所属的容器/Pod 信息（一）</a></li>
+    </ul>
+</section>
+    <hr/>
+    <section class="comments" id="comments">
+        <h2>Comments</h2>
+
+        <div id="disqus_thread"></div>
+        <script type="text/javascript">
+            /* * * CONFIGURATION VARIABLES: EDIT BEFORE PASTING INTO YOUR WEBPAGE * * */
+            var disqus_shortname = 'my-github-blog'; // required: replace example with your forum shortname
+
+                    var disqus_identifier = 'ebpf-libbpf-tracepoint-common-questions';
+                var disqus_url = 'https://mozillazg.com/2022/05/ebpf-libbpf-tracepoint-common-questions.html';
+
+            var disqus_config = function () {
+                this.language = "zh";
+            };
+
+            /* * * DON'T EDIT BELOW THIS LINE * * */
+            (function () {
+                var dsq = document.createElement('script');
+                dsq.type = 'text/javascript';
+                dsq.async = true;
+                dsq.src = '//' + disqus_shortname + '.disqus.com/embed.js';
+                (document.getElementsByTagName('head')[0] || document.getElementsByTagName('body')[0]).appendChild(dsq);
+            })();
+        </script>
+        <noscript>Please enable JavaScript to view the <a href="http://disqus.com/?ref_noscript">comments powered by
+            Disqus.</a></noscript>
+        <a href="http://disqus.com" class="dsq-brlink">comments powered by <span class="logo-disqus">Disqus</span></a>
+
+    </section>
+        </article>
+    </section>
+
+        </div>
+    </div>
+</div>
+<footer>
+   <div class="container">
+      <hr>
+      <div class="row">
+         <div class="col-xs-10">&copy; 2022 mozillazg
+            &middot; Powered by <a href="https://github.com/DandyDev/pelican-bootstrap3" target="_blank">pelican-bootstrap3</a>,
+            <a href="http://docs.getpelican.com/" target="_blank">Pelican</a>,
+            <a href="http://getbootstrap.com" target="_blank">Bootstrap</a>
+            &middot; <a href="/privacy-policy.html" target="_blank">Privacy</a>              <p><small>  <a rel="license" href="http://creativecommons.org/licenses/by-sa/4.0/"><img alt="Creative Commons License" style="border-width:0" src="/static/images/by-sa-80x15.png" /></a>
+    &quot;<span xmlns:dct="http://purl.org/dc/terms/" property="dct:title">mozillazg's blog</span>&quot; by <a xmlns:cc="http://creativecommons.org/ns#" href="https://mozillazg.com" property="cc:attributionName" rel="cc:attributionURL">mozillazg</a> is
+  licensed under a <a rel="license" href="http://creativecommons.org/licenses/by-sa/4.0/">Creative Commons Attribution-ShareAlike 4.0 International License</a>, except where indicated otherwise.
+</small></p>
+         </div>
+         <div class="col-xs-2"><p class="pull-right"><i class="fa fa-arrow-up"></i> <a href="#">Back to top</a></p></div>
+      </div>
+   </div>
+</footer>
+<script src="https://cdn.jsdelivr.net/npm/jquery@2.1.1/dist/jquery.min.js"></script>
+
+<!-- Include all compiled plugins (below), or include individual files as needed -->
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@3.3.4/dist/js/bootstrap.min.js"></script>
+
+<!-- Enable responsive features in IE8 with Respond.js (https://github.com/scottjehl/Respond) -->
+
+    <!-- Disqus -->
+    <script type="text/javascript">
+        /* * * CONFIGURATION VARIABLES: EDIT BEFORE PASTING INTO YOUR WEBPAGE * * */
+        var disqus_shortname = 'my-github-blog'; // required: replace example with your forum shortname
+
+        /* * * DON'T EDIT BELOW THIS LINE * * */
+        (function () {
+            var s = document.createElement('script');
+            s.async = true;
+            s.type = 'text/javascript';
+            s.src = '//' + disqus_shortname + '.disqus.com/count.js';
+            (document.getElementsByTagName('HEAD')[0] || document.getElementsByTagName('BODY')[0]).appendChild(s);
+        }());
+    </script>
+    <!-- End Disqus Code -->
+    <!-- Google Analytics Universal -->
+    <script type="text/javascript">
+        (function(i,s,o,g,r,a,m){i['GoogleAnalyticsObject']=r;i[r]=i[r]||function(){
+        (i[r].q=i[r].q||[]).push(arguments)},i[r].l=1*new Date();a=s.createElement(o),
+        m=s.getElementsByTagName(o)[0];a.async=1;a.src=g;m.parentNode.insertBefore(a,m)
+        })(window,document,'script','//www.google-analytics.com/analytics.js','ga');
+
+        ga('create', 'UA-77172981-1', 'auto');
+        ga('send', 'pageview');
+    </script>
+    <!-- End Google Analytics Universal Code -->
+
+<!-- share.js -->
+<script src="https://cdn.jsdelivr.net/npm/social-share.js@1.0.16/dist/js/social-share.min.js"></script>
+
+
+
+<script src="https://cdn.jsdelivr.net/npm/tocbot@3.0.2/dist/tocbot.min.js"></script>
+<script>
+$(document).ready(function(){
+  tocbot.init({
+    // Where to render the table of contents.
+    tocSelector: '.js-toc',
+    // Where to grab the headings to build the table of contents.
+    contentSelector: '.entry-content',
+    // Which headings to grab inside of the contentSelector element.
+    headingSelector: 'h2, h3, h4,h5',
+    // Headings that match the ignoreSelector will be skipped.
+    ignoreSelector: '.js-toc-ignore',
+    // Main class to add to links.
+    linkClass: 'toc-link',
+    // Extra classes to add to links.
+    extraLinkClasses: '',
+    // Class to add to active links,
+    // the link corresponding to the top most heading on the page.
+    activeLinkClass: 'is-active-link',
+    // Main class to add to lists.
+    listClass: 'toc-list',
+    // Extra classes to add to lists.
+    extraListClasses: '',
+    // Class that gets added when a list should be collapsed.
+    isCollapsedClass: 'is-collapsed',
+    // Class that gets added when a list should be able
+    // to be collapsed but isn't necessarily collpased.
+    collapsibleClass: 'is-collapsible',
+    // Class to add to list items.
+    listItemClass: 'toc-list-item',
+    // How many heading levels should not be collpased.
+    // For example, number 6 will show everything since
+    // there are only 6 heading levels and number 0 will collpase them all.
+    // The sections that are hidden will open
+    // and close as you scroll to headings within them.
+    collapseDepth: 6,
+    // Smooth scrolling enabled.
+    smoothScroll: true,
+    // Smooth scroll duration.
+    smoothScrollDuration: 420,
+    // Callback for scroll end (requires: smoothScroll).
+    scrollEndCallback: function (e) {},
+    // Headings offset between the headings and the top of the document (this is meant for minor adjustments).
+    headingsOffset: 0,
+    // Timeout between events firing to make sure it's
+    // not too rapid (for performance reasons).
+    throttleTimeout: 50,
+    // Element to add the positionFixedClass to.
+    positionFixedSelector: null,
+    // Fixed position class to add to make sidebar fixed after scrolling
+    // down past the fixedSidebarOffset.
+    positionFixedClass: 'is-position-fixed',
+    // fixedSidebarOffset can be any number but by default is set
+    // to auto which sets the fixedSidebarOffset to the sidebar
+    // element's offsetTop from the top of the document on init.
+    fixedSidebarOffset: 'auto',
+    // includeHtml can be set to true to include the HTML markup from the
+    // heading node instead of just including the textContent.
+    includeHtml: false
+  });
+});
+</script>
+</body>
+</html>

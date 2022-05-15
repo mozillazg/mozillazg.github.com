@@ -1,5 +1,125 @@
 <?xml version="1.0" encoding="utf-8"?>
-<feed xmlns="http://www.w3.org/2005/Atom"><title>Huang Huang 的博客</title><link href="https://mozillazg.com/" rel="alternate"></link><link href="https://mozillazg.com/feeds/all.atom.xml" rel="self"></link><id>https://mozillazg.com/</id><updated>2022-05-14T00:00:00+00:00</updated><entry><title>根据进程信息获取对应进程所属的容器/Pod 信息（一）</title><link href="https://mozillazg.com/2022/05/ebpf-libbpfgo-get-container-info-via-process-info.rst.html" rel="alternate"></link><updated>2022-05-14T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2022-05-14:2022/05/ebpf-libbpfgo-get-container-info-via-process-info.rst.html</id><summary type="html">&lt;div class="section" id="id1"&gt;
+<feed xmlns="http://www.w3.org/2005/Atom"><title>mozillazg's blog</title><link href="https://mozillazg.com/" rel="alternate"></link><link href="https://mozillazg.com/feeds/all.atom.xml" rel="self"></link><id>https://mozillazg.com/</id><updated>2022-05-15T00:00:00+00:00</updated><entry><title>ebpf/libbpf 程序使用 tracepoint 的常见问题</title><link href="https://mozillazg.com/2022/05/ebpf-libbpf-tracepoint-common-questions.html" rel="alternate"></link><updated>2022-05-15T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2022-05-15:2022/05/ebpf-libbpf-tracepoint-common-questions.html</id><summary type="html">&lt;div class="section" id="id1"&gt;
+&lt;h2 id="hidid1"&gt;前言&lt;a class="headerlink" href="#hidid1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;记录一些编写 ebpf/libbpf 程序时涉及到的 tracepoint 相关的常见问题。&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class="section" id="tracepoint"&gt;
+&lt;h2 id="hidtracepoint"&gt;tracepoint 可以监控哪些事件&lt;a class="headerlink" href="#hidtracepoint" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;可以通过查看 &lt;tt class="docutils literal"&gt;/sys/kernel/debug/tracing/available_events&lt;/tt&gt; 文件的内容找到 tracepoint 可监控的事件。
+文件中每行内容的格式是:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+&amp;lt;category&amp;gt;:&amp;lt;name&amp;gt;
+&lt;/pre&gt;
+&lt;p&gt;比如:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+syscalls:sys_enter_execve
+&lt;/pre&gt;
+&lt;/div&gt;
+&lt;div class="section" id="sec"&gt;
+&lt;h2 id="hidsec"&gt;SEC 内容的格式&lt;a class="headerlink" href="#hidsec" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;tracepoint 事件对应的 SEC 格式为:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+SEC(&amp;quot;tracepoint/&amp;lt;category&amp;gt;/&amp;lt;name&amp;gt;&amp;quot;)
+
+// 比如:
+// SEC(&amp;quot;tracepoint/syscalls/sys_enter_openat&amp;quot;)
+&lt;/pre&gt;
+&lt;p&gt;或:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+SEC(&amp;quot;tp/&amp;lt;category&amp;gt;/&amp;lt;name&amp;gt;&amp;quot;)
+
+// 比如:
+// SEC(&amp;quot;tp/syscalls/sys_enter_openat&amp;quot;)
+&lt;/pre&gt;
+&lt;p&gt;&lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;SEC(&amp;quot;tp/xx/yy&amp;quot;)&lt;/span&gt;&lt;/tt&gt; 跟 &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;SEC(&amp;quot;tracepoint/xx/yy&amp;quot;)&lt;/span&gt;&lt;/tt&gt; 其实是等效的，看个人喜好随便用哪种都行。&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class="section" id="id2"&gt;
+&lt;h2 id="hidid2"&gt;确定 tracepoint 事件处理函数的参数类型，获取对应的内核调用参数&lt;a class="headerlink" href="#hidid2" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;假设，我们想监控 &lt;tt class="docutils literal"&gt;chmod&lt;/tt&gt; 这个命令涉及的 &lt;tt class="docutils literal"&gt;fchmodat&lt;/tt&gt; 系统调用的 tracepoint 事件，
+那么，如何确定ebpf 中事件处理函数的参数类型，以及如何获取到对应的 &lt;tt class="docutils literal"&gt;fchmodat&lt;/tt&gt; 这个系统调用涉及的参数的内容，
+比如拿到操作文件名称以及操作的权限 mode 的值。&lt;/p&gt;
+&lt;p&gt;第一步，先确定 &lt;tt class="docutils literal"&gt;chmod&lt;/tt&gt; 所使用的系统调用，这个比较简单，有很多种方法可以做到，比如通过 &lt;tt class="docutils literal"&gt;strace&lt;/tt&gt; 命令:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+$ strace chmod 600 a.txt
+...
+fchmodat(AT_FDCWD, &amp;quot;a.txt&amp;quot;, 0600)       = 0
+...
+&lt;/pre&gt;
+&lt;p&gt;第二步，找到针对这个系统调用可以使用的 tracepoint 事件:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+$ sudo cat /sys/kernel/debug/tracing/available_events |grep fchmodat
+syscalls:sys_exit_fchmodat
+syscalls:sys_enter_fchmodat
+&lt;/pre&gt;
+&lt;p&gt;可以看到，有 &lt;tt class="docutils literal"&gt;sys_enter_fchmodat&lt;/tt&gt; 和 &lt;tt class="docutils literal"&gt;sys_exit_fchmodat&lt;/tt&gt; 这两个事件。这里选择
+&lt;tt class="docutils literal"&gt;sys_enter_fchmodat&lt;/tt&gt; 这个事件进行后续的说明。&lt;/p&gt;
+&lt;p&gt;第三步，确定函数的参数类型。这个需要到 &lt;tt class="docutils literal"&gt;vmlinux.h&lt;/tt&gt; 文件中进行查找，
+一般 &lt;tt class="docutils literal"&gt;sys_enter_xx&lt;/tt&gt; 对应 &lt;tt class="docutils literal"&gt;trace_event_raw_sys_enter&lt;/tt&gt; ，
+&lt;tt class="docutils literal"&gt;sys_exit_xx&lt;/tt&gt; 对应 &lt;tt class="docutils literal"&gt;trace_event_raw_sys_exit&lt;/tt&gt; ，
+其他的一般对应 &lt;tt class="docutils literal"&gt;trace_event_raw_&amp;lt;name&amp;gt;&lt;/tt&gt; ，如果没找到的话，可以参考 &lt;tt class="docutils literal"&gt;trace_event_raw_sys_enter&lt;/tt&gt;
+的例子找它相近的 struct。 对于 &lt;tt class="docutils literal"&gt;sys_enter_fchmodat&lt;/tt&gt; ，我们使用 &lt;tt class="docutils literal"&gt;trace_event_raw_sys_enter&lt;/tt&gt; 这个 struct:&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="k"&gt;struct&lt;/span&gt; &lt;span class="n"&gt;trace_event_raw_sys_enter&lt;/span&gt; &lt;span class="p"&gt;{&lt;/span&gt;
+    &lt;span class="k"&gt;struct&lt;/span&gt; &lt;span class="n"&gt;trace_entry&lt;/span&gt; &lt;span class="n"&gt;ent&lt;/span&gt;&lt;span class="p"&gt;;&lt;/span&gt;
+    &lt;span class="kt"&gt;long&lt;/span&gt; &lt;span class="kt"&gt;int&lt;/span&gt; &lt;span class="n"&gt;id&lt;/span&gt;&lt;span class="p"&gt;;&lt;/span&gt;
+    &lt;span class="kt"&gt;long&lt;/span&gt; &lt;span class="kt"&gt;unsigned&lt;/span&gt; &lt;span class="kt"&gt;int&lt;/span&gt; &lt;span class="n"&gt;args&lt;/span&gt;&lt;span class="p"&gt;[&lt;/span&gt;&lt;span class="mi"&gt;6&lt;/span&gt;&lt;span class="p"&gt;];&lt;/span&gt;
+    &lt;span class="kt"&gt;char&lt;/span&gt; &lt;span class="n"&gt;__data&lt;/span&gt;&lt;span class="p"&gt;[&lt;/span&gt;&lt;span class="mi"&gt;0&lt;/span&gt;&lt;span class="p"&gt;];&lt;/span&gt;
+&lt;span class="p"&gt;};&lt;/span&gt;
+&lt;/pre&gt;&lt;/div&gt;
+&lt;p&gt;其中 &lt;tt class="docutils literal"&gt;args&lt;/tt&gt; 中就存储了事件相关的我们可以获取的信息，至于里面包含了哪些信息就是第三步需要确定的信息。&lt;/p&gt;
+&lt;p&gt;第三步，确定事件本身可以获取到哪些信息，虽然我们指定 &lt;tt class="docutils literal"&gt;fchmodat&lt;/tt&gt; 系统调用需要提供文件名称和 mode 信息，
+但是，我们不确定是否可以在 ebpf 程序中获取到这些信息。可以通过查看
+&lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;/sys/kernel/debug/tracing/events/&amp;lt;category&amp;gt;/&amp;lt;name&amp;gt;/format&lt;/span&gt;&lt;/tt&gt; 文件获取到我们可以获取哪些信息。
+比如 &lt;tt class="docutils literal"&gt;sys_enter_fchmodat&lt;/tt&gt; 这个事件的 &lt;tt class="docutils literal"&gt;/sys/kernel/debug/tracing/events/syscalls/sys_enter_fchmodat/format&lt;/tt&gt;
+的内容如下:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+$ sudo cat /sys/kernel/debug/tracing/events/syscalls/sys_enter_fchmodat/format
+name: sys_enter_fchmodat
+ID: 647
+format:
+        field:unsigned short common_type;       offset:0;       size:2; signed:0;
+        field:unsigned char common_flags;       offset:2;       size:1; signed:0;
+        field:unsigned char common_preempt_count;       offset:3;       size:1; signed:0;
+        field:int common_pid;   offset:4;       size:4; signed:1;
+
+        field:int __syscall_nr; offset:8;       size:4; signed:1;
+        field:int dfd;  offset:16;      size:8; signed:0;
+        field:const char * filename;    offset:24;      size:8; signed:0;
+        field:umode_t mode;     offset:32;      size:8; signed:0;
+
+print fmt: &amp;quot;dfd: 0x%08lx, filename: 0x%08lx, mode: 0x%08lx&amp;quot;, ((unsigned long)(REC-&amp;gt;dfd)), ((unsigned long)(REC-&amp;gt;filename)), ((unsigned long)(REC-&amp;gt;mode))
+&lt;/pre&gt;
+&lt;p&gt;&lt;tt class="docutils literal"&gt;__syscall_nr&lt;/tt&gt; 之后的字段都是我们可以在 ebpf 程序中获取的信息。
+从上面可以看到，我们可以获取 &lt;tt class="docutils literal"&gt;sys_enter_fchmodat&lt;/tt&gt; 事件的 &lt;tt class="docutils literal"&gt;dfd&lt;/tt&gt; 、 &lt;tt class="docutils literal"&gt;filename&lt;/tt&gt; 以及 &lt;tt class="docutils literal"&gt;mode&lt;/tt&gt; 信息，
+这里就包含了前面所说的文件名称以及权限 mode 信息。
+通过 &lt;tt class="docutils literal"&gt;trace_event_raw_sys_enter&lt;/tt&gt; 的 &lt;tt class="docutils literal"&gt;args&lt;/tt&gt; 数组获取，通过 &lt;tt class="docutils literal"&gt;args[0]&lt;/tt&gt; 获取 &lt;tt class="docutils literal"&gt;dfd&lt;/tt&gt; , &lt;tt class="docutils literal"&gt;args[1]&lt;/tt&gt; 获取 &lt;tt class="docutils literal"&gt;filename&lt;/tt&gt; 以此类推。&lt;/p&gt;
+&lt;p&gt;信息都确定好了，就可以写程序了。比如上面 &lt;tt class="docutils literal"&gt;sys_enter_fchmodat&lt;/tt&gt; 事件的示例 ebpf 程序如下:&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="n"&gt;SEC&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="s"&gt;&amp;quot;tracepoint/syscalls/sys_enter_fchmodat&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+&lt;span class="kt"&gt;int&lt;/span&gt; &lt;span class="n"&gt;tracepoint__syscalls__sys_enter_fchmodat&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="k"&gt;struct&lt;/span&gt; &lt;span class="n"&gt;trace_event_raw_sys_enter&lt;/span&gt; &lt;span class="o"&gt;*&lt;/span&gt;&lt;span class="n"&gt;ctx&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+&lt;span class="p"&gt;{&lt;/span&gt;
+        &lt;span class="k"&gt;struct&lt;/span&gt; &lt;span class="n"&gt;event_t&lt;/span&gt; &lt;span class="o"&gt;*&lt;/span&gt;&lt;span class="n"&gt;event&lt;/span&gt;&lt;span class="p"&gt;;&lt;/span&gt;
+        &lt;span class="n"&gt;event&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;bpf_ringbuf_reserve&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="o"&gt;&amp;amp;&lt;/span&gt;&lt;span class="n"&gt;events&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="k"&gt;sizeof&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="o"&gt;*&lt;/span&gt;&lt;span class="n"&gt;event&lt;/span&gt;&lt;span class="p"&gt;),&lt;/span&gt; &lt;span class="mi"&gt;0&lt;/span&gt;&lt;span class="p"&gt;);&lt;/span&gt;
+        &lt;span class="k"&gt;if&lt;/span&gt; &lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="o"&gt;!&lt;/span&gt;&lt;span class="n"&gt;event&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt; &lt;span class="p"&gt;{&lt;/span&gt;
+            &lt;span class="k"&gt;return&lt;/span&gt; &lt;span class="mi"&gt;0&lt;/span&gt;&lt;span class="p"&gt;;&lt;/span&gt;
+        &lt;span class="p"&gt;}&lt;/span&gt;
+
+
+        &lt;span class="kt"&gt;char&lt;/span&gt; &lt;span class="o"&gt;*&lt;/span&gt;&lt;span class="n"&gt;filename_ptr&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="kt"&gt;char&lt;/span&gt; &lt;span class="o"&gt;*&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt; &lt;span class="n"&gt;BPF_CORE_READ&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;ctx&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;args&lt;/span&gt;&lt;span class="p"&gt;[&lt;/span&gt;&lt;span class="mi"&gt;1&lt;/span&gt;&lt;span class="p"&gt;]);&lt;/span&gt;
+        &lt;span class="n"&gt;bpf_core_read_user_str&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="o"&gt;&amp;amp;&lt;/span&gt;&lt;span class="n"&gt;event&lt;/span&gt;&lt;span class="o"&gt;-&amp;gt;&lt;/span&gt;&lt;span class="n"&gt;filename&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="k"&gt;sizeof&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;event&lt;/span&gt;&lt;span class="o"&gt;-&amp;gt;&lt;/span&gt;&lt;span class="n"&gt;filename&lt;/span&gt;&lt;span class="p"&gt;),&lt;/span&gt; &lt;span class="n"&gt;filename_ptr&lt;/span&gt;&lt;span class="p"&gt;);&lt;/span&gt;
+        &lt;span class="n"&gt;event&lt;/span&gt;&lt;span class="o"&gt;-&amp;gt;&lt;/span&gt;&lt;span class="n"&gt;mode&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;BPF_CORE_READ&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;ctx&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;args&lt;/span&gt;&lt;span class="p"&gt;[&lt;/span&gt;&lt;span class="mi"&gt;2&lt;/span&gt;&lt;span class="p"&gt;]);&lt;/span&gt;
+
+        &lt;span class="n"&gt;bpf_ringbuf_submit&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;event&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="mi"&gt;0&lt;/span&gt;&lt;span class="p"&gt;);&lt;/span&gt;
+        &lt;span class="k"&gt;return&lt;/span&gt; &lt;span class="mi"&gt;0&lt;/span&gt;&lt;span class="p"&gt;;&lt;/span&gt;
+&lt;span class="p"&gt;}&lt;/span&gt;
+&lt;/pre&gt;&lt;/div&gt;
+&lt;p&gt;完成的示例程序详见：&lt;a class="reference external" href="https://github.com/mozillazg/hello-libbpfgo/tree/master/07-tracepoint-args"&gt;https://github.com/mozillazg/hello-libbpfgo/tree/master/07-tracepoint-args&lt;/a&gt;&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class="section" id="id3"&gt;
+&lt;h2 id="hidid3"&gt;参考资料&lt;a class="headerlink" href="#hidid3" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;ul class="simple"&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://nakryiko.com/posts/bpf-core-reference-guide/"&gt;BPF CO-RE reference guide&lt;/a&gt;&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/div&gt;
+</summary><category term="tracepoint"></category><category term="libbpf"></category><category term="libbpfgo"></category></entry><entry><title>根据进程信息获取对应进程所属的容器/Pod 信息（一）</title><link href="https://mozillazg.com/2022/05/ebpf-libbpfgo-get-container-info-via-process-info.rst.html" rel="alternate"></link><updated>2022-05-14T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2022-05-14:2022/05/ebpf-libbpfgo-get-container-info-via-process-info.rst.html</id><summary type="html">&lt;div class="section" id="id1"&gt;
 &lt;h2 id="hidid1"&gt;前言&lt;a class="headerlink" href="#hidid1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;p&gt;前面我们通过 ebpf 程序获取到了执行操作的对应进程的进程信息，一般来说还会有需要获取这个进程所属的容器或 Pod 信息的需求。
 本文记录一下一种获取进程所属的容器信息的方法（知道了容器信息通过其他方法可以很容易的找到容器所属的 Pod 信息）。&lt;/p&gt;
@@ -170,7 +290,7 @@ $ kubectl describe pod test |grep f1abcafee046eda0e9d78691dcc20fcde1d008bb84a2b0
 &lt;li&gt;&lt;a class="reference external" href="https://github.com/aquasecurity/tracee"&gt;aquasecurity/tracee: Linux Runtime Security and Forensics using eBPF&lt;/a&gt;&lt;/li&gt;
 &lt;/ul&gt;
 &lt;/div&gt;
-</summary><category term="libbpfgo"></category><category term="go"></category><category term="golang"></category></entry><entry><title>libbpfgo 使用示例：编写使用 perfbuf map 的 ebpf 程序</title><link href="https://mozillazg.com/2022/05/ebpf-libbpfgo-use-perfbuf-map.html" rel="alternate"></link><updated>2022-05-04T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2022-05-04:2022/05/ebpf-libbpfgo-use-perfbuf-map.html</id><summary type="html">&lt;div class="section" id="id1"&gt;
+</summary><category term="libbpf"></category><category term="libbpfgo"></category><category term="go"></category><category term="golang"></category></entry><entry><title>libbpfgo 使用示例：编写使用 perfbuf map 的 ebpf 程序</title><link href="https://mozillazg.com/2022/05/ebpf-libbpfgo-use-perfbuf-map.html" rel="alternate"></link><updated>2022-05-04T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2022-05-04:2022/05/ebpf-libbpfgo-use-perfbuf-map.html</id><summary type="html">&lt;div class="section" id="id1"&gt;
 &lt;h2 id="hidid1"&gt;前言&lt;a class="headerlink" href="#hidid1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;p&gt;本文简单记录一下如何编写一个使用 perfbuf map 传递数据的 ebpf 程序，
 以及如何使用 libbpfgo 处理 perfbuf map 中存储的数据。&lt;/p&gt;
@@ -247,7 +367,7 @@ $ kubectl describe pod test |grep f1abcafee046eda0e9d78691dcc20fcde1d008bb84a2b0
 &lt;li&gt;&lt;a class="reference external" href="https://github.com/aquasecurity/libbpfgo"&gt;aquasecurity/libbpfgo: eBPF library for Go, wrapping libbpf&lt;/a&gt;&lt;/li&gt;
 &lt;/ul&gt;
 &lt;/div&gt;
-</summary><category term="libbpfgo"></category><category term="go"></category><category term="golang"></category></entry><entry><title>libbpfgo 使用示例：编写使用 ringbuf map 的 ebpf 程序</title><link href="https://mozillazg.com/2022/05/ebpf-libbpfgo-use-ringbuf-map.html" rel="alternate"></link><updated>2022-05-04T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2022-05-04:2022/05/ebpf-libbpfgo-use-ringbuf-map.html</id><summary type="html">&lt;div class="section" id="id1"&gt;
+</summary><category term="libbpf"></category><category term="libbpfgo"></category><category term="go"></category><category term="golang"></category></entry><entry><title>libbpfgo 使用示例：编写使用 ringbuf map 的 ebpf 程序</title><link href="https://mozillazg.com/2022/05/ebpf-libbpfgo-use-ringbuf-map.html" rel="alternate"></link><updated>2022-05-04T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2022-05-04:2022/05/ebpf-libbpfgo-use-ringbuf-map.html</id><summary type="html">&lt;div class="section" id="id1"&gt;
 &lt;h2 id="hidid1"&gt;前言&lt;a class="headerlink" href="#hidid1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;p&gt;本文简单记录一下如何编写一个使用 ringbuf map 传递数据的 ebpf 程序，
 以及如何使用 libbpfgo 处理 ringbuf map 中存储的数据。&lt;/p&gt;
@@ -328,7 +448,7 @@ $ kubectl describe pod test |grep f1abcafee046eda0e9d78691dcc20fcde1d008bb84a2b0
 &lt;li&gt;&lt;a class="reference external" href="https://github.com/aquasecurity/libbpfgo"&gt;aquasecurity/libbpfgo: eBPF library for Go, wrapping libbpf&lt;/a&gt;&lt;/li&gt;
 &lt;/ul&gt;
 &lt;/div&gt;
-</summary><category term="libbpfgo"></category><category term="go"></category><category term="golang"></category></entry><entry><title>libbpfgo 使用示例：搭建开发环境以及编写第一个 ebpf 程序</title><link href="https://mozillazg.com/2022/05/ebpf-libbpfgo-develop-env-and-hello-world.html" rel="alternate"></link><updated>2022-05-03T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2022-05-03:2022/05/ebpf-libbpfgo-develop-env-and-hello-world.html</id><summary type="html">&lt;div class="section" id="id1"&gt;
+</summary><category term="libbpf"></category><category term="libbpfgo"></category><category term="go"></category><category term="golang"></category></entry><entry><title>libbpfgo 使用示例：搭建开发环境以及编写第一个 ebpf 程序</title><link href="https://mozillazg.com/2022/05/ebpf-libbpfgo-develop-env-and-hello-world.html" rel="alternate"></link><updated>2022-05-03T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2022-05-03:2022/05/ebpf-libbpfgo-develop-env-and-hello-world.html</id><summary type="html">&lt;div class="section" id="id1"&gt;
 &lt;h2 id="hidid1"&gt;前言&lt;a class="headerlink" href="#hidid1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;p&gt;本文记录搭建 &lt;a class="reference external" href="https://github.com/aquasecurity/libbpfgo"&gt;libbpfgo&lt;/a&gt; 开发环境以及使用 libbpfgo 编写一个简单的 ebpf 示例程序。&lt;/p&gt;
 &lt;/div&gt;
@@ -460,7 +580,7 @@ runc:&lt;span class="o"&gt;[&lt;/span&gt;2:INIT&lt;span class="o"&gt;]&lt;/span&
 &lt;li&gt;&lt;a class="reference external" href="https://github.com/aquasecurity/tracee"&gt;aquasecurity/tracee: Linux Runtime Security and Forensics using eBPF&lt;/a&gt;&lt;/li&gt;
 &lt;/ul&gt;
 &lt;/div&gt;
-</summary><category term="libbpfgo"></category><category term="go"></category><category term="golang"></category></entry><entry><title>通过编写自定义内置函数的方式扩展 OPA/Rego 运行时</title><link href="https://mozillazg.com/2021/12/opa-openpolicyagent-extend-opa-via-add-new-built-in-functions-to-rego-go-runtime.html" rel="alternate"></link><updated>2021-12-31T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2021-12-31:2021/12/opa-openpolicyagent-extend-opa-via-add-new-built-in-functions-to-rego-go-runtime.html</id><summary type="html">&lt;div class="section" id="id1"&gt;
+</summary><category term="libbpf"></category><category term="libbpfgo"></category><category term="go"></category><category term="golang"></category></entry><entry><title>通过编写自定义内置函数的方式扩展 OPA/Rego 运行时</title><link href="https://mozillazg.com/2021/12/opa-openpolicyagent-extend-opa-via-add-new-built-in-functions-to-rego-go-runtime.html" rel="alternate"></link><updated>2021-12-31T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2021-12-31:2021/12/opa-openpolicyagent-extend-opa-via-add-new-built-in-functions-to-rego-go-runtime.html</id><summary type="html">&lt;div class="section" id="id1"&gt;
 &lt;h2 id="hidid1"&gt;前言&lt;a class="headerlink" href="#hidid1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;p&gt;本文记录一下如何通过编写自定义内置函数的函数扩展 OPA/Rego 运行时，使得在编写 OPA/Rego 策略语言的时候
 可以直接使用自定义的这个内置函数实现更复杂的策略需求。&lt;/p&gt;
@@ -598,241 +718,4 @@ commit id, issue/PR message 等等。&lt;/p&gt;
 &lt;li&gt;&lt;a class="reference external" href="https://python-security.readthedocs.io/pypi-vuln/index-2021-07-27-combine-prs-workflow.html"&gt;Vulnerability in GitHub Actions workflow for PyPI — Python Security 0.0 documentation&lt;/a&gt;&lt;/li&gt;
 &lt;/ul&gt;
 &lt;/div&gt;
-</summary></entry><entry><title>容器特权模式与非特权模式的区别</title><link href="https://mozillazg.com/2021/11/docker-container-difference-between-privileged-mode-and-non-privileged-mode.html" rel="alternate"></link><updated>2021-11-21T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2021-11-21:2021/11/docker-container-difference-between-privileged-mode-and-non-privileged-mode.html</id><summary type="html">&lt;div class="section" id="id2"&gt;
-&lt;h2 id="hidid2"&gt;前言&lt;a class="headerlink" href="#hidid2" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
-&lt;p&gt;本文尝试解答容器特权模式和非特权模式的区别，
-以及通过它们之间的区别找出哪些场景下必需使用特权模式才能实现业务需求。&lt;/p&gt;
-&lt;/div&gt;
-&lt;div class="section" id="id3"&gt;
-&lt;h2 id="hidid3"&gt;特权模式&lt;a class="headerlink" href="#hidid3" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
-&lt;p&gt;&lt;a class="reference external" href="https://github.com/kubernetes/cri-api"&gt;CRI(Container Runtime Interface)&lt;/a&gt; 中特权模式的说明如下：&lt;/p&gt;
-&lt;pre class="literal-block"&gt;
-// If set, run container in privileged mode.
-// Privileged mode is incompatible with the following options. If
-// privileged is set, the following features MAY have no effect:
-// 1. capabilities
-// 2. selinux_options
-// 4. seccomp
-// 5. apparmor
-//
-// Privileged mode implies the following specific options are applied:
-// 1. All capabilities are added.
-// 2. Sensitive paths, such as kernel module paths within sysfs, are not masked.
-// 3. Any sysfs and procfs mounts are mounted RW.
-// 4. AppArmor confinement is not applied.
-// 5. Seccomp restrictions are not applied.
-// 6. The device cgroup does not restrict access to any devices.
-// 7. All devices from the host's /dev are available within the container.
-// 8. SELinux restrictions are not applied (e.g. label=disabled).
-&lt;/pre&gt;
-&lt;!-- 通过上面的说明，可以得出如下信息： --&gt;
-&lt;!--  --&gt;
-&lt;!-- * 开启特权模式后，linux capabilities、SELinux、Seccomp、AppArmor 等限制容器内进程权限的功能可能不会再生效。 --&gt;
-&lt;!-- * 开启特权模式时，将： --&gt;
-&lt;!--  --&gt;
-&lt;!-- * 启用所有的 `linux capabilities &lt;https://man7.org/linux/man-pages/man7/capabilities.7.html&gt;`__ --&gt;
-&lt;!-- * 将不再对容器内进程屏蔽主机上的敏感目录，比如 sysfs 下的内核模块文件 --&gt;
-&lt;!-- * 任何的 sysfs 和 procfs 挂载目录将以 ``RW`` 读写模式进行挂载 --&gt;
-&lt;!-- * 不再应用 AppArmor 安全配置 --&gt;
-&lt;!-- * 不再应用 Seccomp 安全约束 --&gt;
-&lt;!-- * cgroup 设备将不再禁止访问任何的设备 --&gt;
-&lt;!-- * 容器将可以操作主机上的 /dev 下的设备 --&gt;
-&lt;!-- * 不再应用 SELinux 安全约束 --&gt;
-&lt;p&gt;下面我们将通过示例说明一下每一项的效果。&lt;/p&gt;
-&lt;div class="section" id="all-capabilities-are-added"&gt;
-&lt;h3 id="hidall-capabilities-are-added"&gt;All capabilities are added&lt;a class="headerlink" href="#hidall-capabilities-are-added" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
-&lt;p&gt;普通模式下容器内进程只可以使用有限的一些 linux capabilities:&lt;/p&gt;
-&lt;pre class="literal-block"&gt;
-$ docker run --rm -it  r.j3ss.co/amicontained bash
-
-Capabilities:
-    BOUNDING -&amp;gt; chown dac_override fowner fsetid kill setgid setuid setpcap net_bind_service net_raw sys_chroot mknod audit_write setfcap
-&lt;/pre&gt;
-&lt;p&gt;但是，特权模式下的容器内进程可以使用所有的 linux capabilities:&lt;/p&gt;
-&lt;pre class="literal-block"&gt;
-$ docker run --privileged --rm -it  r.j3ss.co/amicontained bash
-
-Capabilities:
-    BOUNDING -&amp;gt; chown dac_override dac_read_search fowner fsetid kill setgid setuid setpcap linux_immutable net_bind_service net_broadcast net_admin net_raw ipc_lock ipc_owner sys_module sys_rawio sys_chroot sys_ptrace sys_pacct sys_admin sys_boot sys_nice sys_resource sys_time sys_tty_config mknod lease audit_write audit_control setfcap mac_override mac_admin syslog wake_alarm block_suspend audit_read
-&lt;/pre&gt;
-&lt;p&gt;也可以通过手动自定义 &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;--cap-add&lt;/span&gt;&lt;/tt&gt; 参数的方式，在普通模式下实现类似的需求:&lt;/p&gt;
-&lt;pre class="literal-block"&gt;
-$ docker run --cap-add=ALL  --rm -it  r.j3ss.co/amicontained bash
-Capabilities:
-        BOUNDING -&amp;gt; chown dac_override dac_read_search fowner fsetid kill setgid setuid setpcap linux_immutable net_bind_service net_broadcast net_admin net_raw ipc_lock ipc_owner sys_module sys_rawio sys_chroot sys_ptrace sys_pacct sys_admin sys_boot sys_nice sys_resource sys_time sys_tty_config mknod lease audit_write audit_control setfcap mac_override mac_admin syslog wake_alarm block_suspend audit_read
-&lt;/pre&gt;
-&lt;p&gt;BTW，特权模式下，容器内进程拥有使用所有的 linux capabilities 的能力，但是，
-不表示进程就一定有使用某些 linux capabilities 的权限。比如，如果容器是以非 root 用户启动的，
-就算它是以特权模式启动的容器，也不表示它就能够做一些无权限做的事情:&lt;/p&gt;
-&lt;pre class="literal-block"&gt;
-$ docker run --rm -it debian:buster chown 65534 /var/log/lastlog
-
-$ docker run -u 65534 --rm -it debian:buster chown 65534 /var/log/lastlog
-chown: changing ownership of '/var/log/lastlog': Operation not permitted
-
-$ docker run --privileged -u 65534 --rm -it debian:buster chown 65534 /var/log/lastlog
-chown: changing ownership of '/var/log/lastlog': Operation not permitted
-&lt;/pre&gt;
-&lt;/div&gt;
-&lt;div class="section" id="sensitive-paths-such-as-kernel-module-paths-within-sysfs-are-not-masked"&gt;
-&lt;h3 id="hidsensitive-paths-such-as-kernel-module-paths-within-sysfs-are-not-masked"&gt;Sensitive paths, such as kernel module paths within sysfs, are not masked.&lt;a class="headerlink" href="#hidsensitive-paths-such-as-kernel-module-paths-within-sysfs-are-not-masked" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
-&lt;p&gt;普通模式下，部分内核模块路径比如 /proc 下的一些目录需要阻止写入、有些又需要允许读写，
-这些文件目录将会以 tmpfs 文件系统的方式挂载到容器中，以实现目录 mask 的需求
-（TODO: 待进一步更新说明）:&lt;/p&gt;
-&lt;pre class="literal-block"&gt;
-$ docker run --rm -it debian:buster mount |grep '/proc.*tmpfs'
-tmpfs on /proc/acpi type tmpfs (ro,relatime)
-tmpfs on /proc/kcore type tmpfs (rw,nosuid,size=65536k,mode=755)
-tmpfs on /proc/keys type tmpfs (rw,nosuid,size=65536k,mode=755)
-tmpfs on /proc/timer_list type tmpfs (rw,nosuid,size=65536k,mode=755)
-tmpfs on /proc/sched_debug type tmpfs (rw,nosuid,size=65536k,mode=755)
-tmpfs on /proc/scsi type tmpfs (ro,relatime)
-&lt;/pre&gt;
-&lt;p&gt;特权模式下，这些目录将不再以 tmpfs 文件系统的方式挂载:&lt;/p&gt;
-&lt;pre class="literal-block"&gt;
-$ docker run --privileged --rm -it debian:buster mount |grep '/proc.*tmpfs'
-$
-&lt;/pre&gt;
-&lt;/div&gt;
-&lt;div class="section" id="any-sysfs-and-procfs-mounts-are-mounted-rw"&gt;
-&lt;h3 id="hidany-sysfs-and-procfs-mounts-are-mounted-rw"&gt;Any sysfs and procfs mounts are mounted RW.&lt;a class="headerlink" href="#hidany-sysfs-and-procfs-mounts-are-mounted-rw" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
-&lt;p&gt;普通模式下，部分内核文件系统(sysfs、procfs)会被以只读的方式挂载到容器中，以阻止容器内进程随意修改系统内核:&lt;/p&gt;
-&lt;pre class="literal-block"&gt;
-$ docker run --rm -it debian:buster mount |grep '(ro'
-sysfs on /sys type sysfs (ro,nosuid,nodev,noexec,relatime)
-cgroup on /sys/fs/cgroup/systemd type cgroup (ro,nosuid,nodev,noexec,relatime,xattr,release_agent=/usr/lib/systemd/systemd-cgroups-agent,name=systemd)
-cgroup on /sys/fs/cgroup/memory type cgroup (ro,nosuid,nodev,noexec,relatime,memory)
-cgroup on /sys/fs/cgroup/rdma type cgroup (ro,nosuid,nodev,noexec,relatime,rdma)
-cgroup on /sys/fs/cgroup/cpuset type cgroup (ro,nosuid,nodev,noexec,relatime,cpuset)
-cgroup on /sys/fs/cgroup/net_cls,net_prio type cgroup (ro,nosuid,nodev,noexec,relatime,net_cls,net_prio)
-cgroup on /sys/fs/cgroup/cpu,cpuacct type cgroup (ro,nosuid,nodev,noexec,relatime,cpu,cpuacct)
-cgroup on /sys/fs/cgroup/hugetlb type cgroup (ro,nosuid,nodev,noexec,relatime,hugetlb)
-cgroup on /sys/fs/cgroup/freezer type cgroup (ro,nosuid,nodev,noexec,relatime,freezer)
-cgroup on /sys/fs/cgroup/blkio type cgroup (ro,nosuid,nodev,noexec,relatime,blkio)
-cgroup on /sys/fs/cgroup/perf_event type cgroup (ro,nosuid,nodev,noexec,relatime,perf_event)
-cgroup on /sys/fs/cgroup/devices type cgroup (ro,nosuid,nodev,noexec,relatime,devices)
-cgroup on /sys/fs/cgroup/pids type cgroup (ro,nosuid,nodev,noexec,relatime,pids)
-proc on /proc/bus type proc (ro,nosuid,nodev,noexec,relatime)
-proc on /proc/fs type proc (ro,nosuid,nodev,noexec,relatime)
-proc on /proc/irq type proc (ro,nosuid,nodev,noexec,relatime)
-proc on /proc/sys type proc (ro,nosuid,nodev,noexec,relatime)
-proc on /proc/sysrq-trigger type proc (ro,nosuid,nodev,noexec,relatime)
-tmpfs on /proc/acpi type tmpfs (ro,relatime)
-tmpfs on /proc/scsi type tmpfs (ro,relatime)
-tmpfs on /sys/firmware type tmpfs (ro,relatime)
-&lt;/pre&gt;
-&lt;p&gt;但是在特权模式下，内核文件系统将不再以只读的方式被挂载:&lt;/p&gt;
-&lt;pre class="literal-block"&gt;
-$ docker run --privileged --rm -it debian:buster mount |grep '(ro'
-$
-&lt;/pre&gt;
-&lt;/div&gt;
-&lt;div class="section" id="apparmor-confinement-is-not-applied"&gt;
-&lt;h3 id="hidapparmor-confinement-is-not-applied"&gt;AppArmor confinement is not applied.&lt;a class="headerlink" href="#hidapparmor-confinement-is-not-applied" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
-&lt;/div&gt;
-&lt;div class="section" id="seccomp-restrictions-are-not-applied"&gt;
-&lt;h3 id="hidseccomp-restrictions-are-not-applied"&gt;Seccomp restrictions are not applied.&lt;a class="headerlink" href="#hidseccomp-restrictions-are-not-applied" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
-&lt;p&gt;普通模式下，可以通过配置 AppArmor 或 Seccomp 相关安全选项
-（如果未配置的话，容器引擎默认也会启用一些对应的默认配置）
-对容器进行加固:&lt;/p&gt;
-&lt;pre class="literal-block"&gt;
-$ docker run --rm -it  r.j3ss.co/amicontained bash
-AppArmor Profile: unconfined
-Seccomp: filtering
-Blocked Syscalls (63):
-        MSGRCV SYSLOG SETPGID SETSID USELIB USTAT SYSFS VHANGUP PIVOT_ROOT _SYSCTL ACCT SETTIMEOFDAY MOUNT UMOUNT2 SWAPON SWAPOFF REBOOT SETHOSTNAME SETDOMAINNAME IOPL IOPERM CREATE_MODULE INIT_MODULE DELETE_MODULE GET_KERNEL_SYMS QUERY_MODULE QUOTACTL NFSSERVCTL GETPMSG PUTPMSG AFS_SYSCALL TUXCALL SECURITY LOOKUP_DCOOKIE CLOCK_SETTIME VSERVER MBIND SET_MEMPOLICY GET_MEMPOLICY KEXEC_LOAD ADD_KEY REQUEST_KEY KEYCTL MIGRATE_PAGES UNSHARE MOVE_PAGES PERF_EVENT_OPEN FANOTIFY_INIT NAME_TO_HANDLE_AT OPEN_BY_HANDLE_AT SETNS PROCESS_VM_READV PROCESS_VM_WRITEV KCMP FINIT_MODULE KEXEC_FILE_LOAD BPF USERFAULTFD PREADV2 PWRITEV2 PKEY_MPROTECT PKEY_ALLOC PKEY_FREE
-&lt;/pre&gt;
-&lt;p&gt;特权模式下，这些 AppArmor 或 Seccomp 相关配置将不再生效:&lt;/p&gt;
-&lt;pre class="literal-block"&gt;
-$ docker run --privileged --rm -it  r.j3ss.co/amicontained bash
-AppArmor Profile: unconfined
-Seccomp: disabled
-&lt;/pre&gt;
-&lt;p&gt;普通模式下也可以通过对应的安全选项来禁用 AppArmor 或 Seccomp 特性。&lt;/p&gt;
-&lt;/div&gt;
-&lt;div class="section" id="the-device-cgroup-does-not-restrict-access-to-any-devices"&gt;
-&lt;h3 id="hidthe-device-cgroup-does-not-restrict-access-to-any-devices"&gt;The device cgroup does not restrict access to any devices.&lt;a class="headerlink" href="#hidthe-device-cgroup-does-not-restrict-access-to-any-devices" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
-&lt;p&gt;默认模式下，只能以只读模式操作 cgroup&lt;/p&gt;
-&lt;pre class="literal-block"&gt;
-$ docker run --rm -it debian:buster mount | grep 'cgroup'
-tmpfs on /sys/fs/cgroup type tmpfs (rw,nosuid,nodev,noexec,relatime,mode=755)
-cgroup on /sys/fs/cgroup/systemd type cgroup (ro,nosuid,nodev,noexec,relatime,xattr,release_agent=/usr/lib/systemd/systemd-cgroups-agent,name=systemd)
-cgroup on /sys/fs/cgroup/memory type cgroup (ro,nosuid,nodev,noexec,relatime,memory)
-cgroup on /sys/fs/cgroup/rdma type cgroup (ro,nosuid,nodev,noexec,relatime,rdma)
-cgroup on /sys/fs/cgroup/cpuset type cgroup (ro,nosuid,nodev,noexec,relatime,cpuset)
-cgroup on /sys/fs/cgroup/net_cls,net_prio type cgroup (ro,nosuid,nodev,noexec,relatime,net_cls,net_prio)
-cgroup on /sys/fs/cgroup/cpu,cpuacct type cgroup (ro,nosuid,nodev,noexec,relatime,cpu,cpuacct)
-cgroup on /sys/fs/cgroup/hugetlb type cgroup (ro,nosuid,nodev,noexec,relatime,hugetlb)
-cgroup on /sys/fs/cgroup/freezer type cgroup (ro,nosuid,nodev,noexec,relatime,freezer)
-cgroup on /sys/fs/cgroup/blkio type cgroup (ro,nosuid,nodev,noexec,relatime,blkio)
-cgroup on /sys/fs/cgroup/perf_event type cgroup (ro,nosuid,nodev,noexec,relatime,perf_event)
-cgroup on /sys/fs/cgroup/devices type cgroup (ro,nosuid,nodev,noexec,relatime,devices)
-cgroup on /sys/fs/cgroup/pids type cgroup (ro,nosuid,nodev,noexec,relatime,pids)
-&lt;/pre&gt;
-&lt;p&gt;特权模式下，将可以对 cgroup 进行读写操作:&lt;/p&gt;
-&lt;pre class="literal-block"&gt;
-$ docker run --privileged --rm -it debian:buster mount | grep 'cgroup'
-tmpfs on /sys/fs/cgroup type tmpfs (rw,nosuid,nodev,noexec,relatime,mode=755)
-cgroup on /sys/fs/cgroup/systemd type cgroup (rw,nosuid,nodev,noexec,relatime,xattr,release_agent=/usr/lib/systemd/systemd-cgroups-agent,name=systemd)
-cgroup on /sys/fs/cgroup/memory type cgroup (rw,nosuid,nodev,noexec,relatime,memory)
-cgroup on /sys/fs/cgroup/rdma type cgroup (rw,nosuid,nodev,noexec,relatime,rdma)
-cgroup on /sys/fs/cgroup/cpuset type cgroup (rw,nosuid,nodev,noexec,relatime,cpuset)
-cgroup on /sys/fs/cgroup/net_cls,net_prio type cgroup (rw,nosuid,nodev,noexec,relatime,net_cls,net_prio)
-cgroup on /sys/fs/cgroup/cpu,cpuacct type cgroup (rw,nosuid,nodev,noexec,relatime,cpu,cpuacct)
-cgroup on /sys/fs/cgroup/hugetlb type cgroup (rw,nosuid,nodev,noexec,relatime,hugetlb)
-cgroup on /sys/fs/cgroup/freezer type cgroup (rw,nosuid,nodev,noexec,relatime,freezer)
-cgroup on /sys/fs/cgroup/blkio type cgroup (rw,nosuid,nodev,noexec,relatime,blkio)
-cgroup on /sys/fs/cgroup/perf_event type cgroup (rw,nosuid,nodev,noexec,relatime,perf_event)
-cgroup on /sys/fs/cgroup/devices type cgroup (rw,nosuid,nodev,noexec,relatime,devices)
-cgroup on /sys/fs/cgroup/pids type cgroup (rw,nosuid,nodev,noexec,relatime,pids)
-&lt;/pre&gt;
-&lt;/div&gt;
-&lt;div class="section" id="all-devices-from-the-host-s-dev-are-available-within-the-container"&gt;
-&lt;h3 id="hidall-devices-from-the-host-s-dev-are-available-within-the-container"&gt;All devices from the host's /dev are available within the container.&lt;a class="headerlink" href="#hidall-devices-from-the-host-s-dev-are-available-within-the-container" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
-&lt;p&gt;普通模式下，容器内 /dev 目录下看不到节点 /dev 目录下特有的 devices&lt;/p&gt;
-&lt;pre class="literal-block"&gt;
-# docker run --rm -it debian:buster ls /dev
-console  fd    mqueue  ptmx  random  stderr  stdout  urandom
-core     full  null    pts   shm     stdin   tty     zero
-&lt;/pre&gt;
-&lt;p&gt;特权模式下，容器内的 /dev 目录会包含这些来自节点 /dev 目录下的那些内容:&lt;/p&gt;
-&lt;pre class="literal-block"&gt;
-$ docker run --privileged --rm -it debian:buster ls /dev
-autofs           mapper              stdin   tty25  tty44  tty63    vcsa1
-btrfs-control    mcelog              stdout  tty26  tty45  tty7     vcsa2
-bus              mem                 tty     tty27  tty46  tty8     vcsa3
-console          memory_bandwidth    tty0    tty28  tty47  tty9     vcsa4
-core             mqueue              tty1    tty29  tty48  ttyS0    vcsa5
-cpu              net                 tty10   tty3   tty49  ttyS1    vcsa6
-cpu_dma_latency  network_latency     tty11   tty30  tty5   ttyS2    vcsu
-cuse             network_throughput  tty12   tty31  tty50  ttyS3    vcsu1
-dri              null                tty13   tty32  tty51  uhid     vcsu2
-fb0              nvram               tty14   tty33  tty52  uinput   vcsu3
-fd               port                tty15   tty34  tty53  urandom  vcsu4
-full             ppp                 tty16   tty35  tty54  usbmon0  vcsu5
-fuse             ptmx                tty17   tty36  tty55  usbmon1  vcsu6
-hidraw0          ptp0                tty18   tty37  tty56  vcs      vda
-hpet             pts                 tty19   tty38  tty57  vcs1     vda1
-hwrng            random              tty2    tty39  tty58  vcs2     vfio
-infiniband       raw                 tty20   tty4   tty59  vcs3     vga_arbiter
-input            rtc0                tty21   tty40  tty6   vcs4     vhost-net
-kmsg             shm                 tty22   tty41  tty60  vcs5     vhost-vsock
-lightnvm         snapshot            tty23   tty42  tty61  vcs6     zero
-loop-control     stderr              tty24   tty43  tty62  vcsa
-&lt;/pre&gt;
-&lt;/div&gt;
-&lt;div class="section" id="selinux-restrictions-are-not-applied-e-g-label-disabled"&gt;
-&lt;h3 id="hidselinux-restrictions-are-not-applied-e-g-label-disabled"&gt;SELinux restrictions are not applied (e.g. label=disabled).&lt;a class="headerlink" href="#hidselinux-restrictions-are-not-applied-e-g-label-disabled" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
-&lt;p&gt;特权模式下，SELinux 相关的安全加固配置将被禁用。&lt;/p&gt;
-&lt;p&gt;普通模式下也可以通过对应的安全选项来禁用 SELinux 特性。&lt;/p&gt;
-&lt;/div&gt;
-&lt;/div&gt;
-&lt;div class="section" id="id4"&gt;
-&lt;h2 id="hidid4"&gt;参考资料&lt;a class="headerlink" href="#hidid4" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
-&lt;ul class="simple"&gt;
-&lt;li&gt;&lt;a class="reference external" href="https://github.com/kubernetes/cri-api"&gt;kubernetes/cri-api: Container Runtime Interface (CRI) – a plugin interface which enables kubelet to use a wide variety of container runtimes.&lt;/a&gt;&lt;/li&gt;
-&lt;li&gt;&lt;a class="reference external" href="https://man7.org/linux/man-pages/man7/capabilities.7.html"&gt;capabilities(7) - Linux manual page&lt;/a&gt;&lt;/li&gt;
-&lt;li&gt;&lt;a class="reference external" href="https://docs.docker.com/engine/reference/run/#runtime-privilege-and-linux-capabilities"&gt;Docker run reference | Docker Documentation&lt;/a&gt;&lt;/li&gt;
-&lt;/ul&gt;
-&lt;/div&gt;
-</summary><category term="privileged"></category><category term="security"></category></entry></feed>
+</summary></entry></feed>
