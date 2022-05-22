@@ -1,5 +1,100 @@
 <?xml version="1.0" encoding="utf-8"?>
-<feed xmlns="http://www.w3.org/2005/Atom"><title>mozillazg's blog</title><link href="https://mozillazg.com/" rel="alternate"></link><link href="https://mozillazg.com/feeds/mozillazg.atom.xml" rel="self"></link><id>https://mozillazg.com/</id><updated>2022-05-15T00:00:00+00:00</updated><entry><title>ebpf/libbpf 程序使用 tracepoint 的常见问题</title><link href="https://mozillazg.com/2022/05/ebpf-libbpf-tracepoint-common-questions.html" rel="alternate"></link><updated>2022-05-15T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2022-05-15:2022/05/ebpf-libbpf-tracepoint-common-questions.html</id><summary type="html">&lt;div class="section" id="id1"&gt;
+<feed xmlns="http://www.w3.org/2005/Atom"><title>mozillazg's blog</title><link href="https://mozillazg.com/" rel="alternate"></link><link href="https://mozillazg.com/feeds/mozillazg.atom.xml" rel="self"></link><id>https://mozillazg.com/</id><updated>2022-05-22T00:00:00+00:00</updated><entry><title>libbpfgo 使用示例：在内核态和用户态使用 ebpf map</title><link href="https://mozillazg.com/2022/05/ebpf-libbpfgo-use-map-example.html" rel="alternate"></link><updated>2022-05-22T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2022-05-22:2022/05/ebpf-libbpfgo-use-map-example.html</id><summary type="html">&lt;div class="section" id="id1"&gt;
+&lt;h2 id="hidid1"&gt;前言&lt;a class="headerlink" href="#hidid1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;记录一下如何在 libbpfgo 程序中使用 ebpf map（ebpf map 本身的资料可以参考参考资料）。&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class="section" id="ebpf-ebpf-map"&gt;
+&lt;h2 id="hidebpf-ebpf-map"&gt;ebpf 程序中使用 ebpf map&lt;a class="headerlink" href="#hidebpf-ebpf-map" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;div class="section" id="map"&gt;
+&lt;h3 id="hidmap"&gt;定义 map&lt;a class="headerlink" href="#hidmap" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
+&lt;p&gt;先看一下定义一个 ebpf map 的方法，比如类型为 &lt;tt class="docutils literal"&gt;BPF_MAP_TYPE_HASH&lt;/tt&gt; 的 map:&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="k"&gt;struct&lt;/span&gt; &lt;span class="p"&gt;{&lt;/span&gt;
+        &lt;span class="n"&gt;__uint&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;type&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;BPF_MAP_TYPE_HASH&lt;/span&gt;&lt;span class="p"&gt;);&lt;/span&gt;
+        &lt;span class="n"&gt;__type&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;key&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;u32&lt;/span&gt;&lt;span class="p"&gt;);&lt;/span&gt;
+        &lt;span class="n"&gt;__type&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;value&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="k"&gt;struct&lt;/span&gt; &lt;span class="n"&gt;event_t&lt;/span&gt;&lt;span class="p"&gt;);&lt;/span&gt;
+        &lt;span class="n"&gt;__uint&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;max_entries&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="mi"&gt;1024&lt;/span&gt; &lt;span class="o"&gt;*&lt;/span&gt; &lt;span class="mi"&gt;16&lt;/span&gt;&lt;span class="p"&gt;);&lt;/span&gt;
+&lt;span class="p"&gt;}&lt;/span&gt; &lt;span class="n"&gt;event_map&lt;/span&gt; &lt;span class="n"&gt;SEC&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="s"&gt;&amp;quot;.maps&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;);&lt;/span&gt;
+&lt;/pre&gt;&lt;/div&gt;
+&lt;p&gt;可以看到主要需要指定 &lt;tt class="docutils literal"&gt;type&lt;/tt&gt; 、 &lt;tt class="docutils literal"&gt;key&lt;/tt&gt; 、 &lt;tt class="docutils literal"&gt;value&lt;/tt&gt; 、 &lt;tt class="docutils literal"&gt;max_entries&lt;/tt&gt; 这几个字段。&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class="section" id="id2"&gt;
+&lt;h3 id="hidid2"&gt;对 map 进行操作&lt;a class="headerlink" href="#hidid2" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
+&lt;p&gt;在 ebpf 程序中可以通过下面几个常用的辅助函数对 map 对象进行操作：&lt;/p&gt;
+&lt;p&gt;&lt;tt class="docutils literal"&gt;void bpf_map_lookup_elem(map, void *key. &lt;span class="pre"&gt;...)&lt;/span&gt;&lt;/tt&gt; 通过 key 查找对应的 value&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="n"&gt;event&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;bpf_map_lookup_elem&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="o"&gt;&amp;amp;&lt;/span&gt;&lt;span class="n"&gt;event_map&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="o"&gt;&amp;amp;&lt;/span&gt;&lt;span class="n"&gt;pid&lt;/span&gt;&lt;span class="p"&gt;);&lt;/span&gt;
+&lt;span class="k"&gt;if&lt;/span&gt; &lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="o"&gt;!&lt;/span&gt;&lt;span class="n"&gt;event&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt; &lt;span class="p"&gt;{&lt;/span&gt;    &lt;span class="c1"&gt;// key 不存在&lt;/span&gt;
+    &lt;span class="k"&gt;return&lt;/span&gt; &lt;span class="mi"&gt;0&lt;/span&gt;&lt;span class="p"&gt;;&lt;/span&gt;
+&lt;span class="p"&gt;}&lt;/span&gt;
+&lt;/pre&gt;&lt;/div&gt;
+&lt;p&gt;&lt;tt class="docutils literal"&gt;void bpf_map_update_elem(map, void *key, &lt;span class="pre"&gt;...,&lt;/span&gt; __u64 flags)&lt;/tt&gt; 更新指定 key 的值， &lt;tt class="docutils literal"&gt;flags&lt;/tt&gt; 参数用于控制更新行为&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="cm"&gt;/* File: include/uapi/linux/bpf.h */&lt;/span&gt;
+&lt;span class="cm"&gt;/* flags for BPF_MAP_UPDATE_ELEM command */&lt;/span&gt;
+&lt;span class="cp"&gt;#define BPF_ANY       0 &lt;/span&gt;&lt;span class="cm"&gt;/* create new element or update existing */&lt;/span&gt;&lt;span class="cp"&gt;&lt;/span&gt;
+&lt;span class="cp"&gt;#define BPF_NOEXIST   1 &lt;/span&gt;&lt;span class="cm"&gt;/* create new element only if it didn&amp;#39;t exist */&lt;/span&gt;&lt;span class="cp"&gt;&lt;/span&gt;
+&lt;span class="cp"&gt;#define BPF_EXIST     2 &lt;/span&gt;&lt;span class="cm"&gt;/* only update existing element */&lt;/span&gt;&lt;span class="cp"&gt;&lt;/span&gt;
+
+&lt;span class="n"&gt;bpf_map_update_elem&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="o"&gt;&amp;amp;&lt;/span&gt;&lt;span class="n"&gt;event_map&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="o"&gt;&amp;amp;&lt;/span&gt;&lt;span class="n"&gt;pid&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="o"&gt;&amp;amp;&lt;/span&gt;&lt;span class="n"&gt;event&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;BPF_ANY&lt;/span&gt;&lt;span class="p"&gt;);&lt;/span&gt;
+&lt;/pre&gt;&lt;/div&gt;
+&lt;p&gt;&lt;tt class="docutils literal"&gt;void bpf_map_delete_elem(map, void *key)&lt;/tt&gt; 删除指定 key&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="n"&gt;bpf_map_delete_elem&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="o"&gt;&amp;amp;&lt;/span&gt;&lt;span class="n"&gt;event_map&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="o"&gt;&amp;amp;&lt;/span&gt;&lt;span class="n"&gt;pid&lt;/span&gt;&lt;span class="p"&gt;);&lt;/span&gt;
+&lt;/pre&gt;&lt;/div&gt;
+&lt;p&gt;完整示例程序详见: &lt;a class="reference external" href="https://github.com/mozillazg/hello-libbpfgo/tree/master/08-map-map-type-hash-kernel"&gt;https://github.com/mozillazg/hello-libbpfgo/tree/master/08-map-map-type-hash-kernel&lt;/a&gt;&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class="section" id="pin-map"&gt;
+&lt;h3 id="hidpin-map"&gt;pin map&lt;a class="headerlink" href="#hidpin-map" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
+&lt;p&gt;pin map 用于将 map 保存到本地文件系统中进行持久化，
+libbpf 中是会自动保存到 &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;/sys/fs/bpf/&amp;lt;map_name&amp;gt;&lt;/span&gt;&lt;/tt&gt; 路径下。&lt;/p&gt;
+&lt;p&gt;定义 pin map 的方法只是在普通 map 的基础上加一个 &lt;tt class="docutils literal"&gt;pinning&lt;/tt&gt; 字段:&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="k"&gt;struct&lt;/span&gt; &lt;span class="p"&gt;{&lt;/span&gt;
+        &lt;span class="n"&gt;__uint&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;type&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;BPF_MAP_TYPE_HASH&lt;/span&gt;&lt;span class="p"&gt;);&lt;/span&gt;
+        &lt;span class="n"&gt;__type&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;key&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;u32&lt;/span&gt;&lt;span class="p"&gt;);&lt;/span&gt;
+        &lt;span class="n"&gt;__type&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;value&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="k"&gt;struct&lt;/span&gt; &lt;span class="n"&gt;event_t&lt;/span&gt;&lt;span class="p"&gt;);&lt;/span&gt;
+        &lt;span class="n"&gt;__uint&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;max_entries&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="mi"&gt;1024&lt;/span&gt; &lt;span class="o"&gt;*&lt;/span&gt; &lt;span class="mi"&gt;16&lt;/span&gt;&lt;span class="p"&gt;);&lt;/span&gt;
+        &lt;span class="n"&gt;__uint&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;pinning&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;LIBBPF_PIN_BY_NAME&lt;/span&gt;&lt;span class="p"&gt;);&lt;/span&gt;  &lt;span class="c1"&gt;// &amp;lt;- pin&lt;/span&gt;
+&lt;span class="p"&gt;}&lt;/span&gt; &lt;span class="n"&gt;event_map&lt;/span&gt; &lt;span class="n"&gt;SEC&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="s"&gt;&amp;quot;.maps&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;);&lt;/span&gt;
+&lt;/pre&gt;&lt;/div&gt;
+&lt;p&gt;完整示例程序详见： &lt;a class="reference external" href="https://github.com/mozillazg/hello-libbpfgo/tree/master/11-map-pin"&gt;https://github.com/mozillazg/hello-libbpfgo/tree/master/11-map-pin&lt;/a&gt;&lt;/p&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;div class="section" id="go-ebpf-map"&gt;
+&lt;h2 id="hidgo-ebpf-map"&gt;go 程序中使用 ebpf map&lt;a class="headerlink" href="#hidgo-ebpf-map" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;可以使用 libbpfgo 在 go 程序中操作 ebpf 程序中定义的 ebpf map。&lt;/p&gt;
+&lt;div class="section" id="id3"&gt;
+&lt;h3 id="hidid3"&gt;对 map 进行操作&lt;a class="headerlink" href="#hidid3" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
+&lt;p&gt;先通过 &lt;tt class="docutils literal"&gt;bpfmap, err := &lt;span class="pre"&gt;bpfModule.GetMap(&amp;quot;bpf_map&amp;quot;)&lt;/span&gt;&lt;/tt&gt; 拿到定义的 map 对象，然后就可以
+做一些常见的操作了：&lt;/p&gt;
+&lt;p&gt;&lt;tt class="docutils literal"&gt;Update(key, value unsafe.Pointer) error&lt;/tt&gt; 更新指定 key 的值，使用的 flags 是 &lt;tt class="docutils literal"&gt;BPF_ANY&lt;/tt&gt; 即
+创建新元素或者更新已有的 key:&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="nx"&gt;key&lt;/span&gt; &lt;span class="o"&gt;:=&lt;/span&gt; &lt;span class="mi"&gt;1&lt;/span&gt;
+&lt;span class="nx"&gt;value&lt;/span&gt; &lt;span class="o"&gt;:=&lt;/span&gt; &lt;span class="mi"&gt;233&lt;/span&gt;
+&lt;span class="nx"&gt;keyPtr&lt;/span&gt; &lt;span class="o"&gt;:=&lt;/span&gt; &lt;span class="nx"&gt;unsafe&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Pointer&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="o"&gt;&amp;amp;&lt;/span&gt;&lt;span class="nx"&gt;key&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+&lt;span class="nx"&gt;valuePtr&lt;/span&gt; &lt;span class="o"&gt;:=&lt;/span&gt; &lt;span class="nx"&gt;unsafe&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Pointer&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="o"&gt;&amp;amp;&lt;/span&gt;&lt;span class="nx"&gt;value&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+&lt;span class="nx"&gt;bpfmap&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Update&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="nx"&gt;keyPtr&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="nx"&gt;valuePtr&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+&lt;/pre&gt;&lt;/div&gt;
+&lt;p&gt;&lt;tt class="docutils literal"&gt;GetValue(key unsafe.Pointer) &lt;span class="pre"&gt;([]byte,&lt;/span&gt; error)&lt;/tt&gt; 获取指定 key 的值，当 key 不存在时会返回 error:&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="nx"&gt;key&lt;/span&gt; &lt;span class="o"&gt;:=&lt;/span&gt; &lt;span class="mi"&gt;1&lt;/span&gt;
+&lt;span class="nx"&gt;keyPtr&lt;/span&gt; &lt;span class="o"&gt;:=&lt;/span&gt; &lt;span class="nx"&gt;unsafe&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Pointer&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="o"&gt;&amp;amp;&lt;/span&gt;&lt;span class="nx"&gt;key&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+&lt;span class="nx"&gt;data&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="nx"&gt;err&lt;/span&gt; &lt;span class="o"&gt;:=&lt;/span&gt; &lt;span class="nx"&gt;bpfmap&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;GetValue&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="nx"&gt;keyPtr&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+&lt;/pre&gt;&lt;/div&gt;
+&lt;p&gt;&lt;tt class="docutils literal"&gt;DeleteKey(key unsafe.Pointer) error&lt;/tt&gt; 删除指定 key，当 key 不存在时会返回 error:&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="nx"&gt;key&lt;/span&gt; &lt;span class="o"&gt;:=&lt;/span&gt; &lt;span class="mi"&gt;1&lt;/span&gt;
+&lt;span class="nx"&gt;keyPtr&lt;/span&gt; &lt;span class="o"&gt;:=&lt;/span&gt; &lt;span class="nx"&gt;unsafe&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Pointer&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="o"&gt;&amp;amp;&lt;/span&gt;&lt;span class="nx"&gt;key&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+&lt;span class="nx"&gt;err&lt;/span&gt; &lt;span class="o"&gt;:=&lt;/span&gt; &lt;span class="nx"&gt;bpfmap&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;DeleteKey&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="nx"&gt;keyPtr&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+&lt;/pre&gt;&lt;/div&gt;
+&lt;p&gt;完整示例程序详见: &lt;a class="reference external" href="https://github.com/mozillazg/hello-libbpfgo/tree/master/09-map-map-type-hash-userspace"&gt;https://github.com/mozillazg/hello-libbpfgo/tree/master/09-map-map-type-hash-userspace&lt;/a&gt;&lt;/p&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;div class="section" id="id4"&gt;
+&lt;h2 id="hidid4"&gt;参考资料&lt;a class="headerlink" href="#hidid4" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;ul class="simple"&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://arthurchiao.art/blog/bpf-advanced-notes-2-zh/"&gt;BPF 进阶笔记（二）：BPF Map 类型详解：使用场景、程序示例&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://nakryiko.com/posts/bcc-to-libbpf-howto-guide/"&gt;BCC to libbpf conversion guide&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://github.com/aquasecurity/libbpfgo"&gt;aquasecurity/libbpfgo: eBPF library for Go, wrapping libbpf&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://prototype-kernel.readthedocs.io/en/latest/bpf/ebpf_maps.html"&gt;eBPF maps — Prototype Kernel 0.0.1 documentation&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://man7.org/linux/man-pages/man2/bpf.2.html"&gt;bpf(2) - Linux manual page&lt;/a&gt;&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/div&gt;
+</summary><category term="libbpf"></category><category term="libbpfgo"></category></entry><entry><title>ebpf/libbpf 程序使用 tracepoint 的常见问题</title><link href="https://mozillazg.com/2022/05/ebpf-libbpf-tracepoint-common-questions.html" rel="alternate"></link><updated>2022-05-15T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2022-05-15:2022/05/ebpf-libbpf-tracepoint-common-questions.html</id><summary type="html">&lt;div class="section" id="id1"&gt;
 &lt;h2 id="hidid1"&gt;前言&lt;a class="headerlink" href="#hidid1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;p&gt;记录一些编写 ebpf/libbpf 程序时涉及到的 tracepoint 相关的常见问题。&lt;/p&gt;
 &lt;/div&gt;
@@ -65,8 +160,8 @@ syscalls:sys_enter_fchmodat
     &lt;span class="kt"&gt;char&lt;/span&gt; &lt;span class="n"&gt;__data&lt;/span&gt;&lt;span class="p"&gt;[&lt;/span&gt;&lt;span class="mi"&gt;0&lt;/span&gt;&lt;span class="p"&gt;];&lt;/span&gt;
 &lt;span class="p"&gt;};&lt;/span&gt;
 &lt;/pre&gt;&lt;/div&gt;
-&lt;p&gt;其中 &lt;tt class="docutils literal"&gt;args&lt;/tt&gt; 中就存储了事件相关的我们可以获取的信息，至于里面包含了哪些信息就是第三步需要确定的信息。&lt;/p&gt;
-&lt;p&gt;第三步，确定事件本身可以获取到哪些信息，虽然我们指定 &lt;tt class="docutils literal"&gt;fchmodat&lt;/tt&gt; 系统调用需要提供文件名称和 mode 信息，
+&lt;p&gt;其中 &lt;tt class="docutils literal"&gt;args&lt;/tt&gt; 中就存储了事件相关的我们可以获取的信息，至于里面包含了哪些信息就是第四步需要确定的信息。&lt;/p&gt;
+&lt;p&gt;第四步，确定事件本身可以获取到哪些信息，虽然我们知道 &lt;tt class="docutils literal"&gt;fchmodat&lt;/tt&gt; 系统调用需要提供文件名称和 mode 信息，
 但是，我们不确定是否可以在 ebpf 程序中获取到这些信息。可以通过查看
 &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;/sys/kernel/debug/tracing/events/&amp;lt;category&amp;gt;/&amp;lt;name&amp;gt;/format&lt;/span&gt;&lt;/tt&gt; 文件获取到我们可以获取哪些信息。
 比如 &lt;tt class="docutils literal"&gt;sys_enter_fchmodat&lt;/tt&gt; 这个事件的 &lt;tt class="docutils literal"&gt;/sys/kernel/debug/tracing/events/syscalls/sys_enter_fchmodat/format&lt;/tt&gt;
@@ -96,27 +191,23 @@ print fmt: &amp;quot;dfd: 0x%08lx, filename: 0x%08lx, mode: 0x%08lx&amp;quot;, (
 &lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="n"&gt;SEC&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="s"&gt;&amp;quot;tracepoint/syscalls/sys_enter_fchmodat&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
 &lt;span class="kt"&gt;int&lt;/span&gt; &lt;span class="n"&gt;tracepoint__syscalls__sys_enter_fchmodat&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="k"&gt;struct&lt;/span&gt; &lt;span class="n"&gt;trace_event_raw_sys_enter&lt;/span&gt; &lt;span class="o"&gt;*&lt;/span&gt;&lt;span class="n"&gt;ctx&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
 &lt;span class="p"&gt;{&lt;/span&gt;
-        &lt;span class="k"&gt;struct&lt;/span&gt; &lt;span class="n"&gt;event_t&lt;/span&gt; &lt;span class="o"&gt;*&lt;/span&gt;&lt;span class="n"&gt;event&lt;/span&gt;&lt;span class="p"&gt;;&lt;/span&gt;
-        &lt;span class="n"&gt;event&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;bpf_ringbuf_reserve&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="o"&gt;&amp;amp;&lt;/span&gt;&lt;span class="n"&gt;events&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="k"&gt;sizeof&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="o"&gt;*&lt;/span&gt;&lt;span class="n"&gt;event&lt;/span&gt;&lt;span class="p"&gt;),&lt;/span&gt; &lt;span class="mi"&gt;0&lt;/span&gt;&lt;span class="p"&gt;);&lt;/span&gt;
-        &lt;span class="k"&gt;if&lt;/span&gt; &lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="o"&gt;!&lt;/span&gt;&lt;span class="n"&gt;event&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt; &lt;span class="p"&gt;{&lt;/span&gt;
-            &lt;span class="k"&gt;return&lt;/span&gt; &lt;span class="mi"&gt;0&lt;/span&gt;&lt;span class="p"&gt;;&lt;/span&gt;
-        &lt;span class="p"&gt;}&lt;/span&gt;
-
+        &lt;span class="c1"&gt;// ...&lt;/span&gt;
 
         &lt;span class="kt"&gt;char&lt;/span&gt; &lt;span class="o"&gt;*&lt;/span&gt;&lt;span class="n"&gt;filename_ptr&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="kt"&gt;char&lt;/span&gt; &lt;span class="o"&gt;*&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt; &lt;span class="n"&gt;BPF_CORE_READ&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;ctx&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;args&lt;/span&gt;&lt;span class="p"&gt;[&lt;/span&gt;&lt;span class="mi"&gt;1&lt;/span&gt;&lt;span class="p"&gt;]);&lt;/span&gt;
         &lt;span class="n"&gt;bpf_core_read_user_str&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="o"&gt;&amp;amp;&lt;/span&gt;&lt;span class="n"&gt;event&lt;/span&gt;&lt;span class="o"&gt;-&amp;gt;&lt;/span&gt;&lt;span class="n"&gt;filename&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="k"&gt;sizeof&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;event&lt;/span&gt;&lt;span class="o"&gt;-&amp;gt;&lt;/span&gt;&lt;span class="n"&gt;filename&lt;/span&gt;&lt;span class="p"&gt;),&lt;/span&gt; &lt;span class="n"&gt;filename_ptr&lt;/span&gt;&lt;span class="p"&gt;);&lt;/span&gt;
         &lt;span class="n"&gt;event&lt;/span&gt;&lt;span class="o"&gt;-&amp;gt;&lt;/span&gt;&lt;span class="n"&gt;mode&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;BPF_CORE_READ&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;ctx&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;args&lt;/span&gt;&lt;span class="p"&gt;[&lt;/span&gt;&lt;span class="mi"&gt;2&lt;/span&gt;&lt;span class="p"&gt;]);&lt;/span&gt;
 
-        &lt;span class="n"&gt;bpf_ringbuf_submit&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;event&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="mi"&gt;0&lt;/span&gt;&lt;span class="p"&gt;);&lt;/span&gt;
-        &lt;span class="k"&gt;return&lt;/span&gt; &lt;span class="mi"&gt;0&lt;/span&gt;&lt;span class="p"&gt;;&lt;/span&gt;
+        &lt;span class="c1"&gt;// ...&lt;/span&gt;
 &lt;span class="p"&gt;}&lt;/span&gt;
 &lt;/pre&gt;&lt;/div&gt;
-&lt;p&gt;完成的示例程序详见：&lt;a class="reference external" href="https://github.com/mozillazg/hello-libbpfgo/tree/master/07-tracepoint-args"&gt;https://github.com/mozillazg/hello-libbpfgo/tree/master/07-tracepoint-args&lt;/a&gt;&lt;/p&gt;
+&lt;p&gt;完整的示例程序详见：&lt;a class="reference external" href="https://github.com/mozillazg/hello-libbpfgo/tree/master/07-tracepoint-args"&gt;https://github.com/mozillazg/hello-libbpfgo/tree/master/07-tracepoint-args&lt;/a&gt;&lt;/p&gt;
 &lt;/div&gt;
 &lt;div class="section" id="id3"&gt;
 &lt;h2 id="hidid3"&gt;参考资料&lt;a class="headerlink" href="#hidid3" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;ul class="simple"&gt;
 &lt;li&gt;&lt;a class="reference external" href="https://nakryiko.com/posts/bpf-core-reference-guide/"&gt;BPF CO-RE reference guide&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://github.com/libbpf/libbpf/blob/12e932ac0e18546dd7247e66ea1b4aa236d2ef38/src/libbpf.c#L9002-L9081"&gt;libbpf/libbpf.c at 12e932ac0e18546dd7247e66ea1b4aa236d2ef38 · libbpf/libbpf&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://nakryiko.com/posts/bcc-to-libbpf-howto-guide/"&gt;BCC to libbpf conversion guide&lt;/a&gt;&lt;/li&gt;
 &lt;/ul&gt;
 &lt;/div&gt;
 </summary><category term="tracepoint"></category><category term="libbpf"></category><category term="libbpfgo"></category></entry><entry><title>根据进程信息获取对应进程所属的容器/Pod 信息（一）</title><link href="https://mozillazg.com/2022/05/ebpf-libbpfgo-get-container-info-via-process-info.rst.html" rel="alternate"></link><updated>2022-05-14T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2022-05-14:2022/05/ebpf-libbpfgo-get-container-info-via-process-info.rst.html</id><summary type="html">&lt;div class="section" id="id1"&gt;
@@ -171,7 +262,7 @@ $ kubectl describe pod test |grep f1abcafee046eda0e9d78691dcc20fcde1d008bb84a2b0
 &lt;!-- 参考资料 --&gt;
 &lt;!-- ============ --&gt;
 &lt;/div&gt;
-</summary><category term="libbpfgo"></category><category term="go"></category><category term="golang"></category></entry><entry><title>libbpfgo 使用示例：在 ebpf 程序中获取进程信息</title><link href="https://mozillazg.com/2022/05/ebpf-libbpfgo-get-process-info.html" rel="alternate"></link><updated>2022-05-13T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2022-05-13:2022/05/ebpf-libbpfgo-get-process-info.html</id><summary type="html">&lt;div class="section" id="id1"&gt;
+</summary><category term="libbpf"></category><category term="libbpfgo"></category><category term="go"></category><category term="golang"></category></entry><entry><title>libbpfgo 使用示例：在 ebpf 程序中获取进程信息</title><link href="https://mozillazg.com/2022/05/ebpf-libbpfgo-get-process-info.html" rel="alternate"></link><updated>2022-05-13T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2022-05-13:2022/05/ebpf-libbpfgo-get-process-info.html</id><summary type="html">&lt;div class="section" id="id1"&gt;
 &lt;h2 id="hidid1"&gt;前言&lt;a class="headerlink" href="#hidid1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;p&gt;大多数基于 ebpf 技术的程序都有需要在 ebpf 程序中获取相应事件发生时触发该事件的进程信息的需求，
 本文记录一下如何在 ebpf 程序中获取常见的进程信息。&lt;/p&gt;
@@ -231,8 +322,8 @@ $ kubectl describe pod test |grep f1abcafee046eda0e9d78691dcc20fcde1d008bb84a2b0
 &lt;/pre&gt;&lt;/div&gt;
 &lt;/div&gt;
 &lt;div class="section" id="userspace-pid"&gt;
-&lt;h3 id="hiduserspace-pid"&gt;获取 userspace 层面的 pid 信息&lt;a class="headerlink" href="#hiduserspace-pid" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
-&lt;p&gt;如上面所说，在容器等使用了独立的 pid namspace 的场景下，会出现对应 pid namespace 下看到的的 pid 跟 host 上的 pid 不一样的情况，所以我们也需要获取一下这个 userspace 层面的 pid 信息。&lt;/p&gt;
+&lt;h3 id="hiduserspace-pid"&gt;获取 userspace（用户态） 层面的 pid 信息&lt;a class="headerlink" href="#hiduserspace-pid" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
+&lt;p&gt;如上面所说，在容器等使用了独立的 pid namspace 的场景下，会出现对应 pid namespace 下看到的的 pid 跟 host 上的 pid 不一样的情况，所以我们也需要获取一下这个 userspace（用户态） 层面的 pid 信息。&lt;/p&gt;
 &lt;p&gt;主要是通过 &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;task-&amp;gt;nsproxy&lt;/span&gt;&lt;/tt&gt; 拿到 &lt;a class="reference external" href="https://elixir.bootlin.com/linux/v5.13/source/include/linux/nsproxy.h#L31"&gt;nsproxy&lt;/a&gt; 信息， &lt;tt class="docutils literal"&gt;nsproxy&lt;/tt&gt; 的结构体定义如下：&lt;/p&gt;
 &lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="cm"&gt;/*&lt;/span&gt;
 &lt;span class="cm"&gt; * A structure to contain pointers to all per-process&lt;/span&gt;
@@ -688,34 +779,4 @@ Do you want to &lt;span class="nb"&gt;exit&lt;/span&gt; &lt;span class="o"&gt;([
 &lt;li&gt;&lt;a class="reference external" href="https://github.com/open-policy-agent/opa"&gt;open-policy-agent/opa: An open source, general-purpose policy engine.&lt;/a&gt;&lt;/li&gt;
 &lt;/ul&gt;
 &lt;/div&gt;
-</summary><category term="openpolicyagent"></category><category term="rego"></category></entry><entry><title>Github Action 的 context 功能容易被攻击者利用实施脚本注入攻击</title><link href="https://mozillazg.com/2021/12/security-script-injection-attack-via-github-action-context.html" rel="alternate"></link><updated>2021-12-12T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2021-12-12:2021/12/security-script-injection-attack-via-github-action-context.html</id><summary type="html">&lt;p&gt;Github Action 提供了一个叫 &lt;a class="reference external" href="https://docs.github.com/en/actions/learn-github-actions/contexts"&gt;context&lt;/a&gt; 的功能，通过 context 可以在 workflow 中应用当前仓库、当前 job 等等
-上下文 metadata 信息，其中通过 &lt;a class="reference external" href="https://docs.github.com/en/actions/learn-github-actions/contexts#github-context"&gt;github context&lt;/a&gt; 可以获取当前 workflow 的运行信息，比如分支名称、issue/PR 标题，
-commit id, issue/PR message 等等。&lt;/p&gt;
-&lt;p&gt;github context 获取到的很多信息其实是第三方控制的信息，
-比如贡献者通过 PR 触发 CI 时，github context 中的很多信息就是贡献者提交 PR
-的那个贡献者所控制的分支的相关信息。&lt;/p&gt;
-&lt;p&gt;基于 github context 的这个特点，攻击者可以通过 PR 流程来实施脚本注入攻击。
-比如，攻击者可以通过构造一个 shell 语句作为一个分支的名称，然后提交 PR 以触发 CI，
-如果 CI 中 github action workflow 有直接在 shell 命令中使用分支名的逻辑话，
-就会触发执行攻击者构造的 shell 语句的操作，攻击者就成功实施了脚本注入攻击。&lt;/p&gt;
-&lt;p&gt;下面演示一个在 github action 中会存在脚本注入攻击问题的 workflow 语法的例子：&lt;/p&gt;
-&lt;pre class="literal-block"&gt;
-- name: test
-  run: |
-    echo 'show branch name: '
-    echo &amp;quot;${{ github.ref_name }}&amp;quot;
-&lt;/pre&gt;
-&lt;p&gt;上面这个 run 指令中，通过 echo 输出了执行当前 workflow 的分支名称，看起来没啥问题。
-但是，但我创建一个名为 &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;$(ls$IFS$(echo$IFS'UkVBRE1FLm1kCg=='|base64$IFS'-d'))&lt;/span&gt;&lt;/tt&gt; 的分支
-然后在这个分支下触发 workflow 的时候， 结果就会跟预期的不一样了：&lt;/p&gt;
-&lt;p&gt;&lt;img alt="image" src="/static/images/security/github-action-script-injection.png" /&gt;&lt;/p&gt;
-&lt;blockquote&gt;
-&lt;/blockquote&gt;
-&lt;div class="section" id="id1"&gt;
-&lt;h2 id="hidid1"&gt;参考资料&lt;a class="headerlink" href="#hidid1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
-&lt;ul class="simple"&gt;
-&lt;li&gt;&lt;a class="reference external" href="https://docs.github.com/en/actions/security-guides/security-hardening-for-github-actions#understanding-the-risk-of-script-injections"&gt;Security hardening for GitHub Actions - GitHub Docs&lt;/a&gt;&lt;/li&gt;
-&lt;li&gt;&lt;a class="reference external" href="https://python-security.readthedocs.io/pypi-vuln/index-2021-07-27-combine-prs-workflow.html"&gt;Vulnerability in GitHub Actions workflow for PyPI — Python Security 0.0 documentation&lt;/a&gt;&lt;/li&gt;
-&lt;/ul&gt;
-&lt;/div&gt;
-</summary></entry></feed>
+</summary><category term="openpolicyagent"></category><category term="rego"></category></entry></feed>
