@@ -1,5 +1,170 @@
 <?xml version="1.0" encoding="utf-8"?>
-<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom"><channel><title>mozillazg's blog</title><link>https://mozillazg.com/</link><description></description><atom:link href="https://mozillazg.com/feeds/all.rss.xml" rel="self"></atom:link><lastBuildDate>Sun, 22 May 2022 00:00:00 +0000</lastBuildDate><item><title>libbpfgo 使用示例：在内核态和用户态使用 ebpf map</title><link>https://mozillazg.com/2022/05/ebpf-libbpfgo-use-map-example.html</link><description>&lt;div class="section" id="id1"&gt;
+<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom"><channel><title>mozillazg's blog</title><link>https://mozillazg.com/</link><description></description><atom:link href="https://mozillazg.com/feeds/all.rss.xml" rel="self"></atom:link><lastBuildDate>Sun, 29 May 2022 00:00:00 +0000</lastBuildDate><item><title>ebpf/libbpf 程序使用 raw tracepoint 的常见问题</title><link>https://mozillazg.com/2022/05/ebpf-libbpf-raw-tracepoint-common-questions.html</link><description>&lt;div class="section" id="id1"&gt;
+&lt;h2 id="hidid1"&gt;前言&lt;a class="headerlink" href="#hidid1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;记录一些编写 ebpf/libbpf 程序时涉及到的 raw tracepoint 相关的常见问题。&lt;/p&gt;
+&lt;!-- raw tracepoint 和 tracepoint 的区别 --&gt;
+&lt;!-- ===================================== --&gt;
+&lt;/div&gt;
+&lt;div class="section" id="raw-tracepoint"&gt;
+&lt;h2 id="hidraw-tracepoint"&gt;raw tracepoint 可以监控哪些事件&lt;a class="headerlink" href="#hidraw-tracepoint" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;可以通过查看 &lt;tt class="docutils literal"&gt;/sys/kernel/debug/tracing/available_events&lt;/tt&gt; 文件的内容找到 tracepoint 可监控的事件。
+文件中每行内容的格式是:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+&amp;lt;category&amp;gt;:&amp;lt;name&amp;gt;
+&lt;/pre&gt;
+&lt;p&gt;比如:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+sched:sched_switch
+&lt;/pre&gt;
+&lt;p&gt;不过，raw tracepoint 用到的是 &lt;tt class="docutils literal"&gt;&amp;lt;name&amp;gt;&lt;/tt&gt; 的值，而不是整个 &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;&amp;lt;category&amp;gt;:&amp;lt;name&amp;gt;&lt;/span&gt;&lt;/tt&gt; ， 详见下方介绍。&lt;/p&gt;
+&lt;!-- 内核源码中使用 ``TRACE_EVENT`` 这个宏所定义的事件都可以通过 raw tracepoint 进行监控。 --&gt;
+&lt;!-- 这些事件主要集中在 `include/trace/events/ &lt;https://elixir.bootlin.com/linux/v5.13/source/include/trace/events&gt;`__   目录下。 --&gt;
+&lt;!--  --&gt;
+&lt;!-- 定义 raw tracepoint 可用事件的内容的格式是:: --&gt;
+&lt;!--  --&gt;
+&lt;!-- TRACE_EVENT(&lt;event_name&gt;, --&gt;
+&lt;!-- TP_PROTO(...), --&gt;
+&lt;!-- TP_ARGS(...), ...) --&gt;
+&lt;!--  --&gt;
+&lt;!-- .. 比如:: --&gt;
+&lt;!--  --&gt;
+&lt;!-- TRACE_EVENT_FN(sys_enter, --&gt;
+&lt;!-- TP_PROTO(struct pt_regs *regs, long id), --&gt;
+&lt;!-- TP_ARGS(regs, id), ...) --&gt;
+&lt;!--  --&gt;
+&lt;!-- 上面这个示例表示可以使用 ``sys_enter`` 作为 raw tracepoint 事件名称。 --&gt;
+&lt;!-- 可以使用的 `include/trace/events/syscalls.h &lt;https://elixir.bootlin.com/linux/v5.13/source/include/trace/events/syscalls.h&gt;`__ 文件中定义的 ``sys_enter`` 和 ``sys_exit`` 事件来监控所有系统调用事件 --&gt;
+&lt;/div&gt;
+&lt;div class="section" id="sec"&gt;
+&lt;h2 id="hidsec"&gt;SEC 内容的格式&lt;a class="headerlink" href="#hidsec" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;raw_tracepoint 事件对应的 SEC 格式为 (&lt;tt class="docutils literal"&gt;&amp;lt;name&amp;gt;&lt;/tt&gt; 值为上面 &lt;tt class="docutils literal"&gt;available_events&lt;/tt&gt; 文件中列出的那些 &lt;tt class="docutils literal"&gt;&amp;lt;name&amp;gt;&lt;/tt&gt;)&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+SEC(&amp;quot;raw_tracepoint/&amp;lt;name&amp;gt;&amp;quot;)
+
+// 比如:
+// SEC(&amp;quot;raw_tracepoint/sched_switch&amp;quot;)
+&lt;/pre&gt;
+&lt;p&gt;或:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+SEC(&amp;quot;raw_tp/&amp;lt;name&amp;gt;&amp;quot;)
+
+// 比如:
+// SEC(&amp;quot;raw_tp/sched_switch&amp;quot;)
+&lt;/pre&gt;
+&lt;p&gt;&lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;SEC(&amp;quot;raw_tp/xx&amp;quot;)&lt;/span&gt;&lt;/tt&gt; 跟 &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;SEC(&amp;quot;raw_tracepoint/xx&amp;quot;)&lt;/span&gt;&lt;/tt&gt; 其实是等效的，看个人喜好随便用哪种都行。&lt;/p&gt;
+&lt;p&gt;有两个特殊情况，那就是:&lt;/p&gt;
+&lt;ul class="simple"&gt;
+&lt;li&gt;统一用 &lt;tt class="docutils literal"&gt;sys_enter&lt;/tt&gt; 表示 &lt;tt class="docutils literal"&gt;syscalls&lt;/tt&gt; 分类下的 &lt;tt class="docutils literal"&gt;sys_enter_xxx&lt;/tt&gt; 事件: &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;SEC(&amp;quot;raw_tracepoint/sys_enter&amp;quot;)&lt;/span&gt;&lt;/tt&gt;&lt;/li&gt;
+&lt;li&gt;统一用 &lt;tt class="docutils literal"&gt;sys_exit&lt;/tt&gt; 表示 &lt;tt class="docutils literal"&gt;syscalls&lt;/tt&gt; 分类下的 &lt;tt class="docutils literal"&gt;sys_exit_xxx&lt;/tt&gt; 事件: &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;SEC(&amp;quot;raw_tracepoint/sys_exit&amp;quot;)&lt;/span&gt;&lt;/tt&gt;&lt;/li&gt;
+&lt;/ul&gt;
+&lt;p&gt;即，可以用 &lt;tt class="docutils literal"&gt;sys_enter&lt;/tt&gt; 和 &lt;tt class="docutils literal"&gt;sys_exit&lt;/tt&gt; 事件来监控所有系统调用事件。&lt;/p&gt;
+&lt;!-- 可以使用的 `include/trace/events/syscalls.h &lt;https://elixir.bootlin.com/linux/v5.13/source/include/trace/events/syscalls.h&gt;`__ 文件中定义的 ``sys_enter`` 和 ``sys_exit`` 事件来监控所有系统调用事件 --&gt;
+&lt;/div&gt;
+&lt;div class="section" id="id2"&gt;
+&lt;h2 id="hidid2"&gt;确定 raw tracepoint 事件处理函数的参数类型，获取对应的内核调用参数&lt;a class="headerlink" href="#hidid2" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;假设，我们想通过 raw tracepoint 监控 &lt;tt class="docutils literal"&gt;chmod&lt;/tt&gt; 这个命令涉及的 &lt;tt class="docutils literal"&gt;fchmodat&lt;/tt&gt; 系统调用，
+那么，如何确定ebpf 中事件处理函数的参数类型，以及如何获取到对应的 &lt;tt class="docutils literal"&gt;fchmodat&lt;/tt&gt; 这个系统调用涉及的参数的内容，
+比如拿到操作文件名称以及操作的权限 mode 的值。&lt;/p&gt;
+&lt;p&gt;第一步，先确定 &lt;tt class="docutils literal"&gt;chmod&lt;/tt&gt; 所使用的系统调用，这个比较简单，有很多种方法可以做到，比如通过 &lt;tt class="docutils literal"&gt;strace&lt;/tt&gt; 命令:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+$ strace chmod 600 a.txt
+...
+fchmodat(AT_FDCWD, &amp;quot;a.txt&amp;quot;, 0600)       = 0
+...
+&lt;/pre&gt;
+&lt;!-- 第二步，找到针对这个系统调用可以使用的 raw tracepoint 事件。raw tracepoint 可以使用 `include/trace/events/syscalls.h &lt;https://elixir.bootlin.com/linux/v5.13/source/include/trace/events/syscalls.h&gt;`__ 文件中定义的 ``sys_enter`` 和 ``sys_exit`` 事件来监控所有系统调用事件。 --&gt;
+&lt;p&gt;第二步，找到针对这个系统调用可以使用的 raw tracepoint 事件。前面说了，可以用 &lt;tt class="docutils literal"&gt;sys_enter&lt;/tt&gt; 和 &lt;tt class="docutils literal"&gt;sys_exit&lt;/tt&gt; 事件来监控所有系统调用事件。&lt;/p&gt;
+&lt;p&gt;第三步，确定函数的参数类型。raw tracepoint 统一使用 &lt;tt class="docutils literal"&gt;bpf_raw_tracepoint_args&lt;/tt&gt; 这个结构体&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="k"&gt;struct&lt;/span&gt; &lt;span class="n"&gt;bpf_raw_tracepoint_args&lt;/span&gt; &lt;span class="p"&gt;{&lt;/span&gt;
+    &lt;span class="n"&gt;__u64&lt;/span&gt; &lt;span class="n"&gt;args&lt;/span&gt;&lt;span class="p"&gt;[&lt;/span&gt;&lt;span class="mi"&gt;0&lt;/span&gt;&lt;span class="p"&gt;];&lt;/span&gt;
+&lt;span class="p"&gt;};&lt;/span&gt;
+&lt;/pre&gt;&lt;/div&gt;
+&lt;p&gt;其中 &lt;tt class="docutils literal"&gt;args&lt;/tt&gt; 中就存储了事件相关的我们可以获取的信息，至于里面包含了哪些信息就是第四步需要确定的信息。&lt;/p&gt;
+&lt;!-- 第四步，确定事件本身可以获取到哪些信息。前面说了，可以使用的 `include/trace/events/syscalls.h &lt;https://elixir.bootlin.com/linux/v5.13/source/include/trace/events/syscalls.h&gt;`__ 文件中定义的 ``sys_enter`` 和 ``sys_exit`` 事件来监控所有系统调用事件。这里以 ``sys_enter`` 为例： --&gt;
+&lt;p&gt;第四步，确定事件本身可以获取到哪些信息。这里以 &lt;tt class="docutils literal"&gt;sys_enter&lt;/tt&gt; 为例（内容取自 &lt;a class="reference external" href="https://elixir.bootlin.com/linux/v5.13/source/include/trace/events/syscalls.h"&gt;include/trace/events/syscalls.h&lt;/a&gt; ， 大部分事件主要集中在 &lt;a class="reference external" href="https://elixir.bootlin.com/linux/v5.13/source/include/trace/events"&gt;include/trace/events/&lt;/a&gt;   目录下） 。&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="n"&gt;TRACE_EVENT_FN&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;sys_enter&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;
+    &lt;span class="n"&gt;TP_PROTO&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="k"&gt;struct&lt;/span&gt; &lt;span class="n"&gt;pt_regs&lt;/span&gt; &lt;span class="o"&gt;*&lt;/span&gt;&lt;span class="n"&gt;regs&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="kt"&gt;long&lt;/span&gt; &lt;span class="n"&gt;id&lt;/span&gt;&lt;span class="p"&gt;),&lt;/span&gt;
+    &lt;span class="n"&gt;TP_ARGS&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;regs&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;id&lt;/span&gt;&lt;span class="p"&gt;),&lt;/span&gt;
+    &lt;span class="n"&gt;TP_STRUCT__entry&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;
+        &lt;span class="n"&gt;__field&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;    &lt;span class="kt"&gt;long&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;           &lt;span class="n"&gt;id&lt;/span&gt;              &lt;span class="p"&gt;)&lt;/span&gt;
+        &lt;span class="n"&gt;__array&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;    &lt;span class="kt"&gt;unsigned&lt;/span&gt; &lt;span class="kt"&gt;long&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;  &lt;span class="n"&gt;args&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;   &lt;span class="mi"&gt;6&lt;/span&gt;       &lt;span class="p"&gt;)&lt;/span&gt;
+    &lt;span class="p"&gt;),&lt;/span&gt;
+    &lt;span class="n"&gt;TP_fast_assign&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;
+        &lt;span class="n"&gt;__entry&lt;/span&gt;&lt;span class="o"&gt;-&amp;gt;&lt;/span&gt;&lt;span class="n"&gt;id&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;id&lt;/span&gt;&lt;span class="p"&gt;;&lt;/span&gt;
+        &lt;span class="n"&gt;syscall_get_arguments&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;current&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;regs&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;__entry&lt;/span&gt;&lt;span class="o"&gt;-&amp;gt;&lt;/span&gt;&lt;span class="n"&gt;args&lt;/span&gt;&lt;span class="p"&gt;);&lt;/span&gt;
+    &lt;span class="p"&gt;),&lt;/span&gt;
+    &lt;span class="n"&gt;TP_printk&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="s"&gt;&amp;quot;NR %ld (%lx, %lx, %lx, %lx, %lx, %lx)&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;
+          &lt;span class="n"&gt;__entry&lt;/span&gt;&lt;span class="o"&gt;-&amp;gt;&lt;/span&gt;&lt;span class="n"&gt;id&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;
+          &lt;span class="n"&gt;__entry&lt;/span&gt;&lt;span class="o"&gt;-&amp;gt;&lt;/span&gt;&lt;span class="n"&gt;args&lt;/span&gt;&lt;span class="p"&gt;[&lt;/span&gt;&lt;span class="mi"&gt;0&lt;/span&gt;&lt;span class="p"&gt;],&lt;/span&gt; &lt;span class="n"&gt;__entry&lt;/span&gt;&lt;span class="o"&gt;-&amp;gt;&lt;/span&gt;&lt;span class="n"&gt;args&lt;/span&gt;&lt;span class="p"&gt;[&lt;/span&gt;&lt;span class="mi"&gt;1&lt;/span&gt;&lt;span class="p"&gt;],&lt;/span&gt; &lt;span class="n"&gt;__entry&lt;/span&gt;&lt;span class="o"&gt;-&amp;gt;&lt;/span&gt;&lt;span class="n"&gt;args&lt;/span&gt;&lt;span class="p"&gt;[&lt;/span&gt;&lt;span class="mi"&gt;2&lt;/span&gt;&lt;span class="p"&gt;],&lt;/span&gt;
+          &lt;span class="n"&gt;__entry&lt;/span&gt;&lt;span class="o"&gt;-&amp;gt;&lt;/span&gt;&lt;span class="n"&gt;args&lt;/span&gt;&lt;span class="p"&gt;[&lt;/span&gt;&lt;span class="mi"&gt;3&lt;/span&gt;&lt;span class="p"&gt;],&lt;/span&gt; &lt;span class="n"&gt;__entry&lt;/span&gt;&lt;span class="o"&gt;-&amp;gt;&lt;/span&gt;&lt;span class="n"&gt;args&lt;/span&gt;&lt;span class="p"&gt;[&lt;/span&gt;&lt;span class="mi"&gt;4&lt;/span&gt;&lt;span class="p"&gt;],&lt;/span&gt; &lt;span class="n"&gt;__entry&lt;/span&gt;&lt;span class="o"&gt;-&amp;gt;&lt;/span&gt;&lt;span class="n"&gt;args&lt;/span&gt;&lt;span class="p"&gt;[&lt;/span&gt;&lt;span class="mi"&gt;5&lt;/span&gt;&lt;span class="p"&gt;]),&lt;/span&gt;
+    &lt;span class="n"&gt;syscall_regfunc&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;syscall_unregfunc&lt;/span&gt;
+&lt;span class="p"&gt;);&lt;/span&gt;
+&lt;/pre&gt;&lt;/div&gt;
+&lt;p&gt;其中&lt;/p&gt;
+&lt;ul class="simple"&gt;
+&lt;li&gt;&lt;tt class="docutils literal"&gt;TP_PROTO(struct pt_regs *regs, long id)&lt;/tt&gt; 定义了可以通过 &lt;tt class="docutils literal"&gt;bpf_raw_tracepoint_args&lt;/tt&gt; 的 &lt;tt class="docutils literal"&gt;args&lt;/tt&gt; 拿到的信息。
+&lt;tt class="docutils literal"&gt;id&lt;/tt&gt; 是系统调用的 id， &lt;tt class="docutils literal"&gt;regs&lt;/tt&gt; 中包含了对应的系统调用的参数。 可以通过 id 过滤只处理 &lt;tt class="docutils literal"&gt;fchmodat&lt;/tt&gt; 的系统调用事件（通过命令 &lt;tt class="docutils literal"&gt;ausyscall fchmodat&lt;/tt&gt; 找到对应的系统调用 id），&lt;/li&gt;
+&lt;/ul&gt;
+&lt;p&gt;然后在继续获取对应的系统调用参数。&lt;/p&gt;
+&lt;p&gt;&lt;tt class="docutils literal"&gt;fchmodat&lt;/tt&gt; 这个系统调用的函数定义如下:&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="kt"&gt;int&lt;/span&gt; &lt;span class="nf"&gt;fchmodat&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="kt"&gt;int&lt;/span&gt; &lt;span class="n"&gt;dirfd&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="k"&gt;const&lt;/span&gt; &lt;span class="kt"&gt;char&lt;/span&gt; &lt;span class="o"&gt;*&lt;/span&gt;&lt;span class="n"&gt;pathname&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="kt"&gt;mode_t&lt;/span&gt; &lt;span class="n"&gt;mode&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="kt"&gt;int&lt;/span&gt; &lt;span class="n"&gt;flags&lt;/span&gt;&lt;span class="p"&gt;);&lt;/span&gt;
+&lt;/pre&gt;&lt;/div&gt;
+&lt;p&gt;因为 &lt;tt class="docutils literal"&gt;regs&lt;/tt&gt; 是 &lt;tt class="docutils literal"&gt;pt_regs&lt;/tt&gt; 类型，所以我们可以通过 &lt;tt class="docutils literal"&gt;PT_REGS_PARM1_CORE(regs)&lt;/tt&gt; 获取第一个参数的值，
+&lt;tt class="docutils literal"&gt;PT_REGS_PARM2_CORE(regs)&lt;/tt&gt; 获取第二个参数的值， &lt;tt class="docutils literal"&gt;PT_REGS_PARM3_CORE(regs)&lt;/tt&gt; 获取第三个参数的值，以此类推，
+可以通过 &lt;tt class="docutils literal"&gt;PT_REGS_PARM4_CORE&lt;/tt&gt; 和 &lt;tt class="docutils literal"&gt;PT_REGS_PARM5_CORE&lt;/tt&gt; 分别获取 regs 中第四个和第五个参数的值。&lt;/p&gt;
+&lt;p&gt;信息都确定好了，就可以写程序了。比如上面通过 &lt;tt class="docutils literal"&gt;sys_enter&lt;/tt&gt; 事件处理 &lt;tt class="docutils literal"&gt;fchmodat&lt;/tt&gt; 系统调用的示例 ebpf 程序如下:&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="n"&gt;SEC&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="s"&gt;&amp;quot;raw_tracepoint/sys_enter&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+&lt;span class="kt"&gt;int&lt;/span&gt; &lt;span class="n"&gt;raw_tracepoint__sys_enter&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="k"&gt;struct&lt;/span&gt; &lt;span class="n"&gt;bpf_raw_tracepoint_args&lt;/span&gt; &lt;span class="o"&gt;*&lt;/span&gt;&lt;span class="n"&gt;ctx&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+&lt;span class="p"&gt;{&lt;/span&gt;
+    &lt;span class="kt"&gt;unsigned&lt;/span&gt; &lt;span class="kt"&gt;long&lt;/span&gt; &lt;span class="n"&gt;syscall_id&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;ctx&lt;/span&gt;&lt;span class="o"&gt;-&amp;gt;&lt;/span&gt;&lt;span class="n"&gt;args&lt;/span&gt;&lt;span class="p"&gt;[&lt;/span&gt;&lt;span class="mi"&gt;1&lt;/span&gt;&lt;span class="p"&gt;];&lt;/span&gt;
+    &lt;span class="k"&gt;if&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;syscall_id&lt;/span&gt; &lt;span class="o"&gt;!=&lt;/span&gt; &lt;span class="mi"&gt;268&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;    &lt;span class="c1"&gt;// 过滤系统调用 id，只处理 fchmodat 系统调用&lt;/span&gt;
+        &lt;span class="k"&gt;return&lt;/span&gt; &lt;span class="mi"&gt;0&lt;/span&gt;&lt;span class="p"&gt;;&lt;/span&gt;
+
+    &lt;span class="k"&gt;struct&lt;/span&gt; &lt;span class="n"&gt;pt_regs&lt;/span&gt; &lt;span class="o"&gt;*&lt;/span&gt;&lt;span class="n"&gt;regs&lt;/span&gt;&lt;span class="p"&gt;;&lt;/span&gt;
+    &lt;span class="n"&gt;regs&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="k"&gt;struct&lt;/span&gt; &lt;span class="n"&gt;pt_regs&lt;/span&gt; &lt;span class="o"&gt;*&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt; &lt;span class="n"&gt;ctx&lt;/span&gt;&lt;span class="o"&gt;-&amp;gt;&lt;/span&gt;&lt;span class="n"&gt;args&lt;/span&gt;&lt;span class="p"&gt;[&lt;/span&gt;&lt;span class="mi"&gt;0&lt;/span&gt;&lt;span class="p"&gt;];&lt;/span&gt;
+
+    &lt;span class="kt"&gt;char&lt;/span&gt; &lt;span class="n"&gt;pathname&lt;/span&gt;&lt;span class="p"&gt;[&lt;/span&gt;&lt;span class="mi"&gt;256&lt;/span&gt;&lt;span class="p"&gt;];&lt;/span&gt;
+    &lt;span class="n"&gt;u32&lt;/span&gt; &lt;span class="n"&gt;mode&lt;/span&gt;&lt;span class="p"&gt;;&lt;/span&gt;
+
+    &lt;span class="c1"&gt;// 读取第二个参数的值&lt;/span&gt;
+    &lt;span class="kt"&gt;char&lt;/span&gt; &lt;span class="o"&gt;*&lt;/span&gt;&lt;span class="n"&gt;pathname_ptr&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="kt"&gt;char&lt;/span&gt; &lt;span class="o"&gt;*&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt; &lt;span class="n"&gt;PT_REGS_PARM2_CORE&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;regs&lt;/span&gt;&lt;span class="p"&gt;);&lt;/span&gt;
+    &lt;span class="n"&gt;bpf_core_read_user_str&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="o"&gt;&amp;amp;&lt;/span&gt;&lt;span class="n"&gt;pathname&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="k"&gt;sizeof&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;pathname&lt;/span&gt;&lt;span class="p"&gt;),&lt;/span&gt; &lt;span class="n"&gt;pathname_ptr&lt;/span&gt;&lt;span class="p"&gt;);&lt;/span&gt;
+
+    &lt;span class="c1"&gt;// 读取第三个参数的值&lt;/span&gt;
+    &lt;span class="n"&gt;mode&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;u32&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt; &lt;span class="n"&gt;PT_REGS_PARM3_CORE&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;regs&lt;/span&gt;&lt;span class="p"&gt;);&lt;/span&gt;
+
+    &lt;span class="kt"&gt;char&lt;/span&gt; &lt;span class="n"&gt;fmt&lt;/span&gt;&lt;span class="p"&gt;[]&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="s"&gt;&amp;quot;fchmodat %s %d&lt;/span&gt;&lt;span class="se"&gt;\n&lt;/span&gt;&lt;span class="s"&gt;&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;;&lt;/span&gt;
+    &lt;span class="n"&gt;bpf_trace_printk&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;fmt&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="k"&gt;sizeof&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;fmt&lt;/span&gt;&lt;span class="p"&gt;),&lt;/span&gt; &lt;span class="o"&gt;&amp;amp;&lt;/span&gt;&lt;span class="n"&gt;pathname&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;mode&lt;/span&gt;&lt;span class="p"&gt;);&lt;/span&gt;
+    &lt;span class="k"&gt;return&lt;/span&gt; &lt;span class="mi"&gt;0&lt;/span&gt;&lt;span class="p"&gt;;&lt;/span&gt;
+&lt;span class="p"&gt;}&lt;/span&gt;
+&lt;/pre&gt;&lt;/div&gt;
+&lt;p&gt;完整的示例程序详见：&lt;/p&gt;
+&lt;ul class="simple"&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://github.com/mozillazg/hello-libbpfgo/tree/master/12-raw-tracepoint-args"&gt;https://github.com/mozillazg/hello-libbpfgo/tree/master/12-raw-tracepoint-args&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://github.com/mozillazg/hello-libbpfgo/tree/master/13-raw-tracepoint-args-sched_switch"&gt;https://github.com/mozillazg/hello-libbpfgo/tree/master/13-raw-tracepoint-args-sched_switch&lt;/a&gt;&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/div&gt;
+&lt;div class="section" id="id3"&gt;
+&lt;h2 id="hidid3"&gt;参考资料&lt;a class="headerlink" href="#hidid3" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;ul class="simple"&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://lwn.net/Articles/379903/"&gt;Using the TRACE_EVENT() macro (Part 1) [LWN.net]&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://lwn.net/Articles/381064/"&gt;Using the TRACE_EVENT() macro (Part 2) [LWN.net]&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://lwn.net/Articles/383362/"&gt;Using the TRACE_EVENT() macro (Part 3) [LWN.net]&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://lwn.net/Articles/750569/"&gt;bpf, tracing: introduce bpf raw tracepoints [LWN.net]&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://nakryiko.com/posts/bpf-core-reference-guide/"&gt;BPF CO-RE reference guide&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://github.com/iovisor/bcc/blob/master/docs/reference_guide.md#7-raw-tracepoints"&gt;bcc/reference_guide.md at master · iovisor/bcc&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://github.com/libbpf/libbpf/blob/12e932ac0e18546dd7247e66ea1b4aa236d2ef38/src/libbpf.c#L9002-L9081"&gt;libbpf/libbpf.c at 12e932ac0e18546dd7247e66ea1b4aa236d2ef38 · libbpf/libbpf&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://nakryiko.com/posts/bcc-to-libbpf-howto-guide/"&gt;BCC to libbpf conversion guide&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://sysdig.com/blog/the-art-of-writing-ebpf-programs-a-primer/"&gt;The art of writing eBPF programs: a primer. –Sysdig&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://unix.stackexchange.com/questions/421750/where-do-you-find-the-syscall-table-for-linux"&gt;Where do you find the syscall table for Linux? - Unix &amp;amp; Linux Stack Exchange&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://linux.die.net/man/8/ausyscall"&gt;ausyscall(8) - Linux man page&lt;/a&gt;&lt;/li&gt;
+&lt;/ul&gt;
+&lt;!-- * `linux/syscall_32.tbl at v5.13 · torvalds/linux &lt;https://github.com/torvalds/linux/blob/v5.13/arch/x86/entry/syscalls/syscall_32.tbl&gt;`__ --&gt;
+&lt;!-- * `linux/syscall_64.tbl at v5.13 · torvalds/linux &lt;https://github.com/torvalds/linux/blob/v5.13/arch/x86/entry/syscalls/syscall_64.tbl&gt;`__ --&gt;
+&lt;!-- * `linux/syscall.tbl at v5.13 · torvalds/linux &lt;https://github.com/torvalds/linux/blob/v5.13/arch/arm/tools/syscall.tbl&gt;`__ --&gt;
+&lt;!-- * `linux/unistd.h at v5.13 · torvalds/linux &lt;https://github.com/torvalds/linux/blob/v5.13/include/uapi/asm-generic/unistd.h&gt;`__ --&gt;
+&lt;/div&gt;
+</description><dc:creator xmlns:dc="http://purl.org/dc/elements/1.1/">mozillazg</dc:creator><pubDate>Sun, 29 May 2022 00:00:00 +0000</pubDate><guid>tag:mozillazg.com,2022-05-29:2022/05/ebpf-libbpf-raw-tracepoint-common-questions.html</guid><category>raw-tracepoint</category><category>libbpf</category><category>libbpfgo</category></item><item><title>libbpfgo 使用示例：在内核态和用户态使用 ebpf map</title><link>https://mozillazg.com/2022/05/ebpf-libbpfgo-use-map-example.html</link><description>&lt;div class="section" id="id1"&gt;
 &lt;h2 id="hidid1"&gt;前言&lt;a class="headerlink" href="#hidid1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;p&gt;记录一下如何在 libbpfgo 程序中使用 ebpf map（ebpf map 本身的资料可以参考参考资料）。&lt;/p&gt;
 &lt;/div&gt;
@@ -112,7 +277,7 @@ syscalls:sys_enter_execve
 &lt;/div&gt;
 &lt;div class="section" id="sec"&gt;
 &lt;h2 id="hidsec"&gt;SEC 内容的格式&lt;a class="headerlink" href="#hidsec" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
-&lt;p&gt;tracepoint 事件对应的 SEC 格式为:&lt;/p&gt;
+&lt;p&gt;tracepoint 事件对应的 SEC 格式为（ &lt;tt class="docutils literal"&gt;&amp;lt;category&amp;gt;&lt;/tt&gt; 和 &lt;tt class="docutils literal"&gt;&amp;lt;name&amp;gt;&lt;/tt&gt; 的值均取值前面 available_events 文件中列出的内容 ）:&lt;/p&gt;
 &lt;pre class="literal-block"&gt;
 SEC(&amp;quot;tracepoint/&amp;lt;category&amp;gt;/&amp;lt;name&amp;gt;&amp;quot;)
 
@@ -130,7 +295,7 @@ SEC(&amp;quot;tp/&amp;lt;category&amp;gt;/&amp;lt;name&amp;gt;&amp;quot;)
 &lt;/div&gt;
 &lt;div class="section" id="id2"&gt;
 &lt;h2 id="hidid2"&gt;确定 tracepoint 事件处理函数的参数类型，获取对应的内核调用参数&lt;a class="headerlink" href="#hidid2" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
-&lt;p&gt;假设，我们想监控 &lt;tt class="docutils literal"&gt;chmod&lt;/tt&gt; 这个命令涉及的 &lt;tt class="docutils literal"&gt;fchmodat&lt;/tt&gt; 系统调用的 tracepoint 事件，
+&lt;p&gt;假设，我们想通过 tracepoint 监控 &lt;tt class="docutils literal"&gt;chmod&lt;/tt&gt; 这个命令涉及的 &lt;tt class="docutils literal"&gt;fchmodat&lt;/tt&gt; 系统调用，
 那么，如何确定ebpf 中事件处理函数的参数类型，以及如何获取到对应的 &lt;tt class="docutils literal"&gt;fchmodat&lt;/tt&gt; 这个系统调用涉及的参数的内容，
 比如拿到操作文件名称以及操作的权限 mode 的值。&lt;/p&gt;
 &lt;p&gt;第一步，先确定 &lt;tt class="docutils literal"&gt;chmod&lt;/tt&gt; 所使用的系统调用，这个比较简单，有很多种方法可以做到，比如通过 &lt;tt class="docutils literal"&gt;strace&lt;/tt&gt; 命令:&lt;/p&gt;
@@ -200,7 +365,11 @@ print fmt: &amp;quot;dfd: 0x%08lx, filename: 0x%08lx, mode: 0x%08lx&amp;quot;, (
         &lt;span class="c1"&gt;// ...&lt;/span&gt;
 &lt;span class="p"&gt;}&lt;/span&gt;
 &lt;/pre&gt;&lt;/div&gt;
-&lt;p&gt;完整的示例程序详见：&lt;a class="reference external" href="https://github.com/mozillazg/hello-libbpfgo/tree/master/07-tracepoint-args"&gt;https://github.com/mozillazg/hello-libbpfgo/tree/master/07-tracepoint-args&lt;/a&gt;&lt;/p&gt;
+&lt;p&gt;完整的示例程序详见：&lt;/p&gt;
+&lt;ul class="simple"&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://github.com/mozillazg/hello-libbpfgo/tree/master/07-tracepoint-args"&gt;https://github.com/mozillazg/hello-libbpfgo/tree/master/07-tracepoint-args&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://github.com/mozillazg/hello-libbpfgo/tree/master/14-tracepoint-args-sched_switch"&gt;https://github.com/mozillazg/hello-libbpfgo/tree/master/14-tracepoint-args-sched_switch&lt;/a&gt;&lt;/li&gt;
+&lt;/ul&gt;
 &lt;/div&gt;
 &lt;div class="section" id="id3"&gt;
 &lt;h2 id="hidid3"&gt;参考资料&lt;a class="headerlink" href="#hidid3" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
@@ -410,7 +579,7 @@ $ kubectl describe pod test |grep f1abcafee046eda0e9d78691dcc20fcde1d008bb84a2b0
                     &lt;span class="n"&gt;e&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="n"&gt;pid&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;bpf_get_current_pid_tgid&lt;/span&gt;&lt;span class="p"&gt;()&lt;/span&gt; &lt;span class="o"&gt;&amp;gt;&amp;gt;&lt;/span&gt; &lt;span class="mi"&gt;32&lt;/span&gt;&lt;span class="p"&gt;;&lt;/span&gt;
 
         &lt;span class="c1"&gt;// 写数据&lt;/span&gt;
-                    &lt;span class="n"&gt;bpf_perf_event_output&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;ctx&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="o"&gt;&amp;amp;&lt;/span&gt;&lt;span class="n"&gt;events&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="mh"&gt;0xffffffffULL&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="o"&gt;&amp;amp;&lt;/span&gt;&lt;span class="n"&gt;e&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="k"&gt;sizeof&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;e&lt;/span&gt;&lt;span class="p"&gt;));&lt;/span&gt;
+                    &lt;span class="n"&gt;bpf_perf_event_output&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;ctx&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="o"&gt;&amp;amp;&lt;/span&gt;&lt;span class="n"&gt;events&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;BPF_F_CURRENT_CPU&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="o"&gt;&amp;amp;&lt;/span&gt;&lt;span class="n"&gt;e&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="k"&gt;sizeof&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;e&lt;/span&gt;&lt;span class="p"&gt;));&lt;/span&gt;
 
                     &lt;span class="k"&gt;return&lt;/span&gt; &lt;span class="mi"&gt;0&lt;/span&gt;&lt;span class="p"&gt;;&lt;/span&gt;
     &lt;span class="p"&gt;}&lt;/span&gt;
@@ -671,112 +840,4 @@ runc:&lt;span class="o"&gt;[&lt;/span&gt;2:INIT&lt;span class="o"&gt;]&lt;/span&
 &lt;li&gt;&lt;a class="reference external" href="https://github.com/aquasecurity/tracee"&gt;aquasecurity/tracee: Linux Runtime Security and Forensics using eBPF&lt;/a&gt;&lt;/li&gt;
 &lt;/ul&gt;
 &lt;/div&gt;
-</description><dc:creator xmlns:dc="http://purl.org/dc/elements/1.1/">mozillazg</dc:creator><pubDate>Tue, 03 May 2022 00:00:00 +0000</pubDate><guid>tag:mozillazg.com,2022-05-03:2022/05/ebpf-libbpfgo-develop-env-and-hello-world.html</guid><category>libbpf</category><category>libbpfgo</category><category>go</category><category>golang</category></item><item><title>通过编写自定义内置函数的方式扩展 OPA/Rego 运行时</title><link>https://mozillazg.com/2021/12/opa-openpolicyagent-extend-opa-via-add-new-built-in-functions-to-rego-go-runtime.html</link><description>&lt;div class="section" id="id1"&gt;
-&lt;h2 id="hidid1"&gt;前言&lt;a class="headerlink" href="#hidid1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
-&lt;p&gt;本文记录一下如何通过编写自定义内置函数的函数扩展 OPA/Rego 运行时，使得在编写 OPA/Rego 策略语言的时候
-可以直接使用自定义的这个内置函数实现更复杂的策略需求。&lt;/p&gt;
-&lt;div class="section" id="id2"&gt;
-&lt;h3 id="hidid2"&gt;编写自定义内置函数&lt;a class="headerlink" href="#hidid2" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
-&lt;p&gt;我们将要编写的一个自定义内置函数名为 &lt;tt class="docutils literal"&gt;auth.get_user_info&lt;/tt&gt; ，这个函数的作用是，获取自定义 uid 的用户信息：&lt;/p&gt;
-&lt;pre class="literal-block"&gt;
-user := auth.get_user_info(uid)
-&lt;/pre&gt;
-&lt;p&gt;并且将使用 &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;github.com/open-policy-agent/opa&amp;#64;v0.35.0&lt;/span&gt;&lt;/tt&gt; 这个 opa 运行时库来编写这个自定义函数，
-我们可以使用这个库提供的 &lt;tt class="docutils literal"&gt;rego.RegisterBuiltin1&lt;/tt&gt; 函数来实现我们的需求：&lt;/p&gt;
-&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="kn"&gt;package&lt;/span&gt; &lt;span class="nx"&gt;main&lt;/span&gt;
-
-&lt;span class="kn"&gt;import&lt;/span&gt; &lt;span class="p"&gt;(&lt;/span&gt;
-        &lt;span class="s"&gt;&amp;quot;fmt&amp;quot;&lt;/span&gt;
-        &lt;span class="s"&gt;&amp;quot;os&amp;quot;&lt;/span&gt;
-
-        &lt;span class="s"&gt;&amp;quot;github.com/open-policy-agent/opa/ast&amp;quot;&lt;/span&gt;
-        &lt;span class="s"&gt;&amp;quot;github.com/open-policy-agent/opa/cmd&amp;quot;&lt;/span&gt;
-        &lt;span class="s"&gt;&amp;quot;github.com/open-policy-agent/opa/rego&amp;quot;&lt;/span&gt;
-        &lt;span class="s"&gt;&amp;quot;github.com/open-policy-agent/opa/types&amp;quot;&lt;/span&gt;
-&lt;span class="p"&gt;)&lt;/span&gt;
-
-&lt;span class="kd"&gt;type&lt;/span&gt; &lt;span class="nx"&gt;User&lt;/span&gt; &lt;span class="kd"&gt;struct&lt;/span&gt; &lt;span class="p"&gt;{&lt;/span&gt;
-        &lt;span class="nx"&gt;Name&lt;/span&gt; &lt;span class="kt"&gt;string&lt;/span&gt;
-        &lt;span class="nx"&gt;Age&lt;/span&gt; &lt;span class="kt"&gt;int&lt;/span&gt;
-&lt;span class="p"&gt;}&lt;/span&gt;
-
-&lt;span class="kd"&gt;func&lt;/span&gt; &lt;span class="nx"&gt;main&lt;/span&gt;&lt;span class="p"&gt;()&lt;/span&gt; &lt;span class="p"&gt;{&lt;/span&gt;
-        &lt;span class="nx"&gt;users&lt;/span&gt; &lt;span class="o"&gt;:=&lt;/span&gt; &lt;span class="kd"&gt;map&lt;/span&gt;&lt;span class="p"&gt;[&lt;/span&gt;&lt;span class="kt"&gt;string&lt;/span&gt;&lt;span class="p"&gt;]&lt;/span&gt;&lt;span class="nx"&gt;User&lt;/span&gt;&lt;span class="p"&gt;{&lt;/span&gt;
-                &lt;span class="s"&gt;&amp;quot;uid-1&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt; &lt;span class="p"&gt;{&lt;/span&gt;
-                        &lt;span class="nx"&gt;Name&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt; &lt;span class="s"&gt;&amp;quot;tom&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;
-                        &lt;span class="nx"&gt;Age&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;  &lt;span class="mi"&gt;25&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;
-                &lt;span class="p"&gt;},&lt;/span&gt;
-                &lt;span class="s"&gt;&amp;quot;uid-2&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt; &lt;span class="p"&gt;{&lt;/span&gt;
-                        &lt;span class="nx"&gt;Name&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt; &lt;span class="s"&gt;&amp;quot;eric&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;
-                        &lt;span class="nx"&gt;Age&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;  &lt;span class="mi"&gt;30&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;
-                &lt;span class="p"&gt;},&lt;/span&gt;
-        &lt;span class="p"&gt;}&lt;/span&gt;
-        &lt;span class="nx"&gt;rego&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;RegisterBuiltin1&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;
-                &lt;span class="o"&gt;&amp;amp;&lt;/span&gt;&lt;span class="nx"&gt;rego&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Function&lt;/span&gt;&lt;span class="p"&gt;{&lt;/span&gt;
-                        &lt;span class="nx"&gt;Name&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;    &lt;span class="s"&gt;&amp;quot;auth.get_user_info&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;
-                        &lt;span class="nx"&gt;Decl&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;    &lt;span class="nx"&gt;types&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;NewFunction&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="nx"&gt;types&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Args&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="nx"&gt;types&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;S&lt;/span&gt;&lt;span class="p"&gt;),&lt;/span&gt; &lt;span class="nx"&gt;types&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;A&lt;/span&gt;&lt;span class="p"&gt;),&lt;/span&gt;
-                        &lt;span class="nx"&gt;Memoize&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt; &lt;span class="kc"&gt;true&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;
-                &lt;span class="p"&gt;},&lt;/span&gt;
-                &lt;span class="kd"&gt;func&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="nx"&gt;bctx&lt;/span&gt; &lt;span class="nx"&gt;rego&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;BuiltinContext&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="nx"&gt;op1&lt;/span&gt; &lt;span class="o"&gt;*&lt;/span&gt;&lt;span class="nx"&gt;ast&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Term&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt; &lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="o"&gt;*&lt;/span&gt;&lt;span class="nx"&gt;ast&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Term&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="kt"&gt;error&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt; &lt;span class="p"&gt;{&lt;/span&gt;
-                        &lt;span class="kd"&gt;var&lt;/span&gt; &lt;span class="nx"&gt;uid&lt;/span&gt; &lt;span class="kt"&gt;string&lt;/span&gt;
-                        &lt;span class="k"&gt;if&lt;/span&gt; &lt;span class="nx"&gt;err&lt;/span&gt; &lt;span class="o"&gt;:=&lt;/span&gt; &lt;span class="nx"&gt;ast&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;As&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="nx"&gt;op1&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Value&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="o"&gt;&amp;amp;&lt;/span&gt;&lt;span class="nx"&gt;uid&lt;/span&gt;&lt;span class="p"&gt;);&lt;/span&gt; &lt;span class="nx"&gt;err&lt;/span&gt; &lt;span class="o"&gt;!=&lt;/span&gt; &lt;span class="kc"&gt;nil&lt;/span&gt; &lt;span class="p"&gt;{&lt;/span&gt;
-                                &lt;span class="k"&gt;return&lt;/span&gt; &lt;span class="kc"&gt;nil&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="nx"&gt;err&lt;/span&gt;
-                        &lt;span class="p"&gt;}&lt;/span&gt;
-                        &lt;span class="nx"&gt;user&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="nx"&gt;ok&lt;/span&gt; &lt;span class="o"&gt;:=&lt;/span&gt; &lt;span class="nx"&gt;users&lt;/span&gt;&lt;span class="p"&gt;[&lt;/span&gt;&lt;span class="nx"&gt;uid&lt;/span&gt;&lt;span class="p"&gt;]&lt;/span&gt;
-                        &lt;span class="k"&gt;if&lt;/span&gt; &lt;span class="p"&gt;!&lt;/span&gt;&lt;span class="nx"&gt;ok&lt;/span&gt; &lt;span class="p"&gt;{&lt;/span&gt;
-                                &lt;span class="k"&gt;return&lt;/span&gt; &lt;span class="kc"&gt;nil&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="nx"&gt;fmt&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Errorf&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="s"&gt;&amp;quot;user %s is not found&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="nx"&gt;uid&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
-                        &lt;span class="p"&gt;}&lt;/span&gt;
-                        &lt;span class="nx"&gt;v&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="nx"&gt;err&lt;/span&gt; &lt;span class="o"&gt;:=&lt;/span&gt; &lt;span class="nx"&gt;ast&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;InterfaceToValue&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="nx"&gt;user&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
-                        &lt;span class="k"&gt;if&lt;/span&gt; &lt;span class="nx"&gt;err&lt;/span&gt; &lt;span class="o"&gt;!=&lt;/span&gt; &lt;span class="kc"&gt;nil&lt;/span&gt; &lt;span class="p"&gt;{&lt;/span&gt;
-                                &lt;span class="k"&gt;return&lt;/span&gt; &lt;span class="kc"&gt;nil&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="nx"&gt;err&lt;/span&gt;
-                        &lt;span class="p"&gt;}&lt;/span&gt;
-                        &lt;span class="k"&gt;return&lt;/span&gt; &lt;span class="nx"&gt;ast&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;NewTerm&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="nx"&gt;v&lt;/span&gt;&lt;span class="p"&gt;),&lt;/span&gt; &lt;span class="kc"&gt;nil&lt;/span&gt;
-                &lt;span class="p"&gt;},&lt;/span&gt;
-        &lt;span class="p"&gt;)&lt;/span&gt;
-
-        &lt;span class="k"&gt;if&lt;/span&gt; &lt;span class="nx"&gt;err&lt;/span&gt; &lt;span class="o"&gt;:=&lt;/span&gt; &lt;span class="nx"&gt;cmd&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;RootCommand&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Execute&lt;/span&gt;&lt;span class="p"&gt;();&lt;/span&gt; &lt;span class="nx"&gt;err&lt;/span&gt; &lt;span class="o"&gt;!=&lt;/span&gt; &lt;span class="kc"&gt;nil&lt;/span&gt; &lt;span class="p"&gt;{&lt;/span&gt;
-                &lt;span class="nx"&gt;fmt&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Println&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="nx"&gt;err&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
-                &lt;span class="nx"&gt;os&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Exit&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="mi"&gt;1&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
-        &lt;span class="p"&gt;}&lt;/span&gt;
-&lt;span class="p"&gt;}&lt;/span&gt;
-&lt;/pre&gt;&lt;/div&gt;
-&lt;p&gt;测试：&lt;/p&gt;
-&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;$ go build -o custom-built-functions
-
-$ ./custom-built-functions run
-OPA 0.35.0 &lt;span class="o"&gt;(&lt;/span&gt;commit , built at &lt;span class="o"&gt;)&lt;/span&gt;
-
-Run &lt;span class="s1"&gt;&amp;#39;help&amp;#39;&lt;/span&gt; to see a list of commands and check &lt;span class="k"&gt;for&lt;/span&gt; updates.
-
-&amp;gt; uid :&lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="s2"&gt;&amp;quot;uid-1&amp;quot;&lt;/span&gt;
-Rule &lt;span class="s1"&gt;&amp;#39;uid&amp;#39;&lt;/span&gt; defined in package repl. Type &lt;span class="s1"&gt;&amp;#39;show&amp;#39;&lt;/span&gt; to see rules.
-&amp;gt; uid
-&lt;span class="s2"&gt;&amp;quot;uid-1&amp;quot;&lt;/span&gt;
-&amp;gt; user :&lt;span class="o"&gt;=&lt;/span&gt; auth.get_user_info&lt;span class="o"&gt;(&lt;/span&gt;uid&lt;span class="o"&gt;)&lt;/span&gt;
-Rule &lt;span class="s1"&gt;&amp;#39;user&amp;#39;&lt;/span&gt; defined in package repl. Type &lt;span class="s1"&gt;&amp;#39;show&amp;#39;&lt;/span&gt; to see rules.
-&amp;gt; user
-&lt;span class="o"&gt;{&lt;/span&gt;
-  &lt;span class="s2"&gt;&amp;quot;Age&amp;quot;&lt;/span&gt;: 25,
-  &lt;span class="s2"&gt;&amp;quot;Name&amp;quot;&lt;/span&gt;: &lt;span class="s2"&gt;&amp;quot;tom&amp;quot;&lt;/span&gt;
-&lt;span class="o"&gt;}&lt;/span&gt;
-&amp;gt; user.Age
-25
-&amp;gt; user.Name
-&lt;span class="s2"&gt;&amp;quot;tom&amp;quot;&lt;/span&gt;
-&amp;gt;
-Do you want to &lt;span class="nb"&gt;exit&lt;/span&gt; &lt;span class="o"&gt;([&lt;/span&gt;y&lt;span class="o"&gt;]&lt;/span&gt;/n&lt;span class="o"&gt;)&lt;/span&gt;? y
-&lt;/pre&gt;&lt;/div&gt;
-&lt;p&gt;通过上面的测试可以看到，我们已经实现了自定义内置函数的需求，并且测试结果也符合预期结果。&lt;/p&gt;
-&lt;p&gt;通过上面的示例代码中的 &lt;tt class="docutils literal"&gt;rego.RegisterBuiltin1&lt;/tt&gt; 这个函数名称可能已经猜到了，如果要定义接受两个参数
-的函数的话应该使用 &lt;tt class="docutils literal"&gt;rego.RegisterBuiltin2&lt;/tt&gt; 函数，同理还有 &lt;tt class="docutils literal"&gt;rego.RegisterBuiltin3&lt;/tt&gt; 和 &lt;tt class="docutils literal"&gt;reg.RegisterBuiltin4&lt;/tt&gt; 函数
-可供使用。以及还有一个定义不定长参数的 &lt;tt class="docutils literal"&gt;rego.RegisterBuiltinDyn&lt;/tt&gt; 可以用来满足跟复杂的函数需求。&lt;/p&gt;
-&lt;/div&gt;
-&lt;/div&gt;
-&lt;div class="section" id="id3"&gt;
-&lt;h2 id="hidid3"&gt;参考资料&lt;a class="headerlink" href="#hidid3" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
-&lt;ul class="simple"&gt;
-&lt;li&gt;&lt;a class="reference external" href="https://www.openpolicyagent.org/"&gt;Open Policy Agent&lt;/a&gt;&lt;/li&gt;
-&lt;li&gt;&lt;a class="reference external" href="https://github.com/open-policy-agent/opa"&gt;open-policy-agent/opa: An open source, general-purpose policy engine.&lt;/a&gt;&lt;/li&gt;
-&lt;/ul&gt;
-&lt;/div&gt;
-</description><dc:creator xmlns:dc="http://purl.org/dc/elements/1.1/">mozillazg</dc:creator><pubDate>Fri, 31 Dec 2021 00:00:00 +0000</pubDate><guid>tag:mozillazg.com,2021-12-31:2021/12/opa-openpolicyagent-extend-opa-via-add-new-built-in-functions-to-rego-go-runtime.html</guid><category>openpolicyagent</category><category>rego</category></item></channel></rss>
+</description><dc:creator xmlns:dc="http://purl.org/dc/elements/1.1/">mozillazg</dc:creator><pubDate>Tue, 03 May 2022 00:00:00 +0000</pubDate><guid>tag:mozillazg.com,2022-05-03:2022/05/ebpf-libbpfgo-develop-env-and-hello-world.html</guid><category>libbpf</category><category>libbpfgo</category><category>go</category><category>golang</category></item></channel></rss>
