@@ -1,7 +1,88 @@
 <?xml version="1.0" encoding="utf-8"?>
-<feed xmlns="http://www.w3.org/2005/Atom"><title>mozillazg's blog</title><link href="https://mozillazg.com/" rel="alternate"></link><link href="https://mozillazg.com/feeds/all.atom.xml" rel="self"></link><id>https://mozillazg.com/</id><updated>2022-05-29T00:00:00+00:00</updated><entry><title>ebpf/libbpf 程序使用 raw tracepoint 的常见问题</title><link href="https://mozillazg.com/2022/05/ebpf-libbpf-raw-tracepoint-common-questions.html" rel="alternate"></link><updated>2022-05-29T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2022-05-29:2022/05/ebpf-libbpf-raw-tracepoint-common-questions.html</id><summary type="html">&lt;div class="section" id="id1"&gt;
+<feed xmlns="http://www.w3.org/2005/Atom"><title>mozillazg's blog</title><link href="https://mozillazg.com/" rel="alternate"></link><link href="https://mozillazg.com/feeds/all.atom.xml" rel="self"></link><id>https://mozillazg.com/</id><updated>2022-06-14T00:00:00+00:00</updated><entry><title>ebpf/libbpf 程序使用 btf raw tracepoint 的常见问题</title><link href="https://mozillazg.com/2022/06/ebpf-libbpf-btf-powered-enabled-raw-tracepoint-common-questions.html" rel="alternate"></link><updated>2022-06-14T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2022-06-14:2022/06/ebpf-libbpf-btf-powered-enabled-raw-tracepoint-common-questions.html</id><summary type="html">&lt;div class="section" id="id1"&gt;
+&lt;h2 id="hidid1"&gt;前言&lt;a class="headerlink" href="#hidid1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;本文记录一些编写 ebpf/libbpf 程序时涉及到的 btf raw tracepoint 相关的常见问题。&lt;/p&gt;
+&lt;!-- （编写 ``BPF_PROG_TYPE_TRACING`` 程序） --&gt;
+&lt;/div&gt;
+&lt;div class="section" id="btf-raw-tracepoint-raw-tracepoint"&gt;
+&lt;h2 id="hidbtf-raw-tracepoint-raw-tracepoint"&gt;btf raw tracepoint 跟常规 raw tracepoint 的区别&lt;a class="headerlink" href="#hidbtf-raw-tracepoint-raw-tracepoint" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;所谓的 btf raw tracepoint 指的是 &lt;a class="reference external" href="https://lore.kernel.org/netdev/20201203204634.1325171-1-andrii&amp;#64;kernel.org/t/"&gt;BTF-powered raw tracepoint (tp_btf) 或者说是 BTF-enabled raw tracepoint&lt;/a&gt; 。&lt;/p&gt;
+&lt;p&gt;btf raw tracepoint 跟常规 raw tracepoint 有一个 &lt;a class="reference external" href="https://nakryiko.com/posts/bpf-core-reference-guide/#btf-enabled-bpf-program-types-with-direct-memory-reads"&gt;最主要的区别&lt;/a&gt; 是：
+btf 版本可以直接在 ebpf 程序中访问内核内存，
+不需要像常规 raw tracepoint 一样需要借助类似 &lt;tt class="docutils literal"&gt;bpf_core_read&lt;/tt&gt; 或 &lt;tt class="docutils literal"&gt;bpf_probe_read_kernel&lt;/tt&gt; 这样 的辅助函数才能访问内核内存:&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="k"&gt;struct&lt;/span&gt; &lt;span class="n"&gt;task_struct&lt;/span&gt; &lt;span class="o"&gt;*&lt;/span&gt;&lt;span class="n"&gt;task&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="k"&gt;struct&lt;/span&gt; &lt;span class="n"&gt;task_struct&lt;/span&gt; &lt;span class="o"&gt;*&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt; &lt;span class="n"&gt;bpf_get_current_task&lt;/span&gt;&lt;span class="p"&gt;();&lt;/span&gt;
+&lt;span class="n"&gt;u32&lt;/span&gt; &lt;span class="n"&gt;ppid&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;BPF_CORE_READ&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;task&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;real_parent&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;tgid&lt;/span&gt;&lt;span class="p"&gt;);&lt;/span&gt;
+
+&lt;span class="c1"&gt;// btf enabled&lt;/span&gt;
+&lt;span class="k"&gt;struct&lt;/span&gt; &lt;span class="n"&gt;task_struct&lt;/span&gt; &lt;span class="o"&gt;*&lt;/span&gt;&lt;span class="n"&gt;task&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="k"&gt;struct&lt;/span&gt; &lt;span class="n"&gt;task_struct&lt;/span&gt; &lt;span class="o"&gt;*&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt; &lt;span class="n"&gt;bpf_get_current_task_btf&lt;/span&gt;&lt;span class="p"&gt;();&lt;/span&gt;
+&lt;span class="n"&gt;u32&lt;/span&gt; &lt;span class="n"&gt;ppid&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;task&lt;/span&gt;&lt;span class="o"&gt;-&amp;gt;&lt;/span&gt;&lt;span class="n"&gt;real_parent&lt;/span&gt;&lt;span class="o"&gt;-&amp;gt;&lt;/span&gt;&lt;span class="n"&gt;tgid&lt;/span&gt;&lt;span class="p"&gt;;&lt;/span&gt;
+&lt;/pre&gt;&lt;/div&gt;
+&lt;/div&gt;
+&lt;div class="section" id="btf-raw-tracepoint"&gt;
+&lt;h2 id="hidbtf-raw-tracepoint"&gt;btf raw tracepoint 可以监控哪些事件&lt;a class="headerlink" href="#hidbtf-raw-tracepoint" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;btf raw tracepoint 跟 &lt;a class="reference external" href="https://mozillazg.com/2022/05/ebpf-libbpf-raw-tracepoint-common-questions.html"&gt;raw tracepoint&lt;/a&gt; 所能监控的事件是一样的，这里不再赘述。&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class="section" id="sec"&gt;
+&lt;h2 id="hidsec"&gt;SEC 内容的格式&lt;a class="headerlink" href="#hidsec" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;btf raw tracepoint 事件对应的 SEC 格式为:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+SEC(&amp;quot;tp_btf/&amp;lt;name&amp;gt;&amp;quot;)
+
+// 比如:
+// SEC(&amp;quot;tp_btf/sched_switch&amp;quot;)
+// SEC(&amp;quot;tp_btf/sys_enter&amp;quot;)
+// SEC(&amp;quot;tp_btf/sys_exit&amp;quot;)
+&lt;/pre&gt;
+&lt;p&gt;&lt;tt class="docutils literal"&gt;&amp;lt;name&amp;gt;&lt;/tt&gt; 的值跟 &lt;a class="reference external" href="https://mozillazg.com/2022/05/ebpf-libbpf-raw-tracepoint-common-questions.html"&gt;raw tracepoint&lt;/a&gt; SEC 中使用的 &lt;tt class="docutils literal"&gt;&amp;lt;name&amp;gt;&lt;/tt&gt; 是一样的。&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class="section" id="id2"&gt;
+&lt;h2 id="hidid2"&gt;如何确定 btf raw tracepoint 事件处理函数的参数类型，获取对应的内核调用参数&lt;a class="headerlink" href="#hidid2" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;所有事件都是在 vmlinux.h 中存在一个名为 &lt;tt class="docutils literal"&gt;btf_trace_&amp;lt;name&amp;gt;&lt;/tt&gt; 的定义。&lt;/p&gt;
+&lt;p&gt;比如 &lt;tt class="docutils literal"&gt;sys_enter&lt;/tt&gt; 这个事件对应的定义如下：&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="k"&gt;typedef&lt;/span&gt; &lt;span class="nf"&gt;void&lt;/span&gt; &lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="o"&gt;*&lt;/span&gt;&lt;span class="n"&gt;btf_trace_sys_enter&lt;/span&gt;&lt;span class="p"&gt;)(&lt;/span&gt;&lt;span class="kt"&gt;void&lt;/span&gt; &lt;span class="o"&gt;*&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="k"&gt;struct&lt;/span&gt; &lt;span class="n"&gt;pt_regs&lt;/span&gt; &lt;span class="o"&gt;*&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="kt"&gt;long&lt;/span&gt; &lt;span class="kt"&gt;int&lt;/span&gt;&lt;span class="p"&gt;);&lt;/span&gt;
+&lt;/pre&gt;&lt;/div&gt;
+&lt;p&gt;对应的 ebpf 函数可以定义成下面这样：&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="n"&gt;SEC&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="s"&gt;&amp;quot;tp_btf/sys_enter&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+&lt;span class="kt"&gt;int&lt;/span&gt; &lt;span class="n"&gt;btf_raw_tracepoint__sys_enter&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;u64&lt;/span&gt; &lt;span class="o"&gt;*&lt;/span&gt;&lt;span class="n"&gt;ctx&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+&lt;span class="p"&gt;{&lt;/span&gt;
+  &lt;span class="c1"&gt;// ...&lt;/span&gt;
+&lt;span class="p"&gt;}&lt;/span&gt;
+&lt;/pre&gt;&lt;/div&gt;
+&lt;p&gt;其中 &lt;tt class="docutils literal"&gt;ctx[0]&lt;/tt&gt; 对应上面 &lt;tt class="docutils literal"&gt;btf_trace_sys_enter&lt;/tt&gt; 中 &lt;tt class="docutils literal"&gt;void *&lt;/tt&gt; 后面的第一个参数 &lt;tt class="docutils literal"&gt;struct pt_regs *&lt;/tt&gt;,
+&lt;tt class="docutils literal"&gt;ctx[1]&lt;/tt&gt; 是第二个参数 &lt;tt class="docutils literal"&gt;long int&lt;/tt&gt; 。这两个参数的含义跟前面 &lt;a class="reference external" href="https://mozillazg.com/2022/05/ebpf-libbpf-raw-tracepoint-common-questions.html"&gt;raw tracepoint&lt;/a&gt; 中所说的 &lt;tt class="docutils literal"&gt;TP_PROTO(struct pt_regs *regs, long id)&lt;/tt&gt; 中的含义是一样的。&lt;/p&gt;
+&lt;p&gt;对应的，使用 btf raw tracepoint 获取 &lt;tt class="docutils literal"&gt;fchmodat&lt;/tt&gt; 系统调用事件的示例程序如下：&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="n"&gt;SEC&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="s"&gt;&amp;quot;tp_btf/sys_enter&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+&lt;span class="kt"&gt;int&lt;/span&gt; &lt;span class="n"&gt;btf_raw_tracepoint__sys_enter&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;u64&lt;/span&gt; &lt;span class="o"&gt;*&lt;/span&gt;&lt;span class="n"&gt;ctx&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+&lt;span class="p"&gt;{&lt;/span&gt;
+    &lt;span class="kt"&gt;long&lt;/span&gt; &lt;span class="kt"&gt;int&lt;/span&gt; &lt;span class="n"&gt;syscall_id&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="kt"&gt;long&lt;/span&gt; &lt;span class="kt"&gt;int&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;&lt;span class="n"&gt;ctx&lt;/span&gt;&lt;span class="p"&gt;[&lt;/span&gt;&lt;span class="mi"&gt;1&lt;/span&gt;&lt;span class="p"&gt;];&lt;/span&gt;
+    &lt;span class="k"&gt;if&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;syscall_id&lt;/span&gt; &lt;span class="o"&gt;!=&lt;/span&gt; &lt;span class="mi"&gt;268&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;    &lt;span class="c1"&gt;// fchmodat&lt;/span&gt;
+        &lt;span class="k"&gt;return&lt;/span&gt; &lt;span class="mi"&gt;0&lt;/span&gt;&lt;span class="p"&gt;;&lt;/span&gt;
+
+    &lt;span class="k"&gt;struct&lt;/span&gt; &lt;span class="n"&gt;pt_regs&lt;/span&gt; &lt;span class="o"&gt;*&lt;/span&gt;&lt;span class="n"&gt;regs&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="k"&gt;struct&lt;/span&gt; &lt;span class="n"&gt;pt_regs&lt;/span&gt; &lt;span class="o"&gt;*&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;&lt;span class="n"&gt;ctx&lt;/span&gt;&lt;span class="p"&gt;[&lt;/span&gt;&lt;span class="mi"&gt;0&lt;/span&gt;&lt;span class="p"&gt;];&lt;/span&gt;
+    &lt;span class="c1"&gt;// 后面的逻辑跟前面 raw tracepoint 示例程序中是一样的&lt;/span&gt;
+    &lt;span class="c1"&gt;// ...&lt;/span&gt;
+&lt;span class="p"&gt;}&lt;/span&gt;
+&lt;/pre&gt;&lt;/div&gt;
+&lt;p&gt;BTW, 在 btf raw tracepoint 程序中可以通过 &lt;tt class="docutils literal"&gt;bpf_get_current_task_btf()&lt;/tt&gt; 获取 btf 版本的 task 信息。&lt;/p&gt;
+&lt;p&gt;完整的示例程序如下：&lt;/p&gt;
+&lt;ul class="simple"&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://github.com/mozillazg/hello-libbpfgo/tree/master/16-btf-raw-tracepoint-args"&gt;https://github.com/mozillazg/hello-libbpfgo/tree/master/16-btf-raw-tracepoint-args&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://github.com/mozillazg/hello-libbpfgo/tree/master/17-btf-raw-tracepoint-args-sched_switch"&gt;https://github.com/mozillazg/hello-libbpfgo/tree/master/17-btf-raw-tracepoint-args-sched_switch&lt;/a&gt;&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/div&gt;
+&lt;div class="section" id="id3"&gt;
+&lt;h2 id="hidid3"&gt;参考资料&lt;a class="headerlink" href="#hidid3" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;ul class="simple"&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://lore.kernel.org/netdev/20201203204634.1325171-1-andrii&amp;#64;kernel.org/t/"&gt;[PATCH v6 bpf-next 00/14] Support BTF-powered BPF tracing programs for kernel modules&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://nakryiko.com/posts/bpf-core-reference-guide/#btf-enabled-bpf-program-types-with-direct-memory-reads"&gt;BPF CO-RE reference guide&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://github.com/libbpf/libbpf/blob/12e932ac0e18546dd7247e66ea1b4aa236d2ef38/src/libbpf.c#L9002-L9081"&gt;libbpf/libbpf.c at 12e932ac0e18546dd7247e66ea1b4aa236d2ef38 · libbpf/libbpf&lt;/a&gt;&lt;/li&gt;
+&lt;/ul&gt;
+&lt;!-- * https://github.com/aya-rs/aya/pull/85 --&gt;
+&lt;/div&gt;
+</summary><category term="btf"></category><category term="raw-tracepoint"></category><category term="libbpf"></category><category term="libbpfgo"></category></entry><entry><title>ebpf/libbpf 程序使用 raw tracepoint 的常见问题</title><link href="https://mozillazg.com/2022/05/ebpf-libbpf-raw-tracepoint-common-questions.html" rel="alternate"></link><updated>2022-05-29T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2022-05-29:2022/05/ebpf-libbpf-raw-tracepoint-common-questions.html</id><summary type="html">&lt;div class="section" id="id1"&gt;
 &lt;h2 id="hidid1"&gt;前言&lt;a class="headerlink" href="#hidid1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;p&gt;记录一些编写 ebpf/libbpf 程序时涉及到的 raw tracepoint 相关的常见问题。&lt;/p&gt;
+&lt;!-- （编写 ``BPF_PROG_TYPE_RAW_TRACEPOINT`` 程序） --&gt;
 &lt;!-- raw tracepoint 和 tracepoint 的区别 --&gt;
 &lt;!-- ===================================== --&gt;
 &lt;/div&gt;
@@ -37,7 +118,7 @@ sched:sched_switch
 &lt;/div&gt;
 &lt;div class="section" id="sec"&gt;
 &lt;h2 id="hidsec"&gt;SEC 内容的格式&lt;a class="headerlink" href="#hidsec" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
-&lt;p&gt;raw_tracepoint 事件对应的 SEC 格式为 (&lt;tt class="docutils literal"&gt;&amp;lt;name&amp;gt;&lt;/tt&gt; 值为上面 &lt;tt class="docutils literal"&gt;available_events&lt;/tt&gt; 文件中列出的那些 &lt;tt class="docutils literal"&gt;&amp;lt;name&amp;gt;&lt;/tt&gt;)&lt;/p&gt;
+&lt;p&gt;raw tracepoint 事件对应的 SEC 格式为:&lt;/p&gt;
 &lt;pre class="literal-block"&gt;
 SEC(&amp;quot;raw_tracepoint/&amp;lt;name&amp;gt;&amp;quot;)
 
@@ -51,6 +132,7 @@ SEC(&amp;quot;raw_tp/&amp;lt;name&amp;gt;&amp;quot;)
 // 比如:
 // SEC(&amp;quot;raw_tp/sched_switch&amp;quot;)
 &lt;/pre&gt;
+&lt;p&gt;&lt;tt class="docutils literal"&gt;&amp;lt;name&amp;gt;&lt;/tt&gt; 值为前面面 &lt;tt class="docutils literal"&gt;available_events&lt;/tt&gt; 文件中列出的那些 &lt;tt class="docutils literal"&gt;&amp;lt;name&amp;gt;&lt;/tt&gt; 。&lt;/p&gt;
 &lt;p&gt;&lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;SEC(&amp;quot;raw_tp/xx&amp;quot;)&lt;/span&gt;&lt;/tt&gt; 跟 &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;SEC(&amp;quot;raw_tracepoint/xx&amp;quot;)&lt;/span&gt;&lt;/tt&gt; 其实是等效的，看个人喜好随便用哪种都行。&lt;/p&gt;
 &lt;p&gt;有两个特殊情况，那就是:&lt;/p&gt;
 &lt;ul class="simple"&gt;
@@ -61,7 +143,7 @@ SEC(&amp;quot;raw_tp/&amp;lt;name&amp;gt;&amp;quot;)
 &lt;!-- 可以使用的 `include/trace/events/syscalls.h &lt;https://elixir.bootlin.com/linux/v5.13/source/include/trace/events/syscalls.h&gt;`__ 文件中定义的 ``sys_enter`` 和 ``sys_exit`` 事件来监控所有系统调用事件 --&gt;
 &lt;/div&gt;
 &lt;div class="section" id="id2"&gt;
-&lt;h2 id="hidid2"&gt;确定 raw tracepoint 事件处理函数的参数类型，获取对应的内核调用参数&lt;a class="headerlink" href="#hidid2" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;h2 id="hidid2"&gt;如何确定 raw tracepoint 事件处理函数的参数类型，获取对应的内核调用参数&lt;a class="headerlink" href="#hidid2" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;p&gt;假设，我们想通过 raw tracepoint 监控 &lt;tt class="docutils literal"&gt;chmod&lt;/tt&gt; 这个命令涉及的 &lt;tt class="docutils literal"&gt;fchmodat&lt;/tt&gt; 系统调用，
 那么，如何确定ebpf 中事件处理函数的参数类型，以及如何获取到对应的 &lt;tt class="docutils literal"&gt;fchmodat&lt;/tt&gt; 这个系统调用涉及的参数的内容，
 比如拿到操作文件名称以及操作的权限 mode 的值。&lt;/p&gt;
@@ -262,6 +344,7 @@ libbpf 中是会自动保存到 &lt;tt class="docutils literal"&gt;&lt;span clas
 </summary><category term="libbpf"></category><category term="libbpfgo"></category></entry><entry><title>ebpf/libbpf 程序使用 tracepoint 的常见问题</title><link href="https://mozillazg.com/2022/05/ebpf-libbpf-tracepoint-common-questions.html" rel="alternate"></link><updated>2022-05-15T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2022-05-15:2022/05/ebpf-libbpf-tracepoint-common-questions.html</id><summary type="html">&lt;div class="section" id="id1"&gt;
 &lt;h2 id="hidid1"&gt;前言&lt;a class="headerlink" href="#hidid1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;p&gt;记录一些编写 ebpf/libbpf 程序时涉及到的 tracepoint 相关的常见问题。&lt;/p&gt;
+&lt;!-- （编写 ``BPF_PROG_TYPE_TRACEPOINT`` 程序） --&gt;
 &lt;/div&gt;
 &lt;div class="section" id="tracepoint"&gt;
 &lt;h2 id="hidtracepoint"&gt;tracepoint 可以监控哪些事件&lt;a class="headerlink" href="#hidtracepoint" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
@@ -277,7 +360,7 @@ syscalls:sys_enter_execve
 &lt;/div&gt;
 &lt;div class="section" id="sec"&gt;
 &lt;h2 id="hidsec"&gt;SEC 内容的格式&lt;a class="headerlink" href="#hidsec" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
-&lt;p&gt;tracepoint 事件对应的 SEC 格式为（ &lt;tt class="docutils literal"&gt;&amp;lt;category&amp;gt;&lt;/tt&gt; 和 &lt;tt class="docutils literal"&gt;&amp;lt;name&amp;gt;&lt;/tt&gt; 的值均取值前面 available_events 文件中列出的内容 ）:&lt;/p&gt;
+&lt;p&gt;tracepoint 事件对应的 SEC 格式为:&lt;/p&gt;
 &lt;pre class="literal-block"&gt;
 SEC(&amp;quot;tracepoint/&amp;lt;category&amp;gt;/&amp;lt;name&amp;gt;&amp;quot;)
 
@@ -291,10 +374,11 @@ SEC(&amp;quot;tp/&amp;lt;category&amp;gt;/&amp;lt;name&amp;gt;&amp;quot;)
 // 比如:
 // SEC(&amp;quot;tp/syscalls/sys_enter_openat&amp;quot;)
 &lt;/pre&gt;
+&lt;p&gt;&lt;tt class="docutils literal"&gt;&amp;lt;category&amp;gt;&lt;/tt&gt; 和 &lt;tt class="docutils literal"&gt;&amp;lt;name&amp;gt;&lt;/tt&gt; 的值均取值前面 available_events 文件中列出的内容。&lt;/p&gt;
 &lt;p&gt;&lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;SEC(&amp;quot;tp/xx/yy&amp;quot;)&lt;/span&gt;&lt;/tt&gt; 跟 &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;SEC(&amp;quot;tracepoint/xx/yy&amp;quot;)&lt;/span&gt;&lt;/tt&gt; 其实是等效的，看个人喜好随便用哪种都行。&lt;/p&gt;
 &lt;/div&gt;
 &lt;div class="section" id="id2"&gt;
-&lt;h2 id="hidid2"&gt;确定 tracepoint 事件处理函数的参数类型，获取对应的内核调用参数&lt;a class="headerlink" href="#hidid2" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;h2 id="hidid2"&gt;如何确定 tracepoint 事件处理函数的参数类型，获取对应的内核调用参数&lt;a class="headerlink" href="#hidid2" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;p&gt;假设，我们想通过 tracepoint 监控 &lt;tt class="docutils literal"&gt;chmod&lt;/tt&gt; 这个命令涉及的 &lt;tt class="docutils literal"&gt;fchmodat&lt;/tt&gt; 系统调用，
 那么，如何确定ebpf 中事件处理函数的参数类型，以及如何获取到对应的 &lt;tt class="docutils literal"&gt;fchmodat&lt;/tt&gt; 这个系统调用涉及的参数的内容，
 比如拿到操作文件名称以及操作的权限 mode 的值。&lt;/p&gt;
@@ -706,138 +790,6 @@ $ kubectl describe pod test |grep f1abcafee046eda0e9d78691dcc20fcde1d008bb84a2b0
 &lt;h2 id="hidid2"&gt;参考资料&lt;a class="headerlink" href="#hidid2" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;ul class="simple"&gt;
 &lt;li&gt;&lt;a class="reference external" href="https://github.com/aquasecurity/libbpfgo"&gt;aquasecurity/libbpfgo: eBPF library for Go, wrapping libbpf&lt;/a&gt;&lt;/li&gt;
-&lt;/ul&gt;
-&lt;/div&gt;
-</summary><category term="libbpf"></category><category term="libbpfgo"></category><category term="go"></category><category term="golang"></category></entry><entry><title>libbpfgo 使用示例：搭建开发环境以及编写第一个 ebpf 程序</title><link href="https://mozillazg.com/2022/05/ebpf-libbpfgo-develop-env-and-hello-world.html" rel="alternate"></link><updated>2022-05-03T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2022-05-03:2022/05/ebpf-libbpfgo-develop-env-and-hello-world.html</id><summary type="html">&lt;div class="section" id="id1"&gt;
-&lt;h2 id="hidid1"&gt;前言&lt;a class="headerlink" href="#hidid1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
-&lt;p&gt;本文记录搭建 &lt;a class="reference external" href="https://github.com/aquasecurity/libbpfgo"&gt;libbpfgo&lt;/a&gt; 开发环境以及使用 libbpfgo 编写一个简单的 ebpf 示例程序。&lt;/p&gt;
-&lt;/div&gt;
-&lt;div class="section" id="id2"&gt;
-&lt;h2 id="hidid2"&gt;搭建开发环境&lt;a class="headerlink" href="#hidid2" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
-&lt;p&gt;为了简单起见，我这里使用 &lt;a class="reference external" href="https://www.vagrantup.com/"&gt;vagrant&lt;/a&gt; 搭建虚拟机开发环境:&lt;/p&gt;
-&lt;ol class="arabic simple"&gt;
-&lt;li&gt;安装 vagrant-env 插件：&lt;/li&gt;
-&lt;/ol&gt;
-&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;$ vagrant plugin install vagrant-env
-&lt;/pre&gt;&lt;/div&gt;
-&lt;ol class="arabic simple" start="2"&gt;
-&lt;li&gt;clone 示例代码仓库:&lt;/li&gt;
-&lt;/ol&gt;
-&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;$ mkdir -p &lt;span class="nv"&gt;$GOPATH&lt;/span&gt;/src/github.com/mozillazg &lt;span class="o"&gt;&amp;amp;&amp;amp;&lt;/span&gt; &lt;span class="se"&gt;\&lt;/span&gt;
-  &lt;span class="nb"&gt;cd&lt;/span&gt; &lt;span class="nv"&gt;$GOPATH&lt;/span&gt;/src/github.com/mozillazg &lt;span class="o"&gt;&amp;amp;&amp;amp;&lt;/span&gt; &lt;span class="se"&gt;\&lt;/span&gt;
-  git clone https://github.com/mozillazg/hello-libbpfgo.git &lt;span class="o"&gt;&amp;amp;&amp;amp;&lt;/span&gt; &lt;span class="se"&gt;\&lt;/span&gt;
-  &lt;span class="nb"&gt;cd&lt;/span&gt; hello-libbpfgo &lt;span class="o"&gt;&amp;amp;&amp;amp;&lt;/span&gt; &lt;span class="se"&gt;\&lt;/span&gt;
-  git submodule update --init --recursive
-&lt;/pre&gt;&lt;/div&gt;
-&lt;ol class="arabic simple" start="3"&gt;
-&lt;li&gt;配置 .env 文件（用于将本机的 GOPATH 挂载到虚拟机中）：&lt;/li&gt;
-&lt;/ol&gt;
-&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="c1"&gt;# 修改 .env 文件，将 GOPATH 的值修改为本机对应的路径&lt;/span&gt;
-$ cp .env.example .env
-&lt;/pre&gt;&lt;/div&gt;
-&lt;ol class="arabic simple" start="4"&gt;
-&lt;li&gt;启动虚拟机:&lt;/li&gt;
-&lt;/ol&gt;
-&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;$ vagrant up
-&lt;/pre&gt;&lt;/div&gt;
-&lt;ol class="arabic simple" start="5"&gt;
-&lt;li&gt;等虚拟机就位后，进入虚拟机:&lt;/li&gt;
-&lt;/ol&gt;
-&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;$ vagrant ssh
-&lt;/pre&gt;&lt;/div&gt;
-&lt;/div&gt;
-&lt;div class="section" id="id3"&gt;
-&lt;h2 id="hidid3"&gt;编写示例程序&lt;a class="headerlink" href="#hidid3" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
-&lt;p&gt;这里使用 hello-libbpfgo 中 &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;01-hello-world&lt;/span&gt;&lt;/tt&gt; 目录下的示例程序为例简单介绍一下示例程序。&lt;/p&gt;
-&lt;p&gt;main.ebpf.c:&lt;/p&gt;
-&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="cp"&gt;#include&lt;/span&gt; &lt;span class="cpf"&gt;&amp;quot;vmlinux.h&amp;quot;&lt;/span&gt;&lt;span class="cp"&gt;&lt;/span&gt;
-
-&lt;span class="cp"&gt;#include&lt;/span&gt; &lt;span class="cpf"&gt;&amp;lt;bpf/bpf_helpers.h&amp;gt;&lt;/span&gt;&lt;span class="cp"&gt;&lt;/span&gt;
-&lt;span class="cp"&gt;#include&lt;/span&gt; &lt;span class="cpf"&gt;&amp;lt;bpf/bpf_tracing.h&amp;gt;&lt;/span&gt;&lt;span class="cp"&gt;&lt;/span&gt;
-
-&lt;span class="n"&gt;SEC&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="s"&gt;&amp;quot;kprobe/do_sys_openat2&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
-&lt;span class="kt"&gt;int&lt;/span&gt; &lt;span class="n"&gt;kprobe__do_sys_openat2&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="k"&gt;struct&lt;/span&gt; &lt;span class="n"&gt;pt_regs&lt;/span&gt; &lt;span class="o"&gt;*&lt;/span&gt;&lt;span class="n"&gt;ctx&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
-&lt;span class="p"&gt;{&lt;/span&gt;
-                &lt;span class="kt"&gt;char&lt;/span&gt; &lt;span class="n"&gt;file_name&lt;/span&gt;&lt;span class="p"&gt;[&lt;/span&gt;&lt;span class="mi"&gt;256&lt;/span&gt;&lt;span class="p"&gt;];&lt;/span&gt;
-                &lt;span class="n"&gt;bpf_probe_read&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;file_name&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="k"&gt;sizeof&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;file_name&lt;/span&gt;&lt;span class="p"&gt;),&lt;/span&gt; &lt;span class="n"&gt;PT_REGS_PARM2&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;ctx&lt;/span&gt;&lt;span class="p"&gt;));&lt;/span&gt;
-
-                &lt;span class="kt"&gt;char&lt;/span&gt; &lt;span class="n"&gt;fmt&lt;/span&gt;&lt;span class="p"&gt;[]&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="s"&gt;&amp;quot;open file %s&lt;/span&gt;&lt;span class="se"&gt;\n&lt;/span&gt;&lt;span class="s"&gt;&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;;&lt;/span&gt;
-                &lt;span class="n"&gt;bpf_trace_printk&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;fmt&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="k"&gt;sizeof&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;fmt&lt;/span&gt;&lt;span class="p"&gt;),&lt;/span&gt; &lt;span class="o"&gt;&amp;amp;&lt;/span&gt;&lt;span class="n"&gt;file_name&lt;/span&gt;&lt;span class="p"&gt;);&lt;/span&gt;
-
-                &lt;span class="k"&gt;return&lt;/span&gt; &lt;span class="mi"&gt;0&lt;/span&gt;&lt;span class="p"&gt;;&lt;/span&gt;
-&lt;span class="p"&gt;}&lt;/span&gt;
-&lt;/pre&gt;&lt;/div&gt;
-&lt;p&gt;main.ebpf.c 这个程序比较简单，就是hook &lt;tt class="docutils literal"&gt;do_sys_openat2&lt;/tt&gt; 这个内核函数的调用，
-将函数调用参数中的 filename 信息给记录下来。&lt;/p&gt;
-&lt;p&gt;主要看一下，怎么在 go 程序中使用 libbpfgo 调用这个 ebpf 程序：&lt;/p&gt;
-&lt;p&gt;main.go:&lt;/p&gt;
-&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="kn"&gt;package&lt;/span&gt; &lt;span class="nx"&gt;main&lt;/span&gt;
-
-&lt;span class="kn"&gt;import&lt;/span&gt; &lt;span class="p"&gt;(&lt;/span&gt;
-        &lt;span class="s"&gt;&amp;quot;fmt&amp;quot;&lt;/span&gt;
-        &lt;span class="s"&gt;&amp;quot;time&amp;quot;&lt;/span&gt;
-
-        &lt;span class="nx"&gt;bpf&lt;/span&gt; &lt;span class="s"&gt;&amp;quot;github.com/aquasecurity/libbpfgo&amp;quot;&lt;/span&gt;
-&lt;span class="p"&gt;)&lt;/span&gt;
-
-&lt;span class="kd"&gt;func&lt;/span&gt; &lt;span class="nx"&gt;main&lt;/span&gt;&lt;span class="p"&gt;()&lt;/span&gt; &lt;span class="p"&gt;{&lt;/span&gt;
-        &lt;span class="nx"&gt;bpfModule&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="nx"&gt;err&lt;/span&gt; &lt;span class="o"&gt;:=&lt;/span&gt; &lt;span class="nx"&gt;bpf&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;NewModuleFromFile&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="s"&gt;&amp;quot;main.bpf.o&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
-        &lt;span class="k"&gt;if&lt;/span&gt; &lt;span class="nx"&gt;err&lt;/span&gt; &lt;span class="o"&gt;!=&lt;/span&gt; &lt;span class="kc"&gt;nil&lt;/span&gt; &lt;span class="p"&gt;{&lt;/span&gt;
-                &lt;span class="nb"&gt;panic&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="nx"&gt;err&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
-        &lt;span class="p"&gt;}&lt;/span&gt;
-        &lt;span class="k"&gt;defer&lt;/span&gt; &lt;span class="nx"&gt;bpfModule&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Close&lt;/span&gt;&lt;span class="p"&gt;()&lt;/span&gt;
-        &lt;span class="k"&gt;if&lt;/span&gt; &lt;span class="nx"&gt;err&lt;/span&gt; &lt;span class="o"&gt;:=&lt;/span&gt; &lt;span class="nx"&gt;bpfModule&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;BPFLoadObject&lt;/span&gt;&lt;span class="p"&gt;();&lt;/span&gt; &lt;span class="nx"&gt;err&lt;/span&gt; &lt;span class="o"&gt;!=&lt;/span&gt; &lt;span class="kc"&gt;nil&lt;/span&gt; &lt;span class="p"&gt;{&lt;/span&gt;
-                &lt;span class="nb"&gt;panic&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="nx"&gt;err&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
-        &lt;span class="p"&gt;}&lt;/span&gt;
-        &lt;span class="nx"&gt;prog&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="nx"&gt;err&lt;/span&gt; &lt;span class="o"&gt;:=&lt;/span&gt; &lt;span class="nx"&gt;bpfModule&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;GetProgram&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="s"&gt;&amp;quot;kprobe__do_sys_openat2&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
-        &lt;span class="k"&gt;if&lt;/span&gt; &lt;span class="nx"&gt;err&lt;/span&gt; &lt;span class="o"&gt;!=&lt;/span&gt; &lt;span class="kc"&gt;nil&lt;/span&gt; &lt;span class="p"&gt;{&lt;/span&gt;
-                &lt;span class="nb"&gt;panic&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="nx"&gt;err&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
-        &lt;span class="p"&gt;}&lt;/span&gt;
-        &lt;span class="k"&gt;if&lt;/span&gt; &lt;span class="nx"&gt;_&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="nx"&gt;err&lt;/span&gt; &lt;span class="o"&gt;:=&lt;/span&gt; &lt;span class="nx"&gt;prog&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;AttachKprobe&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="s"&gt;&amp;quot;do_sys_openat2&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;);&lt;/span&gt; &lt;span class="nx"&gt;err&lt;/span&gt; &lt;span class="o"&gt;!=&lt;/span&gt; &lt;span class="kc"&gt;nil&lt;/span&gt; &lt;span class="p"&gt;{&lt;/span&gt;
-                &lt;span class="nb"&gt;panic&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="nx"&gt;err&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
-        &lt;span class="p"&gt;}&lt;/span&gt;
-
-        &lt;span class="k"&gt;for&lt;/span&gt; &lt;span class="p"&gt;{&lt;/span&gt;
-                &lt;span class="nx"&gt;fmt&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Println&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="s"&gt;&amp;quot;Waiting...&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
-                &lt;span class="nx"&gt;time&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Sleep&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="mi"&gt;10&lt;/span&gt; &lt;span class="o"&gt;*&lt;/span&gt; &lt;span class="nx"&gt;time&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Second&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
-        &lt;span class="p"&gt;}&lt;/span&gt;
-&lt;span class="p"&gt;}&lt;/span&gt;
-&lt;/pre&gt;&lt;/div&gt;
-&lt;p&gt;从上面的 go 程序中可以看到，使用 libbpfgo 调用 ebpf 程序主要有四个步骤：&lt;/p&gt;
-&lt;ol class="arabic simple"&gt;
-&lt;li&gt;通过 bpf.NewModuleFromFile 方法读取编译好的 .o 文件&lt;/li&gt;
-&lt;li&gt;使用 bpfModule.BPFLoadObject() 加载读取的 .o 文件中对象信息&lt;/li&gt;
-&lt;li&gt;使用 bpfModule.GetProgram 获取 ebpf 程序中对应的 hook 函数&lt;/li&gt;
-&lt;li&gt;如果这个函数是个 kprobe hook 函数，那么就调用 prog.AttachKprobe
-把它 attach 到对应的内核函数hook中。&lt;/li&gt;
-&lt;/ol&gt;
-&lt;p&gt;下面编译程序然后看一下对应的效果：&lt;/p&gt;
-&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;$ vagrant ssh
-$ &lt;span class="nb"&gt;cd&lt;/span&gt; &lt;span class="nv"&gt;$GOPATH&lt;/span&gt;/src/github.com/mozillazg/hello-libbpfgo/01-hello-world &lt;span class="o"&gt;&amp;amp;&amp;amp;&lt;/span&gt; &lt;span class="se"&gt;\&lt;/span&gt;
-    make
-$ sudo ./main-static
-&lt;/pre&gt;&lt;/div&gt;
-&lt;p&gt;另开一个终端，查看 ebpf 中打印的信息:&lt;/p&gt;
-&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;$ vagrant ssh
-$ sudo cat /sys/kernel/debug/tracing/trace_pipe
-
-runc:&lt;span class="o"&gt;[&lt;/span&gt;2:INIT&lt;span class="o"&gt;]&lt;/span&gt;-100616  &lt;span class="o"&gt;[&lt;/span&gt;000&lt;span class="o"&gt;]&lt;/span&gt; d...  5527.233315: bpf_trace_printk: open file /proc/self/fd
-
-runc:&lt;span class="o"&gt;[&lt;/span&gt;2:INIT&lt;span class="o"&gt;]&lt;/span&gt;-100616  &lt;span class="o"&gt;[&lt;/span&gt;000&lt;span class="o"&gt;]&lt;/span&gt; d...  5527.233641: bpf_trace_printk: open file /proc/self/status
-
-runc:&lt;span class="o"&gt;[&lt;/span&gt;2:INIT&lt;span class="o"&gt;]&lt;/span&gt;-100616  &lt;span class="o"&gt;[&lt;/span&gt;000&lt;span class="o"&gt;]&lt;/span&gt; d...  5527.233802: bpf_trace_printk: open file /etc/passwd
-
-runc:&lt;span class="o"&gt;[&lt;/span&gt;2:INIT&lt;span class="o"&gt;]&lt;/span&gt;-100616  &lt;span class="o"&gt;[&lt;/span&gt;000&lt;span class="o"&gt;]&lt;/span&gt; d...  5527.233829: bpf_trace_printk: open file /etc/group
-&lt;/pre&gt;&lt;/div&gt;
-&lt;p&gt;更多信息，详见 &lt;a class="reference external" href="https://github.com/mozillazg/hello-libbpfgo/tree/master/01-hello-world"&gt;https://github.com/mozillazg/hello-libbpfgo/tree/master/01-hello-world&lt;/a&gt;&lt;/p&gt;
-&lt;/div&gt;
-&lt;div class="section" id="id4"&gt;
-&lt;h2 id="hidid4"&gt;参考资料&lt;a class="headerlink" href="#hidid4" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
-&lt;ul class="simple"&gt;
-&lt;li&gt;&lt;a class="reference external" href="https://blog.aquasec.com/libbpf-ebpf-programs"&gt;How to Build eBPF Programs with libbpfgo&lt;/a&gt;&lt;/li&gt;
-&lt;li&gt;&lt;a class="reference external" href="https://github.com/aquasecurity/btfhub"&gt;aquasecurity/btfhub: BTFHub, together with BTFHub Archive repository, provides BTF files for existing published kernels that don't support embedded BTF.&lt;/a&gt;&lt;/li&gt;
-&lt;li&gt;&lt;a class="reference external" href="https://github.com/aquasecurity/libbpfgo"&gt;aquasecurity/libbpfgo: eBPF library for Go, wrapping libbpf&lt;/a&gt;&lt;/li&gt;
-&lt;li&gt;&lt;a class="reference external" href="https://github.com/aquasecurity/tracee"&gt;aquasecurity/tracee: Linux Runtime Security and Forensics using eBPF&lt;/a&gt;&lt;/li&gt;
 &lt;/ul&gt;
 &lt;/div&gt;
 </summary><category term="libbpf"></category><category term="libbpfgo"></category><category term="go"></category><category term="golang"></category></entry></feed>

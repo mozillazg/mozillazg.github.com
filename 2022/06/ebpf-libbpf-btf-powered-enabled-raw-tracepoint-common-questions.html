@@ -1,0 +1,436 @@
+<!DOCTYPE html>
+<html lang="zh"  prefix="og: http://ogp.me/ns# fb: https://www.facebook.com/2008/fbml" class="han-init">
+<head>
+    <title>ebpf/libbpf 程序使用 btf raw tracepoint 的常见问题 - mozillazg's blog</title>
+    <!-- Using the latest rendering mode for IE -->
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <!-- share.css -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/social-share.js@1.0.16/dist/css/share.min.css">
+
+
+    <link href="https://mozillazg.com/favicon.ico" rel="icon">
+
+<link rel="canonical" href="https://mozillazg.com/2022/06/ebpf-libbpf-btf-powered-enabled-raw-tracepoint-common-questions.html">
+
+        <meta name="author" content="mozillazg" />
+        <meta name="keywords" content="ebpf,btf,raw-tracepoint,libbpf,libbpfgo" />
+    <meta name="description" content="前言 本文记录一些编写 ebpf/libbpf 程序时涉及到的 btf raw tracepoint 相关的常见问题。 btf raw tracepoint 跟常规 raw tracepoint 的区别 所谓的 btf raw tracepoint 指的是 BTF-powered raw tracepoint (tp_btf) 或者说是 BTF-enabled raw tracepoint 。 btf raw tracepoint 跟常规 raw tracepoint 有一个 最主要的区别 是： btf 版本可以直接在 ebpf 程序中访问内核内存， 不需要像常规 raw tracepoint 一样需要借助类似 bpf_core_read 或 bpf_probe_read_kernel 这样 的辅助函数才能访问内核内存: struct task_struct *task = (struct task_struct *) bpf_get_current_task(); u32 ppid = BPF_CORE_READ(task, real_parent, tgid); // btf enabled struct task_struct *task = (struct task_struct *) bpf_get_current_task_btf(); u32 ppid = task-&gt;real_parent-&gt;tgid; btf raw tracepoint 可以监控哪些事件 btf raw tracepoint 跟 raw tracepoint 所能监控的事件是一样的，这里不再赘述。 SEC 内容的格式 btf raw tracepoint 事件对应的 SEC 格式为: SEC(&#34;tp_btf/&lt;name&gt;&#34;) // 比如: // SEC(&#34;tp_btf/sched_switch&#34;) // SEC(&#34;tp_btf/sys_enter&#34;) // SEC(&#34;tp_btf/sys_exit&#34;) &lt;name&gt; 的值跟 raw tracepoint SEC 中使用的 &lt;name&gt; 是一样的。 如何确定 btf raw tracepoint 事件处理函数的参数类型，获取对应的内核调用参数 所有事件都是在 vmlinux.h 中存在一个名为 btf_trace_&lt;name&gt; 的定义。 比如 sys_enter 这个事件对应的定义如下： typedef void (*btf_trace_sys_enter)(void *, struct pt_regs *, long int); 对应的 ebpf 函数可以定义成下面这样： SEC(&#34;tp_btf/sys_enter&#34;) int btf_raw_tracepoint__sys_enter(u64 *ctx) { // ... } 其中 ctx[0] 对应上面 btf_trace_sys_enter 中 void * 后面的第一个参数 struct pt_regs *, ctx[1] 是第二个参数 long int 。这两个参数的含义跟前面 raw tracepoint 中所说的 TP_PROTO(struct pt_regs *regs, long id) 中的含义是一样的。 对应的，使用 btf raw tracepoint 获取 fchmodat 系统调用事件的示例程序如下： SEC(&#34;tp_btf/sys_enter&#34;) int btf_raw_tracepoint__sys_enter(u64 *ctx) { long int syscall_id = (long int)ctx[1]; if(syscall_id != 268) // fchmodat return 0; struct pt_regs *regs = (struct pt_regs *)ctx[0]; // 后面的逻辑跟前面 raw tracepoint 示例程序中是一样的 // ... } BTW, 在 btf raw tracepoint 程序中可以通过 bpf_get_current_task_btf() 获取 btf 版本的 task 信息。 完整的示例程序如下： https://github.com/mozillazg/hello-libbpfgo/tree/master/16-btf-raw-tracepoint-args https://github.com/mozillazg/hello-libbpfgo/tree/master/17-btf-raw-tracepoint-args-sched_switch 参考资料 [PATCH v6 bpf-next 00/14] Support BTF-powered BPF tracing programs for kernel modules BPF CO-RE reference guide libbpf/libbpf.c at 12e932ac0e18546dd7247e66ea1b4aa236d2ef38 · libbpf/libbpf" />
+    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-4941850466486001"
+     crossorigin="anonymous"></script>
+
+    <style>
+      .js-toc {
+        margin-bottom: 20px;
+      }
+      .donate-modal {
+        text-align: center;
+      }
+      #donate-modal-container .donate-image {
+        max-height: 300px !important;
+        min-height: inherit !important;
+      }
+    </style>
+
+        <meta property="og:site_name" content="mozillazg's blog" />
+        <meta property="og:type" content="article"/>
+        <meta property="og:title" content="ebpf/libbpf 程序使用 btf raw tracepoint 的常见问题"/>
+        <meta property="og:url" content="https://mozillazg.com/2022/06/ebpf-libbpf-btf-powered-enabled-raw-tracepoint-common-questions.html"/>
+        <meta property="og:description" content="前言 本文记录一些编写 ebpf/libbpf 程序时涉及到的 btf raw tracepoint 相关的常见问题。 btf raw tracepoint 跟常规 raw tracepoint 的区别 所谓的 btf raw tracepoint 指的是 BTF-powered raw tracepoint (tp_btf) 或者说是 BTF-enabled raw tracepoint 。 btf raw tracepoint 跟常规 raw tracepoint 有一个 最主要的区别 是： btf 版本可以直接在 ebpf 程序中访问内核内存， 不需要像常规 raw tracepoint 一样需要借助类似 bpf_core_read 或 bpf_probe_read_kernel 这样 的辅助函数才能访问内核内存: struct task_struct *task = (struct task_struct *) bpf_get_current_task(); u32 ppid = BPF_CORE_READ(task, real_parent, tgid); // btf enabled struct task_struct *task = (struct task_struct *) bpf_get_current_task_btf(); u32 ppid = task-&gt;real_parent-&gt;tgid; btf raw tracepoint 可以监控哪些事件 btf raw tracepoint 跟 raw tracepoint 所能监控的事件是一样的，这里不再赘述。 SEC 内容的格式 btf raw tracepoint 事件对应的 SEC 格式为: SEC(&#34;tp_btf/&lt;name&gt;&#34;) // 比如: // SEC(&#34;tp_btf/sched_switch&#34;) // SEC(&#34;tp_btf/sys_enter&#34;) // SEC(&#34;tp_btf/sys_exit&#34;) &lt;name&gt; 的值跟 raw tracepoint SEC 中使用的 &lt;name&gt; 是一样的。 如何确定 btf raw tracepoint 事件处理函数的参数类型，获取对应的内核调用参数 所有事件都是在 vmlinux.h 中存在一个名为 btf_trace_&lt;name&gt; 的定义。 比如 sys_enter 这个事件对应的定义如下： typedef void (*btf_trace_sys_enter)(void *, struct pt_regs *, long int); 对应的 ebpf 函数可以定义成下面这样： SEC(&#34;tp_btf/sys_enter&#34;) int btf_raw_tracepoint__sys_enter(u64 *ctx) { // ... } 其中 ctx[0] 对应上面 btf_trace_sys_enter 中 void * 后面的第一个参数 struct pt_regs *, ctx[1] 是第二个参数 long int 。这两个参数的含义跟前面 raw tracepoint 中所说的 TP_PROTO(struct pt_regs *regs, long id) 中的含义是一样的。 对应的，使用 btf raw tracepoint 获取 fchmodat 系统调用事件的示例程序如下： SEC(&#34;tp_btf/sys_enter&#34;) int btf_raw_tracepoint__sys_enter(u64 *ctx) { long int syscall_id = (long int)ctx[1]; if(syscall_id != 268) // fchmodat return 0; struct pt_regs *regs = (struct pt_regs *)ctx[0]; // 后面的逻辑跟前面 raw tracepoint 示例程序中是一样的 // ... } BTW, 在 btf raw tracepoint 程序中可以通过 bpf_get_current_task_btf() 获取 btf 版本的 task 信息。 完整的示例程序如下： https://github.com/mozillazg/hello-libbpfgo/tree/master/16-btf-raw-tracepoint-args https://github.com/mozillazg/hello-libbpfgo/tree/master/17-btf-raw-tracepoint-args-sched_switch 参考资料 [PATCH v6 bpf-next 00/14] Support BTF-powered BPF tracing programs for kernel modules BPF CO-RE reference guide libbpf/libbpf.c at 12e932ac0e18546dd7247e66ea1b4aa236d2ef38 · libbpf/libbpf"/>
+        <meta property="article:published_time" content="2022-06-14" />
+            <meta property="article:section" content="ebpf" />
+            <meta property="article:tag" content="ebpf" />
+            <meta property="article:tag" content="btf" />
+            <meta property="article:tag" content="raw-tracepoint" />
+            <meta property="article:tag" content="libbpf" />
+            <meta property="article:tag" content="libbpfgo" />
+            <meta property="article:author" content="mozillazg" />
+            <meta property="og:image"
+                  content="https://mozillazg.com/static/avatar.jpeg"/>
+
+
+    <meta name="twitter:card" content="summary">
+        <meta name="twitter:site" content="@mozillazg">
+        <meta name="twitter:creator" content="@mozillazg">
+    <meta name="twitter:domain" content="https://mozillazg.com">
+            <meta property="twitter:image"
+                  content="https://mozillazg.com/static/avatar.jpeg"/>
+
+    <!-- Bootstrap -->
+        <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@3.3.4/dist/css/bootstrap.min.css" type="text/css"/>
+    <link href="https://cdn.jsdelivr.net/npm/font-awesome@4.3.0/css/font-awesome.min.css" rel="stylesheet">
+
+    <link href="https://cdn.jsdelivr.net/npm/pygments-css@1.0.0/github.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://mozillazg.com/theme/css/style.css" type="text/css"/>
+            <link href="https://mozillazg.com/static/custom.css" rel="stylesheet">
+
+        <link href="https://mozillazg.com/feeds/all.atom.xml" type="application/atom+xml" rel="alternate"
+              title="mozillazg's blog ATOM Feed"/>
+
+        <link href="https://mozillazg.com/feeds/all.rss.xml" type="application/rss+xml" rel="alternate"
+              title="mozillazg's blog RSS Feed"/>
+
+
+        <link href="https://mozillazg.com/feeds/ebpf.atom.xml" type="application/atom+xml" rel="alternate"
+              title="mozillazg's blog ebpf ATOM Feed"/>
+
+
+    <script type="application/ld+json">
+    {
+        "@context": "https://schema.org",
+        "@type": "BlogPosting",
+        "publisher": {
+            "@type": "Person",
+            "name": "mozillazg",
+            "logo": "https://mozillazg.com/static/avatar.jpeg"
+        },
+        "author": {
+            "@type": "Person",
+            "name": "mozillazg",
+            "image": "https://mozillazg.com/static/avatar.jpeg",
+            "url": "https://mozillazg.com",
+            "sameAs": []
+        },
+        "headline": "ebpf/libbpf 程序使用 btf raw tracepoint 的常见问题",
+        "url": "https://mozillazg.com/2022/06/ebpf-libbpf-btf-powered-enabled-raw-tracepoint-common-questions.html",
+        "image": [
+            "https://mozillazg.com/static/avatar.jpeg"
+         ],
+        "keywords": "ebpf, btf, raw-tracepoint, libbpf, libbpfgo",
+        "description": "前言 本文记录一些编写 ebpf/libbpf 程序时涉及到的 btf raw tracepoint 相关的常见问题。 btf raw tracepoint 跟常规 raw tracepoint 的区别 所谓的 btf raw tracepoint 指的是 BTF-powered raw tracepoint (tp_btf) 或者说是 BTF-enabled raw tracepoint 。 btf raw tracepoint 跟常规 raw tracepoint 有一个 最主要的区别 是： btf 版本可以直接在 ebpf 程序中访问内核内存， 不需要像常规 raw tracepoint 一样需要借助类似 bpf_core_read 或 bpf_probe_read_kernel 这样 的辅助函数才能访问内核内存: struct task_struct *task = (struct task_struct *) bpf_get_current_task(); u32 ppid = BPF_CORE_READ(task, real_parent, tgid); // btf enabled struct task_struct *task = (struct task_struct *) bpf_get_current_task_btf(); u32 ppid = task-&gt;real_parent-&gt;tgid; btf raw tracepoint 可以监控哪些事件 btf raw tracepoint 跟 raw tracepoint 所能监控的事件是一样的，这里不再赘述。 SEC 内容的格式 btf raw tracepoint 事件对应的 SEC 格式为: SEC(&#34;tp_btf/&lt;name&gt;&#34;) // 比如: // SEC(&#34;tp_btf/sched_switch&#34;) // SEC(&#34;tp_btf/sys_enter&#34;) // SEC(&#34;tp_btf/sys_exit&#34;) &lt;name&gt; 的值跟 raw tracepoint SEC 中使用的 &lt;name&gt; 是一样的。 如何确定 btf raw tracepoint 事件处理函数的参数类型，获取对应的内核调用参数 所有事件都是在 vmlinux.h 中存在一个名为 btf_trace_&lt;name&gt; 的定义。 比如 sys_enter 这个事件对应的定义如下： typedef void (*btf_trace_sys_enter)(void *, struct pt_regs *, long int); 对应的 ebpf 函数可以定义成下面这样： SEC(&#34;tp_btf/sys_enter&#34;) int btf_raw_tracepoint__sys_enter(u64 *ctx) { // ... } 其中 ctx[0] 对应上面 btf_trace_sys_enter 中 void * 后面的第一个参数 struct pt_regs *, ctx[1] 是第二个参数 long int 。这两个参数的含义跟前面 raw tracepoint 中所说的 TP_PROTO(struct pt_regs *regs, long id) 中的含义是一样的。 对应的，使用 btf raw tracepoint 获取 fchmodat 系统调用事件的示例程序如下： SEC(&#34;tp_btf/sys_enter&#34;) int btf_raw_tracepoint__sys_enter(u64 *ctx) { long int syscall_id = (long int)ctx[1]; if(syscall_id != 268) // fchmodat return 0; struct pt_regs *regs = (struct pt_regs *)ctx[0]; // 后面的逻辑跟前面 raw tracepoint 示例程序中是一样的 // ... } BTW, 在 btf raw tracepoint 程序中可以通过 bpf_get_current_task_btf() 获取 btf 版本的 task 信息。 完整的示例程序如下： https://github.com/mozillazg/hello-libbpfgo/tree/master/16-btf-raw-tracepoint-args https://github.com/mozillazg/hello-libbpfgo/tree/master/17-btf-raw-tracepoint-args-sched_switch 参考资料 [PATCH v6 bpf-next 00/14] Support BTF-powered BPF tracing programs for kernel modules BPF CO-RE reference guide libbpf/libbpf.c at 12e932ac0e18546dd7247e66ea1b4aa236d2ef38 · libbpf/libbpf",
+        "mainEntityOfPage": {
+             "@type": "WebPage",
+             "@id": "https://mozillazg.com/2022/06/ebpf-libbpf-btf-powered-enabled-raw-tracepoint-common-questions.html"
+        },
+        "datePublished": "2022-06-14"
+    }
+    </script>
+
+</head>
+<body>
+
+<div class="navbar" role="navigation">
+	<div class="container">
+        <div class="navbar-header">
+            <button type="button" class="navbar-toggle" data-toggle="collapse" data-target=".navbar-ex1-collapse">
+                <span class="sr-only">Toggle navigation</span>
+                <span class="icon-bar"></span>
+                <span class="icon-bar"></span>
+                <span class="icon-bar"></span>
+            </button>
+            <a href="https://mozillazg.com/" class="navbar-brand">
+mozillazg's blog            </a>
+        </div>
+        <div class="collapse navbar-collapse navbar-ex1-collapse">
+            <ul class="nav navbar-nav">
+                    <li><a href="https://mozillazg.com/feeds/all.atom.xml">Feed</a></li>
+                    <li><a href="/2014/10/pages/about-me.html">About</a></li>
+            </ul>
+            <ul class="nav navbar-nav navbar-right">
+              <li><a href="https://mozillazg.com/archives.html"><i class="fa fa-th-list"></i><span class="icon-label">Archives</span></a></li>
+            </ul>
+        </div>
+        <!-- /.navbar-collapse -->
+    </div>
+</div> <!-- /.navbar -->
+<!-- Banner -->
+<!-- End Banner -->
+<div class="container">
+    <div class="row">
+        <div class="col-lg-12">
+    <section id="content" class="yue">
+        <article>
+            <header class="text-center">
+                <h1>
+                    <a href="https://mozillazg.com/2022/06/ebpf-libbpf-btf-powered-enabled-raw-tracepoint-common-questions.html"
+                       rel="bookmark"
+                       title="Permalink to ebpf/libbpf 程序使用 btf raw tracepoint 的常见问题">
+                        ebpf/libbpf 程序使用 btf raw tracepoint 的常见问题
+                    </a>
+                </h1>
+                <p class="published">
+                    <time datetime="2022-06-14T00:00:00+00:00">
+                    2022-06-14
+                    </time>
+                </p>
+            </header>
+            <div class="entry-content">
+                <div class="well-sm article-info">
+<footer class="post-info">
+        <a href="https://mozillazg.com/category/ebpf.html">ebpf</a>
+
+
+<span class="label label-default hide">Tags</span>
+	<a href="https://mozillazg.com/tag/btf.html">btf</a>
+        /
+	<a href="https://mozillazg.com/tag/raw-tracepoint.html">raw-tracepoint</a>
+        /
+	<a href="https://mozillazg.com/tag/libbpf.html">libbpf</a>
+        /
+	<a href="https://mozillazg.com/tag/libbpfgo.html">libbpfgo</a>
+    
+</footer><!-- /.post-info -->                </div>
+                <div class="js-toc"></div>
+                <div>
+                <div class="section" id="id1">
+<h2 id="hidid1">前言<a class="headerlink" href="#hidid1" title="Permalink to this headline">¶</a></h2>
+<p>本文记录一些编写 ebpf/libbpf 程序时涉及到的 btf raw tracepoint 相关的常见问题。</p>
+<!-- （编写 ``BPF_PROG_TYPE_TRACING`` 程序） -->
+</div>
+<div class="section" id="btf-raw-tracepoint-raw-tracepoint">
+<h2 id="hidbtf-raw-tracepoint-raw-tracepoint">btf raw tracepoint 跟常规 raw tracepoint 的区别<a class="headerlink" href="#hidbtf-raw-tracepoint-raw-tracepoint" title="Permalink to this headline">¶</a></h2>
+<p>所谓的 btf raw tracepoint 指的是 <a class="reference external" href="https://lore.kernel.org/netdev/20201203204634.1325171-1-andrii&#64;kernel.org/t/">BTF-powered raw tracepoint (tp_btf) 或者说是 BTF-enabled raw tracepoint</a> 。</p>
+<p>btf raw tracepoint 跟常规 raw tracepoint 有一个 <a class="reference external" href="https://nakryiko.com/posts/bpf-core-reference-guide/#btf-enabled-bpf-program-types-with-direct-memory-reads">最主要的区别</a> 是：
+btf 版本可以直接在 ebpf 程序中访问内核内存，
+不需要像常规 raw tracepoint 一样需要借助类似 <tt class="docutils literal">bpf_core_read</tt> 或 <tt class="docutils literal">bpf_probe_read_kernel</tt> 这样 的辅助函数才能访问内核内存:</p>
+<div class="highlight"><pre><span></span><span class="k">struct</span> <span class="n">task_struct</span> <span class="o">*</span><span class="n">task</span> <span class="o">=</span> <span class="p">(</span><span class="k">struct</span> <span class="n">task_struct</span> <span class="o">*</span><span class="p">)</span> <span class="n">bpf_get_current_task</span><span class="p">();</span>
+<span class="n">u32</span> <span class="n">ppid</span> <span class="o">=</span> <span class="n">BPF_CORE_READ</span><span class="p">(</span><span class="n">task</span><span class="p">,</span> <span class="n">real_parent</span><span class="p">,</span> <span class="n">tgid</span><span class="p">);</span>
+
+<span class="c1">// btf enabled</span>
+<span class="k">struct</span> <span class="n">task_struct</span> <span class="o">*</span><span class="n">task</span> <span class="o">=</span> <span class="p">(</span><span class="k">struct</span> <span class="n">task_struct</span> <span class="o">*</span><span class="p">)</span> <span class="n">bpf_get_current_task_btf</span><span class="p">();</span>
+<span class="n">u32</span> <span class="n">ppid</span> <span class="o">=</span> <span class="n">task</span><span class="o">-&gt;</span><span class="n">real_parent</span><span class="o">-&gt;</span><span class="n">tgid</span><span class="p">;</span>
+</pre></div>
+</div>
+<div class="section" id="btf-raw-tracepoint">
+<h2 id="hidbtf-raw-tracepoint">btf raw tracepoint 可以监控哪些事件<a class="headerlink" href="#hidbtf-raw-tracepoint" title="Permalink to this headline">¶</a></h2>
+<p>btf raw tracepoint 跟 <a class="reference external" href="https://mozillazg.com/2022/05/ebpf-libbpf-raw-tracepoint-common-questions.html">raw tracepoint</a> 所能监控的事件是一样的，这里不再赘述。</p>
+</div>
+<div class="section" id="sec">
+<h2 id="hidsec">SEC 内容的格式<a class="headerlink" href="#hidsec" title="Permalink to this headline">¶</a></h2>
+<p>btf raw tracepoint 事件对应的 SEC 格式为:</p>
+<pre class="literal-block">
+SEC(&quot;tp_btf/&lt;name&gt;&quot;)
+
+// 比如:
+// SEC(&quot;tp_btf/sched_switch&quot;)
+// SEC(&quot;tp_btf/sys_enter&quot;)
+// SEC(&quot;tp_btf/sys_exit&quot;)
+</pre>
+<p><tt class="docutils literal">&lt;name&gt;</tt> 的值跟 <a class="reference external" href="https://mozillazg.com/2022/05/ebpf-libbpf-raw-tracepoint-common-questions.html">raw tracepoint</a> SEC 中使用的 <tt class="docutils literal">&lt;name&gt;</tt> 是一样的。</p>
+</div>
+<div class="section" id="id2">
+<h2 id="hidid2">如何确定 btf raw tracepoint 事件处理函数的参数类型，获取对应的内核调用参数<a class="headerlink" href="#hidid2" title="Permalink to this headline">¶</a></h2>
+<p>所有事件都是在 vmlinux.h 中存在一个名为 <tt class="docutils literal">btf_trace_&lt;name&gt;</tt> 的定义。</p>
+<p>比如 <tt class="docutils literal">sys_enter</tt> 这个事件对应的定义如下：</p>
+<div class="highlight"><pre><span></span><span class="k">typedef</span> <span class="nf">void</span> <span class="p">(</span><span class="o">*</span><span class="n">btf_trace_sys_enter</span><span class="p">)(</span><span class="kt">void</span> <span class="o">*</span><span class="p">,</span> <span class="k">struct</span> <span class="n">pt_regs</span> <span class="o">*</span><span class="p">,</span> <span class="kt">long</span> <span class="kt">int</span><span class="p">);</span>
+</pre></div>
+<p>对应的 ebpf 函数可以定义成下面这样：</p>
+<div class="highlight"><pre><span></span><span class="n">SEC</span><span class="p">(</span><span class="s">&quot;tp_btf/sys_enter&quot;</span><span class="p">)</span>
+<span class="kt">int</span> <span class="n">btf_raw_tracepoint__sys_enter</span><span class="p">(</span><span class="n">u64</span> <span class="o">*</span><span class="n">ctx</span><span class="p">)</span>
+<span class="p">{</span>
+  <span class="c1">// ...</span>
+<span class="p">}</span>
+</pre></div>
+<p>其中 <tt class="docutils literal">ctx[0]</tt> 对应上面 <tt class="docutils literal">btf_trace_sys_enter</tt> 中 <tt class="docutils literal">void *</tt> 后面的第一个参数 <tt class="docutils literal">struct pt_regs *</tt>,
+<tt class="docutils literal">ctx[1]</tt> 是第二个参数 <tt class="docutils literal">long int</tt> 。这两个参数的含义跟前面 <a class="reference external" href="https://mozillazg.com/2022/05/ebpf-libbpf-raw-tracepoint-common-questions.html">raw tracepoint</a> 中所说的 <tt class="docutils literal">TP_PROTO(struct pt_regs *regs, long id)</tt> 中的含义是一样的。</p>
+<p>对应的，使用 btf raw tracepoint 获取 <tt class="docutils literal">fchmodat</tt> 系统调用事件的示例程序如下：</p>
+<div class="highlight"><pre><span></span><span class="n">SEC</span><span class="p">(</span><span class="s">&quot;tp_btf/sys_enter&quot;</span><span class="p">)</span>
+<span class="kt">int</span> <span class="n">btf_raw_tracepoint__sys_enter</span><span class="p">(</span><span class="n">u64</span> <span class="o">*</span><span class="n">ctx</span><span class="p">)</span>
+<span class="p">{</span>
+    <span class="kt">long</span> <span class="kt">int</span> <span class="n">syscall_id</span> <span class="o">=</span> <span class="p">(</span><span class="kt">long</span> <span class="kt">int</span><span class="p">)</span><span class="n">ctx</span><span class="p">[</span><span class="mi">1</span><span class="p">];</span>
+    <span class="k">if</span><span class="p">(</span><span class="n">syscall_id</span> <span class="o">!=</span> <span class="mi">268</span><span class="p">)</span>    <span class="c1">// fchmodat</span>
+        <span class="k">return</span> <span class="mi">0</span><span class="p">;</span>
+
+    <span class="k">struct</span> <span class="n">pt_regs</span> <span class="o">*</span><span class="n">regs</span> <span class="o">=</span> <span class="p">(</span><span class="k">struct</span> <span class="n">pt_regs</span> <span class="o">*</span><span class="p">)</span><span class="n">ctx</span><span class="p">[</span><span class="mi">0</span><span class="p">];</span>
+    <span class="c1">// 后面的逻辑跟前面 raw tracepoint 示例程序中是一样的</span>
+    <span class="c1">// ...</span>
+<span class="p">}</span>
+</pre></div>
+<p>BTW, 在 btf raw tracepoint 程序中可以通过 <tt class="docutils literal">bpf_get_current_task_btf()</tt> 获取 btf 版本的 task 信息。</p>
+<p>完整的示例程序如下：</p>
+<ul class="simple">
+<li><a class="reference external" href="https://github.com/mozillazg/hello-libbpfgo/tree/master/16-btf-raw-tracepoint-args">https://github.com/mozillazg/hello-libbpfgo/tree/master/16-btf-raw-tracepoint-args</a></li>
+<li><a class="reference external" href="https://github.com/mozillazg/hello-libbpfgo/tree/master/17-btf-raw-tracepoint-args-sched_switch">https://github.com/mozillazg/hello-libbpfgo/tree/master/17-btf-raw-tracepoint-args-sched_switch</a></li>
+</ul>
+</div>
+<div class="section" id="id3">
+<h2 id="hidid3">参考资料<a class="headerlink" href="#hidid3" title="Permalink to this headline">¶</a></h2>
+<ul class="simple">
+<li><a class="reference external" href="https://lore.kernel.org/netdev/20201203204634.1325171-1-andrii&#64;kernel.org/t/">[PATCH v6 bpf-next 00/14] Support BTF-powered BPF tracing programs for kernel modules</a></li>
+<li><a class="reference external" href="https://nakryiko.com/posts/bpf-core-reference-guide/#btf-enabled-bpf-program-types-with-direct-memory-reads">BPF CO-RE reference guide</a></li>
+<li><a class="reference external" href="https://github.com/libbpf/libbpf/blob/12e932ac0e18546dd7247e66ea1b4aa236d2ef38/src/libbpf.c#L9002-L9081">libbpf/libbpf.c at 12e932ac0e18546dd7247e66ea1b4aa236d2ef38 · libbpf/libbpf</a></li>
+</ul>
+<!-- * https://github.com/aya-rs/aya/pull/85 -->
+</div>
+
+                </div>
+            </div>
+            <!-- /.entry-content -->
+<section class="text-center">
+  
+<div id="donate"></div>
+
+<div class="social-share"></div>
+<div class="social-comment-note">
+<p>有任何建议和想法欢迎在下方评论区留言或者加我<a href="/static/wechat.png">微信</a>交流</p>
+</div>
+
+</section>
+<section class="well" id="related-posts">
+    <p>Related Posts:</p>
+    <ul>
+        <li><a href="https://mozillazg.com/2022/05/ebpf-libbpf-raw-tracepoint-common-questions.html">ebpf/libbpf 程序使用 raw tracepoint 的常见问题</a></li>
+        <li><a href="https://mozillazg.com/2022/05/ebpf-libbpfgo-develop-env-and-hello-world.html">libbpfgo 使用示例：搭建开发环境以及编写第一个 ebpf 程序</a></li>
+        <li><a href="https://mozillazg.com/2022/05/ebpf-libbpfgo-get-process-info.html">libbpfgo 使用示例：在 ebpf 程序中获取进程信息</a></li>
+        <li><a href="https://mozillazg.com/2022/05/ebpf-libbpf-tracepoint-common-questions.html">ebpf/libbpf 程序使用 tracepoint 的常见问题</a></li>
+        <li><a href="https://mozillazg.com/2022/05/ebpf-libbpfgo-get-container-info-via-process-info.rst.html">根据进程信息获取对应进程所属的容器/Pod 信息（一）</a></li>
+    </ul>
+</section>
+    <hr/>
+    <section class="comments" id="comments">
+        <h2>Comments</h2>
+
+        <div id="disqus_thread"></div>
+        <script type="text/javascript">
+            /* * * CONFIGURATION VARIABLES: EDIT BEFORE PASTING INTO YOUR WEBPAGE * * */
+            var disqus_shortname = 'my-github-blog'; // required: replace example with your forum shortname
+
+                    var disqus_identifier = 'ebpf-libbpf-btf-powered-enabled-raw-tracepoint-common-questions';
+                var disqus_url = 'https://mozillazg.com/2022/06/ebpf-libbpf-btf-powered-enabled-raw-tracepoint-common-questions.html';
+
+            var disqus_config = function () {
+                this.language = "zh";
+            };
+
+            /* * * DON'T EDIT BELOW THIS LINE * * */
+            (function () {
+                var dsq = document.createElement('script');
+                dsq.type = 'text/javascript';
+                dsq.async = true;
+                dsq.src = '//' + disqus_shortname + '.disqus.com/embed.js';
+                (document.getElementsByTagName('head')[0] || document.getElementsByTagName('body')[0]).appendChild(dsq);
+            })();
+        </script>
+        <noscript>Please enable JavaScript to view the <a href="http://disqus.com/?ref_noscript">comments powered by
+            Disqus.</a></noscript>
+        <a href="http://disqus.com" class="dsq-brlink">comments powered by <span class="logo-disqus">Disqus</span></a>
+
+    </section>
+        </article>
+    </section>
+
+        </div>
+    </div>
+</div>
+<footer>
+   <div class="container">
+      <hr>
+      <div class="row">
+         <div class="col-xs-10">&copy; 2022 mozillazg
+            &middot; Powered by <a href="https://github.com/DandyDev/pelican-bootstrap3" target="_blank">pelican-bootstrap3</a>,
+            <a href="http://docs.getpelican.com/" target="_blank">Pelican</a>,
+            <a href="http://getbootstrap.com" target="_blank">Bootstrap</a>
+            &middot; <a href="/privacy-policy.html" target="_blank">Privacy</a>              <p><small>  <a rel="license" href="http://creativecommons.org/licenses/by-sa/4.0/"><img alt="Creative Commons License" style="border-width:0" src="/static/images/by-sa-80x15.png" /></a>
+    &quot;<span xmlns:dct="http://purl.org/dc/terms/" property="dct:title">mozillazg's blog</span>&quot; by <a xmlns:cc="http://creativecommons.org/ns#" href="https://mozillazg.com" property="cc:attributionName" rel="cc:attributionURL">mozillazg</a> is
+  licensed under a <a rel="license" href="http://creativecommons.org/licenses/by-sa/4.0/">Creative Commons Attribution-ShareAlike 4.0 International License</a>, except where indicated otherwise.
+</small></p>
+         </div>
+         <div class="col-xs-2"><p class="pull-right"><i class="fa fa-arrow-up"></i> <a href="#">Back to top</a></p></div>
+      </div>
+   </div>
+</footer>
+<script src="https://cdn.jsdelivr.net/npm/jquery@2.1.1/dist/jquery.min.js"></script>
+
+<!-- Include all compiled plugins (below), or include individual files as needed -->
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@3.3.4/dist/js/bootstrap.min.js"></script>
+
+<!-- Enable responsive features in IE8 with Respond.js (https://github.com/scottjehl/Respond) -->
+
+    <!-- Disqus -->
+    <script type="text/javascript">
+        /* * * CONFIGURATION VARIABLES: EDIT BEFORE PASTING INTO YOUR WEBPAGE * * */
+        var disqus_shortname = 'my-github-blog'; // required: replace example with your forum shortname
+
+        /* * * DON'T EDIT BELOW THIS LINE * * */
+        (function () {
+            var s = document.createElement('script');
+            s.async = true;
+            s.type = 'text/javascript';
+            s.src = '//' + disqus_shortname + '.disqus.com/count.js';
+            (document.getElementsByTagName('HEAD')[0] || document.getElementsByTagName('BODY')[0]).appendChild(s);
+        }());
+    </script>
+    <!-- End Disqus Code -->
+    <!-- Google Analytics Universal -->
+    <script type="text/javascript">
+        (function(i,s,o,g,r,a,m){i['GoogleAnalyticsObject']=r;i[r]=i[r]||function(){
+        (i[r].q=i[r].q||[]).push(arguments)},i[r].l=1*new Date();a=s.createElement(o),
+        m=s.getElementsByTagName(o)[0];a.async=1;a.src=g;m.parentNode.insertBefore(a,m)
+        })(window,document,'script','//www.google-analytics.com/analytics.js','ga');
+
+        ga('create', 'UA-77172981-1', 'auto');
+        ga('send', 'pageview');
+    </script>
+    <!-- End Google Analytics Universal Code -->
+
+<!-- share.js -->
+<script src="https://cdn.jsdelivr.net/npm/social-share.js@1.0.16/dist/js/social-share.min.js"></script>
+
+
+
+<script src="https://cdn.jsdelivr.net/npm/tocbot@3.0.2/dist/tocbot.min.js"></script>
+<script>
+$(document).ready(function(){
+  tocbot.init({
+    // Where to render the table of contents.
+    tocSelector: '.js-toc',
+    // Where to grab the headings to build the table of contents.
+    contentSelector: '.entry-content',
+    // Which headings to grab inside of the contentSelector element.
+    headingSelector: 'h2, h3, h4,h5',
+    // Headings that match the ignoreSelector will be skipped.
+    ignoreSelector: '.js-toc-ignore',
+    // Main class to add to links.
+    linkClass: 'toc-link',
+    // Extra classes to add to links.
+    extraLinkClasses: '',
+    // Class to add to active links,
+    // the link corresponding to the top most heading on the page.
+    activeLinkClass: 'is-active-link',
+    // Main class to add to lists.
+    listClass: 'toc-list',
+    // Extra classes to add to lists.
+    extraListClasses: '',
+    // Class that gets added when a list should be collapsed.
+    isCollapsedClass: 'is-collapsed',
+    // Class that gets added when a list should be able
+    // to be collapsed but isn't necessarily collpased.
+    collapsibleClass: 'is-collapsible',
+    // Class to add to list items.
+    listItemClass: 'toc-list-item',
+    // How many heading levels should not be collpased.
+    // For example, number 6 will show everything since
+    // there are only 6 heading levels and number 0 will collpase them all.
+    // The sections that are hidden will open
+    // and close as you scroll to headings within them.
+    collapseDepth: 6,
+    // Smooth scrolling enabled.
+    smoothScroll: true,
+    // Smooth scroll duration.
+    smoothScrollDuration: 420,
+    // Callback for scroll end (requires: smoothScroll).
+    scrollEndCallback: function (e) {},
+    // Headings offset between the headings and the top of the document (this is meant for minor adjustments).
+    headingsOffset: 0,
+    // Timeout between events firing to make sure it's
+    // not too rapid (for performance reasons).
+    throttleTimeout: 50,
+    // Element to add the positionFixedClass to.
+    positionFixedSelector: null,
+    // Fixed position class to add to make sidebar fixed after scrolling
+    // down past the fixedSidebarOffset.
+    positionFixedClass: 'is-position-fixed',
+    // fixedSidebarOffset can be any number but by default is set
+    // to auto which sets the fixedSidebarOffset to the sidebar
+    // element's offsetTop from the top of the document on init.
+    fixedSidebarOffset: 'auto',
+    // includeHtml can be set to true to include the HTML markup from the
+    // heading node instead of just including the textContent.
+    includeHtml: false
+  });
+});
+</script>
+</body>
+</html>
