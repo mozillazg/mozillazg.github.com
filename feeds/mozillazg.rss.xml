@@ -1,5 +1,144 @@
 <?xml version="1.0" encoding="utf-8"?>
-<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom"><channel><title>mozillazg's blog</title><link>https://mozillazg.com/</link><description></description><atom:link href="https://mozillazg.com/feeds/mozillazg.rss.xml" rel="self"></atom:link><lastBuildDate>Tue, 14 Jun 2022 00:00:00 +0000</lastBuildDate><item><title>ebpf/libbpf 程序使用 btf raw tracepoint 的常见问题</title><link>https://mozillazg.com/2022/06/ebpf-libbpf-btf-powered-enabled-raw-tracepoint-common-questions.html</link><description>&lt;div class="section" id="id1"&gt;
+<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom"><channel><title>mozillazg's blog</title><link>https://mozillazg.com/</link><description></description><atom:link href="https://mozillazg.com/feeds/mozillazg.rss.xml" rel="self"></atom:link><lastBuildDate>Sun, 19 Jun 2022 00:00:00 +0000</lastBuildDate><item><title>docker-credential-acr-helper: 一个辅助 docker 获取阿里云 ACR 镜像仓库访问凭证的项目</title><link>https://mozillazg.com/2022/06/use-docker-credential-acr-helper-help-auth-alibaba-cloud-container-registry-with-temporary-password-without-docker-login.html</link><description>&lt;div class="section" id="id1"&gt;
+&lt;h2 id="hidid1"&gt;前言&lt;a class="headerlink" href="#hidid1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;通常情况下，如果我们想对阿里云容器服务 ACR 上的私有镜像进行 &lt;tt class="docutils literal"&gt;docker pull&lt;/tt&gt;
+或 &lt;tt class="docutils literal"&gt;docker push&lt;/tt&gt; 的话， 需要提前通过 &lt;tt class="docutils literal"&gt;docker login&lt;/tt&gt; 命令配置相应的访问凭证。&lt;/p&gt;
+&lt;p&gt;通过 &lt;tt class="docutils literal"&gt;docker login&lt;/tt&gt; 命令配置用户名和密码的方法存在如下几个问题：&lt;/p&gt;
+&lt;ul class="simple"&gt;
+&lt;li&gt;需要用户多记录和维护一组 docker 专用的密码，密码的管理是一个比较麻烦的事情。&lt;/li&gt;
+&lt;li&gt;ACR 只支持配置一个无过期时间的固定密码，密码的更换和吊销的成本很高，用户轻易不敢操作。&lt;/li&gt;
+&lt;li&gt;无法精细化配置固定密码的权限，无法实现类似只允许进行 pull 操作不允许进行 push 操作的权限控制需求。&lt;/li&gt;
+&lt;li&gt;虽然可以通过 Open API 获取不限量的临时密码，但是 &lt;tt class="docutils literal"&gt;docker login&lt;/tt&gt; 不支持自动刷新临时密码。
+如果使用临时密码进行 &lt;tt class="docutils literal"&gt;docker login&lt;/tt&gt; 操作的话，
+需要用户频繁进行获取临时密码然后再通过 &lt;tt class="docutils literal"&gt;docker login&lt;/tt&gt; 更新密码的操作，同样是一个很麻烦的事情。&lt;/li&gt;
+&lt;/ul&gt;
+&lt;p&gt;幸好，docker 提供提供了一个叫 &lt;a class="reference external" href="https://docs.docker.com/engine/reference/commandline/login/#credential-helpers"&gt;Credential helper&lt;/a&gt; 的机制，
+通过 Credential helper 可以以插件化的方式
+扩展 docker 获取访问凭证的方式，不再局限于只能通过 &lt;tt class="docutils literal"&gt;docker login&lt;/tt&gt; 的方式配置访问凭证。&lt;/p&gt;
+&lt;p&gt;本文将介绍的 &lt;a class="reference external" href="https://github.com/mozillazg/docker-credential-acr-helper"&gt;docker-credential-acr-helper&lt;/a&gt; 就是一个专为 ACR 开发的辅助 docker 获取 ACR 镜像仓库访问凭证的项目。&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class="section" id="id2"&gt;
+&lt;h2 id="hidid2"&gt;介绍&lt;a class="headerlink" href="#hidid2" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;如前面所说， &lt;a class="reference external" href="https://github.com/mozillazg/docker-credential-acr-helper"&gt;docker-credential-acr-helper&lt;/a&gt; 是一个专为 ACR 开发的辅助 docker 获取 ACR 镜像仓库访问凭证的项目。&lt;/p&gt;
+&lt;p&gt;docker-credential-acr-helper 解决了前面所说的那几个问题：&lt;/p&gt;
+&lt;ul class="simple"&gt;
+&lt;li&gt;基于阿里云已有的认证体系，可以直接使用用户熟悉的阿里云访问凭证，无需额外记录和维护 docker 专用的用户名和密码。&lt;/li&gt;
+&lt;li&gt;自动获取用于进行 docker 操作的临时密码，不依赖固定密码, 也无需手动频繁刷新临时密码。&lt;/li&gt;
+&lt;li&gt;用户可以通过配置阿里云 RAM 访问控制策略的方式，实现临时密码精细化权限控制的需求，详见 &lt;a class="reference external" href="https://help.aliyun.com/document_detail/72334.html#section-xzq-5zj-lr6"&gt;ACR 文档&lt;/a&gt; 。&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/div&gt;
+&lt;div class="section" id="id3"&gt;
+&lt;h2 id="hidid3"&gt;使用示例&lt;a class="headerlink" href="#hidid3" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;可以通过如下步骤体验这个项目提供的功能：&lt;/p&gt;
+&lt;ol class="arabic"&gt;
+&lt;li&gt;&lt;p class="first"&gt;前往 &lt;a class="reference external" href="https://github.com/mozillazg/docker-credential-acr-helper/releases/tag/v0.2.0"&gt;github releases&lt;/a&gt; 页面下载最新版本的编译好的二进制文件压缩包&lt;/p&gt;
+&lt;/li&gt;
+&lt;li&gt;&lt;p class="first"&gt;使用页面上的那个 checksums.txt 文件验证压缩包，解压压缩包得到对应的二进制文件 &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;docker-credential-acr-helper&lt;/span&gt;&lt;/tt&gt;&lt;/p&gt;
+&lt;/li&gt;
+&lt;li&gt;&lt;p class="first"&gt;&lt;tt class="docutils literal"&gt;chmod +x &lt;span class="pre"&gt;docker-credential-acr-helper&lt;/span&gt;&lt;/tt&gt;&lt;/p&gt;
+&lt;/li&gt;
+&lt;li&gt;&lt;p class="first"&gt;&lt;tt class="docutils literal"&gt;cp &lt;span class="pre"&gt;docker-credential-acr-helper&lt;/span&gt; /usr/local/bin&lt;/tt&gt;&lt;/p&gt;
+&lt;/li&gt;
+&lt;li&gt;&lt;p class="first"&gt;配置阿里云访问凭证，比如使用配置文件指定访问凭证:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+$ cat ~/.alibabacloud/credentials
+[default]                          # 默认客户端
+type = access_key                  # 认证方式为 access_key
+access_key_id = foo                # Key
+access_key_secret = bar            # Secret
+&lt;/pre&gt;
+&lt;/li&gt;
+&lt;li&gt;&lt;p class="first"&gt;通过 &lt;tt class="docutils literal"&gt;docker logout &amp;lt;acr_registry_domain&amp;gt;&lt;/tt&gt; 退出要测试的 ACR registry 域名，清理对应已保存的 docker 凭证。&lt;/p&gt;
+&lt;/li&gt;
+&lt;li&gt;&lt;p class="first"&gt;通过 &lt;tt class="docutils literal"&gt;docker pull &amp;lt;acr_image&amp;gt;&lt;/tt&gt; 确认当前已无权限访问对应的 ACR 私有镜像。&lt;/p&gt;
+&lt;/li&gt;
+&lt;li&gt;&lt;p class="first"&gt;修改 docker 配置文件 &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;~/.docker/config.json&lt;/span&gt;&lt;/tt&gt; 中 &lt;tt class="docutils literal"&gt;credHelpers&lt;/tt&gt; 配置项，
+指定访问某个 ACR registry 域名时，使用 docker-credential-acr-helper 获取访问凭证
+（关于这个配置的更多说明详见 &lt;a class="reference external" href="https://docs.docker.com/engine/reference/commandline/login/#configure-credential-helpers"&gt;Docker 官方文档&lt;/a&gt; 或者本项目 README）。
+配置示例:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+{
+  &amp;quot;credHelpers&amp;quot; : {
+    &amp;quot;registry.cn-beijing.aliyuncs.com&amp;quot; : &amp;quot;acr-helper&amp;quot;
+  }
+}
+&lt;/pre&gt;
+&lt;/li&gt;
+&lt;li&gt;&lt;p class="first"&gt;通过 &lt;tt class="docutils literal"&gt;docker pull &amp;lt;acr_image&amp;gt;&lt;/tt&gt; 验证配置完成后又可以访问对应的 ACR 私有镜像了。&lt;/p&gt;
+&lt;/li&gt;
+&lt;/ol&gt;
+&lt;/div&gt;
+&lt;div class="section" id="golang-package"&gt;
+&lt;h2 id="hidgolang-package"&gt;以 golang package 的方式集成到第三方项目中&lt;a class="headerlink" href="#hidgolang-package" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;同时，也可以把这个项目当成一个 golang package 来使用。&lt;/p&gt;
+&lt;p&gt;比如，在使用 &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;github.com/google/go-containerregistry/pkg/crane&lt;/span&gt;&lt;/tt&gt; 操作
+docker registry 时，可以使用下面的方法在项目中集成 docker-credential-acr-helper
+提供的辅助认证能力:&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="kn"&gt;import&lt;/span&gt; &lt;span class="p"&gt;(&lt;/span&gt;
+    &lt;span class="s"&gt;&amp;quot;github.com/google/go-containerregistry/pkg/authn&amp;quot;&lt;/span&gt;
+    &lt;span class="s"&gt;&amp;quot;github.com/google/go-containerregistry/pkg/crane&amp;quot;&lt;/span&gt;
+    &lt;span class="s"&gt;&amp;quot;github.com/mozillazg/docker-credential-acr-helper/pkg/credhelper&amp;quot;&lt;/span&gt;
+&lt;span class="p"&gt;)&lt;/span&gt;
+
+&lt;span class="kd"&gt;func&lt;/span&gt; &lt;span class="nx"&gt;main&lt;/span&gt;&lt;span class="p"&gt;()&lt;/span&gt; &lt;span class="p"&gt;{&lt;/span&gt;
+    &lt;span class="nx"&gt;kc&lt;/span&gt; &lt;span class="o"&gt;:=&lt;/span&gt; &lt;span class="nx"&gt;authn&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;NewMultiKeychain&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;
+            &lt;span class="nx"&gt;authn&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;DefaultKeychain&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;
+            &lt;span class="nx"&gt;authn&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;NewKeychainFromHelper&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="nx"&gt;credhelper&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;NewACRHelper&lt;/span&gt;&lt;span class="p"&gt;()),&lt;/span&gt;
+    &lt;span class="p"&gt;)&lt;/span&gt;
+    &lt;span class="nx"&gt;ref&lt;/span&gt; &lt;span class="o"&gt;:=&lt;/span&gt; &lt;span class="nx"&gt;os&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Getenv&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="s"&gt;&amp;quot;REPO_URL&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+    &lt;span class="nx"&gt;digest&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="nx"&gt;err&lt;/span&gt; &lt;span class="o"&gt;:=&lt;/span&gt; &lt;span class="nx"&gt;crane&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Digest&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="nx"&gt;ref&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="nx"&gt;crane&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;WithAuthFromKeychain&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="nx"&gt;kc&lt;/span&gt;&lt;span class="p"&gt;))&lt;/span&gt;
+    &lt;span class="k"&gt;if&lt;/span&gt; &lt;span class="nx"&gt;err&lt;/span&gt; &lt;span class="o"&gt;!=&lt;/span&gt; &lt;span class="kc"&gt;nil&lt;/span&gt; &lt;span class="p"&gt;{&lt;/span&gt;
+            &lt;span class="nb"&gt;panic&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="nx"&gt;err&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+    &lt;span class="p"&gt;}&lt;/span&gt;
+    &lt;span class="nx"&gt;fmt&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Printf&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="s"&gt;&amp;quot;got digest for %q:\n%s\n&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="nx"&gt;ref&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="nx"&gt;digest&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+&lt;span class="p"&gt;}&lt;/span&gt;
+&lt;/pre&gt;&lt;/div&gt;
+&lt;p&gt;完整示例代码详见： &lt;a class="reference external" href="https://github.com/mozillazg/docker-credential-acr-helper/blob/master/examples/go-containerregistry-auth/main.go"&gt;examples/go-containerregistry-auth&lt;/a&gt;&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class="section" id="faq"&gt;
+&lt;h2 id="hidfaq"&gt;FAQ&lt;a class="headerlink" href="#hidfaq" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;div class="section" id="acr"&gt;
+&lt;h3 id="hidacr"&gt;是否支持 ACR 企业版？&lt;a class="headerlink" href="#hidacr" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
+&lt;p&gt;支持。&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class="section" id="id4"&gt;
+&lt;h3 id="hidid4"&gt;如何实现不同 ACR 域名使用不同的阿里云访问凭证？&lt;a class="headerlink" href="#hidid4" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
+&lt;p&gt;可以通过为不同的访问凭证编写独立的 shell 脚本的方式实现。&lt;/p&gt;
+&lt;p&gt;比如:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+$ cat /usr/local/bin/docker-credential-acr-helper-user-1
+#!/usr/bin/env bash
+
+# export ALIBABA_CLOUD_ACCESS_KEY_ID=foo
+# export ALIBABA_CLOUD_ACCESS_KEY_SECRET=bar
+export ALIBABA_CLOUD_CREDENTIALS_FILE=/path/to/user-1-credentials
+
+exec /usr/local/bin/docker-credential-acr-helper &amp;quot;$&amp;#64;&amp;quot;
+
+$ chmod +x /usr/local/bin/docker-credential-acr-helper-user-1
+&lt;/pre&gt;
+&lt;p&gt;然后配置 &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;~/.docker/config.json&lt;/span&gt;&lt;/tt&gt; 实现不同的 ACR 域名使用配置了不同访问凭证的 shell 脚本即可:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+{
+  &amp;quot;credHelpers&amp;quot; : {
+    &amp;quot;registry.cn-beijing.aliyuncs.com&amp;quot; : &amp;quot;acr-helper&amp;quot;,
+    &amp;quot;registry.cn-hangzhou.aliyuncs.com&amp;quot; : &amp;quot;acr-helper-user-1&amp;quot;,
+    &amp;quot;registry.cn-shenzhen.aliyuncs.com&amp;quot; : &amp;quot;acr-helper-user-2&amp;quot;
+  }
+}
+&lt;/pre&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;div class="section" id="id5"&gt;
+&lt;h2 id="hidid5"&gt;参考资料&lt;a class="headerlink" href="#hidid5" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;ul class="simple"&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://docs.docker.com/engine/reference/commandline/login/"&gt;docker login | Docker Documentation&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://github.com/docker/docker-credential-helpers"&gt;docker/docker-credential-helpers: Programs to keep Docker login credentials safe by storing in platform keystores&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://github.com/mozillazg/docker-credential-acr-helper"&gt;mozillazg/docker-credential-acr-helper: A credential helper for the Docker daemon that makes it easier to use Alibaba Cloud Container Registry(ACR).&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://help.aliyun.com/document_detail/72334.html"&gt;GetAuthorizationToken - ACR Documentation&lt;/a&gt;&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/div&gt;
+</description><dc:creator xmlns:dc="http://purl.org/dc/elements/1.1/">mozillazg</dc:creator><pubDate>Sun, 19 Jun 2022 00:00:00 +0000</pubDate><guid>tag:mozillazg.com,2022-06-19:2022/06/use-docker-credential-acr-helper-help-auth-alibaba-cloud-container-registry-with-temporary-password-without-docker-login.html</guid><category>ACR</category></item><item><title>ebpf/libbpf 程序使用 btf raw tracepoint 的常见问题</title><link>https://mozillazg.com/2022/06/ebpf-libbpf-btf-powered-enabled-raw-tracepoint-common-questions.html</link><description>&lt;div class="section" id="id1"&gt;
 &lt;h2 id="hidid1"&gt;前言&lt;a class="headerlink" href="#hidid1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;p&gt;本文记录一些编写 ebpf/libbpf 程序时涉及到的 btf raw tracepoint 相关的常见问题。&lt;/p&gt;
 &lt;!-- （编写 ``BPF_PROG_TYPE_TRACING`` 程序） --&gt;
@@ -711,85 +850,4 @@ $ kubectl describe pod test |grep f1abcafee046eda0e9d78691dcc20fcde1d008bb84a2b0
 &lt;li&gt;&lt;a class="reference external" href="https://github.com/aquasecurity/libbpfgo"&gt;aquasecurity/libbpfgo: eBPF library for Go, wrapping libbpf&lt;/a&gt;&lt;/li&gt;
 &lt;/ul&gt;
 &lt;/div&gt;
-</description><dc:creator xmlns:dc="http://purl.org/dc/elements/1.1/">mozillazg</dc:creator><pubDate>Wed, 04 May 2022 00:00:00 +0000</pubDate><guid>tag:mozillazg.com,2022-05-04:2022/05/ebpf-libbpfgo-use-perfbuf-map.html</guid><category>libbpf</category><category>libbpfgo</category><category>go</category><category>golang</category></item><item><title>libbpfgo 使用示例：编写使用 ringbuf map 的 ebpf 程序</title><link>https://mozillazg.com/2022/05/ebpf-libbpfgo-use-ringbuf-map.html</link><description>&lt;div class="section" id="id1"&gt;
-&lt;h2 id="hidid1"&gt;前言&lt;a class="headerlink" href="#hidid1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
-&lt;p&gt;本文简单记录一下如何编写一个使用 ringbuf map 传递数据的 ebpf 程序，
-以及如何使用 libbpfgo 处理 ringbuf map 中存储的数据。&lt;/p&gt;
-&lt;/div&gt;
-&lt;div class="section" id="ebpf"&gt;
-&lt;h2 id="hidebpf"&gt;ebpf 代码&lt;a class="headerlink" href="#hidebpf" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
-&lt;p&gt;ebpf c 代码中使用 ringbuf map 的方法主要分三步：&lt;/p&gt;
-&lt;ol class="arabic simple"&gt;
-&lt;li&gt;定义一个 &lt;tt class="docutils literal"&gt;BPF_MAP_TYPE_RINGBUF&lt;/tt&gt; 类型的 map&lt;/li&gt;
-&lt;li&gt;写入数据前，先通过 &lt;tt class="docutils literal"&gt;bpf_ringbuf_reserve&lt;/tt&gt; 申请内存空间，申请成功后才能真正写入数据，缺少这一步的话，程序执行时会提示 &lt;tt class="docutils literal"&gt;libbpf: load bpf program failed: Invalid argument&lt;/tt&gt; 错误&lt;/li&gt;
-&lt;li&gt;通过 &lt;tt class="docutils literal"&gt;bpf_ringbuf_submit&lt;/tt&gt; 函数写入数据&lt;/li&gt;
-&lt;/ol&gt;
-&lt;p&gt;示例程序代码片段如下:&lt;/p&gt;
-&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;    &lt;span class="cm"&gt;/* BPF perfbuf map */&lt;/span&gt;
-&lt;span class="cm"&gt;/* 定义 map */&lt;/span&gt;
-
-    &lt;span class="cm"&gt;/* BPF ringbuf map */&lt;/span&gt;
-    &lt;span class="k"&gt;struct&lt;/span&gt; &lt;span class="p"&gt;{&lt;/span&gt;
-            &lt;span class="n"&gt;__uint&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;type&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;BPF_MAP_TYPE_RINGBUF&lt;/span&gt;&lt;span class="p"&gt;);&lt;/span&gt;
-            &lt;span class="n"&gt;__uint&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;max_entries&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="mi"&gt;256&lt;/span&gt; &lt;span class="o"&gt;*&lt;/span&gt; &lt;span class="mi"&gt;1024&lt;/span&gt; &lt;span class="cm"&gt;/* 256 KB */&lt;/span&gt;&lt;span class="p"&gt;);&lt;/span&gt;
-    &lt;span class="p"&gt;}&lt;/span&gt; &lt;span class="n"&gt;events&lt;/span&gt; &lt;span class="n"&gt;SEC&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="s"&gt;&amp;quot;.maps&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;);&lt;/span&gt;
-
-    &lt;span class="n"&gt;SEC&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="s"&gt;&amp;quot;kprobe/do_sys_openat2&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
-    &lt;span class="kt"&gt;int&lt;/span&gt; &lt;span class="n"&gt;kprobe__do_sys_openat2&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="k"&gt;struct&lt;/span&gt; &lt;span class="n"&gt;pt_regs&lt;/span&gt; &lt;span class="o"&gt;*&lt;/span&gt;&lt;span class="n"&gt;ctx&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
-    &lt;span class="p"&gt;{&lt;/span&gt;
-                    &lt;span class="k"&gt;struct&lt;/span&gt; &lt;span class="n"&gt;event&lt;/span&gt; &lt;span class="o"&gt;*&lt;/span&gt;&lt;span class="n"&gt;e&lt;/span&gt;&lt;span class="p"&gt;;&lt;/span&gt;
-
-                    &lt;span class="c1"&gt;// 必需步骤&lt;/span&gt;
-                    &lt;span class="n"&gt;e&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;bpf_ringbuf_reserve&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="o"&gt;&amp;amp;&lt;/span&gt;&lt;span class="n"&gt;events&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="k"&gt;sizeof&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="o"&gt;*&lt;/span&gt;&lt;span class="n"&gt;e&lt;/span&gt;&lt;span class="p"&gt;),&lt;/span&gt; &lt;span class="mi"&gt;0&lt;/span&gt;&lt;span class="p"&gt;);&lt;/span&gt;
-                    &lt;span class="k"&gt;if&lt;/span&gt; &lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="o"&gt;!&lt;/span&gt;&lt;span class="n"&gt;e&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt; &lt;span class="p"&gt;{&lt;/span&gt;
-                            &lt;span class="k"&gt;return&lt;/span&gt; &lt;span class="mi"&gt;0&lt;/span&gt;&lt;span class="p"&gt;;&lt;/span&gt;
-                    &lt;span class="p"&gt;}&lt;/span&gt;
-
-                    &lt;span class="n"&gt;e&lt;/span&gt;&lt;span class="o"&gt;-&amp;gt;&lt;/span&gt;&lt;span class="n"&gt;pid&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;bpf_get_current_pid_tgid&lt;/span&gt;&lt;span class="p"&gt;()&lt;/span&gt; &lt;span class="o"&gt;&amp;gt;&amp;gt;&lt;/span&gt; &lt;span class="mi"&gt;32&lt;/span&gt;&lt;span class="p"&gt;;&lt;/span&gt;
-
-                    &lt;span class="c1"&gt;// 写入数据&lt;/span&gt;
-                    &lt;span class="n"&gt;bpf_ringbuf_submit&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;e&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="mi"&gt;0&lt;/span&gt;&lt;span class="p"&gt;);&lt;/span&gt;
-
-                    &lt;span class="k"&gt;return&lt;/span&gt; &lt;span class="mi"&gt;0&lt;/span&gt;&lt;span class="p"&gt;;&lt;/span&gt;
-    &lt;span class="p"&gt;}&lt;/span&gt;
-&lt;/pre&gt;&lt;/div&gt;
-&lt;/div&gt;
-&lt;div class="section" id="golang"&gt;
-&lt;h2 id="hidgolang"&gt;golang 代码&lt;a class="headerlink" href="#hidgolang" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
-&lt;p&gt;使用 libbpfgo 读取这个 map 里的数据的方法主要有三步：&lt;/p&gt;
-&lt;ol class="arabic simple"&gt;
-&lt;li&gt;调用 &lt;tt class="docutils literal"&gt;InitRingBuf&lt;/tt&gt; 方法初始化一个 ringbuf map 数据接收实例&lt;/li&gt;
-&lt;li&gt;通过 &lt;tt class="docutils literal"&gt;Start()&lt;/tt&gt; 启动实例&lt;/li&gt;
-&lt;li&gt;接收并解码数据&lt;/li&gt;
-&lt;/ol&gt;
-&lt;p&gt;相关代码片段示例如下：&lt;/p&gt;
-&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="nx"&gt;eventsChannel&lt;/span&gt; &lt;span class="o"&gt;:=&lt;/span&gt; &lt;span class="nb"&gt;make&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="kd"&gt;chan&lt;/span&gt; &lt;span class="p"&gt;[]&lt;/span&gt;&lt;span class="kt"&gt;byte&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
-&lt;span class="nx"&gt;pb&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="nx"&gt;err&lt;/span&gt; &lt;span class="o"&gt;:=&lt;/span&gt; &lt;span class="nx"&gt;bpfModule&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;InitRingBuf&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="s"&gt;&amp;quot;events&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="nx"&gt;eventsChannel&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
-&lt;span class="k"&gt;if&lt;/span&gt; &lt;span class="nx"&gt;err&lt;/span&gt; &lt;span class="o"&gt;!=&lt;/span&gt; &lt;span class="kc"&gt;nil&lt;/span&gt; &lt;span class="p"&gt;{&lt;/span&gt;
-        &lt;span class="nb"&gt;panic&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="nx"&gt;err&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
-&lt;span class="p"&gt;}&lt;/span&gt;
-
-&lt;span class="nx"&gt;pb&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Start&lt;/span&gt;&lt;span class="p"&gt;()&lt;/span&gt;
-&lt;span class="k"&gt;defer&lt;/span&gt; &lt;span class="kd"&gt;func&lt;/span&gt;&lt;span class="p"&gt;()&lt;/span&gt; &lt;span class="p"&gt;{&lt;/span&gt;
-        &lt;span class="nx"&gt;pb&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Stop&lt;/span&gt;&lt;span class="p"&gt;()&lt;/span&gt;
-        &lt;span class="nx"&gt;pb&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Close&lt;/span&gt;&lt;span class="p"&gt;()&lt;/span&gt;
-&lt;span class="p"&gt;}()&lt;/span&gt;
-
-&lt;span class="k"&gt;for&lt;/span&gt; &lt;span class="p"&gt;{&lt;/span&gt;
-        &lt;span class="k"&gt;select&lt;/span&gt; &lt;span class="p"&gt;{&lt;/span&gt;
-        &lt;span class="k"&gt;case&lt;/span&gt; &lt;span class="nx"&gt;e&lt;/span&gt; &lt;span class="o"&gt;:=&lt;/span&gt; &lt;span class="o"&gt;&amp;lt;-&lt;/span&gt;&lt;span class="nx"&gt;eventsChannel&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;
-                &lt;span class="c1"&gt;// 解码收到的数据: u32 pid&lt;/span&gt;
-                &lt;span class="nx"&gt;pid&lt;/span&gt; &lt;span class="o"&gt;:=&lt;/span&gt; &lt;span class="nx"&gt;binary&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;LittleEndian&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Uint32&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="nx"&gt;e&lt;/span&gt;&lt;span class="p"&gt;[&lt;/span&gt;&lt;span class="mi"&gt;0&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="mi"&gt;4&lt;/span&gt;&lt;span class="p"&gt;])&lt;/span&gt;
-                &lt;span class="nx"&gt;log&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Printf&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="s"&gt;&amp;quot;pid %d&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="nx"&gt;pid&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
-        &lt;span class="p"&gt;}&lt;/span&gt;
-&lt;span class="p"&gt;}&lt;/span&gt;
-&lt;/pre&gt;&lt;/div&gt;
-&lt;p&gt;完整的代码详见：&lt;a class="reference external" href="https://github.com/mozillazg/hello-libbpfgo/tree/master/03-ring-buf"&gt;https://github.com/mozillazg/hello-libbpfgo/tree/master/03-ring-buf&lt;/a&gt;&lt;/p&gt;
-&lt;/div&gt;
-&lt;div class="section" id="id2"&gt;
-&lt;h2 id="hidid2"&gt;参考资料&lt;a class="headerlink" href="#hidid2" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
-&lt;ul class="simple"&gt;
-&lt;li&gt;&lt;a class="reference external" href="https://github.com/aquasecurity/libbpfgo"&gt;aquasecurity/libbpfgo: eBPF library for Go, wrapping libbpf&lt;/a&gt;&lt;/li&gt;
-&lt;/ul&gt;
-&lt;/div&gt;
-</description><dc:creator xmlns:dc="http://purl.org/dc/elements/1.1/">mozillazg</dc:creator><pubDate>Wed, 04 May 2022 00:00:00 +0000</pubDate><guid>tag:mozillazg.com,2022-05-04:2022/05/ebpf-libbpfgo-use-ringbuf-map.html</guid><category>libbpf</category><category>libbpfgo</category><category>go</category><category>golang</category></item></channel></rss>
+</description><dc:creator xmlns:dc="http://purl.org/dc/elements/1.1/">mozillazg</dc:creator><pubDate>Wed, 04 May 2022 00:00:00 +0000</pubDate><guid>tag:mozillazg.com,2022-05-04:2022/05/ebpf-libbpfgo-use-perfbuf-map.html</guid><category>libbpf</category><category>libbpfgo</category><category>go</category><category>golang</category></item></channel></rss>
