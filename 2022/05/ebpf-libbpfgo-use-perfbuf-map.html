@@ -18,8 +18,6 @@
         <meta name="author" content="mozillazg" />
         <meta name="keywords" content="ebpf,libbpf,libbpfgo,go,golang" />
     <meta name="description" content="前言 本文简单记录一下如何编写一个使用 perfbuf map 传递数据的 ebpf 程序， 以及如何使用 libbpfgo 处理 perfbuf map 中存储的数据。 ebpf 代码 ebpf c 代码中使用 perfbuf map 的方法主要分两步： 首先定义一个 BPF_MAP_TYPE_PERF_EVENT_ARRAY 类型的 map 然后通过 bpf_perf_event_output 函数写入数据即可 示例程序代码片段如下: /* BPF perfbuf map */ /* 定义 map */ struct { __uint(type, BPF_MAP_TYPE_PERF_EVENT_ARRAY); __uint(key_size, sizeof(u32)); __uint(value_size, sizeof(u32)); } events SEC(&#34;.maps&#34;); SEC(&#34;kprobe/do_sys_openat2&#34;) int kprobe__do_sys_openat2(struct pt_regs *ctx) { struct event e = {}; e.pid = bpf_get_current_pid_tgid() &gt;&gt; 32; // 写数据 bpf_perf_event_output(ctx, &amp;events, BPF_F_CURRENT_CPU, &amp;e, sizeof(e)); return 0; } golang 代码 使用 libbpfgo 读取这个 map 里的数据的方法主要有三步： 调用 InitPerfBuf 方法初始化一个 perfbuf map 数据接收实例 通过 Start() 启动实例 接收并解码数据 相关代码片段示例如下： eventsChannel := make(chan []byte) // 因为 perfbuf map 会有数据丢失的问题，可以通过 lostChannel 感知丢失了多少次数据 lostChannel := make(chan uint64) pb, err := bpfModule.InitPerfBuf(&#34;events&#34;, eventsChannel, lostChannel, 1) if err != nil { panic(err) } pb.Start() defer func() { pb.Stop() pb.Close() }() for { select { case e := &lt;-eventsChannel: // 解码收到的数据: u32 pid pid := binary.LittleEndian.Uint32(e[0:4]) log.Printf(&#34;pid %d&#34;, pid) case e := &lt;-lostChannel: log.Printf(&#34;lost %d events&#34;, e) } } 完整的代码详见：https://github.com/mozillazg/hello-libbpfgo/tree/master/02-perf-buf 参考资料 aquasecurity/libbpfgo: eBPF library for Go, wrapping libbpf" />
-    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-4941850466486001"
-     crossorigin="anonymous"></script>
 
     <style>
       .js-toc {
@@ -270,11 +268,11 @@ mozillazg's Blog            </a>
 <section class="well" id="related-posts">
     <p>Related Posts:</p>
     <ul>
-        <li><a href="https://mozillazg.com/2022/05/ebpf-libbpfgo-develop-env-and-hello-world.html">libbpfgo 使用示例：搭建开发环境以及编写第一个 ebpf 程序</a></li>
-        <li><a href="https://mozillazg.com/2022/05/ebpf-libbpfgo-get-container-info-via-process-info.rst.html">根据进程信息获取对应进程所属的容器/Pod 信息（一）</a></li>
         <li><a href="https://mozillazg.com/2022/05/ebpf-libbpfgo-use-ringbuf-map.html">libbpfgo 使用示例：编写使用 ringbuf map 的 ebpf 程序</a></li>
         <li><a href="https://mozillazg.com/2022/05/ebpf-libbpfgo-get-process-info.html">libbpfgo 使用示例：在 ebpf 程序中获取进程信息</a></li>
-        <li><a href="https://mozillazg.com/2022/06/ebpf-libbpf-btf-powered-enabled-raw-tracepoint-common-questions.html">ebpf/libbpf 程序使用 btf raw tracepoint 的常见问题</a></li>
+        <li><a href="https://mozillazg.com/2022/05/ebpf-libbpfgo-develop-env-and-hello-world.html">libbpfgo 使用示例：搭建开发环境以及编写第一个 ebpf 程序</a></li>
+        <li><a href="https://mozillazg.com/2022/05/ebpf-libbpfgo-get-container-info-via-process-info.rst.html">根据进程信息获取对应进程所属的容器/Pod 信息（一）</a></li>
+        <li><a href="https://mozillazg.com/2022/05/ebpf-libbpf-tracepoint-common-questions.html">ebpf/libbpf 程序使用 tracepoint 的常见问题</a></li>
     </ul>
 </section>
     <hr/>

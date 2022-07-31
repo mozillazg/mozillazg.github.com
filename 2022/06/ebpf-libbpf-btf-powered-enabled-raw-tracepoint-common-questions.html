@@ -18,8 +18,6 @@
         <meta name="author" content="mozillazg" />
         <meta name="keywords" content="ebpf,btf,raw-tracepoint,libbpf,libbpfgo" />
     <meta name="description" content="前言 本文记录一些编写 ebpf/libbpf 程序(比如编写类型为 BPF_TRACE_RAW_TP 的 ebpf 程序) 时 涉及到的 btf raw tracepoint 相关的常见问题。 btf raw tracepoint 跟常规 raw tracepoint 的区别 所谓的 btf raw tracepoint 指的是 BTF-powered raw tracepoint (tp_btf) 或者说是 BTF-enabled raw tracepoint 。 btf raw tracepoint 跟常规 raw tracepoint 有一个 最主要的区别 是： btf 版本可以直接在 ebpf 程序中访问内核内存， 不需要像常规 raw tracepoint 一样需要借助类似 bpf_core_read 或 bpf_probe_read_kernel 这样 的辅助函数才能访问内核内存: struct task_struct *task = (struct task_struct *) bpf_get_current_task(); u32 ppid = BPF_CORE_READ(task, real_parent, tgid); // btf enabled struct task_struct *task = (struct task_struct *) bpf_get_current_task_btf(); u32 ppid = task-&gt;real_parent-&gt;tgid; btf raw tracepoint 可以监控哪些事件 btf raw tracepoint 跟 raw tracepoint 所能监控的事件是一样的，这里不再赘述。 SEC 内容的格式 btf raw tracepoint 事件对应的 SEC 格式为: SEC(&#34;tp_btf/&lt;name&gt;&#34;) // 比如: // SEC(&#34;tp_btf/sched_switch&#34;) // SEC(&#34;tp_btf/sys_enter&#34;) // SEC(&#34;tp_btf/sys_exit&#34;) &lt;name&gt; 的值跟 raw tracepoint SEC 中使用的 &lt;name&gt; 是一样的。 如何确定 btf raw tracepoint 事件处理函数的参数类型，获取对应的内核调用参数 所有事件都是在 vmlinux.h 中存在一个名为 btf_trace_&lt;name&gt; 的定义。 比如 sys_enter 这个事件对应的定义如下： typedef void (*btf_trace_sys_enter)(void *, struct pt_regs *, long int); 对应的 ebpf 函数可以定义成下面这样： SEC(&#34;tp_btf/sys_enter&#34;) int btf_raw_tracepoint__sys_enter(u64 *ctx) { // ... } 其中 ctx[0] 对应上面 btf_trace_sys_enter 中 void * 后面的第一个参数 struct pt_regs *, ctx[1] 是第二个参数 long int 。这两个参数的含义跟前面 raw tracepoint 中所说的 TP_PROTO(struct pt_regs *regs, long id) 中的含义是一样的。 对应的，使用 btf raw tracepoint 获取 fchmodat 系统调用事件的示例程序如下： SEC(&#34;tp_btf/sys_enter&#34;) int btf_raw_tracepoint__sys_enter(u64 *ctx) { long int syscall_id = (long int)ctx[1]; if(syscall_id != 268) // fchmodat return 0; struct pt_regs *regs = (struct pt_regs *)ctx[0]; // 后面的逻辑跟前面 raw tracepoint 示例程序中是一样的 // ... } BTW, 在 btf raw tracepoint 程序中可以通过 bpf_get_current_task_btf() 获取 btf 版本的 task 信息。 完整的示例程序如下： https://github.com/mozillazg/hello-libbpfgo/tree/master/16-btf-raw-tracepoint-args https://github.com/mozillazg/hello-libbpfgo/tree/master/17-btf-raw-tracepoint-args-sched_switch 参考资料 [PATCH v6 bpf-next 00/14] Support BTF-powered BPF tracing programs for kernel modules BPF CO-RE reference guide libbpf/libbpf.c at 12e932ac0e18546dd7247e66ea1b4aa236d2ef38 · libbpf/libbpf" />
-    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-4941850466486001"
-     crossorigin="anonymous"></script>
 
     <style>
       .js-toc {
@@ -274,10 +272,10 @@ SEC(&quot;tp_btf/&lt;name&gt;&quot;)
     <p>Related Posts:</p>
     <ul>
         <li><a href="https://mozillazg.com/2022/05/ebpf-libbpf-raw-tracepoint-common-questions.html">ebpf/libbpf 程序使用 raw tracepoint 的常见问题</a></li>
-        <li><a href="https://mozillazg.com/2022/05/ebpf-libbpfgo-get-container-info-via-process-info.rst.html">根据进程信息获取对应进程所属的容器/Pod 信息（一）</a></li>
-        <li><a href="https://mozillazg.com/2022/05/ebpf-libbpfgo-use-perfbuf-map.html">libbpfgo 使用示例：编写使用 perfbuf map 的 ebpf 程序</a></li>
         <li><a href="https://mozillazg.com/2022/05/ebpf-libbpfgo-use-ringbuf-map.html">libbpfgo 使用示例：编写使用 ringbuf map 的 ebpf 程序</a></li>
         <li><a href="https://mozillazg.com/2022/05/ebpf-libbpfgo-get-process-info.html">libbpfgo 使用示例：在 ebpf 程序中获取进程信息</a></li>
+        <li><a href="https://mozillazg.com/2022/05/ebpf-libbpfgo-use-map-example.html">libbpfgo 使用示例：在内核态和用户态使用 ebpf map</a></li>
+        <li><a href="https://mozillazg.com/2022/05/ebpf-libbpf-tracepoint-common-questions.html">ebpf/libbpf 程序使用 tracepoint 的常见问题</a></li>
     </ul>
 </section>
     <hr/>
