@@ -1,5 +1,250 @@
 <?xml version="1.0" encoding="utf-8"?>
-<feed xmlns="http://www.w3.org/2005/Atom"><title>mozillazg's Blog</title><link href="https://mozillazg.com/" rel="alternate"></link><link href="https://mozillazg.com/feeds/all.atom.xml" rel="self"></link><id>https://mozillazg.com/</id><updated>2022-07-31T00:00:00+00:00</updated><entry><title>ebpf 程序中常用的 load_byte/load_half/load_word 功能介绍</title><link href="https://mozillazg.com/2022/07/ebpf-libbpf-what-is-load_byte-load_half-load_word.html" rel="alternate"></link><updated>2022-07-31T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2022-07-31:2022/07/ebpf-libbpf-what-is-load_byte-load_half-load_word.html</id><summary type="html">&lt;div class="section" id="id1"&gt;
+<feed xmlns="http://www.w3.org/2005/Atom"><title>mozillazg's Blog</title><link href="https://mozillazg.com/" rel="alternate"></link><link href="https://mozillazg.com/feeds/all.atom.xml" rel="self"></link><id>https://mozillazg.com/</id><updated>2022-10-07T00:00:00+00:00</updated><entry><title>在 ebpf/libbpf 程序使用尾调用（tail calls）</title><link href="https://mozillazg.com/2022/10/ebpf-libbpf-use-tail-calls.html" rel="alternate"></link><updated>2022-10-07T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2022-10-07:2022/10/ebpf-libbpf-use-tail-calls.html</id><summary type="html">&lt;p&gt;本文将介绍如何在 ebpf/libbpf 程序 eBPF 的尾调用（tail calls）特性。&lt;/p&gt;
+&lt;div class="section" id="tail-calls"&gt;
+&lt;h2 id="hidtail-calls"&gt;尾调用（tail calls）&lt;a class="headerlink" href="#hidtail-calls" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;eBPF 的尾调用（tail calls）特性允许一个 eBPF 程序可以调用另一个 eBPF 程序，
+并且调用完成后不会返回原来的程序。&lt;/p&gt;
+&lt;p&gt;&lt;img alt="image" src="/static/images/bpf/bpf_tailcall.png" /&gt;&lt;/p&gt;
+&lt;p&gt;图片来源：&lt;a class="reference external" href="https://docs.cilium.io/en/v1.12/bpf/#tail-calls"&gt;https://docs.cilium.io/en/v1.12/bpf/#tail-calls&lt;/a&gt;&lt;/p&gt;
+&lt;p&gt;尾调用涉及两个步骤：&lt;/p&gt;
+&lt;ol class="arabic simple"&gt;
+&lt;li&gt;定义一个类型为 &lt;tt class="docutils literal"&gt;BPF_MAP_TYPE_PROG_ARRAY&lt;/tt&gt; 的 map ，
+map 的 value 是在尾调用中被调用的 eBPF 程序的文件描述符。
+我们可以在用户态程序中更新这个 map 的 key/value。&lt;/li&gt;
+&lt;li&gt;在 eBPF 程序中，我们可以通过 &lt;tt class="docutils literal"&gt;bpf_tail_call()&lt;/tt&gt; 这个辅助函数
+从第1步的 map 中获取 eBPF 程序然后执行该程序进行尾调用。&lt;/li&gt;
+&lt;/ol&gt;
+&lt;/div&gt;
+&lt;div class="section" id="id1"&gt;
+&lt;h2 id="hidid1"&gt;使用示例&lt;a class="headerlink" href="#hidid1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;如前面所说，要使用尾调用特性我们需要定义一个 map 以及在 eBPF 程序中使用辅助函数执行尾调用。下面将以示例的代码的方式讲述每个步骤的关键代码。&lt;/p&gt;
+&lt;div class="section" id="bpf-map-type-prog-array-map"&gt;
+&lt;h3 id="hidbpf-map-type-prog-array-map"&gt;定义 BPF_MAP_TYPE_PROG_ARRAY 类型的 map&lt;a class="headerlink" href="#hidbpf-map-type-prog-array-map" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
+&lt;p&gt;可以通过下面的方法定义一个 &lt;tt class="docutils literal"&gt;BPF_MAP_TYPE_PROG_ARRAY&lt;/tt&gt; 类型的 map:&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="k"&gt;struct&lt;/span&gt; &lt;span class="p"&gt;{&lt;/span&gt;
+        &lt;span class="n"&gt;__uint&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;type&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;BPF_MAP_TYPE_PROG_ARRAY&lt;/span&gt;&lt;span class="p"&gt;);&lt;/span&gt;
+        &lt;span class="n"&gt;__uint&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;key_size&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="k"&gt;sizeof&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;u32&lt;/span&gt;&lt;span class="p"&gt;));&lt;/span&gt;
+        &lt;span class="n"&gt;__uint&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;value_size&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="k"&gt;sizeof&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;u32&lt;/span&gt;&lt;span class="p"&gt;));&lt;/span&gt;
+        &lt;span class="n"&gt;__uint&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;max_entries&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="mi"&gt;1024&lt;/span&gt;&lt;span class="p"&gt;);&lt;/span&gt;
+&lt;span class="p"&gt;}&lt;/span&gt; &lt;span class="n"&gt;tail_jmp_map&lt;/span&gt; &lt;span class="n"&gt;SEC&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="s"&gt;&amp;quot;.maps&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;);&lt;/span&gt;
+&lt;/pre&gt;&lt;/div&gt;
+&lt;p&gt;如果想要在定义这个 map 的时候初始化一些值的话，可以用下面的方法：&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="k"&gt;struct&lt;/span&gt; &lt;span class="p"&gt;{&lt;/span&gt;
+        &lt;span class="n"&gt;__uint&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;type&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;BPF_MAP_TYPE_PROG_ARRAY&lt;/span&gt;&lt;span class="p"&gt;);&lt;/span&gt;
+        &lt;span class="n"&gt;__uint&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;key_size&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="k"&gt;sizeof&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;u32&lt;/span&gt;&lt;span class="p"&gt;));&lt;/span&gt;
+        &lt;span class="n"&gt;__uint&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;value_size&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="k"&gt;sizeof&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;u32&lt;/span&gt;&lt;span class="p"&gt;));&lt;/span&gt;
+        &lt;span class="n"&gt;__uint&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;max_entries&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="mi"&gt;1024&lt;/span&gt;&lt;span class="p"&gt;);&lt;/span&gt;
+        &lt;span class="n"&gt;__array&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;values&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="kt"&gt;int&lt;/span&gt; &lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="kt"&gt;void&lt;/span&gt; &lt;span class="o"&gt;*&lt;/span&gt;&lt;span class="p"&gt;));&lt;/span&gt;   &lt;span class="c1"&gt;// 这个 values 必须有&lt;/span&gt;
+&lt;span class="p"&gt;}&lt;/span&gt; &lt;span class="n"&gt;tail_jmp_map&lt;/span&gt; &lt;span class="n"&gt;SEC&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="s"&gt;&amp;quot;.maps&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="p"&gt;{&lt;/span&gt;
+        &lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="n"&gt;values&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="p"&gt;{&lt;/span&gt;                      &lt;span class="c1"&gt;// 初始化一些值&lt;/span&gt;
+                &lt;span class="p"&gt;[&lt;/span&gt;&lt;span class="mi"&gt;268&lt;/span&gt;&lt;span class="p"&gt;]&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="kt"&gt;void&lt;/span&gt; &lt;span class="o"&gt;*&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;&lt;span class="o"&gt;&amp;amp;&lt;/span&gt;&lt;span class="n"&gt;enter_fchmodat&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;
+        &lt;span class="p"&gt;},&lt;/span&gt;
+&lt;span class="p"&gt;};&lt;/span&gt;
+&lt;/pre&gt;&lt;/div&gt;
+&lt;/div&gt;
+&lt;div class="section" id="map"&gt;
+&lt;h3 id="hidmap"&gt;用户态更新 map&lt;a class="headerlink" href="#hidmap" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
+&lt;p&gt;在用户态程序中可以通过 &lt;tt class="docutils literal"&gt;bpf_map_update_elem&lt;/tt&gt; 函数更新这个 map:&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="n"&gt;tail_jump_map_fd&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;bpf_object__find_map_fd_by_name&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;bpf_obj&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="s"&gt;&amp;quot;tail_jmp_map&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;);&lt;/span&gt;
+&lt;span class="n"&gt;bpf_map_update_elem&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;tail_jump_map_fd&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="o"&gt;&amp;amp;&lt;/span&gt;&lt;span class="n"&gt;key&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="o"&gt;&amp;amp;&lt;/span&gt;&lt;span class="n"&gt;bpf_program_fd&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;BPF_ANY&lt;/span&gt;&lt;span class="p"&gt;);&lt;/span&gt;
+&lt;/pre&gt;&lt;/div&gt;
+&lt;/div&gt;
+&lt;div class="section" id="id2"&gt;
+&lt;h3 id="hidid2"&gt;尾调用&lt;a class="headerlink" href="#hidid2" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
+&lt;p&gt;eBPF 程序中可以通过 &lt;tt class="docutils literal"&gt;bpf_tail_call&lt;/tt&gt; 辅助函数执行尾调用：&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="n"&gt;SEC&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="s"&gt;&amp;quot;raw_tracepoint/sys_enter&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+&lt;span class="kt"&gt;int&lt;/span&gt; &lt;span class="n"&gt;raw_tracepoint__sys_enter&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="k"&gt;struct&lt;/span&gt; &lt;span class="n"&gt;bpf_raw_tracepoint_args&lt;/span&gt; &lt;span class="o"&gt;*&lt;/span&gt;&lt;span class="n"&gt;ctx&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt; &lt;span class="p"&gt;{&lt;/span&gt;
+        &lt;span class="n"&gt;u32&lt;/span&gt; &lt;span class="n"&gt;syscall_id&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;ctx&lt;/span&gt;&lt;span class="o"&gt;-&amp;gt;&lt;/span&gt;&lt;span class="n"&gt;args&lt;/span&gt;&lt;span class="p"&gt;[&lt;/span&gt;&lt;span class="mi"&gt;1&lt;/span&gt;&lt;span class="p"&gt;];&lt;/span&gt;
+
+        &lt;span class="c1"&gt;// 执行尾调用&lt;/span&gt;
+        &lt;span class="n"&gt;bpf_tail_call&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;ctx&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="o"&gt;&amp;amp;&lt;/span&gt;&lt;span class="n"&gt;tail_jmp_map&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;syscall_id&lt;/span&gt;&lt;span class="p"&gt;);&lt;/span&gt;
+
+        &lt;span class="c1"&gt;// 如果在 map 中找不到对应的 ebpf 程序的话，会继续走到后面的代码&lt;/span&gt;
+        &lt;span class="kt"&gt;char&lt;/span&gt; &lt;span class="n"&gt;fmt&lt;/span&gt;&lt;span class="p"&gt;[]&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="s"&gt;&amp;quot;no bpf program for syscall %d&lt;/span&gt;&lt;span class="se"&gt;\n&lt;/span&gt;&lt;span class="s"&gt;&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;;&lt;/span&gt;
+        &lt;span class="n"&gt;bpf_trace_printk&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;fmt&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="k"&gt;sizeof&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;fmt&lt;/span&gt;&lt;span class="p"&gt;),&lt;/span&gt; &lt;span class="n"&gt;syscall_id&lt;/span&gt;&lt;span class="p"&gt;);&lt;/span&gt;
+        &lt;span class="k"&gt;return&lt;/span&gt; &lt;span class="mi"&gt;0&lt;/span&gt;&lt;span class="p"&gt;;&lt;/span&gt;
+&lt;span class="p"&gt;}&lt;/span&gt;
+&lt;/pre&gt;&lt;/div&gt;
+&lt;p&gt;完整的示例程序，详见：
+&lt;a class="reference external" href="https://github.com/mozillazg/hello-libbpfgo/tree/master/22-tail-calls"&gt;https://github.com/mozillazg/hello-libbpfgo/tree/master/22-tail-calls&lt;/a&gt;&lt;/p&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;div class="section" id="id3"&gt;
+&lt;h2 id="hidid3"&gt;参考资料&lt;a class="headerlink" href="#hidid3" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;ul class="simple"&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://docs.cilium.io/en/v1.12/bpf/"&gt;BPF and XDP Reference Guide — Cilium 1.12.2 documentation&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://man7.org/linux/man-pages/man2/bpf.2.html"&gt;bpf(2) - Linux manual page&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://man7.org/linux/man-pages/man7/bpf-helpers.7.html"&gt;bpf-helpers(7) - Linux manual page&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://github.com/libbpf/libbpf/issues/354"&gt;Support static initialization of BPF_MAP_TYPE_PROG_ARRAY · Issue #354 · libbpf/libbpf&lt;/a&gt;&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/div&gt;
+</summary><category term="libbpf"></category><category term="libbpfgo"></category></entry><entry><title>解决 ebpf 验证器提示类型错误的问题</title><link href="https://mozillazg.com/2022/10/ebpf-libbpf-verifier-fix-type-expected-issue.html" rel="alternate"></link><updated>2022-10-06T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2022-10-06:2022/10/ebpf-libbpf-verifier-fix-type-expected-issue.html</id><summary type="html">&lt;p&gt;有时当我们加载编译后的 eBPF 程序的时候，eBPF 验证器会提示程序中有类型错误的问题导致程序加载失败。
+本文记录一下这种错误的一种解决方法。&lt;/p&gt;
+&lt;div class="section" id="id1"&gt;
+&lt;h2 id="hidid1"&gt;错误示例&lt;a class="headerlink" href="#hidid1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;比如，当下面这段 eBPF 程序&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="n"&gt;SEC&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="s"&gt;&amp;quot;iter/bpf_sk_storage_map&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+&lt;span class="kt"&gt;int&lt;/span&gt; &lt;span class="n"&gt;iter__bpf_sk_storage_map&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="k"&gt;struct&lt;/span&gt; &lt;span class="n"&gt;bpf_iter__bpf_sk_storage_map&lt;/span&gt; &lt;span class="o"&gt;*&lt;/span&gt;&lt;span class="n"&gt;ctx&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+&lt;span class="p"&gt;{&lt;/span&gt;
+    &lt;span class="k"&gt;if&lt;/span&gt; &lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;ctx&lt;/span&gt;&lt;span class="o"&gt;-&amp;gt;&lt;/span&gt;&lt;span class="n"&gt;sk&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+        &lt;span class="n"&gt;bpf_sk_storage_delete&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="o"&gt;&amp;amp;&lt;/span&gt;&lt;span class="n"&gt;sk_storage_map&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;ctx&lt;/span&gt;&lt;span class="o"&gt;-&amp;gt;&lt;/span&gt;&lt;span class="n"&gt;sk&lt;/span&gt;&lt;span class="p"&gt;);&lt;/span&gt;
+
+    &lt;span class="k"&gt;return&lt;/span&gt; &lt;span class="mi"&gt;0&lt;/span&gt;&lt;span class="p"&gt;;&lt;/span&gt;
+&lt;span class="p"&gt;}&lt;/span&gt;
+&lt;/pre&gt;&lt;/div&gt;
+&lt;p&gt;被加载到内核中时会提示如下类型错误:&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;libbpf: prog &lt;span class="s1"&gt;&amp;#39;iter__bpf_sk_storage_map&amp;#39;&lt;/span&gt;: BPF program load failed: Permission denied
+libbpf: prog &lt;span class="s1"&gt;&amp;#39;iter__bpf_sk_storage_map&amp;#39;&lt;/span&gt;: -- BEGIN PROG LOAD LOG --
+R1 &lt;span class="nv"&gt;type&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;ctx &lt;span class="nv"&gt;expected&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;fp
+&lt;span class="p"&gt;;&lt;/span&gt; &lt;span class="k"&gt;if&lt;/span&gt; &lt;span class="o"&gt;(&lt;/span&gt;ctx-&amp;gt;sk&lt;span class="o"&gt;)&lt;/span&gt;
+0: &lt;span class="o"&gt;(&lt;/span&gt;79&lt;span class="o"&gt;)&lt;/span&gt; &lt;span class="nv"&gt;r2&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; *&lt;span class="o"&gt;(&lt;/span&gt;u64 *&lt;span class="o"&gt;)(&lt;/span&gt;r1 +16&lt;span class="o"&gt;)&lt;/span&gt;
+&lt;span class="p"&gt;;&lt;/span&gt; &lt;span class="k"&gt;if&lt;/span&gt; &lt;span class="o"&gt;(&lt;/span&gt;ctx-&amp;gt;sk&lt;span class="o"&gt;)&lt;/span&gt;
+1: &lt;span class="o"&gt;(&lt;/span&gt;15&lt;span class="o"&gt;)&lt;/span&gt; &lt;span class="k"&gt;if&lt;/span&gt; &lt;span class="nv"&gt;r2&lt;/span&gt; &lt;span class="o"&gt;==&lt;/span&gt; 0x0 goto pc+4
+ &lt;span class="nv"&gt;R1&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;ctx&lt;span class="o"&gt;(&lt;/span&gt;&lt;span class="nv"&gt;id&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;0,off&lt;span class="o"&gt;=&lt;/span&gt;0,imm&lt;span class="o"&gt;=&lt;/span&gt;0&lt;span class="o"&gt;)&lt;/span&gt; &lt;span class="nv"&gt;R2_w&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;ptr_sock&lt;span class="o"&gt;(&lt;/span&gt;&lt;span class="nv"&gt;id&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;0,off&lt;span class="o"&gt;=&lt;/span&gt;0,imm&lt;span class="o"&gt;=&lt;/span&gt;0&lt;span class="o"&gt;)&lt;/span&gt; &lt;span class="nv"&gt;R10&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;fp0
+&lt;span class="p"&gt;;&lt;/span&gt; bpf_sk_storage_delete&lt;span class="o"&gt;(&lt;/span&gt;&lt;span class="p"&gt;&amp;amp;&lt;/span&gt;sk_storage_map, ctx-&amp;gt;sk&lt;span class="o"&gt;)&lt;/span&gt;&lt;span class="p"&gt;;&lt;/span&gt;
+2: &lt;span class="o"&gt;(&lt;/span&gt;79&lt;span class="o"&gt;)&lt;/span&gt; &lt;span class="nv"&gt;r2&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; *&lt;span class="o"&gt;(&lt;/span&gt;u64 *&lt;span class="o"&gt;)(&lt;/span&gt;r1 +16&lt;span class="o"&gt;)&lt;/span&gt;
+&lt;span class="p"&gt;;&lt;/span&gt; bpf_sk_storage_delete&lt;span class="o"&gt;(&lt;/span&gt;&lt;span class="p"&gt;&amp;amp;&lt;/span&gt;sk_storage_map, ctx-&amp;gt;sk&lt;span class="o"&gt;)&lt;/span&gt;&lt;span class="p"&gt;;&lt;/span&gt;
+3: &lt;span class="o"&gt;(&lt;/span&gt;18&lt;span class="o"&gt;)&lt;/span&gt; &lt;span class="nv"&gt;r1&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; 0xffffa0658305aa00
+5: &lt;span class="o"&gt;(&lt;/span&gt;85&lt;span class="o"&gt;)&lt;/span&gt; call bpf_sk_storage_delete#108
+R2 &lt;span class="nv"&gt;type&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;ptr_or_null_ &lt;span class="nv"&gt;expected&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;ptr_
+processed &lt;span class="m"&gt;5&lt;/span&gt; insns &lt;span class="o"&gt;(&lt;/span&gt;limit 1000000&lt;span class="o"&gt;)&lt;/span&gt; max_states_per_insn &lt;span class="m"&gt;0&lt;/span&gt; total_states &lt;span class="m"&gt;0&lt;/span&gt; peak_states &lt;span class="m"&gt;0&lt;/span&gt; mark_read 0
+-- END PROG LOAD LOG --
+libbpf: prog &lt;span class="s1"&gt;&amp;#39;iter__bpf_sk_storage_map&amp;#39;&lt;/span&gt;: failed to load: -13
+libbpf: failed to load object &lt;span class="s1"&gt;&amp;#39;main.bpf.o&amp;#39;&lt;/span&gt;
+failed to load BPF object: permission denied
+&lt;/pre&gt;&lt;/div&gt;
+&lt;div class="section" id="id2"&gt;
+&lt;h3 id="hidid2"&gt;解决办法&lt;a class="headerlink" href="#hidid2" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
+&lt;p&gt;这个错误信息有两个关键错误，一个错误是:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+R1 type=ctx expected=fp
+; if (ctx-&amp;gt;sk)
+0: (79) r2 = *(u64 *)(r1 +16)
+; if (ctx-&amp;gt;sk)
+1: (15) if r2 == 0x0 goto pc+4
+&lt;/pre&gt;
+&lt;p&gt;其中 &lt;tt class="docutils literal"&gt;R1 type=ctx expected=fp&lt;/tt&gt; 说的是，验证器期望 &lt;tt class="docutils literal"&gt;R1&lt;/tt&gt; 的类型是 &lt;tt class="docutils literal"&gt;fp&lt;/tt&gt; 而不是 &lt;tt class="docutils literal"&gt;ctx&lt;/tt&gt; 。
+所谓的 &lt;tt class="docutils literal"&gt;fp&lt;/tt&gt; 指的是栈上的指针类型，即期望 &lt;tt class="docutils literal"&gt;R1&lt;/tt&gt; 是栈上的数据而不是 &lt;tt class="docutils literal"&gt;ctx&lt;/tt&gt; 。&lt;/p&gt;
+&lt;p&gt;另一个错误是:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+ R1=ctx(id=0,off=0,imm=0) R2_w=ptr_sock(id=0,off=0,imm=0) R10=fp0
+; bpf_sk_storage_delete(&amp;amp;sk_storage_map, ctx-&amp;gt;sk);
+2: (79) r2 = *(u64 *)(r1 +16)
+; bpf_sk_storage_delete(&amp;amp;sk_storage_map, ctx-&amp;gt;sk);
+3: (18) r1 = 0xffffa0658305aa00
+5: (85) call bpf_sk_storage_delete#108
+R2 type=ptr_or_null_ expected=ptr_
+&lt;/pre&gt;
+&lt;p&gt;其中 &lt;tt class="docutils literal"&gt;R2 type=ptr_or_null_ expected=ptr_&lt;/tt&gt; 说的是，验证器期望 &lt;tt class="docutils literal"&gt;R2&lt;/tt&gt; 的类型是 &lt;tt class="docutils literal"&gt;ptr&lt;/tt&gt;
+而不是 &lt;tt class="docutils literal"&gt;prt_or_null&lt;/tt&gt; ，即，期望 &lt;tt class="docutils literal"&gt;R2&lt;/tt&gt; 是一个指针而不是一个指针或 &lt;tt class="docutils literal"&gt;NULL&lt;/tt&gt; 。
+这里可能会有点疑惑，前面的判断 &lt;tt class="docutils literal"&gt;if &lt;span class="pre"&gt;(ctx-&amp;gt;sk)&lt;/span&gt;&lt;/tt&gt; 已经确保了不会为 &lt;tt class="docutils literal"&gt;NULL&lt;/tt&gt; ，
+为啥这里还会认为它有可能为 &lt;tt class="docutils literal"&gt;NULL&lt;/tt&gt; ，这是因为前面的 if 判断的不是栈变量，
+存在 &lt;tt class="docutils literal"&gt;R1 type=ctx expected=fp&lt;/tt&gt; 的问题也就无法保证它一定不是 &lt;tt class="docutils literal"&gt;NULL&lt;/tt&gt; 了。&lt;/p&gt;
+&lt;p&gt;解决办法也很简单，就是用一个临时变量保存 &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;ctx-&amp;gt;sk&lt;/span&gt;&lt;/tt&gt; 的值，
+然后用这个栈上的临时变量做后续的操作:&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt; SEC(&amp;quot;iter/bpf_sk_storage_map&amp;quot;)
+ int iter__bpf_sk_storage_map(struct bpf_iter__bpf_sk_storage_map *ctx)
+ {
+&lt;span class="gd"&gt;-    if (ctx-&amp;gt;sk)&lt;/span&gt;
+&lt;span class="gd"&gt;-        bpf_sk_storage_delete(&amp;amp;sk_storage_map, ctx-&amp;gt;sk);&lt;/span&gt;
+&lt;span class="gi"&gt;+    struct sock *sk = ctx-&amp;gt;sk;&lt;/span&gt;
+&lt;span class="gi"&gt;+    if (sk)&lt;/span&gt;
+&lt;span class="gi"&gt;+        bpf_sk_storage_delete(&amp;amp;sk_storage_map, sk);&lt;/span&gt;
+
+     return 0;
+ }
+&lt;/pre&gt;&lt;/div&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;div class="section" id="id3"&gt;
+&lt;h2 id="hidid3"&gt;常见类型关键字的含义&lt;a class="headerlink" href="#hidid3" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;这里记录一下类似前面 &lt;tt class="docutils literal"&gt;fp&lt;/tt&gt; 这样的常见类型关键字具体的含义：&lt;/p&gt;
+&lt;table border="1" class="docutils"&gt;
+&lt;colgroup&gt;
+&lt;col width="31%" /&gt;
+&lt;col width="69%" /&gt;
+&lt;/colgroup&gt;
+&lt;thead valign="bottom"&gt;
+&lt;tr&gt;&lt;th class="head"&gt;关键字&lt;/th&gt;
+&lt;th class="head"&gt;含义&lt;/th&gt;
+&lt;/tr&gt;
+&lt;/thead&gt;
+&lt;tbody valign="top"&gt;
+&lt;tr&gt;&lt;td&gt;&lt;tt class="docutils literal"&gt;scalar&lt;/tt&gt;&lt;/td&gt;
+&lt;td&gt;标量类型（scalar type），非指针类型&lt;/td&gt;
+&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;&lt;tt class="docutils literal"&gt;ctx&lt;/tt&gt;&lt;/td&gt;
+&lt;td&gt;bpf_context 指针&lt;/td&gt;
+&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;&lt;tt class="docutils literal"&gt;map_ptr&lt;/tt&gt;&lt;/td&gt;
+&lt;td&gt;bpf_map 类型的指针&lt;/td&gt;
+&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;&lt;tt class="docutils literal"&gt;map_value&lt;/tt&gt;&lt;/td&gt;
+&lt;td&gt;map 中的元素 value 指针&lt;/td&gt;
+&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;&lt;tt class="docutils literal"&gt;map_key&lt;/tt&gt;&lt;/td&gt;
+&lt;td&gt;map 中的元素 key 指针&lt;/td&gt;
+&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;&lt;tt class="docutils literal"&gt;fp&lt;/tt&gt;&lt;/td&gt;
+&lt;td&gt;栈上的指针（frame pointer）&lt;/td&gt;
+&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;&lt;tt class="docutils literal"&gt;pkt&lt;/tt&gt;&lt;/td&gt;
+&lt;td&gt;skb-&amp;gt;data 指针&lt;/td&gt;
+&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;&lt;tt class="docutils literal"&gt;pkt_meta&lt;/tt&gt;&lt;/td&gt;
+&lt;td&gt;skb-&amp;gt;data - meta_len 位置的指针&lt;/td&gt;
+&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;&lt;tt class="docutils literal"&gt;pkt_end&lt;/tt&gt;&lt;/td&gt;
+&lt;td&gt;skb-&amp;gt;data + headlen 位置的指针&lt;/td&gt;
+&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;&lt;tt class="docutils literal"&gt;sock&lt;/tt&gt;&lt;/td&gt;
+&lt;td&gt;bpf_sock 类型的指针&lt;/td&gt;
+&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;&lt;tt class="docutils literal"&gt;sock_common&lt;/tt&gt;&lt;/td&gt;
+&lt;td&gt;sock_common 类型指针&lt;/td&gt;
+&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;&lt;tt class="docutils literal"&gt;tcp_sock&lt;/tt&gt;&lt;/td&gt;
+&lt;td&gt;tcp_sock 类型指针&lt;/td&gt;
+&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;&lt;tt class="docutils literal"&gt;tp_buffer&lt;/tt&gt;&lt;/td&gt;
+&lt;td&gt;可写的 raw tracepoint buffer 指针&lt;/td&gt;
+&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;&lt;tt class="docutils literal"&gt;xdp_sock&lt;/tt&gt;&lt;/td&gt;
+&lt;td&gt;xdp_sock 类型指针&lt;/td&gt;
+&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;&lt;tt class="docutils literal"&gt;ptr_&lt;/tt&gt;&lt;/td&gt;
+&lt;td&gt;一个 BTF ID，非空指针&lt;/td&gt;
+&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;&lt;tt class="docutils literal"&gt;ptr_or_null_&lt;/tt&gt;&lt;/td&gt;
+&lt;td&gt;一个 BTF ID 或 NULL，可能为空的指针&lt;/td&gt;
+&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;&lt;tt class="docutils literal"&gt;dynptr_ptr&lt;/tt&gt;&lt;/td&gt;
+&lt;td&gt;动态指针（dynptr 指针）&lt;/td&gt;
+&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;&lt;tt class="docutils literal"&gt;mem&lt;/tt&gt;&lt;/td&gt;
+&lt;td&gt;指向一块有效内存区域的指针&lt;/td&gt;
+&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;&lt;tt class="docutils literal"&gt;buf&lt;/tt&gt;&lt;/td&gt;
+&lt;td&gt;指向一个读/写 buffer 的指针&lt;/td&gt;
+&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;&lt;tt class="docutils literal"&gt;func&lt;/tt&gt;&lt;/td&gt;
+&lt;td&gt;BPF 程序函数指针&lt;/td&gt;
+&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;&lt;tt class="docutils literal"&gt;inv&lt;/tt&gt;&lt;/td&gt;
+&lt;td&gt;无效类型（invalid type）&lt;/td&gt;
+&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;&lt;tt class="docutils literal"&gt;?&lt;/tt&gt;&lt;/td&gt;
+&lt;td&gt;&amp;nbsp;&lt;/td&gt;
+&lt;/tr&gt;
+&lt;/tbody&gt;
+&lt;/table&gt;
+&lt;/div&gt;
+&lt;div class="section" id="id4"&gt;
+&lt;h2 id="hidid4"&gt;参考资料&lt;a class="headerlink" href="#hidid4" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;&lt;a class="reference external" href="https://elixir.bootlin.com/linux/v5.19.14/source/kernel/bpf/verifier.c#L533"&gt;verifier.c - kernel/bpf/verifier.c - Linux source code (v5.19.14) - Bootlin&lt;/a&gt;
+&lt;a class="reference external" href="https://lwn.net/Articles/895885/"&gt;BPF: Dynamic pointers [LWN.net]&lt;/a&gt;&lt;/p&gt;
+&lt;/div&gt;
+</summary><category term="libbpf"></category></entry><entry><title>ebpf 程序中常用的 load_byte/load_half/load_word 功能介绍</title><link href="https://mozillazg.com/2022/07/ebpf-libbpf-what-is-load_byte-load_half-load_word.html" rel="alternate"></link><updated>2022-07-31T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2022-07-31:2022/07/ebpf-libbpf-what-is-load_byte-load_half-load_word.html</id><summary type="html">&lt;div class="section" id="id1"&gt;
 &lt;h2 id="hidid1"&gt;前言&lt;a class="headerlink" href="#hidid1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;p&gt;大家在阅读一些网络相关的 ebpf 程序源码时可能会发现部分程序会使用
 &lt;tt class="docutils literal"&gt;load_byte&lt;/tt&gt;, &lt;tt class="docutils literal"&gt;load_half&lt;/tt&gt; 以及 &lt;tt class="docutils literal"&gt;load_word&lt;/tt&gt; 这几个函数来辅助解析网络数据包。&lt;/p&gt;
@@ -12,12 +257,12 @@
 &lt;h3 id="hidid2"&gt;函数定义&lt;a class="headerlink" href="#hidid2" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
 &lt;p&gt;&lt;tt class="docutils literal"&gt;load_byte&lt;/tt&gt; 函数的定义如下:&lt;/p&gt;
 &lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="kt"&gt;unsigned&lt;/span&gt; &lt;span class="kt"&gt;long&lt;/span&gt; &lt;span class="kt"&gt;long&lt;/span&gt; &lt;span class="nf"&gt;load_byte&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="kt"&gt;void&lt;/span&gt; &lt;span class="o"&gt;*&lt;/span&gt;&lt;span class="n"&gt;skb&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;
-                          &lt;span class="kt"&gt;unsigned&lt;/span&gt; &lt;span class="kt"&gt;long&lt;/span&gt; &lt;span class="kt"&gt;long&lt;/span&gt; &lt;span class="n"&gt;off&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt; &lt;span class="n"&gt;asm&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="s"&gt;&amp;quot;llvm.bpf.load.byte&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;);&lt;/span&gt;
+                          &lt;span class="kt"&gt;unsigned&lt;/span&gt; &lt;span class="kt"&gt;long&lt;/span&gt; &lt;span class="kt"&gt;long&lt;/span&gt; &lt;span class="n"&gt;offset&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt; &lt;span class="n"&gt;asm&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="s"&gt;&amp;quot;llvm.bpf.load.byte&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;);&lt;/span&gt;
 &lt;/pre&gt;&lt;/div&gt;
 &lt;/div&gt;
 &lt;div class="section" id="id3"&gt;
 &lt;h3 id="hidid3"&gt;函数功能&lt;a class="headerlink" href="#hidid3" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
-&lt;p&gt;它的功能是：从 &lt;tt class="docutils literal"&gt;skb&lt;/tt&gt; 指向的数据包指针中读取 &lt;strong&gt;8-bits&lt;/strong&gt; 的数据。
+&lt;p&gt;它的功能是：从 &lt;tt class="docutils literal"&gt;skb&lt;/tt&gt; 指向的数据包指针中 offset 位置开始读取 &lt;strong&gt;8-bits&lt;/strong&gt; 的数据。
 跟 gcc 里的 &lt;tt class="docutils literal"&gt;__builtin_bpf_load_byte&lt;/tt&gt; 函数的功能是一样的。&lt;/p&gt;
 &lt;/div&gt;
 &lt;div class="section" id="id4"&gt;
@@ -35,12 +280,12 @@
 &lt;h3 id="hidid5"&gt;函数定义&lt;a class="headerlink" href="#hidid5" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
 &lt;p&gt;&lt;tt class="docutils literal"&gt;load_half&lt;/tt&gt; 函数的定义如下:&lt;/p&gt;
 &lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="kt"&gt;unsigned&lt;/span&gt; &lt;span class="kt"&gt;long&lt;/span&gt; &lt;span class="kt"&gt;long&lt;/span&gt; &lt;span class="nf"&gt;load_half&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="kt"&gt;void&lt;/span&gt; &lt;span class="o"&gt;*&lt;/span&gt;&lt;span class="n"&gt;skb&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;
-                         &lt;span class="kt"&gt;unsigned&lt;/span&gt; &lt;span class="kt"&gt;long&lt;/span&gt; &lt;span class="kt"&gt;long&lt;/span&gt; &lt;span class="n"&gt;off&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt; &lt;span class="n"&gt;asm&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="s"&gt;&amp;quot;llvm.bpf.load.half&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;);&lt;/span&gt;
+                         &lt;span class="kt"&gt;unsigned&lt;/span&gt; &lt;span class="kt"&gt;long&lt;/span&gt; &lt;span class="kt"&gt;long&lt;/span&gt; &lt;span class="n"&gt;offset&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt; &lt;span class="n"&gt;asm&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="s"&gt;&amp;quot;llvm.bpf.load.half&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;);&lt;/span&gt;
 &lt;/pre&gt;&lt;/div&gt;
 &lt;/div&gt;
 &lt;div class="section" id="id6"&gt;
 &lt;h3 id="hidid6"&gt;函数功能&lt;a class="headerlink" href="#hidid6" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
-&lt;p&gt;它的功能是：从 &lt;tt class="docutils literal"&gt;skb&lt;/tt&gt; 指向的数据包指针中读取 &lt;strong&gt;16-bits&lt;/strong&gt; 的数据。
+&lt;p&gt;它的功能是：从 &lt;tt class="docutils literal"&gt;skb&lt;/tt&gt; 指向的数据包指针中 offset 位置开始读取 &lt;strong&gt;16-bits&lt;/strong&gt; 的数据。
 跟 gcc 里的 &lt;tt class="docutils literal"&gt;__builtin_bpf_load_half&lt;/tt&gt; 函数的功能是一样的。&lt;/p&gt;
 &lt;/div&gt;
 &lt;div class="section" id="id7"&gt;
@@ -58,12 +303,12 @@
 &lt;h3 id="hidid8"&gt;函数定义&lt;a class="headerlink" href="#hidid8" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
 &lt;p&gt;&lt;tt class="docutils literal"&gt;load_word&lt;/tt&gt; 函数的定义如下:&lt;/p&gt;
 &lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="kt"&gt;unsigned&lt;/span&gt; &lt;span class="kt"&gt;long&lt;/span&gt; &lt;span class="kt"&gt;long&lt;/span&gt; &lt;span class="nf"&gt;load_word&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="kt"&gt;void&lt;/span&gt; &lt;span class="o"&gt;*&lt;/span&gt;&lt;span class="n"&gt;skb&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;
-                         &lt;span class="kt"&gt;unsigned&lt;/span&gt; &lt;span class="kt"&gt;long&lt;/span&gt; &lt;span class="kt"&gt;long&lt;/span&gt; &lt;span class="n"&gt;off&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt; &lt;span class="n"&gt;asm&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="s"&gt;&amp;quot;llvm.bpf.load.word&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;);&lt;/span&gt;
+                         &lt;span class="kt"&gt;unsigned&lt;/span&gt; &lt;span class="kt"&gt;long&lt;/span&gt; &lt;span class="kt"&gt;long&lt;/span&gt; &lt;span class="n"&gt;offset&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt; &lt;span class="n"&gt;asm&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="s"&gt;&amp;quot;llvm.bpf.load.word&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;);&lt;/span&gt;
 &lt;/pre&gt;&lt;/div&gt;
 &lt;/div&gt;
 &lt;div class="section" id="id9"&gt;
 &lt;h3 id="hidid9"&gt;函数功能&lt;a class="headerlink" href="#hidid9" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
-&lt;p&gt;它的功能是：从 &lt;tt class="docutils literal"&gt;skb&lt;/tt&gt; 指向的数据包指针中读取 &lt;strong&gt;32-bits&lt;/strong&gt; 的数据。
+&lt;p&gt;它的功能是：从 &lt;tt class="docutils literal"&gt;skb&lt;/tt&gt; 指向的数据包指针中 offset 位置开始读取 &lt;strong&gt;32-bits&lt;/strong&gt; 的数据。
 跟 gcc 里的 &lt;tt class="docutils literal"&gt;__builtin_bpf_load_word&lt;/tt&gt; 函数的功能是一样的。&lt;/p&gt;
 &lt;/div&gt;
 &lt;div class="section" id="id10"&gt;
@@ -81,24 +326,22 @@
 &lt;tt class="docutils literal"&gt;bpf_skb_load_bytes&lt;/tt&gt; 函数实现类似的功能。&lt;/p&gt;
 &lt;p&gt;比如前面的那几个例子可以改写为:&lt;/p&gt;
 &lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="c1"&gt;// __u8 protocol = load_byte(skb, ETH_HLEN + offsetof(struct iphdr, protocol));&lt;/span&gt;
-&lt;span class="k"&gt;struct&lt;/span&gt; &lt;span class="n"&gt;iphdr&lt;/span&gt; &lt;span class="n"&gt;ip_hdr&lt;/span&gt;&lt;span class="p"&gt;;&lt;/span&gt;
-&lt;span class="k"&gt;if&lt;/span&gt; &lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;bpf_skb_load_bytes&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;skb&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;ETH_HLEN&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="o"&gt;&amp;amp;&lt;/span&gt;&lt;span class="n"&gt;ip_hdr&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="k"&gt;sizeof&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;ip_hdr&lt;/span&gt;&lt;span class="p"&gt;))&lt;/span&gt; &lt;span class="o"&gt;&amp;lt;&lt;/span&gt; &lt;span class="mi"&gt;0&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+&lt;span class="n"&gt;__u8&lt;/span&gt; &lt;span class="n"&gt;protocol&lt;/span&gt;&lt;span class="p"&gt;;&lt;/span&gt;
+&lt;span class="k"&gt;if&lt;/span&gt; &lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;bpf_skb_load_bytes&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;skb&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;ETH_HLEN&lt;/span&gt; &lt;span class="o"&gt;+&lt;/span&gt; &lt;span class="n"&gt;offsetof&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="k"&gt;struct&lt;/span&gt; &lt;span class="n"&gt;iphdr&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;protocol&lt;/span&gt;&lt;span class="p"&gt;),&lt;/span&gt; &lt;span class="o"&gt;&amp;amp;&lt;/span&gt;&lt;span class="n"&gt;protocol&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="k"&gt;sizeof&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;protocol&lt;/span&gt;&lt;span class="p"&gt;))&lt;/span&gt; &lt;span class="o"&gt;&amp;lt;&lt;/span&gt; &lt;span class="mi"&gt;0&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
     &lt;span class="k"&gt;return&lt;/span&gt; &lt;span class="mi"&gt;0&lt;/span&gt;&lt;span class="p"&gt;;&lt;/span&gt;
-&lt;span class="n"&gt;__u8&lt;/span&gt; &lt;span class="n"&gt;protocol&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;ip_hdr&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="n"&gt;protocol&lt;/span&gt;&lt;span class="p"&gt;;&lt;/span&gt;
 
 
 &lt;span class="c1"&gt;// __u16 h_proto = load_half(skb, offsetof(struct ethhdr, h_proto));&lt;/span&gt;
-&lt;span class="k"&gt;struct&lt;/span&gt; &lt;span class="n"&gt;ethhdr&lt;/span&gt; &lt;span class="n"&gt;eth_hdr&lt;/span&gt;&lt;span class="p"&gt;;&lt;/span&gt;
-&lt;span class="k"&gt;if&lt;/span&gt; &lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;bpf_skb_load_bytes&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;skb&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="mi"&gt;0&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="o"&gt;&amp;amp;&lt;/span&gt;&lt;span class="n"&gt;eth_hdr&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="k"&gt;sizeof&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;eth_hdr&lt;/span&gt;&lt;span class="p"&gt;))&lt;/span&gt; &lt;span class="o"&gt;&amp;lt;&lt;/span&gt; &lt;span class="mi"&gt;0&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+&lt;span class="n"&gt;__u16&lt;/span&gt; &lt;span class="n"&gt;raw_h_proto&lt;/span&gt;&lt;span class="p"&gt;;&lt;/span&gt;
+&lt;span class="k"&gt;if&lt;/span&gt; &lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;bpf_skb_load_bytes&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;skb&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;offsetof&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="k"&gt;struct&lt;/span&gt; &lt;span class="n"&gt;ethhdr&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;h_proto&lt;/span&gt;&lt;span class="p"&gt;),&lt;/span&gt; &lt;span class="o"&gt;&amp;amp;&lt;/span&gt;&lt;span class="n"&gt;raw_h_proto&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="k"&gt;sizeof&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;raw_h_proto&lt;/span&gt;&lt;span class="p"&gt;))&lt;/span&gt; &lt;span class="o"&gt;&amp;lt;&lt;/span&gt; &lt;span class="mi"&gt;0&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
     &lt;span class="k"&gt;return&lt;/span&gt; &lt;span class="mi"&gt;0&lt;/span&gt;&lt;span class="p"&gt;;&lt;/span&gt;
-&lt;span class="n"&gt;__u16&lt;/span&gt; &lt;span class="n"&gt;h_proto&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;bpf_ntohs&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;eth_hdr&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="n"&gt;h_proto&lt;/span&gt;&lt;span class="p"&gt;);&lt;/span&gt;
+&lt;span class="n"&gt;__u16&lt;/span&gt; &lt;span class="n"&gt;h_proto&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;bpf_ntohs&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;raw_h_proto&lt;/span&gt;&lt;span class="p"&gt;);&lt;/span&gt;
 
 
 &lt;span class="c1"&gt;// __u32 saddr = load_word(skb, ETH_HLEN + offsetof(struct iphdr, saddr));&lt;/span&gt;
-&lt;span class="k"&gt;struct&lt;/span&gt; &lt;span class="n"&gt;iphdr&lt;/span&gt; &lt;span class="n"&gt;ip_hdr&lt;/span&gt;&lt;span class="p"&gt;;&lt;/span&gt;
-&lt;span class="k"&gt;if&lt;/span&gt; &lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;bpf_skb_load_bytes&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;skb&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;ETH_HLEN&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="o"&gt;&amp;amp;&lt;/span&gt;&lt;span class="n"&gt;ip_hdr&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="k"&gt;sizeof&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;ip_hdr&lt;/span&gt;&lt;span class="p"&gt;))&lt;/span&gt; &lt;span class="o"&gt;&amp;lt;&lt;/span&gt; &lt;span class="mi"&gt;0&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+&lt;span class="n"&gt;__u32&lt;/span&gt; &lt;span class="n"&gt;saddr&lt;/span&gt;&lt;span class="p"&gt;;&lt;/span&gt;
+&lt;span class="k"&gt;if&lt;/span&gt; &lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;bpf_skb_load_bytes&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;skb&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;ETH_HLEN&lt;/span&gt; &lt;span class="o"&gt;+&lt;/span&gt; &lt;span class="n"&gt;offsetof&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="k"&gt;struct&lt;/span&gt; &lt;span class="n"&gt;iphdr&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;saddr&lt;/span&gt;&lt;span class="p"&gt;),&lt;/span&gt; &lt;span class="o"&gt;&amp;amp;&lt;/span&gt;&lt;span class="n"&gt;saddr&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="k"&gt;sizeof&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;saddr&lt;/span&gt;&lt;span class="p"&gt;))&lt;/span&gt; &lt;span class="o"&gt;&amp;lt;&lt;/span&gt; &lt;span class="mi"&gt;0&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
     &lt;span class="k"&gt;return&lt;/span&gt; &lt;span class="mi"&gt;0&lt;/span&gt;&lt;span class="p"&gt;;&lt;/span&gt;
-&lt;span class="n"&gt;__u32&lt;/span&gt; &lt;span class="n"&gt;saddr&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;ip_hdr&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="n"&gt;saddr&lt;/span&gt;&lt;span class="p"&gt;;&lt;/span&gt;
 &lt;/pre&gt;&lt;/div&gt;
 &lt;/div&gt;
 &lt;div class="section" id="id12"&gt;
@@ -501,99 +744,4 @@ urandom_read  789K   697K        750K            755K
 &lt;!-- * `linux/syscall.tbl at v5.13 · torvalds/linux &lt;https://github.com/torvalds/linux/blob/v5.13/arch/arm/tools/syscall.tbl&gt;`__ --&gt;
 &lt;!-- * `linux/unistd.h at v5.13 · torvalds/linux &lt;https://github.com/torvalds/linux/blob/v5.13/include/uapi/asm-generic/unistd.h&gt;`__ --&gt;
 &lt;/div&gt;
-</summary><category term="raw-tracepoint"></category><category term="libbpf"></category><category term="libbpfgo"></category></entry><entry><title>libbpfgo 使用示例：在内核态和用户态使用 ebpf map</title><link href="https://mozillazg.com/2022/05/ebpf-libbpfgo-use-map-example.html" rel="alternate"></link><updated>2022-05-22T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2022-05-22:2022/05/ebpf-libbpfgo-use-map-example.html</id><summary type="html">&lt;div class="section" id="id1"&gt;
-&lt;h2 id="hidid1"&gt;前言&lt;a class="headerlink" href="#hidid1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
-&lt;p&gt;记录一下如何在 libbpfgo 程序中使用 ebpf map（ebpf map 本身的资料可以参考参考资料）。&lt;/p&gt;
-&lt;/div&gt;
-&lt;div class="section" id="ebpf-ebpf-map"&gt;
-&lt;h2 id="hidebpf-ebpf-map"&gt;ebpf 程序中使用 ebpf map&lt;a class="headerlink" href="#hidebpf-ebpf-map" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
-&lt;div class="section" id="map"&gt;
-&lt;h3 id="hidmap"&gt;定义 map&lt;a class="headerlink" href="#hidmap" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
-&lt;p&gt;先看一下定义一个 ebpf map 的方法，比如类型为 &lt;tt class="docutils literal"&gt;BPF_MAP_TYPE_HASH&lt;/tt&gt; 的 map:&lt;/p&gt;
-&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="k"&gt;struct&lt;/span&gt; &lt;span class="p"&gt;{&lt;/span&gt;
-        &lt;span class="n"&gt;__uint&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;type&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;BPF_MAP_TYPE_HASH&lt;/span&gt;&lt;span class="p"&gt;);&lt;/span&gt;
-        &lt;span class="n"&gt;__type&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;key&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;u32&lt;/span&gt;&lt;span class="p"&gt;);&lt;/span&gt;
-        &lt;span class="n"&gt;__type&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;value&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="k"&gt;struct&lt;/span&gt; &lt;span class="n"&gt;event_t&lt;/span&gt;&lt;span class="p"&gt;);&lt;/span&gt;
-        &lt;span class="n"&gt;__uint&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;max_entries&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="mi"&gt;1024&lt;/span&gt; &lt;span class="o"&gt;*&lt;/span&gt; &lt;span class="mi"&gt;16&lt;/span&gt;&lt;span class="p"&gt;);&lt;/span&gt;
-&lt;span class="p"&gt;}&lt;/span&gt; &lt;span class="n"&gt;event_map&lt;/span&gt; &lt;span class="n"&gt;SEC&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="s"&gt;&amp;quot;.maps&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;);&lt;/span&gt;
-&lt;/pre&gt;&lt;/div&gt;
-&lt;p&gt;可以看到主要需要指定 &lt;tt class="docutils literal"&gt;type&lt;/tt&gt; 、 &lt;tt class="docutils literal"&gt;key&lt;/tt&gt; 、 &lt;tt class="docutils literal"&gt;value&lt;/tt&gt; 、 &lt;tt class="docutils literal"&gt;max_entries&lt;/tt&gt; 这几个字段。&lt;/p&gt;
-&lt;/div&gt;
-&lt;div class="section" id="id2"&gt;
-&lt;h3 id="hidid2"&gt;对 map 进行操作&lt;a class="headerlink" href="#hidid2" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
-&lt;p&gt;在 ebpf 程序中可以通过下面几个常用的辅助函数对 map 对象进行操作：&lt;/p&gt;
-&lt;p&gt;&lt;tt class="docutils literal"&gt;void bpf_map_lookup_elem(map, void *key. &lt;span class="pre"&gt;...)&lt;/span&gt;&lt;/tt&gt; 通过 key 查找对应的 value&lt;/p&gt;
-&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="n"&gt;event&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;bpf_map_lookup_elem&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="o"&gt;&amp;amp;&lt;/span&gt;&lt;span class="n"&gt;event_map&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="o"&gt;&amp;amp;&lt;/span&gt;&lt;span class="n"&gt;pid&lt;/span&gt;&lt;span class="p"&gt;);&lt;/span&gt;
-&lt;span class="k"&gt;if&lt;/span&gt; &lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="o"&gt;!&lt;/span&gt;&lt;span class="n"&gt;event&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt; &lt;span class="p"&gt;{&lt;/span&gt;    &lt;span class="c1"&gt;// key 不存在&lt;/span&gt;
-    &lt;span class="k"&gt;return&lt;/span&gt; &lt;span class="mi"&gt;0&lt;/span&gt;&lt;span class="p"&gt;;&lt;/span&gt;
-&lt;span class="p"&gt;}&lt;/span&gt;
-&lt;/pre&gt;&lt;/div&gt;
-&lt;p&gt;&lt;tt class="docutils literal"&gt;void bpf_map_update_elem(map, void *key, &lt;span class="pre"&gt;...,&lt;/span&gt; __u64 flags)&lt;/tt&gt; 更新指定 key 的值， &lt;tt class="docutils literal"&gt;flags&lt;/tt&gt; 参数用于控制更新行为&lt;/p&gt;
-&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="cm"&gt;/* File: include/uapi/linux/bpf.h */&lt;/span&gt;
-&lt;span class="cm"&gt;/* flags for BPF_MAP_UPDATE_ELEM command */&lt;/span&gt;
-&lt;span class="cp"&gt;#define BPF_ANY       0 &lt;/span&gt;&lt;span class="cm"&gt;/* create new element or update existing */&lt;/span&gt;&lt;span class="cp"&gt;&lt;/span&gt;
-&lt;span class="cp"&gt;#define BPF_NOEXIST   1 &lt;/span&gt;&lt;span class="cm"&gt;/* create new element only if it didn&amp;#39;t exist */&lt;/span&gt;&lt;span class="cp"&gt;&lt;/span&gt;
-&lt;span class="cp"&gt;#define BPF_EXIST     2 &lt;/span&gt;&lt;span class="cm"&gt;/* only update existing element */&lt;/span&gt;&lt;span class="cp"&gt;&lt;/span&gt;
-
-&lt;span class="n"&gt;bpf_map_update_elem&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="o"&gt;&amp;amp;&lt;/span&gt;&lt;span class="n"&gt;event_map&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="o"&gt;&amp;amp;&lt;/span&gt;&lt;span class="n"&gt;pid&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="o"&gt;&amp;amp;&lt;/span&gt;&lt;span class="n"&gt;event&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;BPF_ANY&lt;/span&gt;&lt;span class="p"&gt;);&lt;/span&gt;
-&lt;/pre&gt;&lt;/div&gt;
-&lt;p&gt;&lt;tt class="docutils literal"&gt;void bpf_map_delete_elem(map, void *key)&lt;/tt&gt; 删除指定 key&lt;/p&gt;
-&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="n"&gt;bpf_map_delete_elem&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="o"&gt;&amp;amp;&lt;/span&gt;&lt;span class="n"&gt;event_map&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="o"&gt;&amp;amp;&lt;/span&gt;&lt;span class="n"&gt;pid&lt;/span&gt;&lt;span class="p"&gt;);&lt;/span&gt;
-&lt;/pre&gt;&lt;/div&gt;
-&lt;p&gt;完整示例程序详见: &lt;a class="reference external" href="https://github.com/mozillazg/hello-libbpfgo/tree/master/08-map-map-type-hash-kernel"&gt;https://github.com/mozillazg/hello-libbpfgo/tree/master/08-map-map-type-hash-kernel&lt;/a&gt;&lt;/p&gt;
-&lt;/div&gt;
-&lt;div class="section" id="pin-map"&gt;
-&lt;h3 id="hidpin-map"&gt;pin map&lt;a class="headerlink" href="#hidpin-map" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
-&lt;p&gt;pin map 用于将 map 保存到本地文件系统中进行持久化，
-libbpf 中是会自动保存到 &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;/sys/fs/bpf/&amp;lt;map_name&amp;gt;&lt;/span&gt;&lt;/tt&gt; 路径下。&lt;/p&gt;
-&lt;p&gt;定义 pin map 的方法只是在普通 map 的基础上加一个 &lt;tt class="docutils literal"&gt;pinning&lt;/tt&gt; 字段:&lt;/p&gt;
-&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="k"&gt;struct&lt;/span&gt; &lt;span class="p"&gt;{&lt;/span&gt;
-        &lt;span class="n"&gt;__uint&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;type&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;BPF_MAP_TYPE_HASH&lt;/span&gt;&lt;span class="p"&gt;);&lt;/span&gt;
-        &lt;span class="n"&gt;__type&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;key&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;u32&lt;/span&gt;&lt;span class="p"&gt;);&lt;/span&gt;
-        &lt;span class="n"&gt;__type&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;value&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="k"&gt;struct&lt;/span&gt; &lt;span class="n"&gt;event_t&lt;/span&gt;&lt;span class="p"&gt;);&lt;/span&gt;
-        &lt;span class="n"&gt;__uint&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;max_entries&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="mi"&gt;1024&lt;/span&gt; &lt;span class="o"&gt;*&lt;/span&gt; &lt;span class="mi"&gt;16&lt;/span&gt;&lt;span class="p"&gt;);&lt;/span&gt;
-        &lt;span class="n"&gt;__uint&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;pinning&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;LIBBPF_PIN_BY_NAME&lt;/span&gt;&lt;span class="p"&gt;);&lt;/span&gt;  &lt;span class="c1"&gt;// &amp;lt;- pin&lt;/span&gt;
-&lt;span class="p"&gt;}&lt;/span&gt; &lt;span class="n"&gt;event_map&lt;/span&gt; &lt;span class="n"&gt;SEC&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="s"&gt;&amp;quot;.maps&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;);&lt;/span&gt;
-&lt;/pre&gt;&lt;/div&gt;
-&lt;p&gt;完整示例程序详见： &lt;a class="reference external" href="https://github.com/mozillazg/hello-libbpfgo/tree/master/11-map-pin"&gt;https://github.com/mozillazg/hello-libbpfgo/tree/master/11-map-pin&lt;/a&gt;&lt;/p&gt;
-&lt;/div&gt;
-&lt;/div&gt;
-&lt;div class="section" id="go-ebpf-map"&gt;
-&lt;h2 id="hidgo-ebpf-map"&gt;go 程序中使用 ebpf map&lt;a class="headerlink" href="#hidgo-ebpf-map" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
-&lt;p&gt;可以使用 libbpfgo 在 go 程序中操作 ebpf 程序中定义的 ebpf map。&lt;/p&gt;
-&lt;div class="section" id="id3"&gt;
-&lt;h3 id="hidid3"&gt;对 map 进行操作&lt;a class="headerlink" href="#hidid3" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
-&lt;p&gt;先通过 &lt;tt class="docutils literal"&gt;bpfmap, err := &lt;span class="pre"&gt;bpfModule.GetMap(&amp;quot;bpf_map&amp;quot;)&lt;/span&gt;&lt;/tt&gt; 拿到定义的 map 对象，然后就可以
-做一些常见的操作了：&lt;/p&gt;
-&lt;p&gt;&lt;tt class="docutils literal"&gt;Update(key, value unsafe.Pointer) error&lt;/tt&gt; 更新指定 key 的值，使用的 flags 是 &lt;tt class="docutils literal"&gt;BPF_ANY&lt;/tt&gt; 即
-创建新元素或者更新已有的 key:&lt;/p&gt;
-&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="nx"&gt;key&lt;/span&gt; &lt;span class="o"&gt;:=&lt;/span&gt; &lt;span class="mi"&gt;1&lt;/span&gt;
-&lt;span class="nx"&gt;value&lt;/span&gt; &lt;span class="o"&gt;:=&lt;/span&gt; &lt;span class="mi"&gt;233&lt;/span&gt;
-&lt;span class="nx"&gt;keyPtr&lt;/span&gt; &lt;span class="o"&gt;:=&lt;/span&gt; &lt;span class="nx"&gt;unsafe&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Pointer&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="o"&gt;&amp;amp;&lt;/span&gt;&lt;span class="nx"&gt;key&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
-&lt;span class="nx"&gt;valuePtr&lt;/span&gt; &lt;span class="o"&gt;:=&lt;/span&gt; &lt;span class="nx"&gt;unsafe&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Pointer&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="o"&gt;&amp;amp;&lt;/span&gt;&lt;span class="nx"&gt;value&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
-&lt;span class="nx"&gt;bpfmap&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Update&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="nx"&gt;keyPtr&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="nx"&gt;valuePtr&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
-&lt;/pre&gt;&lt;/div&gt;
-&lt;p&gt;&lt;tt class="docutils literal"&gt;GetValue(key unsafe.Pointer) &lt;span class="pre"&gt;([]byte,&lt;/span&gt; error)&lt;/tt&gt; 获取指定 key 的值，当 key 不存在时会返回 error:&lt;/p&gt;
-&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="nx"&gt;key&lt;/span&gt; &lt;span class="o"&gt;:=&lt;/span&gt; &lt;span class="mi"&gt;1&lt;/span&gt;
-&lt;span class="nx"&gt;keyPtr&lt;/span&gt; &lt;span class="o"&gt;:=&lt;/span&gt; &lt;span class="nx"&gt;unsafe&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Pointer&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="o"&gt;&amp;amp;&lt;/span&gt;&lt;span class="nx"&gt;key&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
-&lt;span class="nx"&gt;data&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="nx"&gt;err&lt;/span&gt; &lt;span class="o"&gt;:=&lt;/span&gt; &lt;span class="nx"&gt;bpfmap&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;GetValue&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="nx"&gt;keyPtr&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
-&lt;/pre&gt;&lt;/div&gt;
-&lt;p&gt;&lt;tt class="docutils literal"&gt;DeleteKey(key unsafe.Pointer) error&lt;/tt&gt; 删除指定 key，当 key 不存在时会返回 error:&lt;/p&gt;
-&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="nx"&gt;key&lt;/span&gt; &lt;span class="o"&gt;:=&lt;/span&gt; &lt;span class="mi"&gt;1&lt;/span&gt;
-&lt;span class="nx"&gt;keyPtr&lt;/span&gt; &lt;span class="o"&gt;:=&lt;/span&gt; &lt;span class="nx"&gt;unsafe&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Pointer&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="o"&gt;&amp;amp;&lt;/span&gt;&lt;span class="nx"&gt;key&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
-&lt;span class="nx"&gt;err&lt;/span&gt; &lt;span class="o"&gt;:=&lt;/span&gt; &lt;span class="nx"&gt;bpfmap&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;DeleteKey&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="nx"&gt;keyPtr&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
-&lt;/pre&gt;&lt;/div&gt;
-&lt;p&gt;完整示例程序详见: &lt;a class="reference external" href="https://github.com/mozillazg/hello-libbpfgo/tree/master/09-map-map-type-hash-userspace"&gt;https://github.com/mozillazg/hello-libbpfgo/tree/master/09-map-map-type-hash-userspace&lt;/a&gt;&lt;/p&gt;
-&lt;/div&gt;
-&lt;/div&gt;
-&lt;div class="section" id="id4"&gt;
-&lt;h2 id="hidid4"&gt;参考资料&lt;a class="headerlink" href="#hidid4" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
-&lt;ul class="simple"&gt;
-&lt;li&gt;&lt;a class="reference external" href="https://arthurchiao.art/blog/bpf-advanced-notes-2-zh/"&gt;BPF 进阶笔记（二）：BPF Map 类型详解：使用场景、程序示例&lt;/a&gt;&lt;/li&gt;
-&lt;li&gt;&lt;a class="reference external" href="https://nakryiko.com/posts/bcc-to-libbpf-howto-guide/"&gt;BCC to libbpf conversion guide&lt;/a&gt;&lt;/li&gt;
-&lt;li&gt;&lt;a class="reference external" href="https://github.com/aquasecurity/libbpfgo"&gt;aquasecurity/libbpfgo: eBPF library for Go, wrapping libbpf&lt;/a&gt;&lt;/li&gt;
-&lt;li&gt;&lt;a class="reference external" href="https://prototype-kernel.readthedocs.io/en/latest/bpf/ebpf_maps.html"&gt;eBPF maps — Prototype Kernel 0.0.1 documentation&lt;/a&gt;&lt;/li&gt;
-&lt;li&gt;&lt;a class="reference external" href="https://man7.org/linux/man-pages/man2/bpf.2.html"&gt;bpf(2) - Linux manual page&lt;/a&gt;&lt;/li&gt;
-&lt;/ul&gt;
-&lt;/div&gt;
-</summary><category term="libbpf"></category><category term="libbpfgo"></category></entry></feed>
+</summary><category term="raw-tracepoint"></category><category term="libbpf"></category><category term="libbpfgo"></category></entry></feed>

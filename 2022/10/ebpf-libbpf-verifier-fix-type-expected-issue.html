@@ -1,0 +1,511 @@
+<!DOCTYPE html>
+<html lang="zh"  prefix="og: http://ogp.me/ns# fb: https://www.facebook.com/2008/fbml" class="han-init">
+<head>
+    <title>解决 ebpf 验证器提示类型错误的问题 - mozillazg's Blog</title>
+    <!-- Using the latest rendering mode for IE -->
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <!-- share.css -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/social-share.js@1.0.16/dist/css/share.min.css">
+
+
+    <link href="https://mozillazg.com/favicon.ico" rel="icon">
+
+<link rel="canonical" href="https://mozillazg.com/2022/10/ebpf-libbpf-verifier-fix-type-expected-issue.html">
+
+        <meta name="author" content="mozillazg" />
+        <meta name="keywords" content="ebpf,libbpf" />
+    <meta name="description" content="有时当我们加载编译后的 eBPF 程序的时候，eBPF 验证器会提示程序中有类型错误的问题导致程序加载失败。 本文记录一下这种错误的一种解决方法。 错误示例 比如，当下面这段 eBPF 程序 SEC(&#34;iter/bpf_sk_storage_map&#34;) int iter__bpf_sk_storage_map(struct bpf_iter__bpf_sk_storage_map *ctx) { if (ctx-&gt;sk) bpf_sk_storage_delete(&amp;sk_storage_map, ctx-&gt;sk); return 0; } 被加载到内核中时会提示如下类型错误: libbpf: prog &#39;iter__bpf_sk_storage_map&#39;: BPF program load failed: Permission denied libbpf: prog &#39;iter__bpf_sk_storage_map&#39;: -- BEGIN PROG LOAD LOG -- R1 type=ctx expected=fp ; if (ctx-&gt;sk) 0: (79) r2 = *(u64 *)(r1 +16) ; if (ctx-&gt;sk) 1: (15) if r2 == 0x0 goto pc+4 R1=ctx(id=0,off=0,imm=0) R2_w=ptr_sock(id=0,off=0,imm=0) R10=fp0 ; bpf_sk_storage_delete(&amp;sk_storage_map, ctx-&gt;sk); 2: (79) r2 = *(u64 *)(r1 +16) ; bpf_sk_storage_delete(&amp;sk_storage_map, ctx-&gt;sk); 3: (18) r1 = 0xffffa0658305aa00 5: (85) call bpf_sk_storage_delete#108 R2 type=ptr_or_null_ expected=ptr_ processed 5 insns (limit 1000000) max_states_per_insn 0 total_states 0 peak_states 0 mark_read 0 -- END PROG LOAD LOG -- libbpf: prog &#39;iter__bpf_sk_storage_map&#39;: failed to load: -13 libbpf: failed to load object &#39;main.bpf.o&#39; failed to load BPF object: permission denied 解决办法 这个错误信息有两个关键错误，一个错误是: R1 type=ctx expected=fp ; if (ctx-&gt;sk) 0: (79) r2 = *(u64 *)(r1 +16) ; if (ctx-&gt;sk) 1: (15) if r2 == 0x0 goto pc+4 其中 R1 type=ctx expected=fp 说的是，验证器期望 R1 的类型是 fp 而不是 ctx 。 所谓的 fp 指的是栈上的指针类型，即期望 R1 是栈上的数据而不是 ctx 。 另一个错误是: R1=ctx(id=0,off=0,imm=0) R2_w=ptr_sock(id=0,off=0,imm=0) R10=fp0 ; bpf_sk_storage_delete(&amp;sk_storage_map, ctx-&gt;sk); 2: (79) r2 = *(u64 *)(r1 +16) ; bpf_sk_storage_delete(&amp;sk_storage_map, ctx-&gt;sk); 3: (18) r1 = 0xffffa0658305aa00 5: (85) call bpf_sk_storage_delete#108 R2 type=ptr_or_null_ expected=ptr_ 其中 R2 type=ptr_or_null_ expected=ptr_ 说的是，验证器期望 R2 的类型是 ptr 而不是 prt_or_null ，即，期望 R2 是一个指针而不是一个指针或 NULL 。 这里可能会有点疑惑，前面的判断 if (ctx-&gt;sk) 已经确保了不会为 NULL ， 为啥这里还会认为它有可能为 NULL ，这是因为前面的 if 判断的不是栈变量， 存在 R1 type=ctx expected=fp 的问题也就无法保证它一定不是 NULL 了。 解决办法也很简单，就是用一个临时变量保存 ctx-&gt;sk 的值， 然后用这个栈上的临时变量做后续的操作: SEC(&#34;iter/bpf_sk_storage_map&#34;) int iter__bpf_sk_storage_map(struct bpf_iter__bpf_sk_storage_map *ctx) { - if (ctx-&gt;sk) - bpf_sk_storage_delete(&amp;sk_storage_map, ctx-&gt;sk); + struct sock *sk = ctx-&gt;sk; + if (sk) + bpf_sk_storage_delete(&amp;sk_storage_map, sk); return 0; } 常见类型关键字的含义 这里记录一下类似前面 fp 这样的常见类型关键字具体的含义： 关键字 含义 scalar 标量类型（scalar type），非指针类型 ctx bpf_context 指针 map_ptr bpf_map 类型的指针 map_value map 中的元素 value 指针 map_key map 中的元素 key 指针 fp 栈上的指针（frame pointer） pkt skb-&gt;data 指针 pkt_meta skb-&gt;data - meta_len 位置的指针 pkt_end skb-&gt;data + headlen 位置的指针 sock bpf_sock 类型的指针 sock_common sock_common 类型指针 tcp_sock tcp_sock 类型指针 tp_buffer 可写的 raw tracepoint buffer 指针 xdp_sock xdp_sock 类型指针 ptr_ 一个 BTF ID，非空指针 ptr_or_null_ 一个 BTF ID 或 NULL，可能为空的指针 dynptr_ptr 动态指针（dynptr 指针） mem 指向一块有效内存区域的指针 buf 指向一个读/写 buffer 的指针 func BPF 程序函数指针 inv 无效类型（invalid type） ?   参考资料 verifier.c - kernel/bpf/verifier.c - Linux source code (v5.19.14) - Bootlin BPF: Dynamic pointers [LWN.net]" />
+
+    <style>
+      .js-toc {
+        margin-bottom: 20px;
+      }
+      .donate-modal {
+        text-align: center;
+      }
+      #donate-modal-container .donate-image {
+        max-height: 300px !important;
+        min-height: inherit !important;
+      }
+    </style>
+
+        <meta property="og:site_name" content="mozillazg's Blog" />
+        <meta property="og:type" content="article"/>
+        <meta property="og:title" content="解决 ebpf 验证器提示类型错误的问题"/>
+        <meta property="og:url" content="https://mozillazg.com/2022/10/ebpf-libbpf-verifier-fix-type-expected-issue.html"/>
+        <meta property="og:description" content="有时当我们加载编译后的 eBPF 程序的时候，eBPF 验证器会提示程序中有类型错误的问题导致程序加载失败。 本文记录一下这种错误的一种解决方法。 错误示例 比如，当下面这段 eBPF 程序 SEC(&#34;iter/bpf_sk_storage_map&#34;) int iter__bpf_sk_storage_map(struct bpf_iter__bpf_sk_storage_map *ctx) { if (ctx-&gt;sk) bpf_sk_storage_delete(&amp;sk_storage_map, ctx-&gt;sk); return 0; } 被加载到内核中时会提示如下类型错误: libbpf: prog &#39;iter__bpf_sk_storage_map&#39;: BPF program load failed: Permission denied libbpf: prog &#39;iter__bpf_sk_storage_map&#39;: -- BEGIN PROG LOAD LOG -- R1 type=ctx expected=fp ; if (ctx-&gt;sk) 0: (79) r2 = *(u64 *)(r1 +16) ; if (ctx-&gt;sk) 1: (15) if r2 == 0x0 goto pc+4 R1=ctx(id=0,off=0,imm=0) R2_w=ptr_sock(id=0,off=0,imm=0) R10=fp0 ; bpf_sk_storage_delete(&amp;sk_storage_map, ctx-&gt;sk); 2: (79) r2 = *(u64 *)(r1 +16) ; bpf_sk_storage_delete(&amp;sk_storage_map, ctx-&gt;sk); 3: (18) r1 = 0xffffa0658305aa00 5: (85) call bpf_sk_storage_delete#108 R2 type=ptr_or_null_ expected=ptr_ processed 5 insns (limit 1000000) max_states_per_insn 0 total_states 0 peak_states 0 mark_read 0 -- END PROG LOAD LOG -- libbpf: prog &#39;iter__bpf_sk_storage_map&#39;: failed to load: -13 libbpf: failed to load object &#39;main.bpf.o&#39; failed to load BPF object: permission denied 解决办法 这个错误信息有两个关键错误，一个错误是: R1 type=ctx expected=fp ; if (ctx-&gt;sk) 0: (79) r2 = *(u64 *)(r1 +16) ; if (ctx-&gt;sk) 1: (15) if r2 == 0x0 goto pc+4 其中 R1 type=ctx expected=fp 说的是，验证器期望 R1 的类型是 fp 而不是 ctx 。 所谓的 fp 指的是栈上的指针类型，即期望 R1 是栈上的数据而不是 ctx 。 另一个错误是: R1=ctx(id=0,off=0,imm=0) R2_w=ptr_sock(id=0,off=0,imm=0) R10=fp0 ; bpf_sk_storage_delete(&amp;sk_storage_map, ctx-&gt;sk); 2: (79) r2 = *(u64 *)(r1 +16) ; bpf_sk_storage_delete(&amp;sk_storage_map, ctx-&gt;sk); 3: (18) r1 = 0xffffa0658305aa00 5: (85) call bpf_sk_storage_delete#108 R2 type=ptr_or_null_ expected=ptr_ 其中 R2 type=ptr_or_null_ expected=ptr_ 说的是，验证器期望 R2 的类型是 ptr 而不是 prt_or_null ，即，期望 R2 是一个指针而不是一个指针或 NULL 。 这里可能会有点疑惑，前面的判断 if (ctx-&gt;sk) 已经确保了不会为 NULL ， 为啥这里还会认为它有可能为 NULL ，这是因为前面的 if 判断的不是栈变量， 存在 R1 type=ctx expected=fp 的问题也就无法保证它一定不是 NULL 了。 解决办法也很简单，就是用一个临时变量保存 ctx-&gt;sk 的值， 然后用这个栈上的临时变量做后续的操作: SEC(&#34;iter/bpf_sk_storage_map&#34;) int iter__bpf_sk_storage_map(struct bpf_iter__bpf_sk_storage_map *ctx) { - if (ctx-&gt;sk) - bpf_sk_storage_delete(&amp;sk_storage_map, ctx-&gt;sk); + struct sock *sk = ctx-&gt;sk; + if (sk) + bpf_sk_storage_delete(&amp;sk_storage_map, sk); return 0; } 常见类型关键字的含义 这里记录一下类似前面 fp 这样的常见类型关键字具体的含义： 关键字 含义 scalar 标量类型（scalar type），非指针类型 ctx bpf_context 指针 map_ptr bpf_map 类型的指针 map_value map 中的元素 value 指针 map_key map 中的元素 key 指针 fp 栈上的指针（frame pointer） pkt skb-&gt;data 指针 pkt_meta skb-&gt;data - meta_len 位置的指针 pkt_end skb-&gt;data + headlen 位置的指针 sock bpf_sock 类型的指针 sock_common sock_common 类型指针 tcp_sock tcp_sock 类型指针 tp_buffer 可写的 raw tracepoint buffer 指针 xdp_sock xdp_sock 类型指针 ptr_ 一个 BTF ID，非空指针 ptr_or_null_ 一个 BTF ID 或 NULL，可能为空的指针 dynptr_ptr 动态指针（dynptr 指针） mem 指向一块有效内存区域的指针 buf 指向一个读/写 buffer 的指针 func BPF 程序函数指针 inv 无效类型（invalid type） ?   参考资料 verifier.c - kernel/bpf/verifier.c - Linux source code (v5.19.14) - Bootlin BPF: Dynamic pointers [LWN.net]"/>
+        <meta property="article:published_time" content="2022-10-06" />
+            <meta property="article:section" content="ebpf" />
+            <meta property="article:tag" content="ebpf" />
+            <meta property="article:tag" content="libbpf" />
+            <meta property="article:author" content="mozillazg" />
+            <meta property="og:image"
+                  content="https://mozillazg.com/static/avatar.jpeg"/>
+
+
+    <meta name="twitter:card" content="summary">
+        <meta name="twitter:site" content="@mozillazg">
+        <meta name="twitter:creator" content="@mozillazg">
+    <meta name="twitter:domain" content="https://mozillazg.com">
+            <meta property="twitter:image"
+                  content="https://mozillazg.com/static/avatar.jpeg"/>
+
+    <!-- Bootstrap -->
+        <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@3.3.4/dist/css/bootstrap.min.css" type="text/css"/>
+    <link href="https://cdn.jsdelivr.net/npm/font-awesome@4.3.0/css/font-awesome.min.css" rel="stylesheet">
+
+    <link href="https://cdn.jsdelivr.net/npm/pygments-css@1.0.0/github.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://mozillazg.com/theme/css/style.css" type="text/css"/>
+            <link href="https://mozillazg.com/static/custom.css" rel="stylesheet">
+
+        <link href="https://mozillazg.com/feeds/all.atom.xml" type="application/atom+xml" rel="alternate"
+              title="mozillazg's Blog ATOM Feed"/>
+
+        <link href="https://mozillazg.com/feeds/all.rss.xml" type="application/rss+xml" rel="alternate"
+              title="mozillazg's Blog RSS Feed"/>
+
+
+        <link href="https://mozillazg.com/feeds/ebpf.atom.xml" type="application/atom+xml" rel="alternate"
+              title="mozillazg's Blog ebpf ATOM Feed"/>
+
+
+    <script type="application/ld+json">
+    {
+        "@context": "https://schema.org",
+        "@type": "BlogPosting",
+        "publisher": {
+            "@type": "Person",
+            "name": "mozillazg",
+            "logo": "https://mozillazg.com/static/avatar.jpeg"
+        },
+        "author": {
+            "@type": "Person",
+            "name": "mozillazg",
+            "image": "https://mozillazg.com/static/avatar.jpeg",
+            "url": "https://mozillazg.com",
+            "sameAs": []
+        },
+        "headline": "解决 ebpf 验证器提示类型错误的问题",
+        "url": "https://mozillazg.com/2022/10/ebpf-libbpf-verifier-fix-type-expected-issue.html",
+        "image": [
+            "https://mozillazg.com/static/avatar.jpeg"
+         ],
+        "keywords": "ebpf, libbpf",
+        "description": "有时当我们加载编译后的 eBPF 程序的时候，eBPF 验证器会提示程序中有类型错误的问题导致程序加载失败。 本文记录一下这种错误的一种解决方法。 错误示例 比如，当下面这段 eBPF 程序 SEC(&#34;iter/bpf_sk_storage_map&#34;) int iter__bpf_sk_storage_map(struct bpf_iter__bpf_sk_storage_map *ctx) { if (ctx-&gt;sk) bpf_sk_storage_delete(&amp;sk_storage_map, ctx-&gt;sk); return 0; } 被加载到内核中时会提示如下类型错误: libbpf: prog &#39;iter__bpf_sk_storage_map&#39;: BPF program load failed: Permission denied libbpf: prog &#39;iter__bpf_sk_storage_map&#39;: -- BEGIN PROG LOAD LOG -- R1 type=ctx expected=fp ; if (ctx-&gt;sk) 0: (79) r2 = *(u64 *)(r1 +16) ; if (ctx-&gt;sk) 1: (15) if r2 == 0x0 goto pc+4 R1=ctx(id=0,off=0,imm=0) R2_w=ptr_sock(id=0,off=0,imm=0) R10=fp0 ; bpf_sk_storage_delete(&amp;sk_storage_map, ctx-&gt;sk); 2: (79) r2 = *(u64 *)(r1 +16) ; bpf_sk_storage_delete(&amp;sk_storage_map, ctx-&gt;sk); 3: (18) r1 = 0xffffa0658305aa00 5: (85) call bpf_sk_storage_delete#108 R2 type=ptr_or_null_ expected=ptr_ processed 5 insns (limit 1000000) max_states_per_insn 0 total_states 0 peak_states 0 mark_read 0 -- END PROG LOAD LOG -- libbpf: prog &#39;iter__bpf_sk_storage_map&#39;: failed to load: -13 libbpf: failed to load object &#39;main.bpf.o&#39; failed to load BPF object: permission denied 解决办法 这个错误信息有两个关键错误，一个错误是: R1 type=ctx expected=fp ; if (ctx-&gt;sk) 0: (79) r2 = *(u64 *)(r1 +16) ; if (ctx-&gt;sk) 1: (15) if r2 == 0x0 goto pc+4 其中 R1 type=ctx expected=fp 说的是，验证器期望 R1 的类型是 fp 而不是 ctx 。 所谓的 fp 指的是栈上的指针类型，即期望 R1 是栈上的数据而不是 ctx 。 另一个错误是: R1=ctx(id=0,off=0,imm=0) R2_w=ptr_sock(id=0,off=0,imm=0) R10=fp0 ; bpf_sk_storage_delete(&amp;sk_storage_map, ctx-&gt;sk); 2: (79) r2 = *(u64 *)(r1 +16) ; bpf_sk_storage_delete(&amp;sk_storage_map, ctx-&gt;sk); 3: (18) r1 = 0xffffa0658305aa00 5: (85) call bpf_sk_storage_delete#108 R2 type=ptr_or_null_ expected=ptr_ 其中 R2 type=ptr_or_null_ expected=ptr_ 说的是，验证器期望 R2 的类型是 ptr 而不是 prt_or_null ，即，期望 R2 是一个指针而不是一个指针或 NULL 。 这里可能会有点疑惑，前面的判断 if (ctx-&gt;sk) 已经确保了不会为 NULL ， 为啥这里还会认为它有可能为 NULL ，这是因为前面的 if 判断的不是栈变量， 存在 R1 type=ctx expected=fp 的问题也就无法保证它一定不是 NULL 了。 解决办法也很简单，就是用一个临时变量保存 ctx-&gt;sk 的值， 然后用这个栈上的临时变量做后续的操作: SEC(&#34;iter/bpf_sk_storage_map&#34;) int iter__bpf_sk_storage_map(struct bpf_iter__bpf_sk_storage_map *ctx) { - if (ctx-&gt;sk) - bpf_sk_storage_delete(&amp;sk_storage_map, ctx-&gt;sk); + struct sock *sk = ctx-&gt;sk; + if (sk) + bpf_sk_storage_delete(&amp;sk_storage_map, sk); return 0; } 常见类型关键字的含义 这里记录一下类似前面 fp 这样的常见类型关键字具体的含义： 关键字 含义 scalar 标量类型（scalar type），非指针类型 ctx bpf_context 指针 map_ptr bpf_map 类型的指针 map_value map 中的元素 value 指针 map_key map 中的元素 key 指针 fp 栈上的指针（frame pointer） pkt skb-&gt;data 指针 pkt_meta skb-&gt;data - meta_len 位置的指针 pkt_end skb-&gt;data + headlen 位置的指针 sock bpf_sock 类型的指针 sock_common sock_common 类型指针 tcp_sock tcp_sock 类型指针 tp_buffer 可写的 raw tracepoint buffer 指针 xdp_sock xdp_sock 类型指针 ptr_ 一个 BTF ID，非空指针 ptr_or_null_ 一个 BTF ID 或 NULL，可能为空的指针 dynptr_ptr 动态指针（dynptr 指针） mem 指向一块有效内存区域的指针 buf 指向一个读/写 buffer 的指针 func BPF 程序函数指针 inv 无效类型（invalid type） ?   参考资料 verifier.c - kernel/bpf/verifier.c - Linux source code (v5.19.14) - Bootlin BPF: Dynamic pointers [LWN.net]",
+        "mainEntityOfPage": {
+             "@type": "WebPage",
+             "@id": "https://mozillazg.com/2022/10/ebpf-libbpf-verifier-fix-type-expected-issue.html"
+        },
+        "datePublished": "2022-10-06"
+    }
+    </script>
+
+</head>
+<body>
+
+<div class="navbar" role="navigation">
+	<div class="container">
+        <div class="navbar-header">
+            <button type="button" class="navbar-toggle" data-toggle="collapse" data-target=".navbar-ex1-collapse">
+                <span class="sr-only">Toggle navigation</span>
+                <span class="icon-bar"></span>
+                <span class="icon-bar"></span>
+                <span class="icon-bar"></span>
+            </button>
+            <a href="https://mozillazg.com/" class="navbar-brand">
+mozillazg's Blog            </a>
+        </div>
+        <div class="collapse navbar-collapse navbar-ex1-collapse">
+            <ul class="nav navbar-nav">
+                    <li><a href="https://mozillazg.com/feeds/all.atom.xml">Feed</a></li>
+                    <li><a href="/2014/10/pages/about-me.html">About</a></li>
+            </ul>
+            <ul class="nav navbar-nav navbar-right">
+              <li><a href="https://mozillazg.com/archives.html"><i class="fa fa-th-list"></i><span class="icon-label">Archives</span></a></li>
+            </ul>
+        </div>
+        <!-- /.navbar-collapse -->
+    </div>
+</div> <!-- /.navbar -->
+<!-- Banner -->
+<!-- End Banner -->
+<div class="container">
+    <div class="row">
+        <div class="col-lg-12">
+    <section id="content" class="yue">
+        <article>
+            <header class="text-center">
+                <h1>
+                    <a href="https://mozillazg.com/2022/10/ebpf-libbpf-verifier-fix-type-expected-issue.html"
+                       rel="bookmark"
+                       title="Permalink to 解决 ebpf 验证器提示类型错误的问题">
+                        解决 ebpf 验证器提示类型错误的问题
+                    </a>
+                </h1>
+                <p class="published">
+                    <time datetime="2022-10-06T00:00:00+00:00">
+                    2022-10-06
+                    </time>
+                </p>
+            </header>
+            <div class="entry-content">
+                <div class="well-sm article-info">
+<footer class="post-info">
+        <a href="https://mozillazg.com/category/ebpf.html">ebpf</a>
+
+
+<span class="label label-default hide">Tags</span>
+	<a href="https://mozillazg.com/tag/libbpf.html">libbpf</a>
+    
+</footer><!-- /.post-info -->                </div>
+                <div class="js-toc"></div>
+                <div>
+                <p>有时当我们加载编译后的 eBPF 程序的时候，eBPF 验证器会提示程序中有类型错误的问题导致程序加载失败。
+本文记录一下这种错误的一种解决方法。</p>
+<div class="section" id="id1">
+<h2 id="hidid1">错误示例<a class="headerlink" href="#hidid1" title="Permalink to this headline">¶</a></h2>
+<p>比如，当下面这段 eBPF 程序</p>
+<div class="highlight"><pre><span></span><span class="n">SEC</span><span class="p">(</span><span class="s">&quot;iter/bpf_sk_storage_map&quot;</span><span class="p">)</span>
+<span class="kt">int</span> <span class="n">iter__bpf_sk_storage_map</span><span class="p">(</span><span class="k">struct</span> <span class="n">bpf_iter__bpf_sk_storage_map</span> <span class="o">*</span><span class="n">ctx</span><span class="p">)</span>
+<span class="p">{</span>
+    <span class="k">if</span> <span class="p">(</span><span class="n">ctx</span><span class="o">-&gt;</span><span class="n">sk</span><span class="p">)</span>
+        <span class="n">bpf_sk_storage_delete</span><span class="p">(</span><span class="o">&amp;</span><span class="n">sk_storage_map</span><span class="p">,</span> <span class="n">ctx</span><span class="o">-&gt;</span><span class="n">sk</span><span class="p">);</span>
+
+    <span class="k">return</span> <span class="mi">0</span><span class="p">;</span>
+<span class="p">}</span>
+</pre></div>
+<p>被加载到内核中时会提示如下类型错误:</p>
+<div class="highlight"><pre><span></span>libbpf: prog <span class="s1">&#39;iter__bpf_sk_storage_map&#39;</span>: BPF program load failed: Permission denied
+libbpf: prog <span class="s1">&#39;iter__bpf_sk_storage_map&#39;</span>: -- BEGIN PROG LOAD LOG --
+R1 <span class="nv">type</span><span class="o">=</span>ctx <span class="nv">expected</span><span class="o">=</span>fp
+<span class="p">;</span> <span class="k">if</span> <span class="o">(</span>ctx-&gt;sk<span class="o">)</span>
+0: <span class="o">(</span>79<span class="o">)</span> <span class="nv">r2</span> <span class="o">=</span> *<span class="o">(</span>u64 *<span class="o">)(</span>r1 +16<span class="o">)</span>
+<span class="p">;</span> <span class="k">if</span> <span class="o">(</span>ctx-&gt;sk<span class="o">)</span>
+1: <span class="o">(</span>15<span class="o">)</span> <span class="k">if</span> <span class="nv">r2</span> <span class="o">==</span> 0x0 goto pc+4
+ <span class="nv">R1</span><span class="o">=</span>ctx<span class="o">(</span><span class="nv">id</span><span class="o">=</span>0,off<span class="o">=</span>0,imm<span class="o">=</span>0<span class="o">)</span> <span class="nv">R2_w</span><span class="o">=</span>ptr_sock<span class="o">(</span><span class="nv">id</span><span class="o">=</span>0,off<span class="o">=</span>0,imm<span class="o">=</span>0<span class="o">)</span> <span class="nv">R10</span><span class="o">=</span>fp0
+<span class="p">;</span> bpf_sk_storage_delete<span class="o">(</span><span class="p">&amp;</span>sk_storage_map, ctx-&gt;sk<span class="o">)</span><span class="p">;</span>
+2: <span class="o">(</span>79<span class="o">)</span> <span class="nv">r2</span> <span class="o">=</span> *<span class="o">(</span>u64 *<span class="o">)(</span>r1 +16<span class="o">)</span>
+<span class="p">;</span> bpf_sk_storage_delete<span class="o">(</span><span class="p">&amp;</span>sk_storage_map, ctx-&gt;sk<span class="o">)</span><span class="p">;</span>
+3: <span class="o">(</span>18<span class="o">)</span> <span class="nv">r1</span> <span class="o">=</span> 0xffffa0658305aa00
+5: <span class="o">(</span>85<span class="o">)</span> call bpf_sk_storage_delete#108
+R2 <span class="nv">type</span><span class="o">=</span>ptr_or_null_ <span class="nv">expected</span><span class="o">=</span>ptr_
+processed <span class="m">5</span> insns <span class="o">(</span>limit 1000000<span class="o">)</span> max_states_per_insn <span class="m">0</span> total_states <span class="m">0</span> peak_states <span class="m">0</span> mark_read 0
+-- END PROG LOAD LOG --
+libbpf: prog <span class="s1">&#39;iter__bpf_sk_storage_map&#39;</span>: failed to load: -13
+libbpf: failed to load object <span class="s1">&#39;main.bpf.o&#39;</span>
+failed to load BPF object: permission denied
+</pre></div>
+<div class="section" id="id2">
+<h3 id="hidid2">解决办法<a class="headerlink" href="#hidid2" title="Permalink to this headline">¶</a></h3>
+<p>这个错误信息有两个关键错误，一个错误是:</p>
+<pre class="literal-block">
+R1 type=ctx expected=fp
+; if (ctx-&gt;sk)
+0: (79) r2 = *(u64 *)(r1 +16)
+; if (ctx-&gt;sk)
+1: (15) if r2 == 0x0 goto pc+4
+</pre>
+<p>其中 <tt class="docutils literal">R1 type=ctx expected=fp</tt> 说的是，验证器期望 <tt class="docutils literal">R1</tt> 的类型是 <tt class="docutils literal">fp</tt> 而不是 <tt class="docutils literal">ctx</tt> 。
+所谓的 <tt class="docutils literal">fp</tt> 指的是栈上的指针类型，即期望 <tt class="docutils literal">R1</tt> 是栈上的数据而不是 <tt class="docutils literal">ctx</tt> 。</p>
+<p>另一个错误是:</p>
+<pre class="literal-block">
+ R1=ctx(id=0,off=0,imm=0) R2_w=ptr_sock(id=0,off=0,imm=0) R10=fp0
+; bpf_sk_storage_delete(&amp;sk_storage_map, ctx-&gt;sk);
+2: (79) r2 = *(u64 *)(r1 +16)
+; bpf_sk_storage_delete(&amp;sk_storage_map, ctx-&gt;sk);
+3: (18) r1 = 0xffffa0658305aa00
+5: (85) call bpf_sk_storage_delete#108
+R2 type=ptr_or_null_ expected=ptr_
+</pre>
+<p>其中 <tt class="docutils literal">R2 type=ptr_or_null_ expected=ptr_</tt> 说的是，验证器期望 <tt class="docutils literal">R2</tt> 的类型是 <tt class="docutils literal">ptr</tt>
+而不是 <tt class="docutils literal">prt_or_null</tt> ，即，期望 <tt class="docutils literal">R2</tt> 是一个指针而不是一个指针或 <tt class="docutils literal">NULL</tt> 。
+这里可能会有点疑惑，前面的判断 <tt class="docutils literal">if <span class="pre">(ctx-&gt;sk)</span></tt> 已经确保了不会为 <tt class="docutils literal">NULL</tt> ，
+为啥这里还会认为它有可能为 <tt class="docutils literal">NULL</tt> ，这是因为前面的 if 判断的不是栈变量，
+存在 <tt class="docutils literal">R1 type=ctx expected=fp</tt> 的问题也就无法保证它一定不是 <tt class="docutils literal">NULL</tt> 了。</p>
+<p>解决办法也很简单，就是用一个临时变量保存 <tt class="docutils literal"><span class="pre">ctx-&gt;sk</span></tt> 的值，
+然后用这个栈上的临时变量做后续的操作:</p>
+<div class="highlight"><pre><span></span> SEC(&quot;iter/bpf_sk_storage_map&quot;)
+ int iter__bpf_sk_storage_map(struct bpf_iter__bpf_sk_storage_map *ctx)
+ {
+<span class="gd">-    if (ctx-&gt;sk)</span>
+<span class="gd">-        bpf_sk_storage_delete(&amp;sk_storage_map, ctx-&gt;sk);</span>
+<span class="gi">+    struct sock *sk = ctx-&gt;sk;</span>
+<span class="gi">+    if (sk)</span>
+<span class="gi">+        bpf_sk_storage_delete(&amp;sk_storage_map, sk);</span>
+
+     return 0;
+ }
+</pre></div>
+</div>
+</div>
+<div class="section" id="id3">
+<h2 id="hidid3">常见类型关键字的含义<a class="headerlink" href="#hidid3" title="Permalink to this headline">¶</a></h2>
+<p>这里记录一下类似前面 <tt class="docutils literal">fp</tt> 这样的常见类型关键字具体的含义：</p>
+<table border="1" class="docutils">
+<colgroup>
+<col width="31%" />
+<col width="69%" />
+</colgroup>
+<thead valign="bottom">
+<tr><th class="head">关键字</th>
+<th class="head">含义</th>
+</tr>
+</thead>
+<tbody valign="top">
+<tr><td><tt class="docutils literal">scalar</tt></td>
+<td>标量类型（scalar type），非指针类型</td>
+</tr>
+<tr><td><tt class="docutils literal">ctx</tt></td>
+<td>bpf_context 指针</td>
+</tr>
+<tr><td><tt class="docutils literal">map_ptr</tt></td>
+<td>bpf_map 类型的指针</td>
+</tr>
+<tr><td><tt class="docutils literal">map_value</tt></td>
+<td>map 中的元素 value 指针</td>
+</tr>
+<tr><td><tt class="docutils literal">map_key</tt></td>
+<td>map 中的元素 key 指针</td>
+</tr>
+<tr><td><tt class="docutils literal">fp</tt></td>
+<td>栈上的指针（frame pointer）</td>
+</tr>
+<tr><td><tt class="docutils literal">pkt</tt></td>
+<td>skb-&gt;data 指针</td>
+</tr>
+<tr><td><tt class="docutils literal">pkt_meta</tt></td>
+<td>skb-&gt;data - meta_len 位置的指针</td>
+</tr>
+<tr><td><tt class="docutils literal">pkt_end</tt></td>
+<td>skb-&gt;data + headlen 位置的指针</td>
+</tr>
+<tr><td><tt class="docutils literal">sock</tt></td>
+<td>bpf_sock 类型的指针</td>
+</tr>
+<tr><td><tt class="docutils literal">sock_common</tt></td>
+<td>sock_common 类型指针</td>
+</tr>
+<tr><td><tt class="docutils literal">tcp_sock</tt></td>
+<td>tcp_sock 类型指针</td>
+</tr>
+<tr><td><tt class="docutils literal">tp_buffer</tt></td>
+<td>可写的 raw tracepoint buffer 指针</td>
+</tr>
+<tr><td><tt class="docutils literal">xdp_sock</tt></td>
+<td>xdp_sock 类型指针</td>
+</tr>
+<tr><td><tt class="docutils literal">ptr_</tt></td>
+<td>一个 BTF ID，非空指针</td>
+</tr>
+<tr><td><tt class="docutils literal">ptr_or_null_</tt></td>
+<td>一个 BTF ID 或 NULL，可能为空的指针</td>
+</tr>
+<tr><td><tt class="docutils literal">dynptr_ptr</tt></td>
+<td>动态指针（dynptr 指针）</td>
+</tr>
+<tr><td><tt class="docutils literal">mem</tt></td>
+<td>指向一块有效内存区域的指针</td>
+</tr>
+<tr><td><tt class="docutils literal">buf</tt></td>
+<td>指向一个读/写 buffer 的指针</td>
+</tr>
+<tr><td><tt class="docutils literal">func</tt></td>
+<td>BPF 程序函数指针</td>
+</tr>
+<tr><td><tt class="docutils literal">inv</tt></td>
+<td>无效类型（invalid type）</td>
+</tr>
+<tr><td><tt class="docutils literal">?</tt></td>
+<td>&nbsp;</td>
+</tr>
+</tbody>
+</table>
+</div>
+<div class="section" id="id4">
+<h2 id="hidid4">参考资料<a class="headerlink" href="#hidid4" title="Permalink to this headline">¶</a></h2>
+<p><a class="reference external" href="https://elixir.bootlin.com/linux/v5.19.14/source/kernel/bpf/verifier.c#L533">verifier.c - kernel/bpf/verifier.c - Linux source code (v5.19.14) - Bootlin</a>
+<a class="reference external" href="https://lwn.net/Articles/895885/">BPF: Dynamic pointers [LWN.net]</a></p>
+</div>
+
+                </div>
+            </div>
+            <!-- /.entry-content -->
+<section class="text-center">
+  
+<div id="donate"></div>
+
+<div class="social-share"></div>
+<div class="social-comment-note">
+<p>有任何建议和想法欢迎在下方评论区留言或者加我<a href="/static/wechat.png">微信</a>交流</p>
+</div>
+
+</section>
+<section class="well" id="related-posts">
+    <p>Related Posts:</p>
+    <ul>
+        <li><a href="https://mozillazg.com/2022/05/ebpf-libbpfgo-get-process-info.html">libbpfgo 使用示例：在 ebpf 程序中获取进程信息</a></li>
+        <li><a href="https://mozillazg.com/2022/05/ebpf-libbpfgo-use-map-example.html">libbpfgo 使用示例：在内核态和用户态使用 ebpf map</a></li>
+        <li><a href="https://mozillazg.com/2022/05/ebpf-libbpfgo-develop-env-and-hello-world.html">libbpfgo 使用示例：搭建开发环境以及编写第一个 ebpf 程序</a></li>
+        <li><a href="https://mozillazg.com/2022/05/ebpf-libbpfgo-use-ringbuf-map.html">libbpfgo 使用示例：编写使用 ringbuf map 的 ebpf 程序</a></li>
+        <li><a href="https://mozillazg.com/2022/06/ebpf-libbpf-btf-powered-enabled-raw-tracepoint-common-questions.html">ebpf/libbpf 程序使用 btf raw tracepoint 的常见问题</a></li>
+    </ul>
+</section>
+    <hr/>
+    <section class="comments" id="comments">
+        <h2>Comments</h2>
+
+        <div id="disqus_thread"></div>
+        <script type="text/javascript">
+            /* * * CONFIGURATION VARIABLES: EDIT BEFORE PASTING INTO YOUR WEBPAGE * * */
+            var disqus_shortname = 'my-github-blog'; // required: replace example with your forum shortname
+
+                    var disqus_identifier = 'ebpf-libbpf-verifier-fix-type-expected-issue';
+                var disqus_url = 'https://mozillazg.com/2022/10/ebpf-libbpf-verifier-fix-type-expected-issue.html';
+
+            var disqus_config = function () {
+                this.language = "zh";
+            };
+
+            /* * * DON'T EDIT BELOW THIS LINE * * */
+            (function () {
+                var dsq = document.createElement('script');
+                dsq.type = 'text/javascript';
+                dsq.async = true;
+                dsq.src = '//' + disqus_shortname + '.disqus.com/embed.js';
+                (document.getElementsByTagName('head')[0] || document.getElementsByTagName('body')[0]).appendChild(dsq);
+            })();
+        </script>
+        <noscript>Please enable JavaScript to view the <a href="http://disqus.com/?ref_noscript">comments powered by
+            Disqus.</a></noscript>
+        <a href="http://disqus.com" class="dsq-brlink">comments powered by <span class="logo-disqus">Disqus</span></a>
+
+    </section>
+        </article>
+    </section>
+
+        </div>
+    </div>
+</div>
+<footer>
+   <div class="container">
+      <hr>
+      <div class="row">
+         <div class="col-xs-10">&copy; 2022 mozillazg
+            &middot; Powered by <a href="https://github.com/DandyDev/pelican-bootstrap3" target="_blank">pelican-bootstrap3</a>,
+            <a href="http://docs.getpelican.com/" target="_blank">Pelican</a>,
+            <a href="http://getbootstrap.com" target="_blank">Bootstrap</a>
+            &middot; <a href="/privacy-policy.html" target="_blank">Privacy</a>              <p><small>  <a rel="license" href="http://creativecommons.org/licenses/by-sa/4.0/"><img alt="Creative Commons License" style="border-width:0" src="/static/images/by-sa-80x15.png" /></a>
+    &quot;<span xmlns:dct="http://purl.org/dc/terms/" property="dct:title">mozillazg's Blog</span>&quot; by <a xmlns:cc="http://creativecommons.org/ns#" href="https://mozillazg.com" property="cc:attributionName" rel="cc:attributionURL">mozillazg</a> is
+  licensed under a <a rel="license" href="http://creativecommons.org/licenses/by-sa/4.0/">Creative Commons Attribution-ShareAlike 4.0 International License</a>, except where indicated otherwise.
+</small></p>
+         </div>
+         <div class="col-xs-2"><p class="pull-right"><i class="fa fa-arrow-up"></i> <a href="#">Back to top</a></p></div>
+      </div>
+   </div>
+</footer>
+<script src="https://cdn.jsdelivr.net/npm/jquery@2.1.1/dist/jquery.min.js"></script>
+
+<!-- Include all compiled plugins (below), or include individual files as needed -->
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@3.3.4/dist/js/bootstrap.min.js"></script>
+
+<!-- Enable responsive features in IE8 with Respond.js (https://github.com/scottjehl/Respond) -->
+
+    <!-- Disqus -->
+    <script type="text/javascript">
+        /* * * CONFIGURATION VARIABLES: EDIT BEFORE PASTING INTO YOUR WEBPAGE * * */
+        var disqus_shortname = 'my-github-blog'; // required: replace example with your forum shortname
+
+        /* * * DON'T EDIT BELOW THIS LINE * * */
+        (function () {
+            var s = document.createElement('script');
+            s.async = true;
+            s.type = 'text/javascript';
+            s.src = '//' + disqus_shortname + '.disqus.com/count.js';
+            (document.getElementsByTagName('HEAD')[0] || document.getElementsByTagName('BODY')[0]).appendChild(s);
+        }());
+    </script>
+    <!-- End Disqus Code -->
+    <!-- Google Analytics Universal -->
+    <script type="text/javascript">
+        (function(i,s,o,g,r,a,m){i['GoogleAnalyticsObject']=r;i[r]=i[r]||function(){
+        (i[r].q=i[r].q||[]).push(arguments)},i[r].l=1*new Date();a=s.createElement(o),
+        m=s.getElementsByTagName(o)[0];a.async=1;a.src=g;m.parentNode.insertBefore(a,m)
+        })(window,document,'script','//www.google-analytics.com/analytics.js','ga');
+
+        ga('create', 'UA-77172981-1', 'auto');
+        ga('send', 'pageview');
+    </script>
+    <!-- End Google Analytics Universal Code -->
+
+<!-- share.js -->
+<script src="https://cdn.jsdelivr.net/npm/social-share.js@1.0.16/dist/js/social-share.min.js"></script>
+
+
+
+<script src="https://cdn.jsdelivr.net/npm/tocbot@3.0.2/dist/tocbot.min.js"></script>
+<script>
+$(document).ready(function(){
+  tocbot.init({
+    // Where to render the table of contents.
+    tocSelector: '.js-toc',
+    // Where to grab the headings to build the table of contents.
+    contentSelector: '.entry-content',
+    // Which headings to grab inside of the contentSelector element.
+    headingSelector: 'h2, h3, h4,h5',
+    // Headings that match the ignoreSelector will be skipped.
+    ignoreSelector: '.js-toc-ignore',
+    // Main class to add to links.
+    linkClass: 'toc-link',
+    // Extra classes to add to links.
+    extraLinkClasses: '',
+    // Class to add to active links,
+    // the link corresponding to the top most heading on the page.
+    activeLinkClass: 'is-active-link',
+    // Main class to add to lists.
+    listClass: 'toc-list',
+    // Extra classes to add to lists.
+    extraListClasses: '',
+    // Class that gets added when a list should be collapsed.
+    isCollapsedClass: 'is-collapsed',
+    // Class that gets added when a list should be able
+    // to be collapsed but isn't necessarily collpased.
+    collapsibleClass: 'is-collapsible',
+    // Class to add to list items.
+    listItemClass: 'toc-list-item',
+    // How many heading levels should not be collpased.
+    // For example, number 6 will show everything since
+    // there are only 6 heading levels and number 0 will collpase them all.
+    // The sections that are hidden will open
+    // and close as you scroll to headings within them.
+    collapseDepth: 6,
+    // Smooth scrolling enabled.
+    smoothScroll: true,
+    // Smooth scroll duration.
+    smoothScrollDuration: 420,
+    // Callback for scroll end (requires: smoothScroll).
+    scrollEndCallback: function (e) {},
+    // Headings offset between the headings and the top of the document (this is meant for minor adjustments).
+    headingsOffset: 0,
+    // Timeout between events firing to make sure it's
+    // not too rapid (for performance reasons).
+    throttleTimeout: 50,
+    // Element to add the positionFixedClass to.
+    positionFixedSelector: null,
+    // Fixed position class to add to make sidebar fixed after scrolling
+    // down past the fixedSidebarOffset.
+    positionFixedClass: 'is-position-fixed',
+    // fixedSidebarOffset can be any number but by default is set
+    // to auto which sets the fixedSidebarOffset to the sidebar
+    // element's offsetTop from the top of the document on init.
+    fixedSidebarOffset: 'auto',
+    // includeHtml can be set to true to include the HTML markup from the
+    // heading node instead of just including the textContent.
+    includeHtml: false
+  });
+});
+</script>
+</body>
+</html>
