@@ -1,0 +1,536 @@
+<!DOCTYPE html>
+<html lang="en"  prefix="og: http://ogp.me/ns# fb: https://www.facebook.com/2008/fbml" class="han-init">
+<head>
+    <title>One way to solve the ebpf verifier alert type error problem - mozillazg's Blog</title>
+    <!-- Using the latest rendering mode for IE -->
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <!-- share.css -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/social-share.js@1.0.16/dist/css/share.min.css">
+
+
+    <link href="https://mozillazg.com/favicon.ico" rel="icon">
+
+<link rel="canonical" href="https://mozillazg.com/2022/10/ebpf-libbpf-verifier-fix-type-expected-issue-en.html">
+
+        <meta name="author" content="mozillazg" />
+        <meta name="keywords" content="ebpf,libbpf,en-version" />
+    <meta name="description" content="Sometimes when we load a compiled eBPF program, the eBPF verifier will indicate that there is a type error in the program causing the program to fail to load. This article documents a solution to this error. Example of error For example, when this eBPF program SEC(&#34;iter/bpf_sk_storage_map&#34;) int iter__bpf_sk_storage_map(struct bpf_iter__bpf_sk_storage_map *ctx) { if (ctx-&gt;sk) bpf_sk_storage_delete(&amp;sk_storage_map, ctx-&gt;sk); return 0; } is loaded into the kernel with the following type of error: libbpf: prog &#39;iter__bpf_sk_storage_map&#39;: BPF program load failed: Permission denied libbpf: prog &#39;iter__bpf_sk_storage_map&#39;: -- BEGIN PROG LOAD LOG -- R1 type=ctx expected=fp ; if (ctx-&gt;sk) 0: (79) r2 = *(u64 *)(r1 +16) ; if (ctx-&gt;sk) 1: (15) if r2 == 0x0 goto pc+4 R1=ctx(id=0,off=0,imm=0) R2_w=ptr_sock(id=0,off=0,imm=0) R10=fp0 ; bpf_sk_storage_delete(&amp;sk_storage_map, ctx-&gt;sk); 2: (79) r2 = *(u64 *)(r1 +16) ; bpf_sk_storage_delete(&amp;sk_storage_map, ctx-&gt;sk); 3: (18) r1 = 0xffffa0658305aa00 5: (85) call bpf_sk_storage_delete#108 R2 type=ptr_or_null_ expected=ptr_ processed 5 insns (limit 1000000) max_states_per_insn 0 total_states 0 peak_states 0 mark_read 0 -- END PROG LOAD LOG -- libbpf: prog &#39;iter__bpf_sk_storage_map&#39;: failed to load: -13 libbpf: failed to load object &#39;main.bpf.o&#39; failed to load BPF object: permission denied Solution This error message has two key errors, one error is R1 type=ctx expected=fp ; if (ctx-&gt;sk) 0: (79) r2 = *(u64 *)(r1 +16) ; if (ctx-&gt;sk) 1: (15) if r2 == 0x0 goto pc+4 Where R1 type=ctx expected=fp means that the verifier expects R1 to be of type fp and not ctx. By fp, we mean the type of the pointer on the stack, i.e., R1 is expected to be data on the stack and not ctx. Another error is R1=ctx(id=0,off=0,imm=0) R2_w=ptr_sock(id=0,off=0,imm=0) R10=fp0 ; bpf_sk_storage_delete(&amp;sk_storage_map, ctx-&gt;sk); 2: (79) r2 = *(u64 *)(r1 +16) ; bpf_sk_storage_delete(&amp;sk_storage_map, ctx-&gt;sk); 3: (18) r1 = 0xffffa0658305aa00 5: (85) call bpf_sk_storage_delete#108 R2 type=ptr_or_null_ expected=ptr_ Where R2 type=ptr_or_null_ expected=ptr_ means that the verifier expects R2 to be of type ptr and not prt_or_null, that is, it expects R2 to be a pointer and not a pointer or NULL. Here you may be a little confused, the previous judgment if (ctx-&gt;sk) has already ensured that it will not be NULL, why here still think it may be NULL, this is because the previous if judgment is not a stack variable, there is R1 type=ctx expected=fp problem also can not guarantee that it is not NULL. The solution is simple: use a temporary variable to store the value of ctx-&gt;sk, and then use this temporary variable on the stack for subsequent operations: SEC(&#34;iter/bpf_sk_storage_map&#34;) int iter__bpf_sk_storage_map(struct bpf_iter__bpf_sk_storage_map *ctx) { - if (ctx-&gt;sk) - bpf_sk_storage_delete(&amp;sk_storage_map, ctx-&gt;sk); + struct sock *sk = ctx-&gt;sk; + if (sk) + bpf_sk_storage_delete(&amp;sk_storage_map, sk); return 0; } Meaning of common types of keywords The specific meaning of common type keywords like the previous fp is documented here. keyword describe scalar reg doesn&#39;t contain a valid pointer ctx reg points to bpf_context map_ptr reg points to struct bpf_map map_value reg points to map element value map_value_or_null points to map elem value or NULL map_key reg points to a map element key fp reg == frame_pointer + offset pkt skb-&gt;data pkt_meta skb-&gt;data - meta_len pkt_end skb-&gt;data + headlen sock reg points to struct bpf_sock sock_or_null reg points to struct bpf_sock or NULL sock_common reg points to sock_common sock_common_or_null reg points to sock_common or NULL tcp_sock reg points to struct tcp_sock tcp_sock_or_null reg points to struct tcp_sock or NULL tp_buffer reg points to a writable raw tp&#39;s buffer xdp_sock reg points to struct xdp_sock ptr_ points to a kernel struct that does not need to be null checked by the BPF program. ptr_or_null_ points to a kernel struct that has not been checked for null dynptr_ptr pointer to bpf_dynptr mem reg points to valid memory region mem_or_null reg points to valid memory region or NULL buf reg points to a read/write buffer func reg points to a bpf program function inv reg doesn&#39;t contain a valid pointer flow_keys reg points to bpf_flow_keys percpu_ptr_ reg points to a percpu kernel variable rdonly_buf reg points to a readonly buffer rdonly_buf_or_null reg points to a readonly buffer or NULL rdwr_buf reg points to a read/write buffer rdwr_buf_or_null reg points to a read/write buffer or NULL 参考资料 verifier.c - kernel/bpf/verifier.c - Linux source code (v5.19.14) - Bootlin verifier.c - kernel/bpf/verifier.c - Linux source code (v5.13) - Bootlin" />
+
+    <style>
+      .js-toc {
+        margin-bottom: 20px;
+      }
+      .donate-modal {
+        text-align: center;
+      }
+      #donate-modal-container .donate-image {
+        max-height: 300px !important;
+        min-height: inherit !important;
+      }
+    </style>
+
+        <meta property="og:site_name" content="mozillazg's Blog" />
+        <meta property="og:type" content="article"/>
+        <meta property="og:title" content="One way to solve the ebpf verifier alert type error problem"/>
+        <meta property="og:url" content="https://mozillazg.com/2022/10/ebpf-libbpf-verifier-fix-type-expected-issue-en.html"/>
+        <meta property="og:description" content="Sometimes when we load a compiled eBPF program, the eBPF verifier will indicate that there is a type error in the program causing the program to fail to load. This article documents a solution to this error. Example of error For example, when this eBPF program SEC(&#34;iter/bpf_sk_storage_map&#34;) int iter__bpf_sk_storage_map(struct bpf_iter__bpf_sk_storage_map *ctx) { if (ctx-&gt;sk) bpf_sk_storage_delete(&amp;sk_storage_map, ctx-&gt;sk); return 0; } is loaded into the kernel with the following type of error: libbpf: prog &#39;iter__bpf_sk_storage_map&#39;: BPF program load failed: Permission denied libbpf: prog &#39;iter__bpf_sk_storage_map&#39;: -- BEGIN PROG LOAD LOG -- R1 type=ctx expected=fp ; if (ctx-&gt;sk) 0: (79) r2 = *(u64 *)(r1 +16) ; if (ctx-&gt;sk) 1: (15) if r2 == 0x0 goto pc+4 R1=ctx(id=0,off=0,imm=0) R2_w=ptr_sock(id=0,off=0,imm=0) R10=fp0 ; bpf_sk_storage_delete(&amp;sk_storage_map, ctx-&gt;sk); 2: (79) r2 = *(u64 *)(r1 +16) ; bpf_sk_storage_delete(&amp;sk_storage_map, ctx-&gt;sk); 3: (18) r1 = 0xffffa0658305aa00 5: (85) call bpf_sk_storage_delete#108 R2 type=ptr_or_null_ expected=ptr_ processed 5 insns (limit 1000000) max_states_per_insn 0 total_states 0 peak_states 0 mark_read 0 -- END PROG LOAD LOG -- libbpf: prog &#39;iter__bpf_sk_storage_map&#39;: failed to load: -13 libbpf: failed to load object &#39;main.bpf.o&#39; failed to load BPF object: permission denied Solution This error message has two key errors, one error is R1 type=ctx expected=fp ; if (ctx-&gt;sk) 0: (79) r2 = *(u64 *)(r1 +16) ; if (ctx-&gt;sk) 1: (15) if r2 == 0x0 goto pc+4 Where R1 type=ctx expected=fp means that the verifier expects R1 to be of type fp and not ctx. By fp, we mean the type of the pointer on the stack, i.e., R1 is expected to be data on the stack and not ctx. Another error is R1=ctx(id=0,off=0,imm=0) R2_w=ptr_sock(id=0,off=0,imm=0) R10=fp0 ; bpf_sk_storage_delete(&amp;sk_storage_map, ctx-&gt;sk); 2: (79) r2 = *(u64 *)(r1 +16) ; bpf_sk_storage_delete(&amp;sk_storage_map, ctx-&gt;sk); 3: (18) r1 = 0xffffa0658305aa00 5: (85) call bpf_sk_storage_delete#108 R2 type=ptr_or_null_ expected=ptr_ Where R2 type=ptr_or_null_ expected=ptr_ means that the verifier expects R2 to be of type ptr and not prt_or_null, that is, it expects R2 to be a pointer and not a pointer or NULL. Here you may be a little confused, the previous judgment if (ctx-&gt;sk) has already ensured that it will not be NULL, why here still think it may be NULL, this is because the previous if judgment is not a stack variable, there is R1 type=ctx expected=fp problem also can not guarantee that it is not NULL. The solution is simple: use a temporary variable to store the value of ctx-&gt;sk, and then use this temporary variable on the stack for subsequent operations: SEC(&#34;iter/bpf_sk_storage_map&#34;) int iter__bpf_sk_storage_map(struct bpf_iter__bpf_sk_storage_map *ctx) { - if (ctx-&gt;sk) - bpf_sk_storage_delete(&amp;sk_storage_map, ctx-&gt;sk); + struct sock *sk = ctx-&gt;sk; + if (sk) + bpf_sk_storage_delete(&amp;sk_storage_map, sk); return 0; } Meaning of common types of keywords The specific meaning of common type keywords like the previous fp is documented here. keyword describe scalar reg doesn&#39;t contain a valid pointer ctx reg points to bpf_context map_ptr reg points to struct bpf_map map_value reg points to map element value map_value_or_null points to map elem value or NULL map_key reg points to a map element key fp reg == frame_pointer + offset pkt skb-&gt;data pkt_meta skb-&gt;data - meta_len pkt_end skb-&gt;data + headlen sock reg points to struct bpf_sock sock_or_null reg points to struct bpf_sock or NULL sock_common reg points to sock_common sock_common_or_null reg points to sock_common or NULL tcp_sock reg points to struct tcp_sock tcp_sock_or_null reg points to struct tcp_sock or NULL tp_buffer reg points to a writable raw tp&#39;s buffer xdp_sock reg points to struct xdp_sock ptr_ points to a kernel struct that does not need to be null checked by the BPF program. ptr_or_null_ points to a kernel struct that has not been checked for null dynptr_ptr pointer to bpf_dynptr mem reg points to valid memory region mem_or_null reg points to valid memory region or NULL buf reg points to a read/write buffer func reg points to a bpf program function inv reg doesn&#39;t contain a valid pointer flow_keys reg points to bpf_flow_keys percpu_ptr_ reg points to a percpu kernel variable rdonly_buf reg points to a readonly buffer rdonly_buf_or_null reg points to a readonly buffer or NULL rdwr_buf reg points to a read/write buffer rdwr_buf_or_null reg points to a read/write buffer or NULL 参考资料 verifier.c - kernel/bpf/verifier.c - Linux source code (v5.19.14) - Bootlin verifier.c - kernel/bpf/verifier.c - Linux source code (v5.13) - Bootlin"/>
+        <meta property="article:published_time" content="2022-10-06" />
+            <meta property="article:section" content="ebpf" />
+            <meta property="article:tag" content="ebpf" />
+            <meta property="article:tag" content="libbpf" />
+            <meta property="article:tag" content="en-version" />
+            <meta property="article:author" content="mozillazg" />
+            <meta property="og:image"
+                  content="https://mozillazg.com/static/avatar.jpeg"/>
+
+
+    <meta name="twitter:card" content="summary">
+        <meta name="twitter:site" content="@mozillazg">
+        <meta name="twitter:creator" content="@mozillazg">
+    <meta name="twitter:domain" content="https://mozillazg.com">
+            <meta property="twitter:image"
+                  content="https://mozillazg.com/static/avatar.jpeg"/>
+
+    <!-- Bootstrap -->
+        <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@3.3.4/dist/css/bootstrap.min.css" type="text/css"/>
+    <link href="https://cdn.jsdelivr.net/npm/font-awesome@4.3.0/css/font-awesome.min.css" rel="stylesheet">
+
+    <link href="https://cdn.jsdelivr.net/npm/pygments-css@1.0.0/github.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://mozillazg.com/theme/css/style.css" type="text/css"/>
+            <link href="https://mozillazg.com/static/custom.css" rel="stylesheet">
+
+        <link href="https://mozillazg.com/feeds/all.atom.xml" type="application/atom+xml" rel="alternate"
+              title="mozillazg's Blog ATOM Feed"/>
+
+        <link href="https://mozillazg.com/feeds/all.rss.xml" type="application/rss+xml" rel="alternate"
+              title="mozillazg's Blog RSS Feed"/>
+
+
+        <link href="https://mozillazg.com/feeds/ebpf.atom.xml" type="application/atom+xml" rel="alternate"
+              title="mozillazg's Blog ebpf ATOM Feed"/>
+
+
+    <script type="application/ld+json">
+    {
+        "@context": "https://schema.org",
+        "@type": "BlogPosting",
+        "publisher": {
+            "@type": "Person",
+            "name": "mozillazg",
+            "logo": "https://mozillazg.com/static/avatar.jpeg"
+        },
+        "author": {
+            "@type": "Person",
+            "name": "mozillazg",
+            "image": "https://mozillazg.com/static/avatar.jpeg",
+            "url": "https://mozillazg.com",
+            "sameAs": []
+        },
+        "headline": "One way to solve the ebpf verifier alert type error problem",
+        "url": "https://mozillazg.com/2022/10/ebpf-libbpf-verifier-fix-type-expected-issue-en.html",
+        "image": [
+            "https://mozillazg.com/static/avatar.jpeg"
+         ],
+        "keywords": "ebpf, libbpf, en-version",
+        "description": "Sometimes when we load a compiled eBPF program, the eBPF verifier will indicate that there is a type error in the program causing the program to fail to load. This article documents a solution to this error. Example of error For example, when this eBPF program SEC(&#34;iter/bpf_sk_storage_map&#34;) int iter__bpf_sk_storage_map(struct bpf_iter__bpf_sk_storage_map *ctx) { if (ctx-&gt;sk) bpf_sk_storage_delete(&amp;sk_storage_map, ctx-&gt;sk); return 0; } is loaded into the kernel with the following type of error: libbpf: prog &#39;iter__bpf_sk_storage_map&#39;: BPF program load failed: Permission denied libbpf: prog &#39;iter__bpf_sk_storage_map&#39;: -- BEGIN PROG LOAD LOG -- R1 type=ctx expected=fp ; if (ctx-&gt;sk) 0: (79) r2 = *(u64 *)(r1 +16) ; if (ctx-&gt;sk) 1: (15) if r2 == 0x0 goto pc+4 R1=ctx(id=0,off=0,imm=0) R2_w=ptr_sock(id=0,off=0,imm=0) R10=fp0 ; bpf_sk_storage_delete(&amp;sk_storage_map, ctx-&gt;sk); 2: (79) r2 = *(u64 *)(r1 +16) ; bpf_sk_storage_delete(&amp;sk_storage_map, ctx-&gt;sk); 3: (18) r1 = 0xffffa0658305aa00 5: (85) call bpf_sk_storage_delete#108 R2 type=ptr_or_null_ expected=ptr_ processed 5 insns (limit 1000000) max_states_per_insn 0 total_states 0 peak_states 0 mark_read 0 -- END PROG LOAD LOG -- libbpf: prog &#39;iter__bpf_sk_storage_map&#39;: failed to load: -13 libbpf: failed to load object &#39;main.bpf.o&#39; failed to load BPF object: permission denied Solution This error message has two key errors, one error is R1 type=ctx expected=fp ; if (ctx-&gt;sk) 0: (79) r2 = *(u64 *)(r1 +16) ; if (ctx-&gt;sk) 1: (15) if r2 == 0x0 goto pc+4 Where R1 type=ctx expected=fp means that the verifier expects R1 to be of type fp and not ctx. By fp, we mean the type of the pointer on the stack, i.e., R1 is expected to be data on the stack and not ctx. Another error is R1=ctx(id=0,off=0,imm=0) R2_w=ptr_sock(id=0,off=0,imm=0) R10=fp0 ; bpf_sk_storage_delete(&amp;sk_storage_map, ctx-&gt;sk); 2: (79) r2 = *(u64 *)(r1 +16) ; bpf_sk_storage_delete(&amp;sk_storage_map, ctx-&gt;sk); 3: (18) r1 = 0xffffa0658305aa00 5: (85) call bpf_sk_storage_delete#108 R2 type=ptr_or_null_ expected=ptr_ Where R2 type=ptr_or_null_ expected=ptr_ means that the verifier expects R2 to be of type ptr and not prt_or_null, that is, it expects R2 to be a pointer and not a pointer or NULL. Here you may be a little confused, the previous judgment if (ctx-&gt;sk) has already ensured that it will not be NULL, why here still think it may be NULL, this is because the previous if judgment is not a stack variable, there is R1 type=ctx expected=fp problem also can not guarantee that it is not NULL. The solution is simple: use a temporary variable to store the value of ctx-&gt;sk, and then use this temporary variable on the stack for subsequent operations: SEC(&#34;iter/bpf_sk_storage_map&#34;) int iter__bpf_sk_storage_map(struct bpf_iter__bpf_sk_storage_map *ctx) { - if (ctx-&gt;sk) - bpf_sk_storage_delete(&amp;sk_storage_map, ctx-&gt;sk); + struct sock *sk = ctx-&gt;sk; + if (sk) + bpf_sk_storage_delete(&amp;sk_storage_map, sk); return 0; } Meaning of common types of keywords The specific meaning of common type keywords like the previous fp is documented here. keyword describe scalar reg doesn&#39;t contain a valid pointer ctx reg points to bpf_context map_ptr reg points to struct bpf_map map_value reg points to map element value map_value_or_null points to map elem value or NULL map_key reg points to a map element key fp reg == frame_pointer + offset pkt skb-&gt;data pkt_meta skb-&gt;data - meta_len pkt_end skb-&gt;data + headlen sock reg points to struct bpf_sock sock_or_null reg points to struct bpf_sock or NULL sock_common reg points to sock_common sock_common_or_null reg points to sock_common or NULL tcp_sock reg points to struct tcp_sock tcp_sock_or_null reg points to struct tcp_sock or NULL tp_buffer reg points to a writable raw tp&#39;s buffer xdp_sock reg points to struct xdp_sock ptr_ points to a kernel struct that does not need to be null checked by the BPF program. ptr_or_null_ points to a kernel struct that has not been checked for null dynptr_ptr pointer to bpf_dynptr mem reg points to valid memory region mem_or_null reg points to valid memory region or NULL buf reg points to a read/write buffer func reg points to a bpf program function inv reg doesn&#39;t contain a valid pointer flow_keys reg points to bpf_flow_keys percpu_ptr_ reg points to a percpu kernel variable rdonly_buf reg points to a readonly buffer rdonly_buf_or_null reg points to a readonly buffer or NULL rdwr_buf reg points to a read/write buffer rdwr_buf_or_null reg points to a read/write buffer or NULL 参考资料 verifier.c - kernel/bpf/verifier.c - Linux source code (v5.19.14) - Bootlin verifier.c - kernel/bpf/verifier.c - Linux source code (v5.13) - Bootlin",
+        "mainEntityOfPage": {
+             "@type": "WebPage",
+             "@id": "https://mozillazg.com/2022/10/ebpf-libbpf-verifier-fix-type-expected-issue-en.html"
+        },
+        "datePublished": "2022-10-06"
+    }
+    </script>
+
+</head>
+<body>
+
+<div class="navbar" role="navigation">
+	<div class="container">
+        <div class="navbar-header">
+            <button type="button" class="navbar-toggle" data-toggle="collapse" data-target=".navbar-ex1-collapse">
+                <span class="sr-only">Toggle navigation</span>
+                <span class="icon-bar"></span>
+                <span class="icon-bar"></span>
+                <span class="icon-bar"></span>
+            </button>
+            <a href="https://mozillazg.com/" class="navbar-brand">
+mozillazg's Blog            </a>
+        </div>
+        <div class="collapse navbar-collapse navbar-ex1-collapse">
+            <ul class="nav navbar-nav">
+                    <li><a href="https://mozillazg.com/feeds/all.atom.xml">Feed</a></li>
+                    <li><a href="/2014/10/pages/about-me.html">About</a></li>
+            </ul>
+            <ul class="nav navbar-nav navbar-right">
+              <li><a href="https://mozillazg.com/archives.html"><i class="fa fa-th-list"></i><span class="icon-label">Archives</span></a></li>
+            </ul>
+        </div>
+        <!-- /.navbar-collapse -->
+    </div>
+</div> <!-- /.navbar -->
+<!-- Banner -->
+<!-- End Banner -->
+<div class="container">
+    <div class="row">
+        <div class="col-lg-12">
+    <section id="content" class="yue">
+        <article>
+            <header class="text-center">
+                <h1>
+                    <a href="https://mozillazg.com/2022/10/ebpf-libbpf-verifier-fix-type-expected-issue-en.html"
+                       rel="bookmark"
+                       title="Permalink to One way to solve the ebpf verifier alert type error problem">
+                        One way to solve the ebpf verifier alert type error problem
+                    </a>
+                </h1>
+                <p class="published">
+                    <time datetime="2022-10-06T00:00:00+00:00">
+                    2022-10-06
+                    </time>
+                </p>
+            </header>
+            <div class="entry-content">
+                <div class="well-sm article-info">
+<footer class="post-info">
+        <a href="https://mozillazg.com/category/ebpf.html">ebpf</a>
+
+
+<span class="label label-default hide">Tags</span>
+	<a href="https://mozillazg.com/tag/libbpf.html">libbpf</a>
+        /
+	<a href="https://mozillazg.com/tag/en-version.html">en-version</a>
+    <span class="label label-default">Lang</span>
+	<a href="https://mozillazg.com/2022/10/ebpf-libbpf-verifier-fix-type-expected-issue.html">zh</a>
+
+</footer><!-- /.post-info -->                </div>
+                <div class="js-toc"></div>
+                <div>
+                <p>Sometimes when we load a compiled eBPF program,
+the eBPF verifier will indicate that there is a type error in
+the program causing the program to fail to load.
+This article documents a solution to this error.</p>
+<div class="section" id="example-of-error">
+<h2 id="hidexample-of-error">Example of error<a class="headerlink" href="#hidexample-of-error" title="Permalink to this headline">¶</a></h2>
+<p>For example, when this eBPF program</p>
+<div class="highlight"><pre><span></span><span class="n">SEC</span><span class="p">(</span><span class="s">&quot;iter/bpf_sk_storage_map&quot;</span><span class="p">)</span>
+<span class="kt">int</span> <span class="n">iter__bpf_sk_storage_map</span><span class="p">(</span><span class="k">struct</span> <span class="n">bpf_iter__bpf_sk_storage_map</span> <span class="o">*</span><span class="n">ctx</span><span class="p">)</span>
+<span class="p">{</span>
+    <span class="k">if</span> <span class="p">(</span><span class="n">ctx</span><span class="o">-&gt;</span><span class="n">sk</span><span class="p">)</span>
+        <span class="n">bpf_sk_storage_delete</span><span class="p">(</span><span class="o">&amp;</span><span class="n">sk_storage_map</span><span class="p">,</span> <span class="n">ctx</span><span class="o">-&gt;</span><span class="n">sk</span><span class="p">);</span>
+
+    <span class="k">return</span> <span class="mi">0</span><span class="p">;</span>
+<span class="p">}</span>
+</pre></div>
+<p>is loaded into the kernel with the following type of error:</p>
+<pre class="literal-block">
+libbpf: prog 'iter__bpf_sk_storage_map': BPF program load failed: Permission denied
+libbpf: prog 'iter__bpf_sk_storage_map': -- BEGIN PROG LOAD LOG --
+R1 type=ctx expected=fp
+; if (ctx-&gt;sk)
+0: (79) r2 = *(u64 *)(r1 +16)
+; if (ctx-&gt;sk)
+1: (15) if r2 == 0x0 goto pc+4
+ R1=ctx(id=0,off=0,imm=0) R2_w=ptr_sock(id=0,off=0,imm=0) R10=fp0
+; bpf_sk_storage_delete(&amp;sk_storage_map, ctx-&gt;sk);
+2: (79) r2 = *(u64 *)(r1 +16)
+; bpf_sk_storage_delete(&amp;sk_storage_map, ctx-&gt;sk);
+3: (18) r1 = 0xffffa0658305aa00
+5: (85) call bpf_sk_storage_delete#108
+R2 type=ptr_or_null_ expected=ptr_
+processed 5 insns (limit 1000000) max_states_per_insn 0 total_states 0 peak_states 0 mark_read 0
+-- END PROG LOAD LOG --
+libbpf: prog 'iter__bpf_sk_storage_map': failed to load: -13
+libbpf: failed to load object 'main.bpf.o'
+failed to load BPF object: permission denied
+</pre>
+<div class="section" id="solution">
+<h3 id="hidsolution">Solution<a class="headerlink" href="#hidsolution" title="Permalink to this headline">¶</a></h3>
+<p>This error message has two key errors, one error is</p>
+<pre class="literal-block">
+R1 type=ctx expected=fp
+; if (ctx-&gt;sk)
+0: (79) r2 = *(u64 *)(r1 +16)
+; if (ctx-&gt;sk)
+1: (15) if r2 == 0x0 goto pc+4
+</pre>
+<p>Where R1 type=ctx expected=fp means that the verifier expects R1 to be of type fp and not ctx. By fp, we mean the type of the pointer on the stack, i.e., R1 is expected to be data on the stack and not ctx.</p>
+<p>Another error is</p>
+<pre class="literal-block">
+ R1=ctx(id=0,off=0,imm=0) R2_w=ptr_sock(id=0,off=0,imm=0) R10=fp0
+; bpf_sk_storage_delete(&amp;sk_storage_map, ctx-&gt;sk);
+2: (79) r2 = *(u64 *)(r1 +16)
+; bpf_sk_storage_delete(&amp;sk_storage_map, ctx-&gt;sk);
+3: (18) r1 = 0xffffa0658305aa00
+5: (85) call bpf_sk_storage_delete#108
+R2 type=ptr_or_null_ expected=ptr_
+</pre>
+<p>Where R2 type=ptr_or_null_ expected=ptr_ means that the verifier expects R2 to be of type ptr and not prt_or_null, that is, it expects R2 to be a pointer and not a pointer or NULL. Here you may be a little confused, the previous judgment if (ctx-&gt;sk) has already ensured that it will not be NULL, why here still think it may be NULL, this is because the previous if judgment is not a stack variable, there is R1 type=ctx expected=fp problem also can not guarantee that it is not NULL.</p>
+<p>The solution is simple: use a temporary variable to store the value of ctx-&gt;sk, and then use this temporary variable on the stack for subsequent operations:</p>
+<div class="highlight"><pre><span></span> SEC(&quot;iter/bpf_sk_storage_map&quot;)
+ int iter__bpf_sk_storage_map(struct bpf_iter__bpf_sk_storage_map *ctx)
+ {
+<span class="gd">-    if (ctx-&gt;sk)</span>
+<span class="gd">-        bpf_sk_storage_delete(&amp;sk_storage_map, ctx-&gt;sk);</span>
+<span class="gi">+    struct sock *sk = ctx-&gt;sk;</span>
+<span class="gi">+    if (sk)</span>
+<span class="gi">+        bpf_sk_storage_delete(&amp;sk_storage_map, sk);</span>
+
+     return 0;
+ }
+</pre></div>
+</div>
+</div>
+<div class="section" id="meaning-of-common-types-of-keywords">
+<h2 id="hidmeaning-of-common-types-of-keywords">Meaning of common types of keywords<a class="headerlink" href="#hidmeaning-of-common-types-of-keywords" title="Permalink to this headline">¶</a></h2>
+<p>The specific meaning of common type keywords like the previous fp is documented here.</p>
+<table border="1" class="docutils">
+<colgroup>
+<col width="29%" />
+<col width="71%" />
+</colgroup>
+<thead valign="bottom">
+<tr><th class="head">keyword</th>
+<th class="head">describe</th>
+</tr>
+</thead>
+<tbody valign="top">
+<tr><td><tt class="docutils literal">scalar</tt></td>
+<td>reg doesn't contain a valid pointer</td>
+</tr>
+<tr><td><tt class="docutils literal">ctx</tt></td>
+<td>reg points to bpf_context</td>
+</tr>
+<tr><td><tt class="docutils literal">map_ptr</tt></td>
+<td>reg points to struct bpf_map</td>
+</tr>
+<tr><td><tt class="docutils literal">map_value</tt></td>
+<td>reg points to map element value</td>
+</tr>
+<tr><td><tt class="docutils literal">map_value_or_null</tt></td>
+<td>points to map elem value or NULL</td>
+</tr>
+<tr><td><tt class="docutils literal">map_key</tt></td>
+<td>reg points to a map element key</td>
+</tr>
+<tr><td><tt class="docutils literal">fp</tt></td>
+<td>reg == frame_pointer + offset</td>
+</tr>
+<tr><td><tt class="docutils literal">pkt</tt></td>
+<td>skb-&gt;data</td>
+</tr>
+<tr><td><tt class="docutils literal">pkt_meta</tt></td>
+<td>skb-&gt;data - meta_len</td>
+</tr>
+<tr><td><tt class="docutils literal">pkt_end</tt></td>
+<td>skb-&gt;data + headlen</td>
+</tr>
+<tr><td><tt class="docutils literal">sock</tt></td>
+<td>reg points to struct bpf_sock</td>
+</tr>
+<tr><td><tt class="docutils literal">sock_or_null</tt></td>
+<td>reg points to struct bpf_sock or NULL</td>
+</tr>
+<tr><td><tt class="docutils literal">sock_common</tt></td>
+<td>reg points to sock_common</td>
+</tr>
+<tr><td><tt class="docutils literal">sock_common_or_null</tt></td>
+<td>reg points to sock_common or NULL</td>
+</tr>
+<tr><td><tt class="docutils literal">tcp_sock</tt></td>
+<td>reg points to struct tcp_sock</td>
+</tr>
+<tr><td><tt class="docutils literal">tcp_sock_or_null</tt></td>
+<td>reg points to struct tcp_sock or NULL</td>
+</tr>
+<tr><td><tt class="docutils literal">tp_buffer</tt></td>
+<td>reg points to a writable raw tp's buffer</td>
+</tr>
+<tr><td><tt class="docutils literal">xdp_sock</tt></td>
+<td>reg points to struct xdp_sock</td>
+</tr>
+<tr><td><tt class="docutils literal">ptr_</tt></td>
+<td>points to a kernel struct that does not need
+to be null checked by the BPF program.</td>
+</tr>
+<tr><td><tt class="docutils literal">ptr_or_null_</tt></td>
+<td>points to a kernel struct that has not been checked for null</td>
+</tr>
+<tr><td><tt class="docutils literal">dynptr_ptr</tt></td>
+<td>pointer to bpf_dynptr</td>
+</tr>
+<tr><td><tt class="docutils literal">mem</tt></td>
+<td>reg points to valid memory region</td>
+</tr>
+<tr><td><tt class="docutils literal">mem_or_null</tt></td>
+<td>reg points to valid memory region or NULL</td>
+</tr>
+<tr><td><tt class="docutils literal">buf</tt></td>
+<td>reg points to a read/write buffer</td>
+</tr>
+<tr><td><tt class="docutils literal">func</tt></td>
+<td>reg points to a bpf program function</td>
+</tr>
+<tr><td><tt class="docutils literal">inv</tt></td>
+<td>reg doesn't contain a valid pointer</td>
+</tr>
+<tr><td><tt class="docutils literal">flow_keys</tt></td>
+<td>reg points to bpf_flow_keys</td>
+</tr>
+<tr><td><tt class="docutils literal">percpu_ptr_</tt></td>
+<td>reg points to a percpu kernel variable</td>
+</tr>
+<tr><td><tt class="docutils literal">rdonly_buf</tt></td>
+<td>reg points to a readonly buffer</td>
+</tr>
+<tr><td><tt class="docutils literal">rdonly_buf_or_null</tt></td>
+<td>reg points to a readonly buffer or NULL</td>
+</tr>
+<tr><td><tt class="docutils literal">rdwr_buf</tt></td>
+<td>reg points to a read/write buffer</td>
+</tr>
+<tr><td><tt class="docutils literal">rdwr_buf_or_null</tt></td>
+<td>reg points to a read/write buffer or NULL</td>
+</tr>
+</tbody>
+</table>
+</div>
+<div class="section" id="id1">
+<h2 id="hidid1">参考资料<a class="headerlink" href="#hidid1" title="Permalink to this headline">¶</a></h2>
+<ul class="simple">
+<li><a class="reference external" href="https://elixir.bootlin.com/linux/v5.19.14/source/kernel/bpf/verifier.c#L533">verifier.c - kernel/bpf/verifier.c - Linux source code (v5.19.14) - Bootlin</a></li>
+<li><a class="reference external" href="https://elixir.bootlin.com/linux/v5.13/source/kernel/bpf/verifier.c#L548">verifier.c - kernel/bpf/verifier.c - Linux source code (v5.13) - Bootlin</a></li>
+</ul>
+</div>
+
+                </div>
+            </div>
+            <!-- /.entry-content -->
+<section class="text-center">
+  
+<div id="donate"></div>
+
+<div class="social-share"></div>
+<div class="social-comment-note">
+<p>有任何建议和想法欢迎在下方评论区留言或者加我<a href="/static/wechat.png">微信</a>交流</p>
+</div>
+
+</section>
+    <hr/>
+    <section class="comments" id="comments">
+        <h2>Comments</h2>
+
+        <div id="disqus_thread"></div>
+        <script type="text/javascript">
+            /* * * CONFIGURATION VARIABLES: EDIT BEFORE PASTING INTO YOUR WEBPAGE * * */
+            var disqus_shortname = 'my-github-blog'; // required: replace example with your forum shortname
+
+                    var disqus_identifier = 'ebpf-libbpf-verifier-fix-type-expected-issue';
+                var disqus_url = 'https://mozillazg.com/2022/10/ebpf-libbpf-verifier-fix-type-expected-issue-en.html';
+
+            var disqus_config = function () {
+                this.language = "en";
+            };
+
+            /* * * DON'T EDIT BELOW THIS LINE * * */
+            (function () {
+                var dsq = document.createElement('script');
+                dsq.type = 'text/javascript';
+                dsq.async = true;
+                dsq.src = '//' + disqus_shortname + '.disqus.com/embed.js';
+                (document.getElementsByTagName('head')[0] || document.getElementsByTagName('body')[0]).appendChild(dsq);
+            })();
+        </script>
+        <noscript>Please enable JavaScript to view the <a href="http://disqus.com/?ref_noscript">comments powered by
+            Disqus.</a></noscript>
+        <a href="http://disqus.com" class="dsq-brlink">comments powered by <span class="logo-disqus">Disqus</span></a>
+
+    </section>
+        </article>
+    </section>
+
+        </div>
+    </div>
+</div>
+<footer>
+   <div class="container">
+      <hr>
+      <div class="row">
+         <div class="col-xs-10">&copy; 2022 mozillazg
+            &middot; Powered by <a href="https://github.com/DandyDev/pelican-bootstrap3" target="_blank">pelican-bootstrap3</a>,
+            <a href="http://docs.getpelican.com/" target="_blank">Pelican</a>,
+            <a href="http://getbootstrap.com" target="_blank">Bootstrap</a>
+            &middot; <a href="/privacy-policy.html" target="_blank">Privacy</a>              <p><small>  <a rel="license" href="http://creativecommons.org/licenses/by-sa/4.0/"><img alt="Creative Commons License" style="border-width:0" src="/static/images/by-sa-80x15.png" /></a>
+    &quot;<span xmlns:dct="http://purl.org/dc/terms/" property="dct:title">mozillazg's Blog</span>&quot; by <a xmlns:cc="http://creativecommons.org/ns#" href="https://mozillazg.com" property="cc:attributionName" rel="cc:attributionURL">mozillazg</a> is
+  licensed under a <a rel="license" href="http://creativecommons.org/licenses/by-sa/4.0/">Creative Commons Attribution-ShareAlike 4.0 International License</a>, except where indicated otherwise.
+</small></p>
+         </div>
+         <div class="col-xs-2"><p class="pull-right"><i class="fa fa-arrow-up"></i> <a href="#">Back to top</a></p></div>
+      </div>
+   </div>
+</footer>
+<script src="https://cdn.jsdelivr.net/npm/jquery@2.1.1/dist/jquery.min.js"></script>
+
+<!-- Include all compiled plugins (below), or include individual files as needed -->
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@3.3.4/dist/js/bootstrap.min.js"></script>
+
+<!-- Enable responsive features in IE8 with Respond.js (https://github.com/scottjehl/Respond) -->
+
+    <!-- Disqus -->
+    <script type="text/javascript">
+        /* * * CONFIGURATION VARIABLES: EDIT BEFORE PASTING INTO YOUR WEBPAGE * * */
+        var disqus_shortname = 'my-github-blog'; // required: replace example with your forum shortname
+
+        /* * * DON'T EDIT BELOW THIS LINE * * */
+        (function () {
+            var s = document.createElement('script');
+            s.async = true;
+            s.type = 'text/javascript';
+            s.src = '//' + disqus_shortname + '.disqus.com/count.js';
+            (document.getElementsByTagName('HEAD')[0] || document.getElementsByTagName('BODY')[0]).appendChild(s);
+        }());
+    </script>
+    <!-- End Disqus Code -->
+    <!-- Google Analytics Universal -->
+    <script type="text/javascript">
+        (function(i,s,o,g,r,a,m){i['GoogleAnalyticsObject']=r;i[r]=i[r]||function(){
+        (i[r].q=i[r].q||[]).push(arguments)},i[r].l=1*new Date();a=s.createElement(o),
+        m=s.getElementsByTagName(o)[0];a.async=1;a.src=g;m.parentNode.insertBefore(a,m)
+        })(window,document,'script','//www.google-analytics.com/analytics.js','ga');
+
+        ga('create', 'UA-77172981-1', 'auto');
+        ga('send', 'pageview');
+    </script>
+    <!-- End Google Analytics Universal Code -->
+
+<!-- share.js -->
+<script src="https://cdn.jsdelivr.net/npm/social-share.js@1.0.16/dist/js/social-share.min.js"></script>
+
+
+
+<script src="https://cdn.jsdelivr.net/npm/tocbot@3.0.2/dist/tocbot.min.js"></script>
+<script>
+$(document).ready(function(){
+  tocbot.init({
+    // Where to render the table of contents.
+    tocSelector: '.js-toc',
+    // Where to grab the headings to build the table of contents.
+    contentSelector: '.entry-content',
+    // Which headings to grab inside of the contentSelector element.
+    headingSelector: 'h2, h3, h4,h5',
+    // Headings that match the ignoreSelector will be skipped.
+    ignoreSelector: '.js-toc-ignore',
+    // Main class to add to links.
+    linkClass: 'toc-link',
+    // Extra classes to add to links.
+    extraLinkClasses: '',
+    // Class to add to active links,
+    // the link corresponding to the top most heading on the page.
+    activeLinkClass: 'is-active-link',
+    // Main class to add to lists.
+    listClass: 'toc-list',
+    // Extra classes to add to lists.
+    extraListClasses: '',
+    // Class that gets added when a list should be collapsed.
+    isCollapsedClass: 'is-collapsed',
+    // Class that gets added when a list should be able
+    // to be collapsed but isn't necessarily collpased.
+    collapsibleClass: 'is-collapsible',
+    // Class to add to list items.
+    listItemClass: 'toc-list-item',
+    // How many heading levels should not be collpased.
+    // For example, number 6 will show everything since
+    // there are only 6 heading levels and number 0 will collpase them all.
+    // The sections that are hidden will open
+    // and close as you scroll to headings within them.
+    collapseDepth: 6,
+    // Smooth scrolling enabled.
+    smoothScroll: true,
+    // Smooth scroll duration.
+    smoothScrollDuration: 420,
+    // Callback for scroll end (requires: smoothScroll).
+    scrollEndCallback: function (e) {},
+    // Headings offset between the headings and the top of the document (this is meant for minor adjustments).
+    headingsOffset: 0,
+    // Timeout between events firing to make sure it's
+    // not too rapid (for performance reasons).
+    throttleTimeout: 50,
+    // Element to add the positionFixedClass to.
+    positionFixedSelector: null,
+    // Fixed position class to add to make sidebar fixed after scrolling
+    // down past the fixedSidebarOffset.
+    positionFixedClass: 'is-position-fixed',
+    // fixedSidebarOffset can be any number but by default is set
+    // to auto which sets the fixedSidebarOffset to the sidebar
+    // element's offsetTop from the top of the document on init.
+    fixedSidebarOffset: 'auto',
+    // includeHtml can be set to true to include the HTML markup from the
+    // heading node instead of just including the textContent.
+    includeHtml: false
+  });
+});
+</script>
+</body>
+</html>

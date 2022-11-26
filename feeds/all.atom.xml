@@ -1,19 +1,66 @@
 <?xml version="1.0" encoding="utf-8"?>
-<feed xmlns="http://www.w3.org/2005/Atom"><title>mozillazg's Blog</title><link href="https://mozillazg.com/" rel="alternate"></link><link href="https://mozillazg.com/feeds/all.atom.xml" rel="self"></link><id>https://mozillazg.com/</id><updated>2022-10-07T00:00:00+00:00</updated><entry><title>在 ebpf/libbpf 程序中使用尾调用（tail calls）</title><link href="https://mozillazg.com/2022/10/ebpf-libbpf-use-tail-calls.html" rel="alternate"></link><updated>2022-10-07T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2022-10-07:2022/10/ebpf-libbpf-use-tail-calls.html</id><summary type="html">&lt;p&gt;本文将介绍如何在 ebpf/libbpf 程序中使用 eBPF 的尾调用（tail calls）特性。&lt;/p&gt;
+<feed xmlns="http://www.w3.org/2005/Atom"><title>mozillazg's Blog</title><link href="https://mozillazg.com/" rel="alternate"></link><link href="https://mozillazg.com/feeds/all.atom.xml" rel="self"></link><id>https://mozillazg.com/</id><updated>2022-11-26T00:00:00+00:00</updated><entry><title>使用 libbpfgo 重写 BCC libbpf-tools 中各个工具的用户态程序</title><link href="https://mozillazg.com/2022/11/ebpf-libbpfgo-tools-port-rewriting-the-control-plane-of-bcc-libbpf-tools-in-golang-with-libbpfgo.html" rel="alternate"></link><updated>2022-11-26T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2022-11-26:2022/11/ebpf-libbpfgo-tools-port-rewriting-the-control-plane-of-bcc-libbpf-tools-in-golang-with-libbpfgo.html</id><summary type="html">&lt;p&gt;最近新开源了一个 eBPF 相关的项目：
+&lt;a class="reference external" href="https://github.com/mozillazg/libbpfgo-tools"&gt;mozillazg/libbpfgo-tools&lt;/a&gt; 。
+这个项目的目标是使用 &lt;a class="reference external" href="https://github.com/aquasecurity/libbpfgo"&gt;libbpfgo&lt;/a&gt; 重写/移植 &lt;a class="reference external" href="https://github.com/iovisor/bcc/tree/master/libbpf-tools"&gt;bcc/libbpf-tools&lt;/a&gt; 中各个工具的前端程序（即，用户态程序）。
+希望能在如何使用 golang 编写 eBPF 程序, 尤其是如何使用 libbpfgo 这个 eBPF 库方面对大家有些许帮助。&lt;/p&gt;
+&lt;div class="section" id="id1"&gt;
+&lt;h2 id="hidid1"&gt;目标&lt;a class="headerlink" href="#hidid1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;这个项目的目标和原则如下：&lt;/p&gt;
+&lt;ul class="simple"&gt;
+&lt;li&gt;所有的 eBPF C 代码全部重用 BCC 仓库中 libbpf-tools 目录下的代码。
+我们不会对 BCC 的代码做任何额外的修改，如果有需要修改的地方会提 PR 给上游 BCC 仓库。&lt;/li&gt;
+&lt;li&gt;所有的用户态程序都使用 libbpfgo 进行实现。&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/div&gt;
+&lt;div class="section" id="id2"&gt;
+&lt;h2 id="hidid2"&gt;状态&lt;a class="headerlink" href="#hidid2" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;当前，我们已经完成了最新 v0.25.0 版本 BCC libbpf-tools 全部 46 个工具中 28 个工具的移植工作，
+更多工具的移植持续进行中：&lt;/p&gt;
+&lt;ul class="simple"&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://github.com/mozillazg/libbpfgo-tools/blob/master/tools/bashreadline"&gt;bashreadline&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://github.com/mozillazg/libbpfgo-tools/blob/master/tools/bindsnoop"&gt;bindsnoop&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://github.com/mozillazg/libbpfgo-tools/blob/master/tools/biolatency"&gt;biolatency&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://github.com/mozillazg/libbpfgo-tools/blob/master/tools/biopattern"&gt;biopattern&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://github.com/mozillazg/libbpfgo-tools/blob/master/tools/biosnoop"&gt;biosnoop&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://github.com/mozillazg/libbpfgo-tools/blob/master/tools/biostacks"&gt;biostacks&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://github.com/mozillazg/libbpfgo-tools/blob/master/tools/bitesize"&gt;bitesize&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://github.com/mozillazg/libbpfgo-tools/blob/master/tools/cpudist"&gt;cpudist&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://github.com/mozillazg/libbpfgo-tools/blob/master/tools/drsnoop"&gt;drsnoop&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://github.com/mozillazg/libbpfgo-tools/blob/master/tools/execsnoop"&gt;execsnoop&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://github.com/mozillazg/libbpfgo-tools/blob/master/tools/filelife"&gt;filelife&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://github.com/mozillazg/libbpfgo-tools/blob/master/tools/filetop"&gt;filetop&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://github.com/mozillazg/libbpfgo-tools/blob/master/tools/mdflush"&gt;mdflush&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://github.com/mozillazg/libbpfgo-tools/blob/master/tools/mountsnoop"&gt;mountsnoop&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://github.com/mozillazg/libbpfgo-tools/blob/master/tools/oomkill"&gt;oomkill&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://github.com/mozillazg/libbpfgo-tools/blob/master/tools/opensnoop"&gt;opensnoop&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://github.com/mozillazg/libbpfgo-tools/blob/master/tools/readahead"&gt;readahead&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://github.com/mozillazg/libbpfgo-tools/blob/master/tools/sigsnoop"&gt;sigsnoop&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://github.com/mozillazg/libbpfgo-tools/blob/master/tools/solisten"&gt;solisten&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://github.com/mozillazg/libbpfgo-tools/blob/master/tools/statsnoop"&gt;statsnoop&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://github.com/mozillazg/libbpfgo-tools/blob/master/tools/syscount"&gt;syscount&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://github.com/mozillazg/libbpfgo-tools/blob/master/tools/tcpconnect"&gt;tcpconnect&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://github.com/mozillazg/libbpfgo-tools/blob/master/tools/tcpconnlat"&gt;tcpconnlat&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://github.com/mozillazg/libbpfgo-tools/blob/master/tools/tcplife"&gt;tcplife&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://github.com/mozillazg/libbpfgo-tools/blob/master/tools/tcprtt"&gt;tcprtt&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://github.com/mozillazg/libbpfgo-tools/blob/master/tools/tcpsynbl"&gt;tcpsynbl&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://github.com/mozillazg/libbpfgo-tools/blob/master/tools/tcptracer"&gt;tcptracer&lt;/a&gt;&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/div&gt;
+</summary><category term="libbpf"></category><category term="libbpfgo"></category></entry><entry><title>在 ebpf/libbpf 程序中使用尾调用（tail calls）</title><link href="https://mozillazg.com/2022/10/ebpf-libbpf-use-tail-calls.html" rel="alternate"></link><updated>2022-10-07T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2022-10-07:2022/10/ebpf-libbpf-use-tail-calls.html</id><summary type="html">&lt;p&gt;本文将介绍如何在 ebpf/libbpf 程序中使用 eBPF 的尾调用（tail calls）特性。&lt;/p&gt;
 &lt;div class="section" id="tail-calls"&gt;
 &lt;h2 id="hidtail-calls"&gt;尾调用（tail calls）&lt;a class="headerlink" href="#hidtail-calls" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
-&lt;p&gt;eBPF 的尾调用（tail calls）特性允许一个 eBPF 程序可以调用另一个 eBPF 程序，
-并且调用完成后不会返回原来的程序。&lt;/p&gt;
+&lt;p&gt;eBPF 的尾调用（tail calls）特性允许一个 eBPF 程序可以调用另一个 eBPF 程序， 并且调用完成后不会返回原来的程序。
+因为尾调用在调用函数的时候会重用调用方函数的 stack frame，所以它的开销比普通的函数
+调用会更低。&lt;/p&gt;
 &lt;p&gt;&lt;img alt="image" src="/static/images/bpf/bpf_tailcall.png" /&gt;&lt;/p&gt;
+&lt;blockquote&gt;
+&lt;/blockquote&gt;
 &lt;p&gt;图片来源：&lt;a class="reference external" href="https://docs.cilium.io/en/v1.12/bpf/#tail-calls"&gt;https://docs.cilium.io/en/v1.12/bpf/#tail-calls&lt;/a&gt;&lt;/p&gt;
 &lt;p&gt;尾调用涉及两个步骤：&lt;/p&gt;
-&lt;ol class="arabic simple"&gt;
-&lt;li&gt;定义一个类型为 &lt;tt class="docutils literal"&gt;BPF_MAP_TYPE_PROG_ARRAY&lt;/tt&gt; 的 map ，
-map 的 value 是在尾调用中被调用的 eBPF 程序的文件描述符。
-我们可以在用户态程序中更新这个 map 的 key/value。&lt;/li&gt;
-&lt;li&gt;在 eBPF 程序中，我们可以通过 &lt;tt class="docutils literal"&gt;bpf_tail_call()&lt;/tt&gt; 这个辅助函数
-从第1步的 map 中获取 eBPF 程序然后执行该程序进行尾调用。&lt;/li&gt;
-&lt;/ol&gt;
+&lt;ul class="simple"&gt;
+&lt;li&gt;定义一个类型为 &lt;tt class="docutils literal"&gt;BPF_MAP_TYPE_PROG_ARRAY&lt;/tt&gt; 的 map ， map 的 value 是在尾调用中被调用的 eBPF 程序的文件描述符。 我们可以在用户态程序中更新这个 map 的 key/value。&lt;/li&gt;
+&lt;li&gt;在 eBPF 程序中，我们可以通过 &lt;tt class="docutils literal"&gt;bpf_tail_call()&lt;/tt&gt; 这个辅助函数 从第1步的 map 中获取 eBPF 程序然后执行该程序进行尾调用。&lt;/li&gt;
+&lt;/ul&gt;
 &lt;/div&gt;
 &lt;div class="section" id="id1"&gt;
 &lt;h2 id="hidid1"&gt;使用示例&lt;a class="headerlink" href="#hidid1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
@@ -65,8 +112,7 @@ map 的 value 是在尾调用中被调用的 eBPF 程序的文件描述符。
         &lt;span class="k"&gt;return&lt;/span&gt; &lt;span class="mi"&gt;0&lt;/span&gt;&lt;span class="p"&gt;;&lt;/span&gt;
 &lt;span class="p"&gt;}&lt;/span&gt;
 &lt;/pre&gt;&lt;/div&gt;
-&lt;p&gt;完整的示例程序，详见：
-&lt;a class="reference external" href="https://github.com/mozillazg/hello-libbpfgo/tree/master/22-tail-calls"&gt;https://github.com/mozillazg/hello-libbpfgo/tree/master/22-tail-calls&lt;/a&gt;&lt;/p&gt;
+&lt;p&gt;完整的示例程序，详见： &lt;a class="reference external" href="https://github.com/mozillazg/hello-libbpfgo/tree/master/22-tail-calls"&gt;https://github.com/mozillazg/hello-libbpfgo/tree/master/22-tail-calls&lt;/a&gt;&lt;/p&gt;
 &lt;/div&gt;
 &lt;/div&gt;
 &lt;div class="section" id="id3"&gt;
@@ -78,8 +124,7 @@ map 的 value 是在尾调用中被调用的 eBPF 程序的文件描述符。
 &lt;li&gt;&lt;a class="reference external" href="https://github.com/libbpf/libbpf/issues/354"&gt;Support static initialization of BPF_MAP_TYPE_PROG_ARRAY · Issue #354 · libbpf/libbpf&lt;/a&gt;&lt;/li&gt;
 &lt;/ul&gt;
 &lt;/div&gt;
-</summary><category term="libbpf"></category><category term="libbpfgo"></category></entry><entry><title>解决 ebpf 验证器提示类型错误的问题</title><link href="https://mozillazg.com/2022/10/ebpf-libbpf-verifier-fix-type-expected-issue.html" rel="alternate"></link><updated>2022-10-06T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2022-10-06:2022/10/ebpf-libbpf-verifier-fix-type-expected-issue.html</id><summary type="html">&lt;p&gt;有时当我们加载编译后的 eBPF 程序的时候，eBPF 验证器会提示程序中有类型错误的问题导致程序加载失败。
-本文记录一下这种错误的一种解决方法。&lt;/p&gt;
+</summary><category term="libbpf"></category><category term="libbpfgo"></category></entry><entry><title>解决 ebpf 验证器提示类型错误问题的一种方法</title><link href="https://mozillazg.com/2022/10/ebpf-libbpf-verifier-fix-type-expected-issue.html" rel="alternate"></link><updated>2022-10-06T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2022-10-06:2022/10/ebpf-libbpf-verifier-fix-type-expected-issue.html</id><summary type="html">&lt;p&gt;有时当我们加载编译后的 eBPF 程序的时候，eBPF 验证器会提示程序中有类型错误的问题导致程序加载失败。 本文记录一下这种错误的一种解决方法。&lt;/p&gt;
 &lt;div class="section" id="id1"&gt;
 &lt;h2 id="hidid1"&gt;错误示例&lt;a class="headerlink" href="#hidid1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;p&gt;比如，当下面这段 eBPF 程序&lt;/p&gt;
@@ -93,26 +138,27 @@ map 的 value 是在尾调用中被调用的 eBPF 程序的文件描述符。
 &lt;span class="p"&gt;}&lt;/span&gt;
 &lt;/pre&gt;&lt;/div&gt;
 &lt;p&gt;被加载到内核中时会提示如下类型错误:&lt;/p&gt;
-&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;libbpf: prog &lt;span class="s1"&gt;&amp;#39;iter__bpf_sk_storage_map&amp;#39;&lt;/span&gt;: BPF program load failed: Permission denied
-libbpf: prog &lt;span class="s1"&gt;&amp;#39;iter__bpf_sk_storage_map&amp;#39;&lt;/span&gt;: -- BEGIN PROG LOAD LOG --
-R1 &lt;span class="nv"&gt;type&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;ctx &lt;span class="nv"&gt;expected&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;fp
-&lt;span class="p"&gt;;&lt;/span&gt; &lt;span class="k"&gt;if&lt;/span&gt; &lt;span class="o"&gt;(&lt;/span&gt;ctx-&amp;gt;sk&lt;span class="o"&gt;)&lt;/span&gt;
-0: &lt;span class="o"&gt;(&lt;/span&gt;79&lt;span class="o"&gt;)&lt;/span&gt; &lt;span class="nv"&gt;r2&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; *&lt;span class="o"&gt;(&lt;/span&gt;u64 *&lt;span class="o"&gt;)(&lt;/span&gt;r1 +16&lt;span class="o"&gt;)&lt;/span&gt;
-&lt;span class="p"&gt;;&lt;/span&gt; &lt;span class="k"&gt;if&lt;/span&gt; &lt;span class="o"&gt;(&lt;/span&gt;ctx-&amp;gt;sk&lt;span class="o"&gt;)&lt;/span&gt;
-1: &lt;span class="o"&gt;(&lt;/span&gt;15&lt;span class="o"&gt;)&lt;/span&gt; &lt;span class="k"&gt;if&lt;/span&gt; &lt;span class="nv"&gt;r2&lt;/span&gt; &lt;span class="o"&gt;==&lt;/span&gt; 0x0 goto pc+4
- &lt;span class="nv"&gt;R1&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;ctx&lt;span class="o"&gt;(&lt;/span&gt;&lt;span class="nv"&gt;id&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;0,off&lt;span class="o"&gt;=&lt;/span&gt;0,imm&lt;span class="o"&gt;=&lt;/span&gt;0&lt;span class="o"&gt;)&lt;/span&gt; &lt;span class="nv"&gt;R2_w&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;ptr_sock&lt;span class="o"&gt;(&lt;/span&gt;&lt;span class="nv"&gt;id&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;0,off&lt;span class="o"&gt;=&lt;/span&gt;0,imm&lt;span class="o"&gt;=&lt;/span&gt;0&lt;span class="o"&gt;)&lt;/span&gt; &lt;span class="nv"&gt;R10&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;fp0
-&lt;span class="p"&gt;;&lt;/span&gt; bpf_sk_storage_delete&lt;span class="o"&gt;(&lt;/span&gt;&lt;span class="p"&gt;&amp;amp;&lt;/span&gt;sk_storage_map, ctx-&amp;gt;sk&lt;span class="o"&gt;)&lt;/span&gt;&lt;span class="p"&gt;;&lt;/span&gt;
-2: &lt;span class="o"&gt;(&lt;/span&gt;79&lt;span class="o"&gt;)&lt;/span&gt; &lt;span class="nv"&gt;r2&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; *&lt;span class="o"&gt;(&lt;/span&gt;u64 *&lt;span class="o"&gt;)(&lt;/span&gt;r1 +16&lt;span class="o"&gt;)&lt;/span&gt;
-&lt;span class="p"&gt;;&lt;/span&gt; bpf_sk_storage_delete&lt;span class="o"&gt;(&lt;/span&gt;&lt;span class="p"&gt;&amp;amp;&lt;/span&gt;sk_storage_map, ctx-&amp;gt;sk&lt;span class="o"&gt;)&lt;/span&gt;&lt;span class="p"&gt;;&lt;/span&gt;
-3: &lt;span class="o"&gt;(&lt;/span&gt;18&lt;span class="o"&gt;)&lt;/span&gt; &lt;span class="nv"&gt;r1&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; 0xffffa0658305aa00
-5: &lt;span class="o"&gt;(&lt;/span&gt;85&lt;span class="o"&gt;)&lt;/span&gt; call bpf_sk_storage_delete#108
-R2 &lt;span class="nv"&gt;type&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;ptr_or_null_ &lt;span class="nv"&gt;expected&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;ptr_
-processed &lt;span class="m"&gt;5&lt;/span&gt; insns &lt;span class="o"&gt;(&lt;/span&gt;limit 1000000&lt;span class="o"&gt;)&lt;/span&gt; max_states_per_insn &lt;span class="m"&gt;0&lt;/span&gt; total_states &lt;span class="m"&gt;0&lt;/span&gt; peak_states &lt;span class="m"&gt;0&lt;/span&gt; mark_read 0
+&lt;pre class="literal-block"&gt;
+libbpf: prog 'iter__bpf_sk_storage_map': BPF program load failed: Permission denied
+libbpf: prog 'iter__bpf_sk_storage_map': -- BEGIN PROG LOAD LOG --
+R1 type=ctx expected=fp
+; if (ctx-&amp;gt;sk)
+0: (79) r2 = *(u64 *)(r1 +16)
+; if (ctx-&amp;gt;sk)
+1: (15) if r2 == 0x0 goto pc+4
+ R1=ctx(id=0,off=0,imm=0) R2_w=ptr_sock(id=0,off=0,imm=0) R10=fp0
+; bpf_sk_storage_delete(&amp;amp;sk_storage_map, ctx-&amp;gt;sk);
+2: (79) r2 = *(u64 *)(r1 +16)
+; bpf_sk_storage_delete(&amp;amp;sk_storage_map, ctx-&amp;gt;sk);
+3: (18) r1 = 0xffffa0658305aa00
+5: (85) call bpf_sk_storage_delete#108
+R2 type=ptr_or_null_ expected=ptr_
+processed 5 insns (limit 1000000) max_states_per_insn 0 total_states 0 peak_states 0 mark_read 0
 -- END PROG LOAD LOG --
-libbpf: prog &lt;span class="s1"&gt;&amp;#39;iter__bpf_sk_storage_map&amp;#39;&lt;/span&gt;: failed to load: -13
-libbpf: failed to load object &lt;span class="s1"&gt;&amp;#39;main.bpf.o&amp;#39;&lt;/span&gt;
+libbpf: prog 'iter__bpf_sk_storage_map': failed to load: -13
+libbpf: failed to load object 'main.bpf.o'
 failed to load BPF object: permission denied
-&lt;/pre&gt;&lt;/div&gt;
+&lt;/pre&gt;
 &lt;div class="section" id="id2"&gt;
 &lt;h3 id="hidid2"&gt;解决办法&lt;a class="headerlink" href="#hidid2" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
 &lt;p&gt;这个错误信息有两个关键错误，一个错误是:&lt;/p&gt;
@@ -123,8 +169,7 @@ R1 type=ctx expected=fp
 ; if (ctx-&amp;gt;sk)
 1: (15) if r2 == 0x0 goto pc+4
 &lt;/pre&gt;
-&lt;p&gt;其中 &lt;tt class="docutils literal"&gt;R1 type=ctx expected=fp&lt;/tt&gt; 说的是，验证器期望 &lt;tt class="docutils literal"&gt;R1&lt;/tt&gt; 的类型是 &lt;tt class="docutils literal"&gt;fp&lt;/tt&gt; 而不是 &lt;tt class="docutils literal"&gt;ctx&lt;/tt&gt; 。
-所谓的 &lt;tt class="docutils literal"&gt;fp&lt;/tt&gt; 指的是栈上的指针类型，即期望 &lt;tt class="docutils literal"&gt;R1&lt;/tt&gt; 是栈上的数据而不是 &lt;tt class="docutils literal"&gt;ctx&lt;/tt&gt; 。&lt;/p&gt;
+&lt;p&gt;其中 &lt;tt class="docutils literal"&gt;R1 type=ctx expected=fp&lt;/tt&gt; 说的是，验证器期望 &lt;tt class="docutils literal"&gt;R1&lt;/tt&gt; 的类型是 &lt;tt class="docutils literal"&gt;fp&lt;/tt&gt; 而不是 &lt;tt class="docutils literal"&gt;ctx&lt;/tt&gt; 。 所谓的 &lt;tt class="docutils literal"&gt;fp&lt;/tt&gt; 指的是栈上的指针类型，即期望 &lt;tt class="docutils literal"&gt;R1&lt;/tt&gt; 是栈上的数据而不是 &lt;tt class="docutils literal"&gt;ctx&lt;/tt&gt; 。&lt;/p&gt;
 &lt;p&gt;另一个错误是:&lt;/p&gt;
 &lt;pre class="literal-block"&gt;
  R1=ctx(id=0,off=0,imm=0) R2_w=ptr_sock(id=0,off=0,imm=0) R10=fp0
@@ -135,13 +180,8 @@ R1 type=ctx expected=fp
 5: (85) call bpf_sk_storage_delete#108
 R2 type=ptr_or_null_ expected=ptr_
 &lt;/pre&gt;
-&lt;p&gt;其中 &lt;tt class="docutils literal"&gt;R2 type=ptr_or_null_ expected=ptr_&lt;/tt&gt; 说的是，验证器期望 &lt;tt class="docutils literal"&gt;R2&lt;/tt&gt; 的类型是 &lt;tt class="docutils literal"&gt;ptr&lt;/tt&gt;
-而不是 &lt;tt class="docutils literal"&gt;prt_or_null&lt;/tt&gt; ，即，期望 &lt;tt class="docutils literal"&gt;R2&lt;/tt&gt; 是一个指针而不是一个指针或 &lt;tt class="docutils literal"&gt;NULL&lt;/tt&gt; 。
-这里可能会有点疑惑，前面的判断 &lt;tt class="docutils literal"&gt;if &lt;span class="pre"&gt;(ctx-&amp;gt;sk)&lt;/span&gt;&lt;/tt&gt; 已经确保了不会为 &lt;tt class="docutils literal"&gt;NULL&lt;/tt&gt; ，
-为啥这里还会认为它有可能为 &lt;tt class="docutils literal"&gt;NULL&lt;/tt&gt; ，这是因为前面的 if 判断的不是栈变量，
-存在 &lt;tt class="docutils literal"&gt;R1 type=ctx expected=fp&lt;/tt&gt; 的问题也就无法保证它一定不是 &lt;tt class="docutils literal"&gt;NULL&lt;/tt&gt; 了。&lt;/p&gt;
-&lt;p&gt;解决办法也很简单，就是用一个临时变量保存 &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;ctx-&amp;gt;sk&lt;/span&gt;&lt;/tt&gt; 的值，
-然后用这个栈上的临时变量做后续的操作:&lt;/p&gt;
+&lt;p&gt;其中 &lt;tt class="docutils literal"&gt;R2 type=ptr_or_null_ expected=ptr_&lt;/tt&gt; 说的是，验证器期望 &lt;tt class="docutils literal"&gt;R2&lt;/tt&gt; 的类型是 &lt;tt class="docutils literal"&gt;ptr&lt;/tt&gt; 而不是 &lt;tt class="docutils literal"&gt;prt_or_null&lt;/tt&gt; ，即，期望 &lt;tt class="docutils literal"&gt;R2&lt;/tt&gt; 是一个指针而不是一个指针或 &lt;tt class="docutils literal"&gt;NULL&lt;/tt&gt; 。 这里可能会有点疑惑，前面的判断 &lt;tt class="docutils literal"&gt;if &lt;span class="pre"&gt;(ctx-&amp;gt;sk)&lt;/span&gt;&lt;/tt&gt; 已经确保了不会为 &lt;tt class="docutils literal"&gt;NULL&lt;/tt&gt; ， 为啥这里还会认为它有可能为 &lt;tt class="docutils literal"&gt;NULL&lt;/tt&gt; ，这是因为前面的 if 判断的不是栈变量， 存在 &lt;tt class="docutils literal"&gt;R1 type=ctx expected=fp&lt;/tt&gt; 的问题也就无法保证它一定不是 &lt;tt class="docutils literal"&gt;NULL&lt;/tt&gt; 了。&lt;/p&gt;
+&lt;p&gt;解决办法也很简单，就是用一个临时变量保存 ctx-&amp;gt;sk 的值， 然后用这个栈上的临时变量做后续的操作:&lt;/p&gt;
 &lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt; SEC(&amp;quot;iter/bpf_sk_storage_map&amp;quot;)
  int iter__bpf_sk_storage_map(struct bpf_iter__bpf_sk_storage_map *ctx)
  {
@@ -161,8 +201,8 @@ R2 type=ptr_or_null_ expected=ptr_
 &lt;p&gt;这里记录一下类似前面 &lt;tt class="docutils literal"&gt;fp&lt;/tt&gt; 这样的常见类型关键字具体的含义：&lt;/p&gt;
 &lt;table border="1" class="docutils"&gt;
 &lt;colgroup&gt;
-&lt;col width="31%" /&gt;
-&lt;col width="69%" /&gt;
+&lt;col width="33%" /&gt;
+&lt;col width="67%" /&gt;
 &lt;/colgroup&gt;
 &lt;thead valign="bottom"&gt;
 &lt;tr&gt;&lt;th class="head"&gt;关键字&lt;/th&gt;
@@ -171,7 +211,7 @@ R2 type=ptr_or_null_ expected=ptr_
 &lt;/thead&gt;
 &lt;tbody valign="top"&gt;
 &lt;tr&gt;&lt;td&gt;&lt;tt class="docutils literal"&gt;scalar&lt;/tt&gt;&lt;/td&gt;
-&lt;td&gt;标量类型（scalar type），非指针类型&lt;/td&gt;
+&lt;td&gt;标量类型（scalar type），不是一个有效的指针类型&lt;/td&gt;
 &lt;/tr&gt;
 &lt;tr&gt;&lt;td&gt;&lt;tt class="docutils literal"&gt;ctx&lt;/tt&gt;&lt;/td&gt;
 &lt;td&gt;bpf_context 指针&lt;/td&gt;
@@ -180,10 +220,13 @@ R2 type=ptr_or_null_ expected=ptr_
 &lt;td&gt;bpf_map 类型的指针&lt;/td&gt;
 &lt;/tr&gt;
 &lt;tr&gt;&lt;td&gt;&lt;tt class="docutils literal"&gt;map_value&lt;/tt&gt;&lt;/td&gt;
-&lt;td&gt;map 中的元素 value 指针&lt;/td&gt;
+&lt;td&gt;指向 map 中的元素 value 的指针&lt;/td&gt;
+&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;&lt;tt class="docutils literal"&gt;map_value_or_null&lt;/tt&gt;&lt;/td&gt;
+&lt;td&gt;指向 map 中的元素 value 的指针或 NULL&lt;/td&gt;
 &lt;/tr&gt;
 &lt;tr&gt;&lt;td&gt;&lt;tt class="docutils literal"&gt;map_key&lt;/tt&gt;&lt;/td&gt;
-&lt;td&gt;map 中的元素 key 指针&lt;/td&gt;
+&lt;td&gt;指向 map 中的元素 key 的指针&lt;/td&gt;
 &lt;/tr&gt;
 &lt;tr&gt;&lt;td&gt;&lt;tt class="docutils literal"&gt;fp&lt;/tt&gt;&lt;/td&gt;
 &lt;td&gt;栈上的指针（frame pointer）&lt;/td&gt;
@@ -200,11 +243,20 @@ R2 type=ptr_or_null_ expected=ptr_
 &lt;tr&gt;&lt;td&gt;&lt;tt class="docutils literal"&gt;sock&lt;/tt&gt;&lt;/td&gt;
 &lt;td&gt;bpf_sock 类型的指针&lt;/td&gt;
 &lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;&lt;tt class="docutils literal"&gt;sock_or_null&lt;/tt&gt;&lt;/td&gt;
+&lt;td&gt;bpf_sock 类型的指针或 NULL&lt;/td&gt;
+&lt;/tr&gt;
 &lt;tr&gt;&lt;td&gt;&lt;tt class="docutils literal"&gt;sock_common&lt;/tt&gt;&lt;/td&gt;
 &lt;td&gt;sock_common 类型指针&lt;/td&gt;
 &lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;&lt;tt class="docutils literal"&gt;sock_common_or_null&lt;/tt&gt;&lt;/td&gt;
+&lt;td&gt;sock_common 类型指针或 NULL&lt;/td&gt;
+&lt;/tr&gt;
 &lt;tr&gt;&lt;td&gt;&lt;tt class="docutils literal"&gt;tcp_sock&lt;/tt&gt;&lt;/td&gt;
 &lt;td&gt;tcp_sock 类型指针&lt;/td&gt;
+&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;&lt;tt class="docutils literal"&gt;tcp_sock_or_null&lt;/tt&gt;&lt;/td&gt;
+&lt;td&gt;tcp_sock 类型指针或 NULL&lt;/td&gt;
 &lt;/tr&gt;
 &lt;tr&gt;&lt;td&gt;&lt;tt class="docutils literal"&gt;tp_buffer&lt;/tt&gt;&lt;/td&gt;
 &lt;td&gt;可写的 raw tracepoint buffer 指针&lt;/td&gt;
@@ -224,6 +276,9 @@ R2 type=ptr_or_null_ expected=ptr_
 &lt;tr&gt;&lt;td&gt;&lt;tt class="docutils literal"&gt;mem&lt;/tt&gt;&lt;/td&gt;
 &lt;td&gt;指向一块有效内存区域的指针&lt;/td&gt;
 &lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;&lt;tt class="docutils literal"&gt;mem_or_null&lt;/tt&gt;&lt;/td&gt;
+&lt;td&gt;指向一块有效内存区域的指针或 NULL&lt;/td&gt;
+&lt;/tr&gt;
 &lt;tr&gt;&lt;td&gt;&lt;tt class="docutils literal"&gt;buf&lt;/tt&gt;&lt;/td&gt;
 &lt;td&gt;指向一个读/写 buffer 的指针&lt;/td&gt;
 &lt;/tr&gt;
@@ -231,18 +286,35 @@ R2 type=ptr_or_null_ expected=ptr_
 &lt;td&gt;BPF 程序函数指针&lt;/td&gt;
 &lt;/tr&gt;
 &lt;tr&gt;&lt;td&gt;&lt;tt class="docutils literal"&gt;inv&lt;/tt&gt;&lt;/td&gt;
-&lt;td&gt;无效类型（invalid type）&lt;/td&gt;
+&lt;td&gt;无效类型（invalid type），不是一个有效的指针类型&lt;/td&gt;
 &lt;/tr&gt;
-&lt;tr&gt;&lt;td&gt;&lt;tt class="docutils literal"&gt;?&lt;/tt&gt;&lt;/td&gt;
-&lt;td&gt;&amp;nbsp;&lt;/td&gt;
+&lt;tr&gt;&lt;td&gt;&lt;tt class="docutils literal"&gt;flow_keys&lt;/tt&gt;&lt;/td&gt;
+&lt;td&gt;bpf_flow_keys 类型的指针&lt;/td&gt;
+&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;&lt;tt class="docutils literal"&gt;percpu_ptr_&lt;/tt&gt;&lt;/td&gt;
+&lt;td&gt;指向一个 percpu 内核变量的指针&lt;/td&gt;
+&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;&lt;tt class="docutils literal"&gt;rdonly_buf&lt;/tt&gt;&lt;/td&gt;
+&lt;td&gt;指向一个只读 buffer 的指针&lt;/td&gt;
+&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;&lt;tt class="docutils literal"&gt;rdonly_buf_or_null&lt;/tt&gt;&lt;/td&gt;
+&lt;td&gt;指向一个只读 buffer 的指针或 NULL&lt;/td&gt;
+&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;&lt;tt class="docutils literal"&gt;rdwr_buf&lt;/tt&gt;&lt;/td&gt;
+&lt;td&gt;指向一个读/写 buffer 的指针&lt;/td&gt;
+&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;&lt;tt class="docutils literal"&gt;rdwr_buf_or_null&lt;/tt&gt;&lt;/td&gt;
+&lt;td&gt;指向一个读/写 buffer 的指针或 NULL&lt;/td&gt;
 &lt;/tr&gt;
 &lt;/tbody&gt;
 &lt;/table&gt;
 &lt;/div&gt;
 &lt;div class="section" id="id4"&gt;
 &lt;h2 id="hidid4"&gt;参考资料&lt;a class="headerlink" href="#hidid4" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
-&lt;p&gt;&lt;a class="reference external" href="https://elixir.bootlin.com/linux/v5.19.14/source/kernel/bpf/verifier.c#L533"&gt;verifier.c - kernel/bpf/verifier.c - Linux source code (v5.19.14) - Bootlin&lt;/a&gt;
-&lt;a class="reference external" href="https://lwn.net/Articles/895885/"&gt;BPF: Dynamic pointers [LWN.net]&lt;/a&gt;&lt;/p&gt;
+&lt;ul class="simple"&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://elixir.bootlin.com/linux/v5.19.14/source/kernel/bpf/verifier.c#L533"&gt;verifier.c - kernel/bpf/verifier.c - Linux source code (v5.19.14) - Bootlin&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://elixir.bootlin.com/linux/v5.13/source/kernel/bpf/verifier.c#L548"&gt;verifier.c - kernel/bpf/verifier.c - Linux source code (v5.13) - Bootlin&lt;/a&gt;&lt;/li&gt;
+&lt;/ul&gt;
 &lt;/div&gt;
 </summary><category term="libbpf"></category></entry><entry><title>ebpf 程序中常用的 load_byte/load_half/load_word 功能介绍</title><link href="https://mozillazg.com/2022/07/ebpf-libbpf-what-is-load_byte-load_half-load_word.html" rel="alternate"></link><updated>2022-07-31T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2022-07-31:2022/07/ebpf-libbpf-what-is-load_byte-load_half-load_word.html</id><summary type="html">&lt;div class="section" id="id1"&gt;
 &lt;h2 id="hidid1"&gt;前言&lt;a class="headerlink" href="#hidid1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
@@ -291,7 +363,7 @@ R2 type=ptr_or_null_ expected=ptr_
 &lt;div class="section" id="id7"&gt;
 &lt;h3 id="hidid7"&gt;使用场景&lt;a class="headerlink" href="#hidid7" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
 &lt;p&gt;当想要从 &lt;tt class="docutils literal"&gt;struct __sk_buff *skb&lt;/tt&gt; 中读取数据类型大小为 16-bits（2个字节）的字段的值的时候，
-可以使用 &lt;tt class="docutils literal"&gt;load_byte&lt;/tt&gt; 直接从指针中读取对应的数据。&lt;/p&gt;
+可以使用 &lt;tt class="docutils literal"&gt;load_half&lt;/tt&gt; 直接从指针中读取对应的数据。&lt;/p&gt;
 &lt;p&gt;例子:&lt;/p&gt;
 &lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="n"&gt;__u16&lt;/span&gt; &lt;span class="n"&gt;h_proto&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;load_half&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;skb&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;offsetof&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="k"&gt;struct&lt;/span&gt; &lt;span class="n"&gt;ethhdr&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;h_proto&lt;/span&gt;&lt;span class="p"&gt;));&lt;/span&gt;
 &lt;/pre&gt;&lt;/div&gt;
@@ -314,7 +386,7 @@ R2 type=ptr_or_null_ expected=ptr_
 &lt;div class="section" id="id10"&gt;
 &lt;h3 id="hidid10"&gt;使用场景&lt;a class="headerlink" href="#hidid10" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
 &lt;p&gt;当想要从 &lt;tt class="docutils literal"&gt;struct __sk_buff *skb&lt;/tt&gt; 中读取数据类型大小为 32-bits（4个字节）的字段的值的时候，
-可以使用 &lt;tt class="docutils literal"&gt;load_byte&lt;/tt&gt; 直接从指针中读取对应的数据。&lt;/p&gt;
+可以使用 &lt;tt class="docutils literal"&gt;load_word&lt;/tt&gt; 直接从指针中读取对应的数据。&lt;/p&gt;
 &lt;p&gt;例子:&lt;/p&gt;
 &lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="n"&gt;__u32&lt;/span&gt; &lt;span class="n"&gt;saddr&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;load_word&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;skb&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;ETH_HLEN&lt;/span&gt; &lt;span class="o"&gt;+&lt;/span&gt; &lt;span class="n"&gt;offsetof&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="k"&gt;struct&lt;/span&gt; &lt;span class="n"&gt;iphdr&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;saddr&lt;/span&gt;&lt;span class="p"&gt;));&lt;/span&gt;
 &lt;/pre&gt;&lt;/div&gt;
@@ -352,396 +424,4 @@ R2 type=ptr_or_null_ expected=ptr_
 &lt;li&gt;&lt;a class="reference external" href="https://man7.org/linux/man-pages/man7/bpf-helpers.7.html"&gt;bpf-helpers(7) - Linux manual page&lt;/a&gt;&lt;/li&gt;
 &lt;/ul&gt;
 &lt;/div&gt;
-</summary><category term="ebpf"></category><category term="libbpf"></category></entry><entry><title>docker-credential-acr-helper: 一个辅助 docker 获取阿里云 ACR 镜像仓库访问凭证的项目</title><link href="https://mozillazg.com/2022/06/use-docker-credential-acr-helper-help-auth-alibaba-cloud-container-registry-with-temporary-password-without-docker-login.html" rel="alternate"></link><updated>2022-06-19T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2022-06-19:2022/06/use-docker-credential-acr-helper-help-auth-alibaba-cloud-container-registry-with-temporary-password-without-docker-login.html</id><summary type="html">&lt;div class="section" id="id1"&gt;
-&lt;h2 id="hidid1"&gt;前言&lt;a class="headerlink" href="#hidid1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
-&lt;p&gt;通常情况下，如果我们想对阿里云容器镜像服务 ACR 上的私有镜像进行 &lt;tt class="docutils literal"&gt;docker pull&lt;/tt&gt;
-或 &lt;tt class="docutils literal"&gt;docker push&lt;/tt&gt; 的话， 需要提前通过 &lt;tt class="docutils literal"&gt;docker login&lt;/tt&gt; 命令配置相应的访问凭证。&lt;/p&gt;
-&lt;p&gt;通过 &lt;tt class="docutils literal"&gt;docker login&lt;/tt&gt; 命令配置用户名和密码的方法存在如下几个问题：&lt;/p&gt;
-&lt;ul class="simple"&gt;
-&lt;li&gt;需要用户多记录和维护一组 docker 专用的密码，密码的管理是一个比较麻烦的事情。&lt;/li&gt;
-&lt;li&gt;ACR 只支持配置一个无过期时间的固定密码，密码的更换和吊销的成本很高，用户轻易不敢操作。&lt;/li&gt;
-&lt;li&gt;无法精细化配置固定密码的权限，无法实现类似只允许进行 pull 操作不允许进行 push 操作的权限控制需求。&lt;/li&gt;
-&lt;li&gt;虽然可以通过 Open API 获取不限量的临时密码，但是 &lt;tt class="docutils literal"&gt;docker login&lt;/tt&gt; 不支持自动刷新临时密码。
-如果使用临时密码进行 &lt;tt class="docutils literal"&gt;docker login&lt;/tt&gt; 操作的话，
-需要用户频繁进行获取临时密码然后再通过 &lt;tt class="docutils literal"&gt;docker login&lt;/tt&gt; 更新密码的操作，同样是一个很麻烦的事情。&lt;/li&gt;
-&lt;/ul&gt;
-&lt;p&gt;幸好，docker 提供提供了一个叫 &lt;a class="reference external" href="https://docs.docker.com/engine/reference/commandline/login/#credential-helpers"&gt;Credential helper&lt;/a&gt; 的机制，
-通过 Credential helper 可以以插件化的方式
-扩展 docker 获取访问凭证的方式，不再局限于只能通过 &lt;tt class="docutils literal"&gt;docker login&lt;/tt&gt; 的方式配置访问凭证。&lt;/p&gt;
-&lt;p&gt;本文将介绍的 &lt;a class="reference external" href="https://github.com/mozillazg/docker-credential-acr-helper"&gt;docker-credential-acr-helper&lt;/a&gt; 就是一个专为 ACR 开发的辅助 docker 获取 ACR 镜像仓库访问凭证的项目。&lt;/p&gt;
-&lt;/div&gt;
-&lt;div class="section" id="id2"&gt;
-&lt;h2 id="hidid2"&gt;介绍&lt;a class="headerlink" href="#hidid2" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
-&lt;p&gt;如前面所说， &lt;a class="reference external" href="https://github.com/mozillazg/docker-credential-acr-helper"&gt;docker-credential-acr-helper&lt;/a&gt; 是一个专为 ACR 开发的辅助 docker 获取 ACR 镜像仓库访问凭证的项目。&lt;/p&gt;
-&lt;p&gt;docker-credential-acr-helper 解决了前面所说的那几个问题：&lt;/p&gt;
-&lt;ul class="simple"&gt;
-&lt;li&gt;基于阿里云已有的认证体系，可以直接使用用户熟悉的阿里云访问凭证，无需额外记录和维护 docker 专用的用户名和密码。&lt;/li&gt;
-&lt;li&gt;自动获取用于进行 docker 操作的临时密码，不依赖固定密码, 也无需手动频繁刷新临时密码。&lt;/li&gt;
-&lt;li&gt;用户可以通过配置阿里云 RAM 访问控制策略的方式，实现临时密码精细化权限控制的需求，详见 &lt;a class="reference external" href="https://help.aliyun.com/document_detail/72334.html#section-xzq-5zj-lr6"&gt;ACR 文档&lt;/a&gt; 。&lt;/li&gt;
-&lt;/ul&gt;
-&lt;/div&gt;
-&lt;div class="section" id="id3"&gt;
-&lt;h2 id="hidid3"&gt;使用示例&lt;a class="headerlink" href="#hidid3" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
-&lt;p&gt;可以通过如下步骤体验这个项目提供的功能：&lt;/p&gt;
-&lt;ol class="arabic"&gt;
-&lt;li&gt;&lt;p class="first"&gt;前往 &lt;a class="reference external" href="https://github.com/mozillazg/docker-credential-acr-helper/releases"&gt;github releases&lt;/a&gt; 页面下载最新版本的编译好的二进制文件压缩包&lt;/p&gt;
-&lt;/li&gt;
-&lt;li&gt;&lt;p class="first"&gt;使用页面上的那个 checksums.txt 文件验证压缩包，解压压缩包得到对应的二进制文件 &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;docker-credential-acr-helper&lt;/span&gt;&lt;/tt&gt;&lt;/p&gt;
-&lt;/li&gt;
-&lt;li&gt;&lt;p class="first"&gt;&lt;tt class="docutils literal"&gt;chmod +x &lt;span class="pre"&gt;docker-credential-acr-helper&lt;/span&gt;&lt;/tt&gt;&lt;/p&gt;
-&lt;/li&gt;
-&lt;li&gt;&lt;p class="first"&gt;&lt;tt class="docutils literal"&gt;cp &lt;span class="pre"&gt;docker-credential-acr-helper&lt;/span&gt; /usr/local/bin&lt;/tt&gt;&lt;/p&gt;
-&lt;/li&gt;
-&lt;li&gt;&lt;p class="first"&gt;配置阿里云访问凭证，比如使用配置文件指定访问凭证:&lt;/p&gt;
-&lt;pre class="literal-block"&gt;
-$ cat ~/.alibabacloud/credentials
-[default]                          # 默认客户端
-type = access_key                  # 认证方式为 access_key
-access_key_id = foo                # Key
-access_key_secret = bar            # Secret
-&lt;/pre&gt;
-&lt;/li&gt;
-&lt;li&gt;&lt;p class="first"&gt;通过 &lt;tt class="docutils literal"&gt;docker logout &amp;lt;acr_registry_domain&amp;gt;&lt;/tt&gt; 退出要测试的 ACR registry 域名，清理对应已保存的 docker 凭证。&lt;/p&gt;
-&lt;/li&gt;
-&lt;li&gt;&lt;p class="first"&gt;通过 &lt;tt class="docutils literal"&gt;docker pull &amp;lt;acr_image&amp;gt;&lt;/tt&gt; 确认当前已无权限访问对应的 ACR 私有镜像。&lt;/p&gt;
-&lt;/li&gt;
-&lt;li&gt;&lt;p class="first"&gt;修改 docker 配置文件 &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;~/.docker/config.json&lt;/span&gt;&lt;/tt&gt; 中 &lt;tt class="docutils literal"&gt;credHelpers&lt;/tt&gt; 配置项，
-指定访问某个 ACR registry 域名时，使用 docker-credential-acr-helper 获取访问凭证
-（关于这个配置的更多说明详见 &lt;a class="reference external" href="https://docs.docker.com/engine/reference/commandline/login/#configure-credential-helpers"&gt;Docker 官方文档&lt;/a&gt; 或者本项目 README）。
-配置示例:&lt;/p&gt;
-&lt;pre class="literal-block"&gt;
-{
-  &amp;quot;credHelpers&amp;quot; : {
-    &amp;quot;registry.cn-beijing.aliyuncs.com&amp;quot; : &amp;quot;acr-helper&amp;quot;
-  }
-}
-&lt;/pre&gt;
-&lt;/li&gt;
-&lt;li&gt;&lt;p class="first"&gt;通过 &lt;tt class="docutils literal"&gt;docker pull &amp;lt;acr_image&amp;gt;&lt;/tt&gt; 验证配置完成后又可以访问对应的 ACR 私有镜像了。&lt;/p&gt;
-&lt;/li&gt;
-&lt;/ol&gt;
-&lt;/div&gt;
-&lt;div class="section" id="golang-package"&gt;
-&lt;h2 id="hidgolang-package"&gt;作为 golang package 被集成到第三方项目中&lt;a class="headerlink" href="#hidgolang-package" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
-&lt;p&gt;同时，也可以把这个项目当成一个 golang package 来使用，将这个项目的能力集成到第三方项目中。&lt;/p&gt;
-&lt;p&gt;比如，在使用 &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;github.com/google/go-containerregistry/pkg/crane&lt;/span&gt;&lt;/tt&gt; 操作
-docker registry 时，可以使用下面的方法在项目中集成 docker-credential-acr-helper
-提供的辅助认证能力:&lt;/p&gt;
-&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="kn"&gt;import&lt;/span&gt; &lt;span class="p"&gt;(&lt;/span&gt;
-    &lt;span class="s"&gt;&amp;quot;github.com/google/go-containerregistry/pkg/authn&amp;quot;&lt;/span&gt;
-    &lt;span class="s"&gt;&amp;quot;github.com/google/go-containerregistry/pkg/crane&amp;quot;&lt;/span&gt;
-    &lt;span class="s"&gt;&amp;quot;github.com/mozillazg/docker-credential-acr-helper/pkg/credhelper&amp;quot;&lt;/span&gt;
-&lt;span class="p"&gt;)&lt;/span&gt;
-
-&lt;span class="kd"&gt;func&lt;/span&gt; &lt;span class="nx"&gt;main&lt;/span&gt;&lt;span class="p"&gt;()&lt;/span&gt; &lt;span class="p"&gt;{&lt;/span&gt;
-    &lt;span class="nx"&gt;kc&lt;/span&gt; &lt;span class="o"&gt;:=&lt;/span&gt; &lt;span class="nx"&gt;authn&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;NewMultiKeychain&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;
-            &lt;span class="nx"&gt;authn&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;DefaultKeychain&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;
-            &lt;span class="nx"&gt;authn&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;NewKeychainFromHelper&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="nx"&gt;credhelper&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;NewACRHelper&lt;/span&gt;&lt;span class="p"&gt;()),&lt;/span&gt;  &lt;span class="c1"&gt;// &amp;lt;- here&lt;/span&gt;
-    &lt;span class="p"&gt;)&lt;/span&gt;
-    &lt;span class="nx"&gt;ref&lt;/span&gt; &lt;span class="o"&gt;:=&lt;/span&gt; &lt;span class="nx"&gt;os&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Getenv&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="s"&gt;&amp;quot;REPO_URL&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
-    &lt;span class="nx"&gt;digest&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="nx"&gt;err&lt;/span&gt; &lt;span class="o"&gt;:=&lt;/span&gt; &lt;span class="nx"&gt;crane&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Digest&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="nx"&gt;ref&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="nx"&gt;crane&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;WithAuthFromKeychain&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="nx"&gt;kc&lt;/span&gt;&lt;span class="p"&gt;))&lt;/span&gt;
-    &lt;span class="k"&gt;if&lt;/span&gt; &lt;span class="nx"&gt;err&lt;/span&gt; &lt;span class="o"&gt;!=&lt;/span&gt; &lt;span class="kc"&gt;nil&lt;/span&gt; &lt;span class="p"&gt;{&lt;/span&gt;
-            &lt;span class="nb"&gt;panic&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="nx"&gt;err&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
-    &lt;span class="p"&gt;}&lt;/span&gt;
-    &lt;span class="nx"&gt;fmt&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Printf&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="s"&gt;&amp;quot;got digest for %q:\n%s\n&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="nx"&gt;ref&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="nx"&gt;digest&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
-&lt;span class="p"&gt;}&lt;/span&gt;
-&lt;/pre&gt;&lt;/div&gt;
-&lt;p&gt;完整示例代码详见： &lt;a class="reference external" href="https://github.com/mozillazg/docker-credential-acr-helper/blob/master/examples/go-containerregistry-auth/main.go"&gt;examples/go-containerregistry-auth&lt;/a&gt;&lt;/p&gt;
-&lt;/div&gt;
-&lt;div class="section" id="faq"&gt;
-&lt;h2 id="hidfaq"&gt;FAQ&lt;a class="headerlink" href="#hidfaq" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
-&lt;div class="section" id="acr"&gt;
-&lt;h3 id="hidacr"&gt;是否支持 ACR 企业版？&lt;a class="headerlink" href="#hidacr" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
-&lt;p&gt;支持。&lt;/p&gt;
-&lt;/div&gt;
-&lt;div class="section" id="id4"&gt;
-&lt;h3 id="hidid4"&gt;如何实现不同 ACR 域名使用不同的阿里云访问凭证？&lt;a class="headerlink" href="#hidid4" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
-&lt;p&gt;可以通过为不同的访问凭证编写独立的 shell 脚本的方式实现。&lt;/p&gt;
-&lt;p&gt;比如:&lt;/p&gt;
-&lt;pre class="literal-block"&gt;
-$ cat /usr/local/bin/docker-credential-acr-helper-user-1
-#!/usr/bin/env bash
-
-# export ALIBABA_CLOUD_ACCESS_KEY_ID=foo
-# export ALIBABA_CLOUD_ACCESS_KEY_SECRET=bar
-export ALIBABA_CLOUD_CREDENTIALS_FILE=/path/to/user-1-credentials
-
-exec /usr/local/bin/docker-credential-acr-helper &amp;quot;$&amp;#64;&amp;quot;
-
-$ chmod +x /usr/local/bin/docker-credential-acr-helper-user-1
-&lt;/pre&gt;
-&lt;p&gt;然后配置 &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;~/.docker/config.json&lt;/span&gt;&lt;/tt&gt; 实现不同的 ACR 域名使用配置了不同访问凭证的 shell 脚本即可:&lt;/p&gt;
-&lt;pre class="literal-block"&gt;
-{
-  &amp;quot;credHelpers&amp;quot; : {
-    &amp;quot;registry.cn-beijing.aliyuncs.com&amp;quot; : &amp;quot;acr-helper&amp;quot;,
-    &amp;quot;registry.cn-hangzhou.aliyuncs.com&amp;quot; : &amp;quot;acr-helper-user-1&amp;quot;,
-    &amp;quot;registry.cn-shenzhen.aliyuncs.com&amp;quot; : &amp;quot;acr-helper-user-2&amp;quot;
-  }
-}
-&lt;/pre&gt;
-&lt;/div&gt;
-&lt;/div&gt;
-&lt;div class="section" id="id5"&gt;
-&lt;h2 id="hidid5"&gt;参考资料&lt;a class="headerlink" href="#hidid5" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
-&lt;ul class="simple"&gt;
-&lt;li&gt;&lt;a class="reference external" href="https://docs.docker.com/engine/reference/commandline/login/"&gt;docker login | Docker Documentation&lt;/a&gt;&lt;/li&gt;
-&lt;li&gt;&lt;a class="reference external" href="https://github.com/docker/docker-credential-helpers"&gt;docker/docker-credential-helpers: Programs to keep Docker login credentials safe by storing in platform keystores&lt;/a&gt;&lt;/li&gt;
-&lt;li&gt;&lt;a class="reference external" href="https://github.com/mozillazg/docker-credential-acr-helper"&gt;mozillazg/docker-credential-acr-helper: A credential helper for the Docker daemon that makes it easier to use Alibaba Cloud Container Registry(ACR).&lt;/a&gt;&lt;/li&gt;
-&lt;li&gt;&lt;a class="reference external" href="https://help.aliyun.com/document_detail/72334.html"&gt;GetAuthorizationToken - ACR Documentation&lt;/a&gt;&lt;/li&gt;
-&lt;/ul&gt;
-&lt;/div&gt;
-</summary><category term="ACR"></category></entry><entry><title>ebpf/libbpf 程序使用 btf raw tracepoint 的常见问题</title><link href="https://mozillazg.com/2022/06/ebpf-libbpf-btf-powered-enabled-raw-tracepoint-common-questions.html" rel="alternate"></link><updated>2022-06-14T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2022-06-14:2022/06/ebpf-libbpf-btf-powered-enabled-raw-tracepoint-common-questions.html</id><summary type="html">&lt;div class="section" id="id1"&gt;
-&lt;h2 id="hidid1"&gt;前言&lt;a class="headerlink" href="#hidid1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
-&lt;p&gt;本文记录一些编写 ebpf/libbpf 程序(比如编写类型为 &lt;tt class="docutils literal"&gt;BPF_TRACE_RAW_TP&lt;/tt&gt; 的 ebpf 程序) 时
-涉及到的 btf raw tracepoint 相关的常见问题。&lt;/p&gt;
-&lt;/div&gt;
-&lt;div class="section" id="btf-raw-tracepoint-raw-tracepoint"&gt;
-&lt;h2 id="hidbtf-raw-tracepoint-raw-tracepoint"&gt;btf raw tracepoint 跟常规 raw tracepoint 的区别&lt;a class="headerlink" href="#hidbtf-raw-tracepoint-raw-tracepoint" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
-&lt;p&gt;所谓的 btf raw tracepoint 指的是 &lt;a class="reference external" href="https://lore.kernel.org/netdev/20201203204634.1325171-1-andrii&amp;#64;kernel.org/t/"&gt;BTF-powered raw tracepoint (tp_btf) 或者说是 BTF-enabled raw tracepoint&lt;/a&gt; 。&lt;/p&gt;
-&lt;p&gt;btf raw tracepoint 跟常规 raw tracepoint 有一个 &lt;a class="reference external" href="https://nakryiko.com/posts/bpf-core-reference-guide/#btf-enabled-bpf-program-types-with-direct-memory-reads"&gt;最主要的区别&lt;/a&gt; 是：
-btf 版本可以直接在 ebpf 程序中访问内核内存，
-不需要像常规 raw tracepoint 一样需要借助类似 &lt;tt class="docutils literal"&gt;bpf_core_read&lt;/tt&gt; 或 &lt;tt class="docutils literal"&gt;bpf_probe_read_kernel&lt;/tt&gt; 这样 的辅助函数才能访问内核内存:&lt;/p&gt;
-&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="k"&gt;struct&lt;/span&gt; &lt;span class="n"&gt;task_struct&lt;/span&gt; &lt;span class="o"&gt;*&lt;/span&gt;&lt;span class="n"&gt;task&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="k"&gt;struct&lt;/span&gt; &lt;span class="n"&gt;task_struct&lt;/span&gt; &lt;span class="o"&gt;*&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt; &lt;span class="n"&gt;bpf_get_current_task&lt;/span&gt;&lt;span class="p"&gt;();&lt;/span&gt;
-&lt;span class="n"&gt;u32&lt;/span&gt; &lt;span class="n"&gt;ppid&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;BPF_CORE_READ&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;task&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;real_parent&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;tgid&lt;/span&gt;&lt;span class="p"&gt;);&lt;/span&gt;
-
-&lt;span class="c1"&gt;// btf enabled&lt;/span&gt;
-&lt;span class="k"&gt;struct&lt;/span&gt; &lt;span class="n"&gt;task_struct&lt;/span&gt; &lt;span class="o"&gt;*&lt;/span&gt;&lt;span class="n"&gt;task&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="k"&gt;struct&lt;/span&gt; &lt;span class="n"&gt;task_struct&lt;/span&gt; &lt;span class="o"&gt;*&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt; &lt;span class="n"&gt;bpf_get_current_task_btf&lt;/span&gt;&lt;span class="p"&gt;();&lt;/span&gt;
-&lt;span class="n"&gt;u32&lt;/span&gt; &lt;span class="n"&gt;ppid&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;task&lt;/span&gt;&lt;span class="o"&gt;-&amp;gt;&lt;/span&gt;&lt;span class="n"&gt;real_parent&lt;/span&gt;&lt;span class="o"&gt;-&amp;gt;&lt;/span&gt;&lt;span class="n"&gt;tgid&lt;/span&gt;&lt;span class="p"&gt;;&lt;/span&gt;
-&lt;/pre&gt;&lt;/div&gt;
-&lt;/div&gt;
-&lt;div class="section" id="btf-raw-tracepoint"&gt;
-&lt;h2 id="hidbtf-raw-tracepoint"&gt;btf raw tracepoint 可以监控哪些事件&lt;a class="headerlink" href="#hidbtf-raw-tracepoint" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
-&lt;p&gt;btf raw tracepoint 跟 &lt;a class="reference external" href="https://mozillazg.com/2022/05/ebpf-libbpf-raw-tracepoint-common-questions.html"&gt;raw tracepoint&lt;/a&gt; 所能监控的事件是一样的，这里不再赘述。&lt;/p&gt;
-&lt;/div&gt;
-&lt;div class="section" id="sec"&gt;
-&lt;h2 id="hidsec"&gt;SEC 内容的格式&lt;a class="headerlink" href="#hidsec" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
-&lt;p&gt;btf raw tracepoint 事件对应的 SEC 格式为:&lt;/p&gt;
-&lt;pre class="literal-block"&gt;
-SEC(&amp;quot;tp_btf/&amp;lt;name&amp;gt;&amp;quot;)
-
-// 比如:
-// SEC(&amp;quot;tp_btf/sched_switch&amp;quot;)
-// SEC(&amp;quot;tp_btf/sys_enter&amp;quot;)
-// SEC(&amp;quot;tp_btf/sys_exit&amp;quot;)
-&lt;/pre&gt;
-&lt;p&gt;&lt;tt class="docutils literal"&gt;&amp;lt;name&amp;gt;&lt;/tt&gt; 的值跟 &lt;a class="reference external" href="https://mozillazg.com/2022/05/ebpf-libbpf-raw-tracepoint-common-questions.html"&gt;raw tracepoint&lt;/a&gt; SEC 中使用的 &lt;tt class="docutils literal"&gt;&amp;lt;name&amp;gt;&lt;/tt&gt; 是一样的。&lt;/p&gt;
-&lt;/div&gt;
-&lt;div class="section" id="id2"&gt;
-&lt;h2 id="hidid2"&gt;如何确定 btf raw tracepoint 事件处理函数的参数类型，获取对应的内核调用参数&lt;a class="headerlink" href="#hidid2" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
-&lt;p&gt;所有事件都是在 vmlinux.h 中存在一个名为 &lt;tt class="docutils literal"&gt;btf_trace_&amp;lt;name&amp;gt;&lt;/tt&gt; 的定义。&lt;/p&gt;
-&lt;p&gt;比如 &lt;tt class="docutils literal"&gt;sys_enter&lt;/tt&gt; 这个事件对应的定义如下：&lt;/p&gt;
-&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="k"&gt;typedef&lt;/span&gt; &lt;span class="nf"&gt;void&lt;/span&gt; &lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="o"&gt;*&lt;/span&gt;&lt;span class="n"&gt;btf_trace_sys_enter&lt;/span&gt;&lt;span class="p"&gt;)(&lt;/span&gt;&lt;span class="kt"&gt;void&lt;/span&gt; &lt;span class="o"&gt;*&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="k"&gt;struct&lt;/span&gt; &lt;span class="n"&gt;pt_regs&lt;/span&gt; &lt;span class="o"&gt;*&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="kt"&gt;long&lt;/span&gt; &lt;span class="kt"&gt;int&lt;/span&gt;&lt;span class="p"&gt;);&lt;/span&gt;
-&lt;/pre&gt;&lt;/div&gt;
-&lt;p&gt;对应的 ebpf 函数可以定义成下面这样：&lt;/p&gt;
-&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="n"&gt;SEC&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="s"&gt;&amp;quot;tp_btf/sys_enter&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
-&lt;span class="kt"&gt;int&lt;/span&gt; &lt;span class="n"&gt;btf_raw_tracepoint__sys_enter&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;u64&lt;/span&gt; &lt;span class="o"&gt;*&lt;/span&gt;&lt;span class="n"&gt;ctx&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
-&lt;span class="p"&gt;{&lt;/span&gt;
-  &lt;span class="c1"&gt;// ...&lt;/span&gt;
-&lt;span class="p"&gt;}&lt;/span&gt;
-&lt;/pre&gt;&lt;/div&gt;
-&lt;p&gt;其中 &lt;tt class="docutils literal"&gt;ctx[0]&lt;/tt&gt; 对应上面 &lt;tt class="docutils literal"&gt;btf_trace_sys_enter&lt;/tt&gt; 中 &lt;tt class="docutils literal"&gt;void *&lt;/tt&gt; 后面的第一个参数 &lt;tt class="docutils literal"&gt;struct pt_regs *&lt;/tt&gt;,
-&lt;tt class="docutils literal"&gt;ctx[1]&lt;/tt&gt; 是第二个参数 &lt;tt class="docutils literal"&gt;long int&lt;/tt&gt; 。这两个参数的含义跟前面 &lt;a class="reference external" href="https://mozillazg.com/2022/05/ebpf-libbpf-raw-tracepoint-common-questions.html"&gt;raw tracepoint&lt;/a&gt; 中所说的 &lt;tt class="docutils literal"&gt;TP_PROTO(struct pt_regs *regs, long id)&lt;/tt&gt; 中的含义是一样的。&lt;/p&gt;
-&lt;p&gt;对应的，使用 btf raw tracepoint 获取 &lt;tt class="docutils literal"&gt;fchmodat&lt;/tt&gt; 系统调用事件的示例程序如下：&lt;/p&gt;
-&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="n"&gt;SEC&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="s"&gt;&amp;quot;tp_btf/sys_enter&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
-&lt;span class="kt"&gt;int&lt;/span&gt; &lt;span class="n"&gt;btf_raw_tracepoint__sys_enter&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;u64&lt;/span&gt; &lt;span class="o"&gt;*&lt;/span&gt;&lt;span class="n"&gt;ctx&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
-&lt;span class="p"&gt;{&lt;/span&gt;
-    &lt;span class="kt"&gt;long&lt;/span&gt; &lt;span class="kt"&gt;int&lt;/span&gt; &lt;span class="n"&gt;syscall_id&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="kt"&gt;long&lt;/span&gt; &lt;span class="kt"&gt;int&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;&lt;span class="n"&gt;ctx&lt;/span&gt;&lt;span class="p"&gt;[&lt;/span&gt;&lt;span class="mi"&gt;1&lt;/span&gt;&lt;span class="p"&gt;];&lt;/span&gt;
-    &lt;span class="k"&gt;if&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;syscall_id&lt;/span&gt; &lt;span class="o"&gt;!=&lt;/span&gt; &lt;span class="mi"&gt;268&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;    &lt;span class="c1"&gt;// fchmodat&lt;/span&gt;
-        &lt;span class="k"&gt;return&lt;/span&gt; &lt;span class="mi"&gt;0&lt;/span&gt;&lt;span class="p"&gt;;&lt;/span&gt;
-
-    &lt;span class="k"&gt;struct&lt;/span&gt; &lt;span class="n"&gt;pt_regs&lt;/span&gt; &lt;span class="o"&gt;*&lt;/span&gt;&lt;span class="n"&gt;regs&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="k"&gt;struct&lt;/span&gt; &lt;span class="n"&gt;pt_regs&lt;/span&gt; &lt;span class="o"&gt;*&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;&lt;span class="n"&gt;ctx&lt;/span&gt;&lt;span class="p"&gt;[&lt;/span&gt;&lt;span class="mi"&gt;0&lt;/span&gt;&lt;span class="p"&gt;];&lt;/span&gt;
-    &lt;span class="c1"&gt;// 后面的逻辑跟前面 raw tracepoint 示例程序中是一样的&lt;/span&gt;
-    &lt;span class="c1"&gt;// ...&lt;/span&gt;
-&lt;span class="p"&gt;}&lt;/span&gt;
-&lt;/pre&gt;&lt;/div&gt;
-&lt;p&gt;BTW, 在 btf raw tracepoint 程序中可以通过 &lt;tt class="docutils literal"&gt;bpf_get_current_task_btf()&lt;/tt&gt; 获取 btf 版本的 task 信息。&lt;/p&gt;
-&lt;p&gt;完整的示例程序如下：&lt;/p&gt;
-&lt;ul class="simple"&gt;
-&lt;li&gt;&lt;a class="reference external" href="https://github.com/mozillazg/hello-libbpfgo/tree/master/16-btf-raw-tracepoint-args"&gt;https://github.com/mozillazg/hello-libbpfgo/tree/master/16-btf-raw-tracepoint-args&lt;/a&gt;&lt;/li&gt;
-&lt;li&gt;&lt;a class="reference external" href="https://github.com/mozillazg/hello-libbpfgo/tree/master/17-btf-raw-tracepoint-args-sched_switch"&gt;https://github.com/mozillazg/hello-libbpfgo/tree/master/17-btf-raw-tracepoint-args-sched_switch&lt;/a&gt;&lt;/li&gt;
-&lt;/ul&gt;
-&lt;/div&gt;
-&lt;div class="section" id="id3"&gt;
-&lt;h2 id="hidid3"&gt;参考资料&lt;a class="headerlink" href="#hidid3" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
-&lt;ul class="simple"&gt;
-&lt;li&gt;&lt;a class="reference external" href="https://lore.kernel.org/netdev/20201203204634.1325171-1-andrii&amp;#64;kernel.org/t/"&gt;[PATCH v6 bpf-next 00/14] Support BTF-powered BPF tracing programs for kernel modules&lt;/a&gt;&lt;/li&gt;
-&lt;li&gt;&lt;a class="reference external" href="https://nakryiko.com/posts/bpf-core-reference-guide/#btf-enabled-bpf-program-types-with-direct-memory-reads"&gt;BPF CO-RE reference guide&lt;/a&gt;&lt;/li&gt;
-&lt;li&gt;&lt;a class="reference external" href="https://github.com/libbpf/libbpf/blob/12e932ac0e18546dd7247e66ea1b4aa236d2ef38/src/libbpf.c#L9002-L9081"&gt;libbpf/libbpf.c at 12e932ac0e18546dd7247e66ea1b4aa236d2ef38 · libbpf/libbpf&lt;/a&gt;&lt;/li&gt;
-&lt;/ul&gt;
-&lt;!-- * https://github.com/aya-rs/aya/pull/85 --&gt;
-&lt;/div&gt;
-</summary><category term="btf"></category><category term="raw-tracepoint"></category><category term="libbpf"></category><category term="libbpfgo"></category></entry><entry><title>ebpf/libbpf 程序使用 raw tracepoint 的常见问题</title><link href="https://mozillazg.com/2022/05/ebpf-libbpf-raw-tracepoint-common-questions.html" rel="alternate"></link><updated>2022-05-29T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2022-05-29:2022/05/ebpf-libbpf-raw-tracepoint-common-questions.html</id><summary type="html">&lt;div class="section" id="id1"&gt;
-&lt;h2 id="hidid1"&gt;前言&lt;a class="headerlink" href="#hidid1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
-&lt;p&gt;记录一些编写 ebpf/libbpf 程序（比如编写类型为 &lt;tt class="docutils literal"&gt;BPF_PROG_TYPE_RAW_TRACEPOINT&lt;/tt&gt; 的 ebpf 程序）时
-涉及到的 raw tracepoint 相关的常见问题。&lt;/p&gt;
-&lt;/div&gt;
-&lt;div class="section" id="raw-tracepoint"&gt;
-&lt;h2 id="hidraw-tracepoint"&gt;raw tracepoint 可以监控哪些事件&lt;a class="headerlink" href="#hidraw-tracepoint" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
-&lt;p&gt;可以通过查看 &lt;tt class="docutils literal"&gt;/sys/kernel/debug/tracing/available_events&lt;/tt&gt; 文件的内容找到 raw tracepoint 可监控的事件。
-文件中每行内容的格式是:&lt;/p&gt;
-&lt;pre class="literal-block"&gt;
-&amp;lt;category&amp;gt;:&amp;lt;name&amp;gt;
-&lt;/pre&gt;
-&lt;p&gt;比如:&lt;/p&gt;
-&lt;pre class="literal-block"&gt;
-sched:sched_switch
-&lt;/pre&gt;
-&lt;p&gt;不过，raw tracepoint 用到的是 &lt;tt class="docutils literal"&gt;&amp;lt;name&amp;gt;&lt;/tt&gt; 的值，而不是整个 &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;&amp;lt;category&amp;gt;:&amp;lt;name&amp;gt;&lt;/span&gt;&lt;/tt&gt; ， 详见下方介绍。&lt;/p&gt;
-&lt;!-- 内核源码中使用 ``TRACE_EVENT`` 这个宏所定义的事件都可以通过 raw tracepoint 进行监控。 --&gt;
-&lt;!-- 这些事件主要集中在 `include/trace/events/ &lt;https://elixir.bootlin.com/linux/v5.13/source/include/trace/events&gt;`__   目录下。 --&gt;
-&lt;!--  --&gt;
-&lt;!-- 定义 raw tracepoint 可用事件的内容的格式是:: --&gt;
-&lt;!--  --&gt;
-&lt;!-- TRACE_EVENT(&lt;event_name&gt;, --&gt;
-&lt;!-- TP_PROTO(...), --&gt;
-&lt;!-- TP_ARGS(...), ...) --&gt;
-&lt;!--  --&gt;
-&lt;!-- .. 比如:: --&gt;
-&lt;!--  --&gt;
-&lt;!-- TRACE_EVENT_FN(sys_enter, --&gt;
-&lt;!-- TP_PROTO(struct pt_regs *regs, long id), --&gt;
-&lt;!-- TP_ARGS(regs, id), ...) --&gt;
-&lt;!--  --&gt;
-&lt;!-- 上面这个示例表示可以使用 ``sys_enter`` 作为 raw tracepoint 事件名称。 --&gt;
-&lt;!-- 可以使用的 `include/trace/events/syscalls.h &lt;https://elixir.bootlin.com/linux/v5.13/source/include/trace/events/syscalls.h&gt;`__ 文件中定义的 ``sys_enter`` 和 ``sys_exit`` 事件来监控所有系统调用事件 --&gt;
-&lt;/div&gt;
-&lt;div class="section" id="sec"&gt;
-&lt;h2 id="hidsec"&gt;SEC 内容的格式&lt;a class="headerlink" href="#hidsec" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
-&lt;p&gt;raw tracepoint 事件对应的 SEC 格式为:&lt;/p&gt;
-&lt;pre class="literal-block"&gt;
-SEC(&amp;quot;raw_tracepoint/&amp;lt;name&amp;gt;&amp;quot;)
-
-// 比如:
-// SEC(&amp;quot;raw_tracepoint/sched_switch&amp;quot;)
-&lt;/pre&gt;
-&lt;p&gt;或:&lt;/p&gt;
-&lt;pre class="literal-block"&gt;
-SEC(&amp;quot;raw_tp/&amp;lt;name&amp;gt;&amp;quot;)
-
-// 比如:
-// SEC(&amp;quot;raw_tp/sched_switch&amp;quot;)
-&lt;/pre&gt;
-&lt;p&gt;&lt;tt class="docutils literal"&gt;&amp;lt;name&amp;gt;&lt;/tt&gt; 值为前面面 &lt;tt class="docutils literal"&gt;available_events&lt;/tt&gt; 文件中列出的那些 &lt;tt class="docutils literal"&gt;&amp;lt;name&amp;gt;&lt;/tt&gt; 。&lt;/p&gt;
-&lt;p&gt;&lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;SEC(&amp;quot;raw_tp/xx&amp;quot;)&lt;/span&gt;&lt;/tt&gt; 跟 &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;SEC(&amp;quot;raw_tracepoint/xx&amp;quot;)&lt;/span&gt;&lt;/tt&gt; 其实是等效的，看个人喜好随便用哪种都行。&lt;/p&gt;
-&lt;p&gt;有两个特殊情况，那就是:&lt;/p&gt;
-&lt;ul class="simple"&gt;
-&lt;li&gt;统一用 &lt;tt class="docutils literal"&gt;sys_enter&lt;/tt&gt; 表示 &lt;tt class="docutils literal"&gt;syscalls&lt;/tt&gt; 分类下的 &lt;tt class="docutils literal"&gt;sys_enter_xxx&lt;/tt&gt; 事件: &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;SEC(&amp;quot;raw_tracepoint/sys_enter&amp;quot;)&lt;/span&gt;&lt;/tt&gt;&lt;/li&gt;
-&lt;li&gt;统一用 &lt;tt class="docutils literal"&gt;sys_exit&lt;/tt&gt; 表示 &lt;tt class="docutils literal"&gt;syscalls&lt;/tt&gt; 分类下的 &lt;tt class="docutils literal"&gt;sys_exit_xxx&lt;/tt&gt; 事件: &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;SEC(&amp;quot;raw_tracepoint/sys_exit&amp;quot;)&lt;/span&gt;&lt;/tt&gt;&lt;/li&gt;
-&lt;/ul&gt;
-&lt;p&gt;即，可以用 &lt;tt class="docutils literal"&gt;sys_enter&lt;/tt&gt; 和 &lt;tt class="docutils literal"&gt;sys_exit&lt;/tt&gt; 事件来监控所有系统调用事件。&lt;/p&gt;
-&lt;!-- 可以使用的 `include/trace/events/syscalls.h &lt;https://elixir.bootlin.com/linux/v5.13/source/include/trace/events/syscalls.h&gt;`__ 文件中定义的 ``sys_enter`` 和 ``sys_exit`` 事件来监控所有系统调用事件 --&gt;
-&lt;/div&gt;
-&lt;div class="section" id="id2"&gt;
-&lt;h2 id="hidid2"&gt;如何确定 raw tracepoint 事件处理函数的参数类型，获取对应的内核调用参数&lt;a class="headerlink" href="#hidid2" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
-&lt;p&gt;假设，我们想通过 raw tracepoint 监控 &lt;tt class="docutils literal"&gt;chmod&lt;/tt&gt; 这个命令涉及的 &lt;tt class="docutils literal"&gt;fchmodat&lt;/tt&gt; 系统调用，
-那么，如何确定ebpf 中事件处理函数的参数类型，以及如何获取到对应的 &lt;tt class="docutils literal"&gt;fchmodat&lt;/tt&gt; 这个系统调用涉及的参数的内容，
-比如拿到操作文件名称以及操作的权限 mode 的值。&lt;/p&gt;
-&lt;p&gt;第一步，找到针对这个系统调用可以使用的 raw tracepoint 事件。前面说了，可以用 &lt;tt class="docutils literal"&gt;sys_enter&lt;/tt&gt; 和 &lt;tt class="docutils literal"&gt;sys_exit&lt;/tt&gt; 事件来监控所有系统调用事件。&lt;/p&gt;
-&lt;p&gt;第二步，确定函数的参数类型。raw tracepoint 统一使用 &lt;tt class="docutils literal"&gt;bpf_raw_tracepoint_args&lt;/tt&gt; 这个结构体&lt;/p&gt;
-&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="k"&gt;struct&lt;/span&gt; &lt;span class="n"&gt;bpf_raw_tracepoint_args&lt;/span&gt; &lt;span class="p"&gt;{&lt;/span&gt;
-    &lt;span class="n"&gt;__u64&lt;/span&gt; &lt;span class="n"&gt;args&lt;/span&gt;&lt;span class="p"&gt;[&lt;/span&gt;&lt;span class="mi"&gt;0&lt;/span&gt;&lt;span class="p"&gt;];&lt;/span&gt;
-&lt;span class="p"&gt;};&lt;/span&gt;
-&lt;/pre&gt;&lt;/div&gt;
-&lt;p&gt;其中 &lt;tt class="docutils literal"&gt;args&lt;/tt&gt; 中就存储了事件相关的我们可以获取的信息，至于里面包含了哪些信息就是第三步需要确定的信息。&lt;/p&gt;
-&lt;!-- 第四步，确定事件本身可以获取到哪些信息。前面说了，可以使用的 `include/trace/events/syscalls.h &lt;https://elixir.bootlin.com/linux/v5.13/source/include/trace/events/syscalls.h&gt;`__ 文件中定义的 ``sys_enter`` 和 ``sys_exit`` 事件来监控所有系统调用事件。这里以 ``sys_enter`` 为例： --&gt;
-&lt;p&gt;第三步，确定事件本身可以获取到哪些信息。这里以 &lt;tt class="docutils literal"&gt;sys_enter&lt;/tt&gt; 为例（内容取自 &lt;a class="reference external" href="https://elixir.bootlin.com/linux/v5.13/source/include/trace/events/syscalls.h"&gt;include/trace/events/syscalls.h&lt;/a&gt; ， 大部分事件主要集中在 &lt;a class="reference external" href="https://elixir.bootlin.com/linux/v5.13/source/include/trace/events"&gt;include/trace/events/&lt;/a&gt;   目录下） 。&lt;/p&gt;
-&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="n"&gt;TRACE_EVENT_FN&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;sys_enter&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;
-    &lt;span class="n"&gt;TP_PROTO&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="k"&gt;struct&lt;/span&gt; &lt;span class="n"&gt;pt_regs&lt;/span&gt; &lt;span class="o"&gt;*&lt;/span&gt;&lt;span class="n"&gt;regs&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="kt"&gt;long&lt;/span&gt; &lt;span class="n"&gt;id&lt;/span&gt;&lt;span class="p"&gt;),&lt;/span&gt;
-    &lt;span class="n"&gt;TP_ARGS&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;regs&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;id&lt;/span&gt;&lt;span class="p"&gt;),&lt;/span&gt;
-    &lt;span class="n"&gt;TP_STRUCT__entry&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;
-        &lt;span class="n"&gt;__field&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;    &lt;span class="kt"&gt;long&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;           &lt;span class="n"&gt;id&lt;/span&gt;              &lt;span class="p"&gt;)&lt;/span&gt;
-        &lt;span class="n"&gt;__array&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;    &lt;span class="kt"&gt;unsigned&lt;/span&gt; &lt;span class="kt"&gt;long&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;  &lt;span class="n"&gt;args&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;   &lt;span class="mi"&gt;6&lt;/span&gt;       &lt;span class="p"&gt;)&lt;/span&gt;
-    &lt;span class="p"&gt;),&lt;/span&gt;
-    &lt;span class="n"&gt;TP_fast_assign&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;
-        &lt;span class="n"&gt;__entry&lt;/span&gt;&lt;span class="o"&gt;-&amp;gt;&lt;/span&gt;&lt;span class="n"&gt;id&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;id&lt;/span&gt;&lt;span class="p"&gt;;&lt;/span&gt;
-        &lt;span class="n"&gt;syscall_get_arguments&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;current&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;regs&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;__entry&lt;/span&gt;&lt;span class="o"&gt;-&amp;gt;&lt;/span&gt;&lt;span class="n"&gt;args&lt;/span&gt;&lt;span class="p"&gt;);&lt;/span&gt;
-    &lt;span class="p"&gt;),&lt;/span&gt;
-    &lt;span class="n"&gt;TP_printk&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="s"&gt;&amp;quot;NR %ld (%lx, %lx, %lx, %lx, %lx, %lx)&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;
-          &lt;span class="n"&gt;__entry&lt;/span&gt;&lt;span class="o"&gt;-&amp;gt;&lt;/span&gt;&lt;span class="n"&gt;id&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;
-          &lt;span class="n"&gt;__entry&lt;/span&gt;&lt;span class="o"&gt;-&amp;gt;&lt;/span&gt;&lt;span class="n"&gt;args&lt;/span&gt;&lt;span class="p"&gt;[&lt;/span&gt;&lt;span class="mi"&gt;0&lt;/span&gt;&lt;span class="p"&gt;],&lt;/span&gt; &lt;span class="n"&gt;__entry&lt;/span&gt;&lt;span class="o"&gt;-&amp;gt;&lt;/span&gt;&lt;span class="n"&gt;args&lt;/span&gt;&lt;span class="p"&gt;[&lt;/span&gt;&lt;span class="mi"&gt;1&lt;/span&gt;&lt;span class="p"&gt;],&lt;/span&gt; &lt;span class="n"&gt;__entry&lt;/span&gt;&lt;span class="o"&gt;-&amp;gt;&lt;/span&gt;&lt;span class="n"&gt;args&lt;/span&gt;&lt;span class="p"&gt;[&lt;/span&gt;&lt;span class="mi"&gt;2&lt;/span&gt;&lt;span class="p"&gt;],&lt;/span&gt;
-          &lt;span class="n"&gt;__entry&lt;/span&gt;&lt;span class="o"&gt;-&amp;gt;&lt;/span&gt;&lt;span class="n"&gt;args&lt;/span&gt;&lt;span class="p"&gt;[&lt;/span&gt;&lt;span class="mi"&gt;3&lt;/span&gt;&lt;span class="p"&gt;],&lt;/span&gt; &lt;span class="n"&gt;__entry&lt;/span&gt;&lt;span class="o"&gt;-&amp;gt;&lt;/span&gt;&lt;span class="n"&gt;args&lt;/span&gt;&lt;span class="p"&gt;[&lt;/span&gt;&lt;span class="mi"&gt;4&lt;/span&gt;&lt;span class="p"&gt;],&lt;/span&gt; &lt;span class="n"&gt;__entry&lt;/span&gt;&lt;span class="o"&gt;-&amp;gt;&lt;/span&gt;&lt;span class="n"&gt;args&lt;/span&gt;&lt;span class="p"&gt;[&lt;/span&gt;&lt;span class="mi"&gt;5&lt;/span&gt;&lt;span class="p"&gt;]),&lt;/span&gt;
-    &lt;span class="n"&gt;syscall_regfunc&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;syscall_unregfunc&lt;/span&gt;
-&lt;span class="p"&gt;);&lt;/span&gt;
-&lt;/pre&gt;&lt;/div&gt;
-&lt;p&gt;其中&lt;/p&gt;
-&lt;ul class="simple"&gt;
-&lt;li&gt;&lt;tt class="docutils literal"&gt;TP_PROTO(struct pt_regs *regs, long id)&lt;/tt&gt; 定义了可以通过 &lt;tt class="docutils literal"&gt;bpf_raw_tracepoint_args&lt;/tt&gt; 的 &lt;tt class="docutils literal"&gt;args&lt;/tt&gt; 拿到的信息。
-&lt;tt class="docutils literal"&gt;id&lt;/tt&gt; 是系统调用的 id， &lt;tt class="docutils literal"&gt;regs&lt;/tt&gt; 中包含了对应的系统调用的参数。 可以通过 id 过滤只处理 &lt;tt class="docutils literal"&gt;fchmodat&lt;/tt&gt; 的系统调用事件（通过命令 &lt;tt class="docutils literal"&gt;ausyscall fchmodat&lt;/tt&gt; 找到对应的系统调用 id）&lt;/li&gt;
-&lt;/ul&gt;
-&lt;p&gt;然后在继续获取对应的系统调用参数。&lt;/p&gt;
-&lt;p&gt;&lt;tt class="docutils literal"&gt;fchmodat&lt;/tt&gt; 这个系统调用的函数定义如下:&lt;/p&gt;
-&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="kt"&gt;int&lt;/span&gt; &lt;span class="nf"&gt;fchmodat&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="kt"&gt;int&lt;/span&gt; &lt;span class="n"&gt;dirfd&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="k"&gt;const&lt;/span&gt; &lt;span class="kt"&gt;char&lt;/span&gt; &lt;span class="o"&gt;*&lt;/span&gt;&lt;span class="n"&gt;pathname&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="kt"&gt;mode_t&lt;/span&gt; &lt;span class="n"&gt;mode&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="kt"&gt;int&lt;/span&gt; &lt;span class="n"&gt;flags&lt;/span&gt;&lt;span class="p"&gt;);&lt;/span&gt;
-&lt;/pre&gt;&lt;/div&gt;
-&lt;p&gt;因为 &lt;tt class="docutils literal"&gt;regs&lt;/tt&gt; 是 &lt;tt class="docutils literal"&gt;pt_regs&lt;/tt&gt; 类型，所以我们可以通过 &lt;tt class="docutils literal"&gt;PT_REGS_PARM1_CORE(regs)&lt;/tt&gt; 获取第一个参数的值，
-&lt;tt class="docutils literal"&gt;PT_REGS_PARM2_CORE(regs)&lt;/tt&gt; 获取第二个参数的值， &lt;tt class="docutils literal"&gt;PT_REGS_PARM3_CORE(regs)&lt;/tt&gt; 获取第三个参数的值，以此类推，
-可以通过 &lt;tt class="docutils literal"&gt;PT_REGS_PARM4_CORE&lt;/tt&gt; 和 &lt;tt class="docutils literal"&gt;PT_REGS_PARM5_CORE&lt;/tt&gt; 分别获取 regs 中第四个和第五个参数的值。&lt;/p&gt;
-&lt;p&gt;信息都确定好了，就可以写程序了。比如上面通过 &lt;tt class="docutils literal"&gt;sys_enter&lt;/tt&gt; 事件处理 &lt;tt class="docutils literal"&gt;fchmodat&lt;/tt&gt; 系统调用的示例 ebpf 程序如下:&lt;/p&gt;
-&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="n"&gt;SEC&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="s"&gt;&amp;quot;raw_tracepoint/sys_enter&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
-&lt;span class="kt"&gt;int&lt;/span&gt; &lt;span class="n"&gt;raw_tracepoint__sys_enter&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="k"&gt;struct&lt;/span&gt; &lt;span class="n"&gt;bpf_raw_tracepoint_args&lt;/span&gt; &lt;span class="o"&gt;*&lt;/span&gt;&lt;span class="n"&gt;ctx&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
-&lt;span class="p"&gt;{&lt;/span&gt;
-    &lt;span class="kt"&gt;unsigned&lt;/span&gt; &lt;span class="kt"&gt;long&lt;/span&gt; &lt;span class="n"&gt;syscall_id&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;ctx&lt;/span&gt;&lt;span class="o"&gt;-&amp;gt;&lt;/span&gt;&lt;span class="n"&gt;args&lt;/span&gt;&lt;span class="p"&gt;[&lt;/span&gt;&lt;span class="mi"&gt;1&lt;/span&gt;&lt;span class="p"&gt;];&lt;/span&gt;
-    &lt;span class="k"&gt;if&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;syscall_id&lt;/span&gt; &lt;span class="o"&gt;!=&lt;/span&gt; &lt;span class="mi"&gt;268&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;    &lt;span class="c1"&gt;// 过滤系统调用 id，只处理 fchmodat 系统调用&lt;/span&gt;
-        &lt;span class="k"&gt;return&lt;/span&gt; &lt;span class="mi"&gt;0&lt;/span&gt;&lt;span class="p"&gt;;&lt;/span&gt;
-
-    &lt;span class="k"&gt;struct&lt;/span&gt; &lt;span class="n"&gt;pt_regs&lt;/span&gt; &lt;span class="o"&gt;*&lt;/span&gt;&lt;span class="n"&gt;regs&lt;/span&gt;&lt;span class="p"&gt;;&lt;/span&gt;
-    &lt;span class="n"&gt;regs&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="k"&gt;struct&lt;/span&gt; &lt;span class="n"&gt;pt_regs&lt;/span&gt; &lt;span class="o"&gt;*&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt; &lt;span class="n"&gt;ctx&lt;/span&gt;&lt;span class="o"&gt;-&amp;gt;&lt;/span&gt;&lt;span class="n"&gt;args&lt;/span&gt;&lt;span class="p"&gt;[&lt;/span&gt;&lt;span class="mi"&gt;0&lt;/span&gt;&lt;span class="p"&gt;];&lt;/span&gt;
-
-    &lt;span class="kt"&gt;char&lt;/span&gt; &lt;span class="n"&gt;pathname&lt;/span&gt;&lt;span class="p"&gt;[&lt;/span&gt;&lt;span class="mi"&gt;256&lt;/span&gt;&lt;span class="p"&gt;];&lt;/span&gt;
-    &lt;span class="n"&gt;u32&lt;/span&gt; &lt;span class="n"&gt;mode&lt;/span&gt;&lt;span class="p"&gt;;&lt;/span&gt;
-
-    &lt;span class="c1"&gt;// 读取第二个参数的值&lt;/span&gt;
-    &lt;span class="kt"&gt;char&lt;/span&gt; &lt;span class="o"&gt;*&lt;/span&gt;&lt;span class="n"&gt;pathname_ptr&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="kt"&gt;char&lt;/span&gt; &lt;span class="o"&gt;*&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt; &lt;span class="n"&gt;PT_REGS_PARM2_CORE&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;regs&lt;/span&gt;&lt;span class="p"&gt;);&lt;/span&gt;
-    &lt;span class="n"&gt;bpf_core_read_user_str&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="o"&gt;&amp;amp;&lt;/span&gt;&lt;span class="n"&gt;pathname&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="k"&gt;sizeof&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;pathname&lt;/span&gt;&lt;span class="p"&gt;),&lt;/span&gt; &lt;span class="n"&gt;pathname_ptr&lt;/span&gt;&lt;span class="p"&gt;);&lt;/span&gt;
-
-    &lt;span class="c1"&gt;// 读取第三个参数的值&lt;/span&gt;
-    &lt;span class="n"&gt;mode&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;u32&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt; &lt;span class="n"&gt;PT_REGS_PARM3_CORE&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;regs&lt;/span&gt;&lt;span class="p"&gt;);&lt;/span&gt;
-
-    &lt;span class="kt"&gt;char&lt;/span&gt; &lt;span class="n"&gt;fmt&lt;/span&gt;&lt;span class="p"&gt;[]&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="s"&gt;&amp;quot;fchmodat %s %d&lt;/span&gt;&lt;span class="se"&gt;\n&lt;/span&gt;&lt;span class="s"&gt;&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;;&lt;/span&gt;
-    &lt;span class="n"&gt;bpf_trace_printk&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;fmt&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="k"&gt;sizeof&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;fmt&lt;/span&gt;&lt;span class="p"&gt;),&lt;/span&gt; &lt;span class="o"&gt;&amp;amp;&lt;/span&gt;&lt;span class="n"&gt;pathname&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;mode&lt;/span&gt;&lt;span class="p"&gt;);&lt;/span&gt;
-    &lt;span class="k"&gt;return&lt;/span&gt; &lt;span class="mi"&gt;0&lt;/span&gt;&lt;span class="p"&gt;;&lt;/span&gt;
-&lt;span class="p"&gt;}&lt;/span&gt;
-&lt;/pre&gt;&lt;/div&gt;
-&lt;p&gt;完整的示例程序详见：&lt;/p&gt;
-&lt;ul class="simple"&gt;
-&lt;li&gt;&lt;a class="reference external" href="https://github.com/mozillazg/hello-libbpfgo/tree/master/12-raw-tracepoint-args"&gt;https://github.com/mozillazg/hello-libbpfgo/tree/master/12-raw-tracepoint-args&lt;/a&gt;&lt;/li&gt;
-&lt;li&gt;&lt;a class="reference external" href="https://github.com/mozillazg/hello-libbpfgo/tree/master/13-raw-tracepoint-args-sched_switch"&gt;https://github.com/mozillazg/hello-libbpfgo/tree/master/13-raw-tracepoint-args-sched_switch&lt;/a&gt;&lt;/li&gt;
-&lt;/ul&gt;
-&lt;/div&gt;
-&lt;div class="section" id="raw-tracepoint-tracepoint"&gt;
-&lt;h2 id="hidraw-tracepoint-tracepoint"&gt;raw tracepoint 和 tracepoint 的区别&lt;a class="headerlink" href="#hidraw-tracepoint-tracepoint" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
-&lt;p&gt;主要区别是，raw tracepoint 不会像 tracepoint 一样在传递上下文给 ebpf 程序时
-预先处理好事件的参数（构造好相应的参数字段），
-raw tracepoint ebpf 程序中访问的都是事件的原始参数。&lt;/p&gt;
-&lt;p&gt;因此，raw tracepoint 相比 tracepoint 性能通常会更好一点
-(数据来自 &lt;a class="reference external" href="https://lwn.net/Articles/750569/"&gt;https://lwn.net/Articles/750569/&lt;/a&gt; )&lt;/p&gt;
-&lt;pre class="literal-block"&gt;
-samples/bpf/test_overhead performance on 1 cpu:
-
-tracepoint    base  kprobe+bpf tracepoint+bpf raw_tracepoint+bpf
-task_rename   1.1M   769K        947K            1.0M
-urandom_read  789K   697K        750K            755K
-&lt;/pre&gt;
-&lt;/div&gt;
-&lt;div class="section" id="id3"&gt;
-&lt;h2 id="hidid3"&gt;参考资料&lt;a class="headerlink" href="#hidid3" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
-&lt;ul class="simple"&gt;
-&lt;li&gt;&lt;a class="reference external" href="https://lwn.net/Articles/379903/"&gt;Using the TRACE_EVENT() macro (Part 1) [LWN.net]&lt;/a&gt;&lt;/li&gt;
-&lt;li&gt;&lt;a class="reference external" href="https://lwn.net/Articles/381064/"&gt;Using the TRACE_EVENT() macro (Part 2) [LWN.net]&lt;/a&gt;&lt;/li&gt;
-&lt;li&gt;&lt;a class="reference external" href="https://lwn.net/Articles/383362/"&gt;Using the TRACE_EVENT() macro (Part 3) [LWN.net]&lt;/a&gt;&lt;/li&gt;
-&lt;li&gt;&lt;a class="reference external" href="https://lwn.net/Articles/750569/"&gt;bpf, tracing: introduce bpf raw tracepoints [LWN.net]&lt;/a&gt;&lt;/li&gt;
-&lt;li&gt;&lt;a class="reference external" href="https://nakryiko.com/posts/bpf-core-reference-guide/"&gt;BPF CO-RE reference guide&lt;/a&gt;&lt;/li&gt;
-&lt;li&gt;&lt;a class="reference external" href="https://github.com/iovisor/bcc/blob/master/docs/reference_guide.md#7-raw-tracepoints"&gt;bcc/reference_guide.md at master · iovisor/bcc&lt;/a&gt;&lt;/li&gt;
-&lt;li&gt;&lt;a class="reference external" href="https://github.com/libbpf/libbpf/blob/12e932ac0e18546dd7247e66ea1b4aa236d2ef38/src/libbpf.c#L9002-L9081"&gt;libbpf/libbpf.c at 12e932ac0e18546dd7247e66ea1b4aa236d2ef38 · libbpf/libbpf&lt;/a&gt;&lt;/li&gt;
-&lt;li&gt;&lt;a class="reference external" href="https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/commit/?id=c4f6699dfcb8558d138fe838f741b2c10f416cf9"&gt;kernel/git/torvalds/linux.git - Linux kernel source tree&lt;/a&gt;&lt;/li&gt;
-&lt;li&gt;&lt;a class="reference external" href="https://nakryiko.com/posts/bcc-to-libbpf-howto-guide/"&gt;BCC to libbpf conversion guide&lt;/a&gt;&lt;/li&gt;
-&lt;li&gt;&lt;a class="reference external" href="https://sysdig.com/blog/the-art-of-writing-ebpf-programs-a-primer/"&gt;The art of writing eBPF programs: a primer. –Sysdig&lt;/a&gt;&lt;/li&gt;
-&lt;li&gt;&lt;a class="reference external" href="https://unix.stackexchange.com/questions/421750/where-do-you-find-the-syscall-table-for-linux"&gt;Where do you find the syscall table for Linux? - Unix &amp;amp; Linux Stack Exchange&lt;/a&gt;&lt;/li&gt;
-&lt;li&gt;&lt;a class="reference external" href="https://linux.die.net/man/8/ausyscall"&gt;ausyscall(8) - Linux man page&lt;/a&gt;&lt;/li&gt;
-&lt;/ul&gt;
-&lt;!-- * `linux/syscall_32.tbl at v5.13 · torvalds/linux &lt;https://github.com/torvalds/linux/blob/v5.13/arch/x86/entry/syscalls/syscall_32.tbl&gt;`__ --&gt;
-&lt;!-- * `linux/syscall_64.tbl at v5.13 · torvalds/linux &lt;https://github.com/torvalds/linux/blob/v5.13/arch/x86/entry/syscalls/syscall_64.tbl&gt;`__ --&gt;
-&lt;!-- * `linux/syscall.tbl at v5.13 · torvalds/linux &lt;https://github.com/torvalds/linux/blob/v5.13/arch/arm/tools/syscall.tbl&gt;`__ --&gt;
-&lt;!-- * `linux/unistd.h at v5.13 · torvalds/linux &lt;https://github.com/torvalds/linux/blob/v5.13/include/uapi/asm-generic/unistd.h&gt;`__ --&gt;
-&lt;/div&gt;
-</summary><category term="raw-tracepoint"></category><category term="libbpf"></category><category term="libbpfgo"></category></entry></feed>
+</summary><category term="ebpf"></category><category term="libbpf"></category></entry></feed>

@@ -1,19 +1,66 @@
 <?xml version="1.0" encoding="utf-8"?>
-<feed xmlns="http://www.w3.org/2005/Atom"><title>mozillazg's Blog</title><link href="https://mozillazg.com/" rel="alternate"></link><link href="https://mozillazg.com/feeds/ebpf.atom.xml" rel="self"></link><id>https://mozillazg.com/</id><updated>2022-10-07T00:00:00+00:00</updated><entry><title>在 ebpf/libbpf 程序中使用尾调用（tail calls）</title><link href="https://mozillazg.com/2022/10/ebpf-libbpf-use-tail-calls.html" rel="alternate"></link><updated>2022-10-07T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2022-10-07:2022/10/ebpf-libbpf-use-tail-calls.html</id><summary type="html">&lt;p&gt;本文将介绍如何在 ebpf/libbpf 程序中使用 eBPF 的尾调用（tail calls）特性。&lt;/p&gt;
+<feed xmlns="http://www.w3.org/2005/Atom"><title>mozillazg's Blog</title><link href="https://mozillazg.com/" rel="alternate"></link><link href="https://mozillazg.com/feeds/ebpf.atom.xml" rel="self"></link><id>https://mozillazg.com/</id><updated>2022-11-26T00:00:00+00:00</updated><entry><title>使用 libbpfgo 重写 BCC libbpf-tools 中各个工具的用户态程序</title><link href="https://mozillazg.com/2022/11/ebpf-libbpfgo-tools-port-rewriting-the-control-plane-of-bcc-libbpf-tools-in-golang-with-libbpfgo.html" rel="alternate"></link><updated>2022-11-26T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2022-11-26:2022/11/ebpf-libbpfgo-tools-port-rewriting-the-control-plane-of-bcc-libbpf-tools-in-golang-with-libbpfgo.html</id><summary type="html">&lt;p&gt;最近新开源了一个 eBPF 相关的项目：
+&lt;a class="reference external" href="https://github.com/mozillazg/libbpfgo-tools"&gt;mozillazg/libbpfgo-tools&lt;/a&gt; 。
+这个项目的目标是使用 &lt;a class="reference external" href="https://github.com/aquasecurity/libbpfgo"&gt;libbpfgo&lt;/a&gt; 重写/移植 &lt;a class="reference external" href="https://github.com/iovisor/bcc/tree/master/libbpf-tools"&gt;bcc/libbpf-tools&lt;/a&gt; 中各个工具的前端程序（即，用户态程序）。
+希望能在如何使用 golang 编写 eBPF 程序, 尤其是如何使用 libbpfgo 这个 eBPF 库方面对大家有些许帮助。&lt;/p&gt;
+&lt;div class="section" id="id1"&gt;
+&lt;h2 id="hidid1"&gt;目标&lt;a class="headerlink" href="#hidid1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;这个项目的目标和原则如下：&lt;/p&gt;
+&lt;ul class="simple"&gt;
+&lt;li&gt;所有的 eBPF C 代码全部重用 BCC 仓库中 libbpf-tools 目录下的代码。
+我们不会对 BCC 的代码做任何额外的修改，如果有需要修改的地方会提 PR 给上游 BCC 仓库。&lt;/li&gt;
+&lt;li&gt;所有的用户态程序都使用 libbpfgo 进行实现。&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/div&gt;
+&lt;div class="section" id="id2"&gt;
+&lt;h2 id="hidid2"&gt;状态&lt;a class="headerlink" href="#hidid2" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;当前，我们已经完成了最新 v0.25.0 版本 BCC libbpf-tools 全部 46 个工具中 28 个工具的移植工作，
+更多工具的移植持续进行中：&lt;/p&gt;
+&lt;ul class="simple"&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://github.com/mozillazg/libbpfgo-tools/blob/master/tools/bashreadline"&gt;bashreadline&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://github.com/mozillazg/libbpfgo-tools/blob/master/tools/bindsnoop"&gt;bindsnoop&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://github.com/mozillazg/libbpfgo-tools/blob/master/tools/biolatency"&gt;biolatency&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://github.com/mozillazg/libbpfgo-tools/blob/master/tools/biopattern"&gt;biopattern&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://github.com/mozillazg/libbpfgo-tools/blob/master/tools/biosnoop"&gt;biosnoop&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://github.com/mozillazg/libbpfgo-tools/blob/master/tools/biostacks"&gt;biostacks&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://github.com/mozillazg/libbpfgo-tools/blob/master/tools/bitesize"&gt;bitesize&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://github.com/mozillazg/libbpfgo-tools/blob/master/tools/cpudist"&gt;cpudist&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://github.com/mozillazg/libbpfgo-tools/blob/master/tools/drsnoop"&gt;drsnoop&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://github.com/mozillazg/libbpfgo-tools/blob/master/tools/execsnoop"&gt;execsnoop&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://github.com/mozillazg/libbpfgo-tools/blob/master/tools/filelife"&gt;filelife&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://github.com/mozillazg/libbpfgo-tools/blob/master/tools/filetop"&gt;filetop&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://github.com/mozillazg/libbpfgo-tools/blob/master/tools/mdflush"&gt;mdflush&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://github.com/mozillazg/libbpfgo-tools/blob/master/tools/mountsnoop"&gt;mountsnoop&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://github.com/mozillazg/libbpfgo-tools/blob/master/tools/oomkill"&gt;oomkill&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://github.com/mozillazg/libbpfgo-tools/blob/master/tools/opensnoop"&gt;opensnoop&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://github.com/mozillazg/libbpfgo-tools/blob/master/tools/readahead"&gt;readahead&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://github.com/mozillazg/libbpfgo-tools/blob/master/tools/sigsnoop"&gt;sigsnoop&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://github.com/mozillazg/libbpfgo-tools/blob/master/tools/solisten"&gt;solisten&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://github.com/mozillazg/libbpfgo-tools/blob/master/tools/statsnoop"&gt;statsnoop&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://github.com/mozillazg/libbpfgo-tools/blob/master/tools/syscount"&gt;syscount&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://github.com/mozillazg/libbpfgo-tools/blob/master/tools/tcpconnect"&gt;tcpconnect&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://github.com/mozillazg/libbpfgo-tools/blob/master/tools/tcpconnlat"&gt;tcpconnlat&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://github.com/mozillazg/libbpfgo-tools/blob/master/tools/tcplife"&gt;tcplife&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://github.com/mozillazg/libbpfgo-tools/blob/master/tools/tcprtt"&gt;tcprtt&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://github.com/mozillazg/libbpfgo-tools/blob/master/tools/tcpsynbl"&gt;tcpsynbl&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://github.com/mozillazg/libbpfgo-tools/blob/master/tools/tcptracer"&gt;tcptracer&lt;/a&gt;&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/div&gt;
+</summary><category term="libbpf"></category><category term="libbpfgo"></category></entry><entry><title>在 ebpf/libbpf 程序中使用尾调用（tail calls）</title><link href="https://mozillazg.com/2022/10/ebpf-libbpf-use-tail-calls.html" rel="alternate"></link><updated>2022-10-07T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2022-10-07:2022/10/ebpf-libbpf-use-tail-calls.html</id><summary type="html">&lt;p&gt;本文将介绍如何在 ebpf/libbpf 程序中使用 eBPF 的尾调用（tail calls）特性。&lt;/p&gt;
 &lt;div class="section" id="tail-calls"&gt;
 &lt;h2 id="hidtail-calls"&gt;尾调用（tail calls）&lt;a class="headerlink" href="#hidtail-calls" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
-&lt;p&gt;eBPF 的尾调用（tail calls）特性允许一个 eBPF 程序可以调用另一个 eBPF 程序，
-并且调用完成后不会返回原来的程序。&lt;/p&gt;
+&lt;p&gt;eBPF 的尾调用（tail calls）特性允许一个 eBPF 程序可以调用另一个 eBPF 程序， 并且调用完成后不会返回原来的程序。
+因为尾调用在调用函数的时候会重用调用方函数的 stack frame，所以它的开销比普通的函数
+调用会更低。&lt;/p&gt;
 &lt;p&gt;&lt;img alt="image" src="/static/images/bpf/bpf_tailcall.png" /&gt;&lt;/p&gt;
+&lt;blockquote&gt;
+&lt;/blockquote&gt;
 &lt;p&gt;图片来源：&lt;a class="reference external" href="https://docs.cilium.io/en/v1.12/bpf/#tail-calls"&gt;https://docs.cilium.io/en/v1.12/bpf/#tail-calls&lt;/a&gt;&lt;/p&gt;
 &lt;p&gt;尾调用涉及两个步骤：&lt;/p&gt;
-&lt;ol class="arabic simple"&gt;
-&lt;li&gt;定义一个类型为 &lt;tt class="docutils literal"&gt;BPF_MAP_TYPE_PROG_ARRAY&lt;/tt&gt; 的 map ，
-map 的 value 是在尾调用中被调用的 eBPF 程序的文件描述符。
-我们可以在用户态程序中更新这个 map 的 key/value。&lt;/li&gt;
-&lt;li&gt;在 eBPF 程序中，我们可以通过 &lt;tt class="docutils literal"&gt;bpf_tail_call()&lt;/tt&gt; 这个辅助函数
-从第1步的 map 中获取 eBPF 程序然后执行该程序进行尾调用。&lt;/li&gt;
-&lt;/ol&gt;
+&lt;ul class="simple"&gt;
+&lt;li&gt;定义一个类型为 &lt;tt class="docutils literal"&gt;BPF_MAP_TYPE_PROG_ARRAY&lt;/tt&gt; 的 map ， map 的 value 是在尾调用中被调用的 eBPF 程序的文件描述符。 我们可以在用户态程序中更新这个 map 的 key/value。&lt;/li&gt;
+&lt;li&gt;在 eBPF 程序中，我们可以通过 &lt;tt class="docutils literal"&gt;bpf_tail_call()&lt;/tt&gt; 这个辅助函数 从第1步的 map 中获取 eBPF 程序然后执行该程序进行尾调用。&lt;/li&gt;
+&lt;/ul&gt;
 &lt;/div&gt;
 &lt;div class="section" id="id1"&gt;
 &lt;h2 id="hidid1"&gt;使用示例&lt;a class="headerlink" href="#hidid1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
@@ -65,8 +112,7 @@ map 的 value 是在尾调用中被调用的 eBPF 程序的文件描述符。
         &lt;span class="k"&gt;return&lt;/span&gt; &lt;span class="mi"&gt;0&lt;/span&gt;&lt;span class="p"&gt;;&lt;/span&gt;
 &lt;span class="p"&gt;}&lt;/span&gt;
 &lt;/pre&gt;&lt;/div&gt;
-&lt;p&gt;完整的示例程序，详见：
-&lt;a class="reference external" href="https://github.com/mozillazg/hello-libbpfgo/tree/master/22-tail-calls"&gt;https://github.com/mozillazg/hello-libbpfgo/tree/master/22-tail-calls&lt;/a&gt;&lt;/p&gt;
+&lt;p&gt;完整的示例程序，详见： &lt;a class="reference external" href="https://github.com/mozillazg/hello-libbpfgo/tree/master/22-tail-calls"&gt;https://github.com/mozillazg/hello-libbpfgo/tree/master/22-tail-calls&lt;/a&gt;&lt;/p&gt;
 &lt;/div&gt;
 &lt;/div&gt;
 &lt;div class="section" id="id3"&gt;
@@ -78,8 +124,7 @@ map 的 value 是在尾调用中被调用的 eBPF 程序的文件描述符。
 &lt;li&gt;&lt;a class="reference external" href="https://github.com/libbpf/libbpf/issues/354"&gt;Support static initialization of BPF_MAP_TYPE_PROG_ARRAY · Issue #354 · libbpf/libbpf&lt;/a&gt;&lt;/li&gt;
 &lt;/ul&gt;
 &lt;/div&gt;
-</summary><category term="libbpf"></category><category term="libbpfgo"></category></entry><entry><title>解决 ebpf 验证器提示类型错误的问题</title><link href="https://mozillazg.com/2022/10/ebpf-libbpf-verifier-fix-type-expected-issue.html" rel="alternate"></link><updated>2022-10-06T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2022-10-06:2022/10/ebpf-libbpf-verifier-fix-type-expected-issue.html</id><summary type="html">&lt;p&gt;有时当我们加载编译后的 eBPF 程序的时候，eBPF 验证器会提示程序中有类型错误的问题导致程序加载失败。
-本文记录一下这种错误的一种解决方法。&lt;/p&gt;
+</summary><category term="libbpf"></category><category term="libbpfgo"></category></entry><entry><title>解决 ebpf 验证器提示类型错误问题的一种方法</title><link href="https://mozillazg.com/2022/10/ebpf-libbpf-verifier-fix-type-expected-issue.html" rel="alternate"></link><updated>2022-10-06T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2022-10-06:2022/10/ebpf-libbpf-verifier-fix-type-expected-issue.html</id><summary type="html">&lt;p&gt;有时当我们加载编译后的 eBPF 程序的时候，eBPF 验证器会提示程序中有类型错误的问题导致程序加载失败。 本文记录一下这种错误的一种解决方法。&lt;/p&gt;
 &lt;div class="section" id="id1"&gt;
 &lt;h2 id="hidid1"&gt;错误示例&lt;a class="headerlink" href="#hidid1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;p&gt;比如，当下面这段 eBPF 程序&lt;/p&gt;
@@ -93,26 +138,27 @@ map 的 value 是在尾调用中被调用的 eBPF 程序的文件描述符。
 &lt;span class="p"&gt;}&lt;/span&gt;
 &lt;/pre&gt;&lt;/div&gt;
 &lt;p&gt;被加载到内核中时会提示如下类型错误:&lt;/p&gt;
-&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;libbpf: prog &lt;span class="s1"&gt;&amp;#39;iter__bpf_sk_storage_map&amp;#39;&lt;/span&gt;: BPF program load failed: Permission denied
-libbpf: prog &lt;span class="s1"&gt;&amp;#39;iter__bpf_sk_storage_map&amp;#39;&lt;/span&gt;: -- BEGIN PROG LOAD LOG --
-R1 &lt;span class="nv"&gt;type&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;ctx &lt;span class="nv"&gt;expected&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;fp
-&lt;span class="p"&gt;;&lt;/span&gt; &lt;span class="k"&gt;if&lt;/span&gt; &lt;span class="o"&gt;(&lt;/span&gt;ctx-&amp;gt;sk&lt;span class="o"&gt;)&lt;/span&gt;
-0: &lt;span class="o"&gt;(&lt;/span&gt;79&lt;span class="o"&gt;)&lt;/span&gt; &lt;span class="nv"&gt;r2&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; *&lt;span class="o"&gt;(&lt;/span&gt;u64 *&lt;span class="o"&gt;)(&lt;/span&gt;r1 +16&lt;span class="o"&gt;)&lt;/span&gt;
-&lt;span class="p"&gt;;&lt;/span&gt; &lt;span class="k"&gt;if&lt;/span&gt; &lt;span class="o"&gt;(&lt;/span&gt;ctx-&amp;gt;sk&lt;span class="o"&gt;)&lt;/span&gt;
-1: &lt;span class="o"&gt;(&lt;/span&gt;15&lt;span class="o"&gt;)&lt;/span&gt; &lt;span class="k"&gt;if&lt;/span&gt; &lt;span class="nv"&gt;r2&lt;/span&gt; &lt;span class="o"&gt;==&lt;/span&gt; 0x0 goto pc+4
- &lt;span class="nv"&gt;R1&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;ctx&lt;span class="o"&gt;(&lt;/span&gt;&lt;span class="nv"&gt;id&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;0,off&lt;span class="o"&gt;=&lt;/span&gt;0,imm&lt;span class="o"&gt;=&lt;/span&gt;0&lt;span class="o"&gt;)&lt;/span&gt; &lt;span class="nv"&gt;R2_w&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;ptr_sock&lt;span class="o"&gt;(&lt;/span&gt;&lt;span class="nv"&gt;id&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;0,off&lt;span class="o"&gt;=&lt;/span&gt;0,imm&lt;span class="o"&gt;=&lt;/span&gt;0&lt;span class="o"&gt;)&lt;/span&gt; &lt;span class="nv"&gt;R10&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;fp0
-&lt;span class="p"&gt;;&lt;/span&gt; bpf_sk_storage_delete&lt;span class="o"&gt;(&lt;/span&gt;&lt;span class="p"&gt;&amp;amp;&lt;/span&gt;sk_storage_map, ctx-&amp;gt;sk&lt;span class="o"&gt;)&lt;/span&gt;&lt;span class="p"&gt;;&lt;/span&gt;
-2: &lt;span class="o"&gt;(&lt;/span&gt;79&lt;span class="o"&gt;)&lt;/span&gt; &lt;span class="nv"&gt;r2&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; *&lt;span class="o"&gt;(&lt;/span&gt;u64 *&lt;span class="o"&gt;)(&lt;/span&gt;r1 +16&lt;span class="o"&gt;)&lt;/span&gt;
-&lt;span class="p"&gt;;&lt;/span&gt; bpf_sk_storage_delete&lt;span class="o"&gt;(&lt;/span&gt;&lt;span class="p"&gt;&amp;amp;&lt;/span&gt;sk_storage_map, ctx-&amp;gt;sk&lt;span class="o"&gt;)&lt;/span&gt;&lt;span class="p"&gt;;&lt;/span&gt;
-3: &lt;span class="o"&gt;(&lt;/span&gt;18&lt;span class="o"&gt;)&lt;/span&gt; &lt;span class="nv"&gt;r1&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; 0xffffa0658305aa00
-5: &lt;span class="o"&gt;(&lt;/span&gt;85&lt;span class="o"&gt;)&lt;/span&gt; call bpf_sk_storage_delete#108
-R2 &lt;span class="nv"&gt;type&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;ptr_or_null_ &lt;span class="nv"&gt;expected&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;ptr_
-processed &lt;span class="m"&gt;5&lt;/span&gt; insns &lt;span class="o"&gt;(&lt;/span&gt;limit 1000000&lt;span class="o"&gt;)&lt;/span&gt; max_states_per_insn &lt;span class="m"&gt;0&lt;/span&gt; total_states &lt;span class="m"&gt;0&lt;/span&gt; peak_states &lt;span class="m"&gt;0&lt;/span&gt; mark_read 0
+&lt;pre class="literal-block"&gt;
+libbpf: prog 'iter__bpf_sk_storage_map': BPF program load failed: Permission denied
+libbpf: prog 'iter__bpf_sk_storage_map': -- BEGIN PROG LOAD LOG --
+R1 type=ctx expected=fp
+; if (ctx-&amp;gt;sk)
+0: (79) r2 = *(u64 *)(r1 +16)
+; if (ctx-&amp;gt;sk)
+1: (15) if r2 == 0x0 goto pc+4
+ R1=ctx(id=0,off=0,imm=0) R2_w=ptr_sock(id=0,off=0,imm=0) R10=fp0
+; bpf_sk_storage_delete(&amp;amp;sk_storage_map, ctx-&amp;gt;sk);
+2: (79) r2 = *(u64 *)(r1 +16)
+; bpf_sk_storage_delete(&amp;amp;sk_storage_map, ctx-&amp;gt;sk);
+3: (18) r1 = 0xffffa0658305aa00
+5: (85) call bpf_sk_storage_delete#108
+R2 type=ptr_or_null_ expected=ptr_
+processed 5 insns (limit 1000000) max_states_per_insn 0 total_states 0 peak_states 0 mark_read 0
 -- END PROG LOAD LOG --
-libbpf: prog &lt;span class="s1"&gt;&amp;#39;iter__bpf_sk_storage_map&amp;#39;&lt;/span&gt;: failed to load: -13
-libbpf: failed to load object &lt;span class="s1"&gt;&amp;#39;main.bpf.o&amp;#39;&lt;/span&gt;
+libbpf: prog 'iter__bpf_sk_storage_map': failed to load: -13
+libbpf: failed to load object 'main.bpf.o'
 failed to load BPF object: permission denied
-&lt;/pre&gt;&lt;/div&gt;
+&lt;/pre&gt;
 &lt;div class="section" id="id2"&gt;
 &lt;h3 id="hidid2"&gt;解决办法&lt;a class="headerlink" href="#hidid2" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
 &lt;p&gt;这个错误信息有两个关键错误，一个错误是:&lt;/p&gt;
@@ -123,8 +169,7 @@ R1 type=ctx expected=fp
 ; if (ctx-&amp;gt;sk)
 1: (15) if r2 == 0x0 goto pc+4
 &lt;/pre&gt;
-&lt;p&gt;其中 &lt;tt class="docutils literal"&gt;R1 type=ctx expected=fp&lt;/tt&gt; 说的是，验证器期望 &lt;tt class="docutils literal"&gt;R1&lt;/tt&gt; 的类型是 &lt;tt class="docutils literal"&gt;fp&lt;/tt&gt; 而不是 &lt;tt class="docutils literal"&gt;ctx&lt;/tt&gt; 。
-所谓的 &lt;tt class="docutils literal"&gt;fp&lt;/tt&gt; 指的是栈上的指针类型，即期望 &lt;tt class="docutils literal"&gt;R1&lt;/tt&gt; 是栈上的数据而不是 &lt;tt class="docutils literal"&gt;ctx&lt;/tt&gt; 。&lt;/p&gt;
+&lt;p&gt;其中 &lt;tt class="docutils literal"&gt;R1 type=ctx expected=fp&lt;/tt&gt; 说的是，验证器期望 &lt;tt class="docutils literal"&gt;R1&lt;/tt&gt; 的类型是 &lt;tt class="docutils literal"&gt;fp&lt;/tt&gt; 而不是 &lt;tt class="docutils literal"&gt;ctx&lt;/tt&gt; 。 所谓的 &lt;tt class="docutils literal"&gt;fp&lt;/tt&gt; 指的是栈上的指针类型，即期望 &lt;tt class="docutils literal"&gt;R1&lt;/tt&gt; 是栈上的数据而不是 &lt;tt class="docutils literal"&gt;ctx&lt;/tt&gt; 。&lt;/p&gt;
 &lt;p&gt;另一个错误是:&lt;/p&gt;
 &lt;pre class="literal-block"&gt;
  R1=ctx(id=0,off=0,imm=0) R2_w=ptr_sock(id=0,off=0,imm=0) R10=fp0
@@ -135,13 +180,8 @@ R1 type=ctx expected=fp
 5: (85) call bpf_sk_storage_delete#108
 R2 type=ptr_or_null_ expected=ptr_
 &lt;/pre&gt;
-&lt;p&gt;其中 &lt;tt class="docutils literal"&gt;R2 type=ptr_or_null_ expected=ptr_&lt;/tt&gt; 说的是，验证器期望 &lt;tt class="docutils literal"&gt;R2&lt;/tt&gt; 的类型是 &lt;tt class="docutils literal"&gt;ptr&lt;/tt&gt;
-而不是 &lt;tt class="docutils literal"&gt;prt_or_null&lt;/tt&gt; ，即，期望 &lt;tt class="docutils literal"&gt;R2&lt;/tt&gt; 是一个指针而不是一个指针或 &lt;tt class="docutils literal"&gt;NULL&lt;/tt&gt; 。
-这里可能会有点疑惑，前面的判断 &lt;tt class="docutils literal"&gt;if &lt;span class="pre"&gt;(ctx-&amp;gt;sk)&lt;/span&gt;&lt;/tt&gt; 已经确保了不会为 &lt;tt class="docutils literal"&gt;NULL&lt;/tt&gt; ，
-为啥这里还会认为它有可能为 &lt;tt class="docutils literal"&gt;NULL&lt;/tt&gt; ，这是因为前面的 if 判断的不是栈变量，
-存在 &lt;tt class="docutils literal"&gt;R1 type=ctx expected=fp&lt;/tt&gt; 的问题也就无法保证它一定不是 &lt;tt class="docutils literal"&gt;NULL&lt;/tt&gt; 了。&lt;/p&gt;
-&lt;p&gt;解决办法也很简单，就是用一个临时变量保存 &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;ctx-&amp;gt;sk&lt;/span&gt;&lt;/tt&gt; 的值，
-然后用这个栈上的临时变量做后续的操作:&lt;/p&gt;
+&lt;p&gt;其中 &lt;tt class="docutils literal"&gt;R2 type=ptr_or_null_ expected=ptr_&lt;/tt&gt; 说的是，验证器期望 &lt;tt class="docutils literal"&gt;R2&lt;/tt&gt; 的类型是 &lt;tt class="docutils literal"&gt;ptr&lt;/tt&gt; 而不是 &lt;tt class="docutils literal"&gt;prt_or_null&lt;/tt&gt; ，即，期望 &lt;tt class="docutils literal"&gt;R2&lt;/tt&gt; 是一个指针而不是一个指针或 &lt;tt class="docutils literal"&gt;NULL&lt;/tt&gt; 。 这里可能会有点疑惑，前面的判断 &lt;tt class="docutils literal"&gt;if &lt;span class="pre"&gt;(ctx-&amp;gt;sk)&lt;/span&gt;&lt;/tt&gt; 已经确保了不会为 &lt;tt class="docutils literal"&gt;NULL&lt;/tt&gt; ， 为啥这里还会认为它有可能为 &lt;tt class="docutils literal"&gt;NULL&lt;/tt&gt; ，这是因为前面的 if 判断的不是栈变量， 存在 &lt;tt class="docutils literal"&gt;R1 type=ctx expected=fp&lt;/tt&gt; 的问题也就无法保证它一定不是 &lt;tt class="docutils literal"&gt;NULL&lt;/tt&gt; 了。&lt;/p&gt;
+&lt;p&gt;解决办法也很简单，就是用一个临时变量保存 ctx-&amp;gt;sk 的值， 然后用这个栈上的临时变量做后续的操作:&lt;/p&gt;
 &lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt; SEC(&amp;quot;iter/bpf_sk_storage_map&amp;quot;)
  int iter__bpf_sk_storage_map(struct bpf_iter__bpf_sk_storage_map *ctx)
  {
@@ -161,8 +201,8 @@ R2 type=ptr_or_null_ expected=ptr_
 &lt;p&gt;这里记录一下类似前面 &lt;tt class="docutils literal"&gt;fp&lt;/tt&gt; 这样的常见类型关键字具体的含义：&lt;/p&gt;
 &lt;table border="1" class="docutils"&gt;
 &lt;colgroup&gt;
-&lt;col width="31%" /&gt;
-&lt;col width="69%" /&gt;
+&lt;col width="33%" /&gt;
+&lt;col width="67%" /&gt;
 &lt;/colgroup&gt;
 &lt;thead valign="bottom"&gt;
 &lt;tr&gt;&lt;th class="head"&gt;关键字&lt;/th&gt;
@@ -171,7 +211,7 @@ R2 type=ptr_or_null_ expected=ptr_
 &lt;/thead&gt;
 &lt;tbody valign="top"&gt;
 &lt;tr&gt;&lt;td&gt;&lt;tt class="docutils literal"&gt;scalar&lt;/tt&gt;&lt;/td&gt;
-&lt;td&gt;标量类型（scalar type），非指针类型&lt;/td&gt;
+&lt;td&gt;标量类型（scalar type），不是一个有效的指针类型&lt;/td&gt;
 &lt;/tr&gt;
 &lt;tr&gt;&lt;td&gt;&lt;tt class="docutils literal"&gt;ctx&lt;/tt&gt;&lt;/td&gt;
 &lt;td&gt;bpf_context 指针&lt;/td&gt;
@@ -180,10 +220,13 @@ R2 type=ptr_or_null_ expected=ptr_
 &lt;td&gt;bpf_map 类型的指针&lt;/td&gt;
 &lt;/tr&gt;
 &lt;tr&gt;&lt;td&gt;&lt;tt class="docutils literal"&gt;map_value&lt;/tt&gt;&lt;/td&gt;
-&lt;td&gt;map 中的元素 value 指针&lt;/td&gt;
+&lt;td&gt;指向 map 中的元素 value 的指针&lt;/td&gt;
+&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;&lt;tt class="docutils literal"&gt;map_value_or_null&lt;/tt&gt;&lt;/td&gt;
+&lt;td&gt;指向 map 中的元素 value 的指针或 NULL&lt;/td&gt;
 &lt;/tr&gt;
 &lt;tr&gt;&lt;td&gt;&lt;tt class="docutils literal"&gt;map_key&lt;/tt&gt;&lt;/td&gt;
-&lt;td&gt;map 中的元素 key 指针&lt;/td&gt;
+&lt;td&gt;指向 map 中的元素 key 的指针&lt;/td&gt;
 &lt;/tr&gt;
 &lt;tr&gt;&lt;td&gt;&lt;tt class="docutils literal"&gt;fp&lt;/tt&gt;&lt;/td&gt;
 &lt;td&gt;栈上的指针（frame pointer）&lt;/td&gt;
@@ -200,11 +243,20 @@ R2 type=ptr_or_null_ expected=ptr_
 &lt;tr&gt;&lt;td&gt;&lt;tt class="docutils literal"&gt;sock&lt;/tt&gt;&lt;/td&gt;
 &lt;td&gt;bpf_sock 类型的指针&lt;/td&gt;
 &lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;&lt;tt class="docutils literal"&gt;sock_or_null&lt;/tt&gt;&lt;/td&gt;
+&lt;td&gt;bpf_sock 类型的指针或 NULL&lt;/td&gt;
+&lt;/tr&gt;
 &lt;tr&gt;&lt;td&gt;&lt;tt class="docutils literal"&gt;sock_common&lt;/tt&gt;&lt;/td&gt;
 &lt;td&gt;sock_common 类型指针&lt;/td&gt;
 &lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;&lt;tt class="docutils literal"&gt;sock_common_or_null&lt;/tt&gt;&lt;/td&gt;
+&lt;td&gt;sock_common 类型指针或 NULL&lt;/td&gt;
+&lt;/tr&gt;
 &lt;tr&gt;&lt;td&gt;&lt;tt class="docutils literal"&gt;tcp_sock&lt;/tt&gt;&lt;/td&gt;
 &lt;td&gt;tcp_sock 类型指针&lt;/td&gt;
+&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;&lt;tt class="docutils literal"&gt;tcp_sock_or_null&lt;/tt&gt;&lt;/td&gt;
+&lt;td&gt;tcp_sock 类型指针或 NULL&lt;/td&gt;
 &lt;/tr&gt;
 &lt;tr&gt;&lt;td&gt;&lt;tt class="docutils literal"&gt;tp_buffer&lt;/tt&gt;&lt;/td&gt;
 &lt;td&gt;可写的 raw tracepoint buffer 指针&lt;/td&gt;
@@ -224,6 +276,9 @@ R2 type=ptr_or_null_ expected=ptr_
 &lt;tr&gt;&lt;td&gt;&lt;tt class="docutils literal"&gt;mem&lt;/tt&gt;&lt;/td&gt;
 &lt;td&gt;指向一块有效内存区域的指针&lt;/td&gt;
 &lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;&lt;tt class="docutils literal"&gt;mem_or_null&lt;/tt&gt;&lt;/td&gt;
+&lt;td&gt;指向一块有效内存区域的指针或 NULL&lt;/td&gt;
+&lt;/tr&gt;
 &lt;tr&gt;&lt;td&gt;&lt;tt class="docutils literal"&gt;buf&lt;/tt&gt;&lt;/td&gt;
 &lt;td&gt;指向一个读/写 buffer 的指针&lt;/td&gt;
 &lt;/tr&gt;
@@ -231,18 +286,35 @@ R2 type=ptr_or_null_ expected=ptr_
 &lt;td&gt;BPF 程序函数指针&lt;/td&gt;
 &lt;/tr&gt;
 &lt;tr&gt;&lt;td&gt;&lt;tt class="docutils literal"&gt;inv&lt;/tt&gt;&lt;/td&gt;
-&lt;td&gt;无效类型（invalid type）&lt;/td&gt;
+&lt;td&gt;无效类型（invalid type），不是一个有效的指针类型&lt;/td&gt;
 &lt;/tr&gt;
-&lt;tr&gt;&lt;td&gt;&lt;tt class="docutils literal"&gt;?&lt;/tt&gt;&lt;/td&gt;
-&lt;td&gt;&amp;nbsp;&lt;/td&gt;
+&lt;tr&gt;&lt;td&gt;&lt;tt class="docutils literal"&gt;flow_keys&lt;/tt&gt;&lt;/td&gt;
+&lt;td&gt;bpf_flow_keys 类型的指针&lt;/td&gt;
+&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;&lt;tt class="docutils literal"&gt;percpu_ptr_&lt;/tt&gt;&lt;/td&gt;
+&lt;td&gt;指向一个 percpu 内核变量的指针&lt;/td&gt;
+&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;&lt;tt class="docutils literal"&gt;rdonly_buf&lt;/tt&gt;&lt;/td&gt;
+&lt;td&gt;指向一个只读 buffer 的指针&lt;/td&gt;
+&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;&lt;tt class="docutils literal"&gt;rdonly_buf_or_null&lt;/tt&gt;&lt;/td&gt;
+&lt;td&gt;指向一个只读 buffer 的指针或 NULL&lt;/td&gt;
+&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;&lt;tt class="docutils literal"&gt;rdwr_buf&lt;/tt&gt;&lt;/td&gt;
+&lt;td&gt;指向一个读/写 buffer 的指针&lt;/td&gt;
+&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;&lt;tt class="docutils literal"&gt;rdwr_buf_or_null&lt;/tt&gt;&lt;/td&gt;
+&lt;td&gt;指向一个读/写 buffer 的指针或 NULL&lt;/td&gt;
 &lt;/tr&gt;
 &lt;/tbody&gt;
 &lt;/table&gt;
 &lt;/div&gt;
 &lt;div class="section" id="id4"&gt;
 &lt;h2 id="hidid4"&gt;参考资料&lt;a class="headerlink" href="#hidid4" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
-&lt;p&gt;&lt;a class="reference external" href="https://elixir.bootlin.com/linux/v5.19.14/source/kernel/bpf/verifier.c#L533"&gt;verifier.c - kernel/bpf/verifier.c - Linux source code (v5.19.14) - Bootlin&lt;/a&gt;
-&lt;a class="reference external" href="https://lwn.net/Articles/895885/"&gt;BPF: Dynamic pointers [LWN.net]&lt;/a&gt;&lt;/p&gt;
+&lt;ul class="simple"&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://elixir.bootlin.com/linux/v5.19.14/source/kernel/bpf/verifier.c#L533"&gt;verifier.c - kernel/bpf/verifier.c - Linux source code (v5.19.14) - Bootlin&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://elixir.bootlin.com/linux/v5.13/source/kernel/bpf/verifier.c#L548"&gt;verifier.c - kernel/bpf/verifier.c - Linux source code (v5.13) - Bootlin&lt;/a&gt;&lt;/li&gt;
+&lt;/ul&gt;
 &lt;/div&gt;
 </summary><category term="libbpf"></category></entry><entry><title>ebpf 程序中常用的 load_byte/load_half/load_word 功能介绍</title><link href="https://mozillazg.com/2022/07/ebpf-libbpf-what-is-load_byte-load_half-load_word.html" rel="alternate"></link><updated>2022-07-31T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2022-07-31:2022/07/ebpf-libbpf-what-is-load_byte-load_half-load_word.html</id><summary type="html">&lt;div class="section" id="id1"&gt;
 &lt;h2 id="hidid1"&gt;前言&lt;a class="headerlink" href="#hidid1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
@@ -291,7 +363,7 @@ R2 type=ptr_or_null_ expected=ptr_
 &lt;div class="section" id="id7"&gt;
 &lt;h3 id="hidid7"&gt;使用场景&lt;a class="headerlink" href="#hidid7" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
 &lt;p&gt;当想要从 &lt;tt class="docutils literal"&gt;struct __sk_buff *skb&lt;/tt&gt; 中读取数据类型大小为 16-bits（2个字节）的字段的值的时候，
-可以使用 &lt;tt class="docutils literal"&gt;load_byte&lt;/tt&gt; 直接从指针中读取对应的数据。&lt;/p&gt;
+可以使用 &lt;tt class="docutils literal"&gt;load_half&lt;/tt&gt; 直接从指针中读取对应的数据。&lt;/p&gt;
 &lt;p&gt;例子:&lt;/p&gt;
 &lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="n"&gt;__u16&lt;/span&gt; &lt;span class="n"&gt;h_proto&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;load_half&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;skb&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;offsetof&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="k"&gt;struct&lt;/span&gt; &lt;span class="n"&gt;ethhdr&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;h_proto&lt;/span&gt;&lt;span class="p"&gt;));&lt;/span&gt;
 &lt;/pre&gt;&lt;/div&gt;
@@ -314,7 +386,7 @@ R2 type=ptr_or_null_ expected=ptr_
 &lt;div class="section" id="id10"&gt;
 &lt;h3 id="hidid10"&gt;使用场景&lt;a class="headerlink" href="#hidid10" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
 &lt;p&gt;当想要从 &lt;tt class="docutils literal"&gt;struct __sk_buff *skb&lt;/tt&gt; 中读取数据类型大小为 32-bits（4个字节）的字段的值的时候，
-可以使用 &lt;tt class="docutils literal"&gt;load_byte&lt;/tt&gt; 直接从指针中读取对应的数据。&lt;/p&gt;
+可以使用 &lt;tt class="docutils literal"&gt;load_word&lt;/tt&gt; 直接从指针中读取对应的数据。&lt;/p&gt;
 &lt;p&gt;例子:&lt;/p&gt;
 &lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="n"&gt;__u32&lt;/span&gt; &lt;span class="n"&gt;saddr&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;load_word&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;skb&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;ETH_HLEN&lt;/span&gt; &lt;span class="o"&gt;+&lt;/span&gt; &lt;span class="n"&gt;offsetof&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="k"&gt;struct&lt;/span&gt; &lt;span class="n"&gt;iphdr&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;saddr&lt;/span&gt;&lt;span class="p"&gt;));&lt;/span&gt;
 &lt;/pre&gt;&lt;/div&gt;
@@ -822,56 +894,4 @@ print fmt: &amp;quot;dfd: 0x%08lx, filename: 0x%08lx, mode: 0x%08lx&amp;quot;, (
 &lt;li&gt;&lt;a class="reference external" href="https://nakryiko.com/posts/bcc-to-libbpf-howto-guide/"&gt;BCC to libbpf conversion guide&lt;/a&gt;&lt;/li&gt;
 &lt;/ul&gt;
 &lt;/div&gt;
-</summary><category term="tracepoint"></category><category term="libbpf"></category><category term="libbpfgo"></category></entry><entry><title>根据进程信息获取对应进程所属的容器/Pod 信息（一）</title><link href="https://mozillazg.com/2022/05/ebpf-libbpfgo-get-container-info-via-process-info.rst.html" rel="alternate"></link><updated>2022-05-14T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2022-05-14:2022/05/ebpf-libbpfgo-get-container-info-via-process-info.rst.html</id><summary type="html">&lt;div class="section" id="id1"&gt;
-&lt;h2 id="hidid1"&gt;前言&lt;a class="headerlink" href="#hidid1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
-&lt;p&gt;前面我们通过 ebpf 程序获取到了执行操作的对应进程的进程信息，一般来说还会有需要获取这个进程所属的容器或 Pod 信息的需求。
-本文记录一下一种获取进程所属的容器信息的方法（知道了容器信息通过其他方法可以很容易的找到容器所属的 Pod 信息）。&lt;/p&gt;
-&lt;/div&gt;
-&lt;div class="section" id="proc-pid-cgroup"&gt;
-&lt;h2 id="hidproc-pid-cgroup"&gt;通过 /proc/&amp;lt;pid&amp;gt;/cgroup 文件获取容器信息&lt;a class="headerlink" href="#hidproc-pid-cgroup" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
-&lt;p&gt;如标题所述，我们可以通过读取 &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;/proc/&amp;lt;pid&amp;gt;/cgroup&lt;/span&gt;&lt;/tt&gt; 文件来获取进程所属的容器 id，通过容器 id 自然就可以找到对应的容器了。&lt;/p&gt;
-&lt;p&gt;这个 cgroup 文件的内容示例如下:&lt;/p&gt;
-&lt;pre class="literal-block"&gt;
-0::/kubepods/besteffort/pod779e55c6-0467-4431-997f-25a71a8e8a8e/a9ccdd00512985cb6e6c8dff176cb3086a989e477200c9a1cfdf8749182fc1da
-&lt;/pre&gt;
-&lt;p&gt;其中， &lt;tt class="docutils literal"&gt;a9ccdd00512985cb6e6c8dff176cb3086a989e477200c9a1cfdf8749182fc1da&lt;/tt&gt; 就是我们要找的容器 id。&lt;/p&gt;
-&lt;p&gt;下面通过一个示例来验证一下这个方法。
-这个示例程序将监控 &lt;tt class="docutils literal"&gt;execve&lt;/tt&gt; 系统调用，并且只记录进程名称是 &lt;tt class="docutils literal"&gt;sh&lt;/tt&gt; 的事件，
-在输出事件时，将在 go 程序中通过读取 &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;/proc/&amp;lt;pid&amp;gt;/cgroup&lt;/span&gt;&lt;/tt&gt; 文件的内容获取对应的容器 id 信息。&lt;/p&gt;
-&lt;p&gt;示例的源代码可以通过 &lt;a class="reference external" href="https://github.com/mozillazg/hello-libbpfgo/tree/master/06-get-container-info-1"&gt;https://github.com/mozillazg/hello-libbpfgo/tree/master/06-get-container-info-1&lt;/a&gt; 获取。&lt;/p&gt;
-&lt;p&gt;编译并运行程序:&lt;/p&gt;
-&lt;pre class="literal-block"&gt;
-$ make
-$ sudo ./main
-&lt;/pre&gt;
-&lt;p&gt;在另一个窗口中通过 kubectl 创建一个使用 &lt;tt class="docutils literal"&gt;sh&lt;/tt&gt; 命令执行操作的 pod:&lt;/p&gt;
-&lt;pre class="literal-block"&gt;
-$ kubectl run test --image docker.io/calico/node:v3.19.1 \
-    -- sh -c 'while true; do ls &amp;gt; /dev/null &amp;amp;&amp;amp; sleep 10; done'
-pod/test created
-
-$ kubectl get pod
-NAME   READY   STATUS    RESTARTS   AGE
-test   1/1     Running   0          3s
-&lt;/pre&gt;
-&lt;p&gt;当 pod Running 后，可以在前面执行 &lt;tt class="docutils literal"&gt;sudo ./main&lt;/tt&gt; 的窗口中看到类似如下的输出:&lt;/p&gt;
-&lt;pre class="literal-block"&gt;
-..., Comm: sh, ContainerId: f1abcafee046eda0e9d78691dcc20fcde1d008bb84a2b08dedfbd2cd4d8feb99
-&lt;/pre&gt;
-&lt;p&gt;通过 kubectl 查看创建的 pod 信息可以看到这个容器 id 就是这个 pod 的容器对应的id:&lt;/p&gt;
-&lt;pre class="literal-block"&gt;
-$ kubectl describe pod test |grep f1abcafee046eda0e9d78691dcc20fcde1d008bb84a2b08dedfbd2cd4d8feb99 -A 8
-    Container ID:  containerd://f1abcafee046eda0e9d78691dcc20fcde1d008bb84a2b08dedfbd2cd4d8feb99
-    Image:         docker.io/calico/node:v3.19.1
-    Image ID:      docker.io/calico/node&amp;#64;sha256:bc4a631d553b38fdc169ea4cb8027fa894a656e80d68d513359a4b9d46836b55
-    Port:          &amp;lt;none&amp;gt;
-    Host Port:     &amp;lt;none&amp;gt;
-    Args:
-      sh
-      -c
-      while true; do ls &amp;gt; /dev/null &amp;amp;&amp;amp; sleep 10; done
-&lt;/pre&gt;
-&lt;!-- 参考资料 --&gt;
-&lt;!-- ============ --&gt;
-&lt;/div&gt;
-</summary><category term="libbpf"></category><category term="libbpfgo"></category><category term="go"></category><category term="golang"></category></entry></feed>
+</summary><category term="tracepoint"></category><category term="libbpf"></category><category term="libbpfgo"></category></entry></feed>
