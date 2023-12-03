@@ -245,29 +245,29 @@ SEC(&quot;raw_tp/&lt;name&gt;&quot;)
 <p>Suppose that we want to monitor the <tt class="docutils literal">fchmodat</tt> system call involved in the <tt class="docutils literal">chmod</tt> command via raw tracepoint. Then, how do we determine the type of parameters of the event handler in ebpf, and how do we get the content of the corresponding <tt class="docutils literal">fchmodat</tt> system call parameters? For example, get the name of the file to be operated on and the value of the permission mode to be operated on.</p>
 <p>The first step is to find the raw tracepoint events that can be used for this system call. As mentioned earlier, you can use the <tt class="docutils literal">sys_enter</tt> and <tt class="docutils literal">sys_exit</tt> events to monitor all system call events.</p>
 <p>The second step is to determine the argument type of the function. raw tracepoint uses the <tt class="docutils literal">bpf_raw_tracepoint_args</tt> structure uniformly.</p>
-<div class="highlight"><pre><span></span><span class="k">struct</span> <span class="n">bpf_raw_tracepoint_args</span> <span class="p">{</span>
-    <span class="n">__u64</span> <span class="n">args</span><span class="p">[</span><span class="mi">0</span><span class="p">];</span>
+<div class="highlight"><pre><span></span><span class="k">struct</span><span class="w"> </span><span class="nc">bpf_raw_tracepoint_args</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="n">__u64</span><span class="w"> </span><span class="n">args</span><span class="p">[</span><span class="mi">0</span><span class="p">];</span>
 <span class="p">};</span>
 </pre></div>
 <p>The <tt class="docutils literal">args</tt> stores the information we can get about the event, and what information is contained in them is what we need to determine in step 3.</p>
 <!-- 第四步，确定事件本身可以获取到哪些信息。前面说了，可以使用的 `include/trace/events/syscalls.h <https://elixir.bootlin.com/linux/v5.13/source/include/trace/events/syscalls.h>`__ 文件中定义的 ``sys_enter`` 和 ``sys_exit`` 事件来监控所有系统调用事件。这里以 ``sys_enter`` 为例： -->
 <p>The third step is to determine what information can be obtained from the event itself. Here is an example of <tt class="docutils literal">sys_enter</tt> (taken from <a class="reference external" href="https://elixir.bootlin.com/linux/v5.13/source/include/trace/events/syscalls.h">include/trace/events/syscalls.h</a>, where most of the events are concentrated in the <a class="reference external" href="https://elixir.bootlin.com/linux/v5.13/source/include/trace/events">include/trace/events/</a> directory).</p>
 <div class="highlight"><pre><span></span><span class="n">TRACE_EVENT_FN</span><span class="p">(</span><span class="n">sys_enter</span><span class="p">,</span>
-    <span class="n">TP_PROTO</span><span class="p">(</span><span class="k">struct</span> <span class="n">pt_regs</span> <span class="o">*</span><span class="n">regs</span><span class="p">,</span> <span class="kt">long</span> <span class="n">id</span><span class="p">),</span>
-    <span class="n">TP_ARGS</span><span class="p">(</span><span class="n">regs</span><span class="p">,</span> <span class="n">id</span><span class="p">),</span>
-    <span class="n">TP_STRUCT__entry</span><span class="p">(</span>
-        <span class="n">__field</span><span class="p">(</span>    <span class="kt">long</span><span class="p">,</span>           <span class="n">id</span>              <span class="p">)</span>
-        <span class="n">__array</span><span class="p">(</span>    <span class="kt">unsigned</span> <span class="kt">long</span><span class="p">,</span>  <span class="n">args</span><span class="p">,</span>   <span class="mi">6</span>       <span class="p">)</span>
-    <span class="p">),</span>
-    <span class="n">TP_fast_assign</span><span class="p">(</span>
-        <span class="n">__entry</span><span class="o">-&gt;</span><span class="n">id</span> <span class="o">=</span> <span class="n">id</span><span class="p">;</span>
-        <span class="n">syscall_get_arguments</span><span class="p">(</span><span class="n">current</span><span class="p">,</span> <span class="n">regs</span><span class="p">,</span> <span class="n">__entry</span><span class="o">-&gt;</span><span class="n">args</span><span class="p">);</span>
-    <span class="p">),</span>
-    <span class="n">TP_printk</span><span class="p">(</span><span class="s">&quot;NR %ld (%lx, %lx, %lx, %lx, %lx, %lx)&quot;</span><span class="p">,</span>
-          <span class="n">__entry</span><span class="o">-&gt;</span><span class="n">id</span><span class="p">,</span>
-          <span class="n">__entry</span><span class="o">-&gt;</span><span class="n">args</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span> <span class="n">__entry</span><span class="o">-&gt;</span><span class="n">args</span><span class="p">[</span><span class="mi">1</span><span class="p">],</span> <span class="n">__entry</span><span class="o">-&gt;</span><span class="n">args</span><span class="p">[</span><span class="mi">2</span><span class="p">],</span>
-          <span class="n">__entry</span><span class="o">-&gt;</span><span class="n">args</span><span class="p">[</span><span class="mi">3</span><span class="p">],</span> <span class="n">__entry</span><span class="o">-&gt;</span><span class="n">args</span><span class="p">[</span><span class="mi">4</span><span class="p">],</span> <span class="n">__entry</span><span class="o">-&gt;</span><span class="n">args</span><span class="p">[</span><span class="mi">5</span><span class="p">]),</span>
-    <span class="n">syscall_regfunc</span><span class="p">,</span> <span class="n">syscall_unregfunc</span>
+<span class="w">    </span><span class="n">TP_PROTO</span><span class="p">(</span><span class="k">struct</span><span class="w"> </span><span class="nc">pt_regs</span><span class="w"> </span><span class="o">*</span><span class="n">regs</span><span class="p">,</span><span class="w"> </span><span class="kt">long</span><span class="w"> </span><span class="n">id</span><span class="p">),</span>
+<span class="w">    </span><span class="n">TP_ARGS</span><span class="p">(</span><span class="n">regs</span><span class="p">,</span><span class="w"> </span><span class="n">id</span><span class="p">),</span>
+<span class="w">    </span><span class="n">TP_STRUCT__entry</span><span class="p">(</span>
+<span class="w">        </span><span class="n">__field</span><span class="p">(</span><span class="w">    </span><span class="kt">long</span><span class="p">,</span><span class="w">           </span><span class="n">id</span><span class="w">              </span><span class="p">)</span>
+<span class="w">        </span><span class="n">__array</span><span class="p">(</span><span class="w">    </span><span class="kt">unsigned</span><span class="w"> </span><span class="kt">long</span><span class="p">,</span><span class="w">  </span><span class="n">args</span><span class="p">,</span><span class="w">   </span><span class="mi">6</span><span class="w">       </span><span class="p">)</span>
+<span class="w">    </span><span class="p">),</span>
+<span class="w">    </span><span class="n">TP_fast_assign</span><span class="p">(</span>
+<span class="w">        </span><span class="n">__entry</span><span class="o">-&gt;</span><span class="n">id</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">id</span><span class="p">;</span>
+<span class="w">        </span><span class="n">syscall_get_arguments</span><span class="p">(</span><span class="n">current</span><span class="p">,</span><span class="w"> </span><span class="n">regs</span><span class="p">,</span><span class="w"> </span><span class="n">__entry</span><span class="o">-&gt;</span><span class="n">args</span><span class="p">);</span>
+<span class="w">    </span><span class="p">),</span>
+<span class="w">    </span><span class="n">TP_printk</span><span class="p">(</span><span class="s">&quot;NR %ld (%lx, %lx, %lx, %lx, %lx, %lx)&quot;</span><span class="p">,</span>
+<span class="w">          </span><span class="n">__entry</span><span class="o">-&gt;</span><span class="n">id</span><span class="p">,</span>
+<span class="w">          </span><span class="n">__entry</span><span class="o">-&gt;</span><span class="n">args</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span><span class="w"> </span><span class="n">__entry</span><span class="o">-&gt;</span><span class="n">args</span><span class="p">[</span><span class="mi">1</span><span class="p">],</span><span class="w"> </span><span class="n">__entry</span><span class="o">-&gt;</span><span class="n">args</span><span class="p">[</span><span class="mi">2</span><span class="p">],</span>
+<span class="w">          </span><span class="n">__entry</span><span class="o">-&gt;</span><span class="n">args</span><span class="p">[</span><span class="mi">3</span><span class="p">],</span><span class="w"> </span><span class="n">__entry</span><span class="o">-&gt;</span><span class="n">args</span><span class="p">[</span><span class="mi">4</span><span class="p">],</span><span class="w"> </span><span class="n">__entry</span><span class="o">-&gt;</span><span class="n">args</span><span class="p">[</span><span class="mi">5</span><span class="p">]),</span>
+<span class="w">    </span><span class="n">syscall_regfunc</span><span class="p">,</span><span class="w"> </span><span class="n">syscall_unregfunc</span>
 <span class="p">);</span>
 </pre></div>
 <p>其中</p>
@@ -277,34 +277,34 @@ SEC(&quot;raw_tp/&lt;name&gt;&quot;)
 </ul>
 <p>After that, continue to get the corresponding system call parameters.</p>
 <p><tt class="docutils literal">fchmodat</tt> This system call has the following function definition:</p>
-<div class="highlight"><pre><span></span><span class="kt">int</span> <span class="nf">fchmodat</span><span class="p">(</span><span class="kt">int</span> <span class="n">dirfd</span><span class="p">,</span> <span class="k">const</span> <span class="kt">char</span> <span class="o">*</span><span class="n">pathname</span><span class="p">,</span> <span class="kt">mode_t</span> <span class="n">mode</span><span class="p">,</span> <span class="kt">int</span> <span class="n">flags</span><span class="p">);</span>
+<div class="highlight"><pre><span></span><span class="kt">int</span><span class="w"> </span><span class="nf">fchmodat</span><span class="p">(</span><span class="kt">int</span><span class="w"> </span><span class="n">dirfd</span><span class="p">,</span><span class="w"> </span><span class="k">const</span><span class="w"> </span><span class="kt">char</span><span class="w"> </span><span class="o">*</span><span class="n">pathname</span><span class="p">,</span><span class="w"> </span><span class="kt">mode_t</span><span class="w"> </span><span class="n">mode</span><span class="p">,</span><span class="w"> </span><span class="kt">int</span><span class="w"> </span><span class="n">flags</span><span class="p">);</span>
 </pre></div>
 <p>Since <tt class="docutils literal">regs</tt> is of type <tt class="docutils literal">pt_regs</tt>, we can get the value of the first argument with <tt class="docutils literal">PT_REGS_PARM1_CORE(regs)</tt>, the value of the second argument with
 <tt class="docutils literal">PT_REGS_PARM2_CORE(regs)</tt> to get the value of the second argument, <tt class="docutils literal">PT_REGS_PARM3_CORE(regs)</tt> to get the value of the third argument, and so on, with <tt class="docutils literal">PT_REGS_PARM4_CORE</tt> and <tt class="docutils literal">PT_REGS_PARM5_CORE</tt> to get the value of the fourth and fifth argument in regs, respectively.</p>
 <p>Once the information is determined, you can write the program. For example, the above example ebpf program that handles the <tt class="docutils literal">fchmodat</tt> system call via the <tt class="docutils literal">sys_enter</tt> event is as follows:</p>
 <div class="highlight"><pre><span></span><span class="n">SEC</span><span class="p">(</span><span class="s">&quot;raw_tracepoint/sys_enter&quot;</span><span class="p">)</span>
-<span class="kt">int</span> <span class="n">raw_tracepoint__sys_enter</span><span class="p">(</span><span class="k">struct</span> <span class="n">bpf_raw_tracepoint_args</span> <span class="o">*</span><span class="n">ctx</span><span class="p">)</span>
+<span class="kt">int</span><span class="w"> </span><span class="n">raw_tracepoint__sys_enter</span><span class="p">(</span><span class="k">struct</span><span class="w"> </span><span class="nc">bpf_raw_tracepoint_args</span><span class="w"> </span><span class="o">*</span><span class="n">ctx</span><span class="p">)</span>
 <span class="p">{</span>
-    <span class="kt">unsigned</span> <span class="kt">long</span> <span class="n">syscall_id</span> <span class="o">=</span> <span class="n">ctx</span><span class="o">-&gt;</span><span class="n">args</span><span class="p">[</span><span class="mi">1</span><span class="p">];</span>
-    <span class="k">if</span><span class="p">(</span><span class="n">syscall_id</span> <span class="o">!=</span> <span class="mi">268</span><span class="p">)</span>    <span class="c1">// filter fchmodat system call</span>
-        <span class="k">return</span> <span class="mi">0</span><span class="p">;</span>
+<span class="w">    </span><span class="kt">unsigned</span><span class="w"> </span><span class="kt">long</span><span class="w"> </span><span class="n">syscall_id</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">ctx</span><span class="o">-&gt;</span><span class="n">args</span><span class="p">[</span><span class="mi">1</span><span class="p">];</span>
+<span class="w">    </span><span class="k">if</span><span class="p">(</span><span class="n">syscall_id</span><span class="w"> </span><span class="o">!=</span><span class="w"> </span><span class="mi">268</span><span class="p">)</span><span class="w">    </span><span class="c1">// filter fchmodat system call</span>
+<span class="w">        </span><span class="k">return</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span>
 
-    <span class="k">struct</span> <span class="n">pt_regs</span> <span class="o">*</span><span class="n">regs</span><span class="p">;</span>
-    <span class="n">regs</span> <span class="o">=</span> <span class="p">(</span><span class="k">struct</span> <span class="n">pt_regs</span> <span class="o">*</span><span class="p">)</span> <span class="n">ctx</span><span class="o">-&gt;</span><span class="n">args</span><span class="p">[</span><span class="mi">0</span><span class="p">];</span>
+<span class="w">    </span><span class="k">struct</span><span class="w"> </span><span class="nc">pt_regs</span><span class="w"> </span><span class="o">*</span><span class="n">regs</span><span class="p">;</span>
+<span class="w">    </span><span class="n">regs</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">(</span><span class="k">struct</span><span class="w"> </span><span class="nc">pt_regs</span><span class="w"> </span><span class="o">*</span><span class="p">)</span><span class="w"> </span><span class="n">ctx</span><span class="o">-&gt;</span><span class="n">args</span><span class="p">[</span><span class="mi">0</span><span class="p">];</span>
 
-    <span class="kt">char</span> <span class="n">pathname</span><span class="p">[</span><span class="mi">256</span><span class="p">];</span>
-    <span class="n">u32</span> <span class="n">mode</span><span class="p">;</span>
+<span class="w">    </span><span class="kt">char</span><span class="w"> </span><span class="n">pathname</span><span class="p">[</span><span class="mi">256</span><span class="p">];</span>
+<span class="w">    </span><span class="n">u32</span><span class="w"> </span><span class="n">mode</span><span class="p">;</span>
 
-    <span class="c1">// xx</span>
-    <span class="kt">char</span> <span class="o">*</span><span class="n">pathname_ptr</span> <span class="o">=</span> <span class="p">(</span><span class="kt">char</span> <span class="o">*</span><span class="p">)</span> <span class="n">PT_REGS_PARM2_CORE</span><span class="p">(</span><span class="n">regs</span><span class="p">);</span>
-    <span class="n">bpf_core_read_user_str</span><span class="p">(</span><span class="o">&amp;</span><span class="n">pathname</span><span class="p">,</span> <span class="k">sizeof</span><span class="p">(</span><span class="n">pathname</span><span class="p">),</span> <span class="n">pathname_ptr</span><span class="p">);</span>
+<span class="w">    </span><span class="c1">// xx</span>
+<span class="w">    </span><span class="kt">char</span><span class="w"> </span><span class="o">*</span><span class="n">pathname_ptr</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">(</span><span class="kt">char</span><span class="w"> </span><span class="o">*</span><span class="p">)</span><span class="w"> </span><span class="n">PT_REGS_PARM2_CORE</span><span class="p">(</span><span class="n">regs</span><span class="p">);</span>
+<span class="w">    </span><span class="n">bpf_core_read_user_str</span><span class="p">(</span><span class="o">&amp;</span><span class="n">pathname</span><span class="p">,</span><span class="w"> </span><span class="k">sizeof</span><span class="p">(</span><span class="n">pathname</span><span class="p">),</span><span class="w"> </span><span class="n">pathname_ptr</span><span class="p">);</span>
 
-    <span class="c1">// xx</span>
-    <span class="n">mode</span> <span class="o">=</span> <span class="p">(</span><span class="n">u32</span><span class="p">)</span> <span class="n">PT_REGS_PARM3_CORE</span><span class="p">(</span><span class="n">regs</span><span class="p">);</span>
+<span class="w">    </span><span class="c1">// xx</span>
+<span class="w">    </span><span class="n">mode</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">(</span><span class="n">u32</span><span class="p">)</span><span class="w"> </span><span class="n">PT_REGS_PARM3_CORE</span><span class="p">(</span><span class="n">regs</span><span class="p">);</span>
 
-    <span class="kt">char</span> <span class="n">fmt</span><span class="p">[]</span> <span class="o">=</span> <span class="s">&quot;fchmodat %s %d</span><span class="se">\n</span><span class="s">&quot;</span><span class="p">;</span>
-    <span class="n">bpf_trace_printk</span><span class="p">(</span><span class="n">fmt</span><span class="p">,</span> <span class="k">sizeof</span><span class="p">(</span><span class="n">fmt</span><span class="p">),</span> <span class="o">&amp;</span><span class="n">pathname</span><span class="p">,</span> <span class="n">mode</span><span class="p">);</span>
-    <span class="k">return</span> <span class="mi">0</span><span class="p">;</span>
+<span class="w">    </span><span class="kt">char</span><span class="w"> </span><span class="n">fmt</span><span class="p">[]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">&quot;fchmodat %s %d</span><span class="se">\n</span><span class="s">&quot;</span><span class="p">;</span>
+<span class="w">    </span><span class="n">bpf_trace_printk</span><span class="p">(</span><span class="n">fmt</span><span class="p">,</span><span class="w"> </span><span class="k">sizeof</span><span class="p">(</span><span class="n">fmt</span><span class="p">),</span><span class="w"> </span><span class="o">&amp;</span><span class="n">pathname</span><span class="p">,</span><span class="w"> </span><span class="n">mode</span><span class="p">);</span>
+<span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span>
 <span class="p">}</span>
 </pre></div>
 <p>You can check out full example codes on Github:</p>
@@ -373,7 +373,7 @@ urandom_read  789K   697K        750K            755K
                 var disqus_url = 'https://mozillazg.com/2022/05/ebpf-libbpf-raw-tracepoint-common-questions-en.html';
 
             var disqus_config = function () {
-                this.language = "en";
+                this.language = "";
             };
 
             /* * * DON'T EDIT BELOW THIS LINE * * */
@@ -400,7 +400,7 @@ urandom_read  789K   697K        750K            755K
    <div class="container">
       <hr>
       <div class="row">
-         <div class="col-xs-10">&copy; 2022 mozillazg
+         <div class="col-xs-10">&copy; 2023 mozillazg
             &middot; Powered by <a href="https://github.com/DandyDev/pelican-bootstrap3" target="_blank">pelican-bootstrap3</a>,
             <a href="http://docs.getpelican.com/" target="_blank">Pelican</a>,
             <a href="http://getbootstrap.com" target="_blank">Bootstrap</a>

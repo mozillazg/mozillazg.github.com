@@ -166,16 +166,16 @@ mozillazg's Blog            </a>
                 <div class="js-toc"></div>
                 <div>
                 <p>有时当我们加载编译后的 eBPF 程序的时候，eBPF 验证器会提示程序中有类型错误的问题导致程序加载失败。 本文记录一下这种错误的一种解决方法。</p>
-<div class="section" id="id1">
-<h2 id="hidid1">错误示例<a class="headerlink" href="#hidid1" title="Permalink to this headline">¶</a></h2>
+<div class="section" id="section-1">
+<h2 id="hidsection-1">错误示例<a class="headerlink" href="#hidsection-1" title="Permalink to this headline">¶</a></h2>
 <p>比如，当下面这段 eBPF 程序</p>
 <div class="highlight"><pre><span></span><span class="n">SEC</span><span class="p">(</span><span class="s">&quot;iter/bpf_sk_storage_map&quot;</span><span class="p">)</span>
-<span class="kt">int</span> <span class="n">iter__bpf_sk_storage_map</span><span class="p">(</span><span class="k">struct</span> <span class="n">bpf_iter__bpf_sk_storage_map</span> <span class="o">*</span><span class="n">ctx</span><span class="p">)</span>
+<span class="kt">int</span><span class="w"> </span><span class="n">iter__bpf_sk_storage_map</span><span class="p">(</span><span class="k">struct</span><span class="w"> </span><span class="nc">bpf_iter__bpf_sk_storage_map</span><span class="w"> </span><span class="o">*</span><span class="n">ctx</span><span class="p">)</span>
 <span class="p">{</span>
-    <span class="k">if</span> <span class="p">(</span><span class="n">ctx</span><span class="o">-&gt;</span><span class="n">sk</span><span class="p">)</span>
-        <span class="n">bpf_sk_storage_delete</span><span class="p">(</span><span class="o">&amp;</span><span class="n">sk_storage_map</span><span class="p">,</span> <span class="n">ctx</span><span class="o">-&gt;</span><span class="n">sk</span><span class="p">);</span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">ctx</span><span class="o">-&gt;</span><span class="n">sk</span><span class="p">)</span>
+<span class="w">        </span><span class="n">bpf_sk_storage_delete</span><span class="p">(</span><span class="o">&amp;</span><span class="n">sk_storage_map</span><span class="p">,</span><span class="w"> </span><span class="n">ctx</span><span class="o">-&gt;</span><span class="n">sk</span><span class="p">);</span>
 
-    <span class="k">return</span> <span class="mi">0</span><span class="p">;</span>
+<span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span>
 <span class="p">}</span>
 </pre></div>
 <p>被加载到内核中时会提示如下类型错误:</p>
@@ -200,8 +200,8 @@ libbpf: prog 'iter__bpf_sk_storage_map': failed to load: -13
 libbpf: failed to load object 'main.bpf.o'
 failed to load BPF object: permission denied
 </pre>
-<div class="section" id="id2">
-<h3 id="hidid2">解决办法<a class="headerlink" href="#hidid2" title="Permalink to this headline">¶</a></h3>
+<div class="section" id="section-2">
+<h3 id="hidsection-2">解决办法<a class="headerlink" href="#hidsection-2" title="Permalink to this headline">¶</a></h3>
 <p>这个错误信息有两个关键错误，一个错误是:</p>
 <pre class="literal-block">
 R1 type=ctx expected=fp
@@ -223,22 +223,22 @@ R2 type=ptr_or_null_ expected=ptr_
 </pre>
 <p>其中 <tt class="docutils literal">R2 type=ptr_or_null_ expected=ptr_</tt> 说的是，验证器期望 <tt class="docutils literal">R2</tt> 的类型是 <tt class="docutils literal">ptr</tt> 而不是 <tt class="docutils literal">prt_or_null</tt> ，即，期望 <tt class="docutils literal">R2</tt> 是一个指针而不是一个指针或 <tt class="docutils literal">NULL</tt> 。 这里可能会有点疑惑，前面的判断 <tt class="docutils literal">if <span class="pre">(ctx-&gt;sk)</span></tt> 已经确保了不会为 <tt class="docutils literal">NULL</tt> ， 为啥这里还会认为它有可能为 <tt class="docutils literal">NULL</tt> ，这是因为前面的 if 判断的不是栈变量， 存在 <tt class="docutils literal">R1 type=ctx expected=fp</tt> 的问题也就无法保证它一定不是 <tt class="docutils literal">NULL</tt> 了。</p>
 <p>解决办法也很简单，就是用一个临时变量保存 ctx-&gt;sk 的值， 然后用这个栈上的临时变量做后续的操作:</p>
-<div class="highlight"><pre><span></span> SEC(&quot;iter/bpf_sk_storage_map&quot;)
- int iter__bpf_sk_storage_map(struct bpf_iter__bpf_sk_storage_map *ctx)
- {
+<div class="highlight"><pre><span></span><span class="w"> </span>SEC(&quot;iter/bpf_sk_storage_map&quot;)
+<span class="w"> </span>int iter__bpf_sk_storage_map(struct bpf_iter__bpf_sk_storage_map *ctx)
+<span class="w"> </span>{
 <span class="gd">-    if (ctx-&gt;sk)</span>
 <span class="gd">-        bpf_sk_storage_delete(&amp;sk_storage_map, ctx-&gt;sk);</span>
 <span class="gi">+    struct sock *sk = ctx-&gt;sk;</span>
 <span class="gi">+    if (sk)</span>
 <span class="gi">+        bpf_sk_storage_delete(&amp;sk_storage_map, sk);</span>
 
-     return 0;
- }
+<span class="w"> </span>    return 0;
+<span class="w"> </span>}
 </pre></div>
 </div>
 </div>
-<div class="section" id="id3">
-<h2 id="hidid3">常见类型关键字的含义<a class="headerlink" href="#hidid3" title="Permalink to this headline">¶</a></h2>
+<div class="section" id="section-3">
+<h2 id="hidsection-3">常见类型关键字的含义<a class="headerlink" href="#hidsection-3" title="Permalink to this headline">¶</a></h2>
 <p>这里记录一下类似前面 <tt class="docutils literal">fp</tt> 这样的常见类型关键字具体的含义：</p>
 <table border="1" class="docutils">
 <colgroup>
@@ -350,8 +350,8 @@ R2 type=ptr_or_null_ expected=ptr_
 </tbody>
 </table>
 </div>
-<div class="section" id="id4">
-<h2 id="hidid4">参考资料<a class="headerlink" href="#hidid4" title="Permalink to this headline">¶</a></h2>
+<div class="section" id="section-4">
+<h2 id="hidsection-4">参考资料<a class="headerlink" href="#hidsection-4" title="Permalink to this headline">¶</a></h2>
 <ul class="simple">
 <li><a class="reference external" href="https://elixir.bootlin.com/linux/v5.19.14/source/kernel/bpf/verifier.c#L533">verifier.c - kernel/bpf/verifier.c - Linux source code (v5.19.14) - Bootlin</a></li>
 <li><a class="reference external" href="https://elixir.bootlin.com/linux/v5.13/source/kernel/bpf/verifier.c#L548">verifier.c - kernel/bpf/verifier.c - Linux source code (v5.13) - Bootlin</a></li>
@@ -374,11 +374,11 @@ R2 type=ptr_or_null_ expected=ptr_
 <section class="well" id="related-posts">
     <p>Related Posts:</p>
     <ul>
-        <li><a href="https://mozillazg.com/2022/05/ebpf-libbpf-tracepoint-common-questions.html">ebpf/libbpf 程序使用 tracepoint 的常见问题</a></li>
+        <li><a href="https://mozillazg.com/2022/11/ebpf-libbpfgo-tools-port-rewriting-the-control-plane-of-bcc-libbpf-tools-in-golang-with-libbpfgo.html">使用 libbpfgo 重写 BCC libbpf-tools 中各个工具的用户态程序</a></li>
+        <li><a href="https://mozillazg.com/2022/10/ebpf-libbpf-use-tail-calls.html">在 ebpf/libbpf 程序中使用尾调用（tail calls）</a></li>
+        <li><a href="https://mozillazg.com/2022/07/ebpf-libbpf-what-is-load_byte-load_half-load_word.html">ebpf 程序中常用的 load_byte/load_half/load_word 功能介绍</a></li>
+        <li><a href="https://mozillazg.com/2022/06/ebpf-libbpf-btf-powered-enabled-raw-tracepoint-common-questions.html">ebpf/libbpf 程序使用 btf raw tracepoint 的常见问题</a></li>
         <li><a href="https://mozillazg.com/2022/05/ebpf-libbpf-raw-tracepoint-common-questions.html">ebpf/libbpf 程序使用 raw tracepoint 的常见问题</a></li>
-        <li><a href="https://mozillazg.com/2022/05/ebpf-libbpfgo-get-container-info-via-process-info.rst.html">根据进程信息获取对应进程所属的容器/Pod 信息（一）</a></li>
-        <li><a href="https://mozillazg.com/2022/05/ebpf-libbpfgo-get-process-info.html">libbpfgo 使用示例：在 ebpf 程序中获取进程信息</a></li>
-        <li><a href="https://mozillazg.com/2022/05/ebpf-libbpfgo-use-perfbuf-map.html">libbpfgo 使用示例：编写使用 perfbuf map 的 ebpf 程序</a></li>
     </ul>
 </section>
     <hr/>
@@ -394,7 +394,7 @@ R2 type=ptr_or_null_ expected=ptr_
                 var disqus_url = 'https://mozillazg.com/2022/10/ebpf-libbpf-verifier-fix-type-expected-issue.html';
 
             var disqus_config = function () {
-                this.language = "zh";
+                this.language = "";
             };
 
             /* * * DON'T EDIT BELOW THIS LINE * * */
@@ -421,7 +421,7 @@ R2 type=ptr_or_null_ expected=ptr_
    <div class="container">
       <hr>
       <div class="row">
-         <div class="col-xs-10">&copy; 2022 mozillazg
+         <div class="col-xs-10">&copy; 2023 mozillazg
             &middot; Powered by <a href="https://github.com/DandyDev/pelican-bootstrap3" target="_blank">pelican-bootstrap3</a>,
             <a href="http://docs.getpelican.com/" target="_blank">Pelican</a>,
             <a href="http://getbootstrap.com" target="_blank">Bootstrap</a>

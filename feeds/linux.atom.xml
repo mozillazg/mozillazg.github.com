@@ -1,14 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
-<feed xmlns="http://www.w3.org/2005/Atom"><title>mozillazg's Blog</title><link href="https://mozillazg.com/" rel="alternate"></link><link href="https://mozillazg.com/feeds/linux.atom.xml" rel="self"></link><id>https://mozillazg.com/</id><updated>2019-06-01T00:00:00+00:00</updated><entry><title>一个因为网卡 txqueuelen 参数值太小导致丢包的 case</title><link href="https://mozillazg.com/2019/06/linux-client-io-timeout-server-lost-drop-packet-tcp-retransmitted-ifconfig-txqueuelen.html" rel="alternate"></link><updated>2019-06-01T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2019-06-01:2019/06/linux-client-io-timeout-server-lost-drop-packet-tcp-retransmitted-ifconfig-txqueuelen.html</id><summary type="html">&lt;p&gt;前段时间线上的一个服务出现 tcp 重传特别严重，同时客户端与服务端通信的过程中经常出现 io timeout 错误。最后发现是因为网卡 txqueuelen 参数的值设置的太小导致的。&lt;/p&gt;
+<feed xmlns="http://www.w3.org/2005/Atom"><title>mozillazg's Blog</title><link href="https://mozillazg.com/" rel="alternate"></link><link href="https://mozillazg.com/feeds/linux.atom.xml" rel="self"></link><id>https://mozillazg.com/</id><updated>2019-06-01T00:00:00+00:00</updated><entry><title>一个因为网卡 txqueuelen 参数值太小导致丢包的 case</title><link href="https://mozillazg.com/2019/06/linux-client-io-timeout-server-lost-drop-packet-tcp-retransmitted-ifconfig-txqueuelen.html" rel="alternate"></link><published>2019-06-01T00:00:00+00:00</published><updated>2019-06-01T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2019-06-01:2019/06/linux-client-io-timeout-server-lost-drop-packet-tcp-retransmitted-ifconfig-txqueuelen.html</id><summary type="html">&lt;p&gt;前段时间线上的一个服务出现 tcp 重传特别严重，同时客户端与服务端通信的过程中经常出现 io timeout 错误。最后发现是因为网卡 txqueuelen 参数的值设置的太小导致的。&lt;/p&gt;
 &lt;p&gt;简单记录一下当时的现象，万一将来遇到类似的现象的时候有个参考，整体不是很完整只给自己备忘一下，有空的时候再完善。&lt;/p&gt;
-&lt;div class="section" id="id1"&gt;
-&lt;h2 id="hidid1"&gt;客户端&lt;a class="headerlink" href="#hidid1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;div class="section" id="section-1"&gt;
+&lt;h2 id="hidsection-1"&gt;客户端&lt;a class="headerlink" href="#hidsection-1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;p&gt;客户端程序使用 go 写的，与服务端端之间以 http 长连接的方式进行通信，直观的现象是日志中经常出现
 &lt;tt class="docutils literal"&gt;read tcp &lt;span class="pre"&gt;&amp;lt;ip&amp;gt;:&amp;lt;port&amp;gt;&lt;/span&gt; &lt;span class="pre"&gt;-&amp;gt;&lt;/span&gt; &lt;span class="pre"&gt;&amp;lt;ip&amp;gt;:&amp;lt;port&amp;gt;:&lt;/span&gt; i/o timeout&lt;/tt&gt; 错误。&lt;/p&gt;
 &lt;p&gt;由于没有客户端服务器的权限所以没有在客户端抓包。&lt;/p&gt;
 &lt;/div&gt;
-&lt;div class="section" id="id2"&gt;
-&lt;h2 id="hidid2"&gt;服务端&lt;a class="headerlink" href="#hidid2" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;div class="section" id="section-2"&gt;
+&lt;h2 id="hidsection-2"&gt;服务端&lt;a class="headerlink" href="#hidsection-2" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;p&gt;服务端最先观察到的现象是客户端在频繁的重连（这里只的是频繁的发送 http 请求，前面讲到了客户端与服务端是以 http 长连接的方式通信的，正常情况是连上之后只发一个 http 请求，要等很久才会发其他的 http 请求，也就是不会出现频繁的发送 http 请求的情况）。&lt;/p&gt;
 &lt;p&gt;然后查看服务端主机的系统监控，发现 tcp 重传的指标特别高。&lt;/p&gt;
 &lt;p&gt;服务端抓包发现的异常情况是: 服务端丢包重传一段时间后，客户端发起了关闭连接的操作，然后又没有完成最后 ACK 而是直接 RST。&lt;/p&gt;
@@ -43,14 +43,14 @@ eth0: flags=4163&amp;lt;UP,BROADCAST,RUNNING,MULTICAST&amp;gt;  mtu 1500
 &lt;p&gt;这篇文章写的不是很详细，有很多证据没法拿出来或者说是缺失了，期望将来能找个时间以及找到一个可以简单在本地重现的方法，那个时候再完善这篇文章，暂时只能算是简单的 case 备忘。&lt;/p&gt;
 &lt;p&gt;BTW, 还碰到一个丢包的 case 是：最终通过开启网卡多队列以及中断绑定来解决大流量下的网络丢包问题。&lt;/p&gt;
 &lt;/div&gt;
-&lt;div class="section" id="id3"&gt;
-&lt;h2 id="hidid3"&gt;参考资料&lt;a class="headerlink" href="#hidid3" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;div class="section" id="section-3"&gt;
+&lt;h2 id="hidsection-3"&gt;参考资料&lt;a class="headerlink" href="#hidsection-3" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;ul class="simple"&gt;
 &lt;li&gt;&lt;a class="reference external" href="http://m.newsmth.net/article/KernelTech/60177"&gt;[合集] 请教：协议栈什么情况下丢包&lt;/a&gt;&lt;/li&gt;
 &lt;/ul&gt;
 &lt;/div&gt;
-</summary><category term="丢包"></category></entry><entry><title>net.ipv4.ip_local_port_range 的值究竟影响了啥</title><link href="https://mozillazg.com/2019/05/linux-what-net.ipv4.ip_local_port_range-effect-or-mean.html" rel="alternate"></link><updated>2019-05-04T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2019-05-04:2019/05/linux-what-net.ipv4.ip_local_port_range-effect-or-mean.html</id><summary type="html">&lt;div class="section" id="id1"&gt;
-&lt;h2 id="hidid1"&gt;前言&lt;a class="headerlink" href="#hidid1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+</summary><category term="丢包"></category></entry><entry><title>net.ipv4.ip_local_port_range 的值究竟影响了啥</title><link href="https://mozillazg.com/2019/05/linux-what-net.ipv4.ip_local_port_range-effect-or-mean.html" rel="alternate"></link><published>2019-05-04T00:00:00+00:00</published><updated>2019-05-04T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2019-05-04:2019/05/linux-what-net.ipv4.ip_local_port_range-effect-or-mean.html</id><summary type="html">&lt;div class="section" id="section-1"&gt;
+&lt;h2 id="hidsection-1"&gt;前言&lt;a class="headerlink" href="#hidsection-1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;p&gt;网上关于 &lt;tt class="docutils literal"&gt;net.ipv4.ip_local_port_range&lt;/tt&gt; 的值的效果众说纷纭（下面所说的连接都假定使用的是相同的协议(都是 TCP 或 UDP)）:&lt;/p&gt;
 &lt;ul class="simple"&gt;
 &lt;li&gt;大部分文章都说这个值决定了客户端的一个 ip 可用的端口数量，即一个 ip 最多只能创建 60K 多一点的连接（1025-65535），如果要突破这个限制需要客户端机器绑定多个 ip。&lt;/li&gt;
@@ -104,8 +104,8 @@ nc: connect to 123.125.114.144 port 80 (tcp) failed: Cannot assign requested add
 &lt;/pre&gt;
 &lt;p&gt;可以看到确实如预期的失败了。&lt;/p&gt;
 &lt;/div&gt;
-&lt;div class="section" id="id2"&gt;
-&lt;h2 id="hidid2"&gt;相同目标 ip 不同目标端口&lt;a class="headerlink" href="#hidid2" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;div class="section" id="ip-1"&gt;
+&lt;h2 id="hidip-1"&gt;相同目标 ip 不同目标端口&lt;a class="headerlink" href="#hidip-1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;p&gt;下面看看相同目标 ip 不同目标端口是否可以突破这个端口限制:&lt;/p&gt;
 &lt;pre class="literal-block"&gt;
 $ nohup nc 123.125.114.144 443 -v &amp;amp;
@@ -136,8 +136,8 @@ nc: connect to 123.125.114.144 port 443 (tcp) failed: Cannot assign requested ad
 &lt;/pre&gt;
 &lt;p&gt;确实是不能再创建连接了，因为每个目标端口都达到了 ip_local_port_range 的限制。&lt;/p&gt;
 &lt;/div&gt;
-&lt;div class="section" id="id3"&gt;
-&lt;h2 id="hidid3"&gt;多个目标 ip 相同目标端口&lt;a class="headerlink" href="#hidid3" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;div class="section" id="ip-2"&gt;
+&lt;h2 id="hidip-2"&gt;多个目标 ip 相同目标端口&lt;a class="headerlink" href="#hidip-2" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;p&gt;下面看一下多个目标 ip 相同目标端口下的情况:&lt;/p&gt;
 &lt;pre class="literal-block"&gt;
 $ nohup nc 220.181.57.216 80 -v &amp;amp;
@@ -159,8 +159,8 @@ SYN-SENT  0        1               10.0.2.15:61000      123.125.114.144:80
 &lt;/pre&gt;
 &lt;p&gt;可以看到，每个目标 ip 都有独立的 ip_local_port_range 限制。&lt;/p&gt;
 &lt;/div&gt;
-&lt;div class="section" id="id4"&gt;
-&lt;h2 id="hidid4"&gt;多个目标 ip 不同目标端口&lt;a class="headerlink" href="#hidid4" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;div class="section" id="ip-3"&gt;
+&lt;h2 id="hidip-3"&gt;多个目标 ip 不同目标端口&lt;a class="headerlink" href="#hidip-3" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;p&gt;下面看一下多个目标 ip 相同不同端口下的情况，按照前面的经验两个 ip 加两个端口应该只能创建 8 个连接&lt;/p&gt;
 &lt;pre class="literal-block"&gt;
 $ nohup nc 123.125.114.144 80 -v &amp;amp;
@@ -203,16 +203,16 @@ ESTAB     0        0               10.0.2.15:61001       220.181.57.216:443
 &lt;/pre&gt;
 &lt;p&gt;可以看到确实如预期的只能创建8个连接。&lt;/p&gt;
 &lt;/div&gt;
-&lt;div class="section" id="id5"&gt;
-&lt;h2 id="hidid5"&gt;总结&lt;a class="headerlink" href="#hidid5" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;div class="section" id="section-2"&gt;
+&lt;h2 id="hidsection-2"&gt;总结&lt;a class="headerlink" href="#hidsection-2" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;p&gt;那么是否就可以说前言中的第一种说法就是错的呢，查了一下资料其实也不能说第一种说法是错误的：&lt;/p&gt;
 &lt;ul class="simple"&gt;
 &lt;li&gt;当系统的内核版本小于 3.2 时，第一种说法是正确的&lt;/li&gt;
 &lt;li&gt;&lt;a class="reference external" href="https://marc.info/?l=haproxy&amp;amp;m=139315478227467&amp;amp;w=2"&gt;当系统的内核版本大于等于 3.2 时，第二种说法是正确的&lt;/a&gt;&lt;/li&gt;
 &lt;/ul&gt;
 &lt;/div&gt;
-&lt;div class="section" id="id6"&gt;
-&lt;h2 id="hidid6"&gt;参考资料&lt;a class="headerlink" href="#hidid6" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;div class="section" id="section-3"&gt;
+&lt;h2 id="hidsection-3"&gt;参考资料&lt;a class="headerlink" href="#hidsection-3" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;ul class="simple"&gt;
 &lt;li&gt;&lt;a class="reference external" href="https://www.kernel.org/doc/Documentation/networking/ip-sysctl.txt"&gt;kernel.org/doc/Documentation/networking/ip-sysctl.txt&lt;/a&gt;&lt;/li&gt;
 &lt;li&gt;&lt;a class="reference external" href="https://medium.com/&amp;#64;pawilon/tuning-your-linux-kernel-and-haproxy-instance-for-high-loads-1a2105ea553e"&gt;Tuning your Linux kernel and HAProxy instance for high loads&lt;/a&gt;&lt;/li&gt;
@@ -222,37 +222,37 @@ ESTAB     0        0               10.0.2.15:61001       220.181.57.216:443
 &lt;li&gt;&lt;a class="reference external" href="https://marc.info/?l=haproxy&amp;amp;m=139315478227467&amp;amp;w=2"&gt;'Re: Fix for rare EADDRNOTAVAIL error' - MARC&lt;/a&gt;&lt;/li&gt;
 &lt;/ul&gt;
 &lt;/div&gt;
-</summary><category term="sysctl"></category></entry><entry><title>strace 常用操作</title><link href="https://mozillazg.com/2019/03/linux-debug-with-strace-cookbook-examples.html" rel="alternate"></link><updated>2019-03-30T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2019-03-30:2019/03/linux-debug-with-strace-cookbook-examples.html</id><summary type="html">&lt;div class="section" id="id1"&gt;
-&lt;h2 id="hidid1"&gt;前言&lt;a class="headerlink" href="#hidid1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+</summary><category term="sysctl"></category></entry><entry><title>strace 常用操作</title><link href="https://mozillazg.com/2019/03/linux-debug-with-strace-cookbook-examples.html" rel="alternate"></link><published>2019-03-30T00:00:00+00:00</published><updated>2019-03-30T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2019-03-30:2019/03/linux-debug-with-strace-cookbook-examples.html</id><summary type="html">&lt;div class="section" id="section-1"&gt;
+&lt;h2 id="hidsection-1"&gt;前言&lt;a class="headerlink" href="#hidsection-1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;p&gt;&lt;a class="reference external" href="http://man7.org/linux/man-pages/man1/strace.1.html"&gt;strace&lt;/a&gt; 可以用来查看/记录程序运行过程中调用的
 &lt;a class="reference external" href="http://man7.org/linux/man-pages/man2/syscalls.2.html"&gt;系统调用&lt;/a&gt; 以及接收到的进程信号（signal），
 对于我们日常 debug 疑难杂症非常的有帮助，是一个非常好的 debug 工具。本文简单记录一下 strace 的常用功能和操作。&lt;/p&gt;
 &lt;/div&gt;
-&lt;div class="section" id="id2"&gt;
-&lt;h2 id="hidid2"&gt;输出的含义&lt;a class="headerlink" href="#hidid2" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;div class="section" id="section-2"&gt;
+&lt;h2 id="hidsection-2"&gt;输出的含义&lt;a class="headerlink" href="#hidsection-2" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;p&gt;我们通过一个简单的命令来查看 strace 程序的典型输出：&lt;/p&gt;
-&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;$ strace ls /tmp/trace
-execve&lt;span class="o"&gt;(&lt;/span&gt;&lt;span class="s2"&gt;&amp;quot;/bin/ls&amp;quot;&lt;/span&gt;, &lt;span class="o"&gt;[&lt;/span&gt;&lt;span class="s2"&gt;&amp;quot;ls&amp;quot;&lt;/span&gt;, &lt;span class="s2"&gt;&amp;quot;/tmp/trace&amp;quot;&lt;/span&gt;&lt;span class="o"&gt;]&lt;/span&gt;, &lt;span class="o"&gt;[&lt;/span&gt;/* &lt;span class="m"&gt;41&lt;/span&gt; vars */&lt;span class="o"&gt;])&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; 0
-brk&lt;span class="o"&gt;(&lt;/span&gt;0&lt;span class="o"&gt;)&lt;/span&gt;                                  &lt;span class="o"&gt;=&lt;/span&gt; 0x11af000
-mmap&lt;span class="o"&gt;(&lt;/span&gt;NULL, 4096, PROT_READ&lt;span class="p"&gt;|&lt;/span&gt;PROT_WRITE, MAP_PRIVATE&lt;span class="p"&gt;|&lt;/span&gt;MAP_ANONYMOUS, -1, 0&lt;span class="o"&gt;)&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; 0x7f0738c16000
-access&lt;span class="o"&gt;(&lt;/span&gt;&lt;span class="s2"&gt;&amp;quot;/etc/ld.so.preload&amp;quot;&lt;/span&gt;, R_OK&lt;span class="o"&gt;)&lt;/span&gt;      &lt;span class="o"&gt;=&lt;/span&gt; -1 ENOENT &lt;span class="o"&gt;(&lt;/span&gt;No such file or directory&lt;span class="o"&gt;)&lt;/span&gt;
-open&lt;span class="o"&gt;(&lt;/span&gt;&lt;span class="s2"&gt;&amp;quot;/etc/ld.so.cache&amp;quot;&lt;/span&gt;, O_RDONLY&lt;span class="o"&gt;)&lt;/span&gt;      &lt;span class="o"&gt;=&lt;/span&gt; 3
-fstat&lt;span class="o"&gt;(&lt;/span&gt;3, &lt;span class="o"&gt;{&lt;/span&gt;&lt;span class="nv"&gt;st_mode&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;S_IFREG&lt;span class="p"&gt;|&lt;/span&gt;0644, &lt;span class="nv"&gt;st_size&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;35759, ...&lt;span class="o"&gt;})&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; 0
-mmap&lt;span class="o"&gt;(&lt;/span&gt;NULL, 35759, PROT_READ, MAP_PRIVATE, 3, 0&lt;span class="o"&gt;)&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; 0x7f0738c0a000
-close&lt;span class="o"&gt;(&lt;/span&gt;3&lt;span class="o"&gt;)&lt;/span&gt;                                &lt;span class="o"&gt;=&lt;/span&gt; 0
-open&lt;span class="o"&gt;(&lt;/span&gt;&lt;span class="s2"&gt;&amp;quot;/lib64/libselinux.so.1&amp;quot;&lt;/span&gt;, O_RDONLY&lt;span class="o"&gt;)&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; 3
-read&lt;span class="o"&gt;(&lt;/span&gt;3, &lt;span class="s2"&gt;&amp;quot;\177ELF\2\1\1\0\0\0\0\0\0\0\0\0\3\0&amp;gt;\0\1\0\0\0PX\0\0\0\0\0\0&amp;quot;&lt;/span&gt;..., 832&lt;span class="o"&gt;)&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; 832
-fstat&lt;span class="o"&gt;(&lt;/span&gt;3, &lt;span class="o"&gt;{&lt;/span&gt;&lt;span class="nv"&gt;st_mode&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;S_IFREG&lt;span class="p"&gt;|&lt;/span&gt;0755, &lt;span class="nv"&gt;st_size&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;122040, ...&lt;span class="o"&gt;})&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; 0
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;$&lt;span class="w"&gt; &lt;/span&gt;strace&lt;span class="w"&gt; &lt;/span&gt;ls&lt;span class="w"&gt; &lt;/span&gt;/tmp/trace
+execve&lt;span class="o"&gt;(&lt;/span&gt;&lt;span class="s2"&gt;&amp;quot;/bin/ls&amp;quot;&lt;/span&gt;,&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;[&lt;/span&gt;&lt;span class="s2"&gt;&amp;quot;ls&amp;quot;&lt;/span&gt;,&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="s2"&gt;&amp;quot;/tmp/trace&amp;quot;&lt;/span&gt;&lt;span class="o"&gt;]&lt;/span&gt;,&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;[&lt;/span&gt;/*&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="m"&gt;41&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;vars&lt;span class="w"&gt; &lt;/span&gt;*/&lt;span class="o"&gt;])&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="m"&gt;0&lt;/span&gt;
+brk&lt;span class="o"&gt;(&lt;/span&gt;&lt;span class="m"&gt;0&lt;/span&gt;&lt;span class="o"&gt;)&lt;/span&gt;&lt;span class="w"&gt;                                  &lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;0x11af000
+mmap&lt;span class="o"&gt;(&lt;/span&gt;NULL,&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="m"&gt;4096&lt;/span&gt;,&lt;span class="w"&gt; &lt;/span&gt;PROT_READ&lt;span class="p"&gt;|&lt;/span&gt;PROT_WRITE,&lt;span class="w"&gt; &lt;/span&gt;MAP_PRIVATE&lt;span class="p"&gt;|&lt;/span&gt;MAP_ANONYMOUS,&lt;span class="w"&gt; &lt;/span&gt;-1,&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="m"&gt;0&lt;/span&gt;&lt;span class="o"&gt;)&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;0x7f0738c16000
+access&lt;span class="o"&gt;(&lt;/span&gt;&lt;span class="s2"&gt;&amp;quot;/etc/ld.so.preload&amp;quot;&lt;/span&gt;,&lt;span class="w"&gt; &lt;/span&gt;R_OK&lt;span class="o"&gt;)&lt;/span&gt;&lt;span class="w"&gt;      &lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;-1&lt;span class="w"&gt; &lt;/span&gt;ENOENT&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;(&lt;/span&gt;No&lt;span class="w"&gt; &lt;/span&gt;such&lt;span class="w"&gt; &lt;/span&gt;file&lt;span class="w"&gt; &lt;/span&gt;or&lt;span class="w"&gt; &lt;/span&gt;directory&lt;span class="o"&gt;)&lt;/span&gt;
+open&lt;span class="o"&gt;(&lt;/span&gt;&lt;span class="s2"&gt;&amp;quot;/etc/ld.so.cache&amp;quot;&lt;/span&gt;,&lt;span class="w"&gt; &lt;/span&gt;O_RDONLY&lt;span class="o"&gt;)&lt;/span&gt;&lt;span class="w"&gt;      &lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="m"&gt;3&lt;/span&gt;
+fstat&lt;span class="o"&gt;(&lt;/span&gt;&lt;span class="m"&gt;3&lt;/span&gt;,&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;{&lt;/span&gt;&lt;span class="nv"&gt;st_mode&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;S_IFREG&lt;span class="p"&gt;|&lt;/span&gt;&lt;span class="m"&gt;0644&lt;/span&gt;,&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nv"&gt;st_size&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="m"&gt;35759&lt;/span&gt;,&lt;span class="w"&gt; &lt;/span&gt;...&lt;span class="o"&gt;})&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="m"&gt;0&lt;/span&gt;
+mmap&lt;span class="o"&gt;(&lt;/span&gt;NULL,&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="m"&gt;35759&lt;/span&gt;,&lt;span class="w"&gt; &lt;/span&gt;PROT_READ,&lt;span class="w"&gt; &lt;/span&gt;MAP_PRIVATE,&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="m"&gt;3&lt;/span&gt;,&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="m"&gt;0&lt;/span&gt;&lt;span class="o"&gt;)&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;0x7f0738c0a000
+close&lt;span class="o"&gt;(&lt;/span&gt;&lt;span class="m"&gt;3&lt;/span&gt;&lt;span class="o"&gt;)&lt;/span&gt;&lt;span class="w"&gt;                                &lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="m"&gt;0&lt;/span&gt;
+open&lt;span class="o"&gt;(&lt;/span&gt;&lt;span class="s2"&gt;&amp;quot;/lib64/libselinux.so.1&amp;quot;&lt;/span&gt;,&lt;span class="w"&gt; &lt;/span&gt;O_RDONLY&lt;span class="o"&gt;)&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="m"&gt;3&lt;/span&gt;
+read&lt;span class="o"&gt;(&lt;/span&gt;&lt;span class="m"&gt;3&lt;/span&gt;,&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="s2"&gt;&amp;quot;\177ELF\2\1\1\0\0\0\0\0\0\0\0\0\3\0&amp;gt;\0\1\0\0\0PX\0\0\0\0\0\0&amp;quot;&lt;/span&gt;...,&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="m"&gt;832&lt;/span&gt;&lt;span class="o"&gt;)&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="m"&gt;832&lt;/span&gt;
+fstat&lt;span class="o"&gt;(&lt;/span&gt;&lt;span class="m"&gt;3&lt;/span&gt;,&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;{&lt;/span&gt;&lt;span class="nv"&gt;st_mode&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;S_IFREG&lt;span class="p"&gt;|&lt;/span&gt;&lt;span class="m"&gt;0755&lt;/span&gt;,&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nv"&gt;st_size&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="m"&gt;122040&lt;/span&gt;,&lt;span class="w"&gt; &lt;/span&gt;...&lt;span class="o"&gt;})&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="m"&gt;0&lt;/span&gt;
 ....
-fstat&lt;span class="o"&gt;(&lt;/span&gt;1, &lt;span class="o"&gt;{&lt;/span&gt;&lt;span class="nv"&gt;st_mode&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;S_IFCHR&lt;span class="p"&gt;|&lt;/span&gt;0620, &lt;span class="nv"&gt;st_rdev&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;makedev&lt;span class="o"&gt;(&lt;/span&gt;136, 0&lt;span class="o"&gt;)&lt;/span&gt;, ...&lt;span class="o"&gt;})&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; 0
-mmap&lt;span class="o"&gt;(&lt;/span&gt;NULL, 4096, PROT_READ&lt;span class="p"&gt;|&lt;/span&gt;PROT_WRITE, MAP_PRIVATE&lt;span class="p"&gt;|&lt;/span&gt;MAP_ANONYMOUS, -1, 0&lt;span class="o"&gt;)&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; 0x7fb97a060000
-write&lt;span class="o"&gt;(&lt;/span&gt;1, &lt;span class="s2"&gt;&amp;quot;test_dir  test.txt\n&amp;quot;&lt;/span&gt;, 19test_dir  test.txt
-&lt;span class="o"&gt;)&lt;/span&gt;    &lt;span class="o"&gt;=&lt;/span&gt; 19
-close&lt;span class="o"&gt;(&lt;/span&gt;1&lt;span class="o"&gt;)&lt;/span&gt;                                &lt;span class="o"&gt;=&lt;/span&gt; 0
-munmap&lt;span class="o"&gt;(&lt;/span&gt;0x7fb97a060000, 4096&lt;span class="o"&gt;)&lt;/span&gt;            &lt;span class="o"&gt;=&lt;/span&gt; 0
-close&lt;span class="o"&gt;(&lt;/span&gt;2&lt;span class="o"&gt;)&lt;/span&gt;                                &lt;span class="o"&gt;=&lt;/span&gt; 0
-exit_group&lt;span class="o"&gt;(&lt;/span&gt;0&lt;span class="o"&gt;)&lt;/span&gt;                           &lt;span class="o"&gt;=&lt;/span&gt; ?
-+++ exited with &lt;span class="m"&gt;0&lt;/span&gt; +++
+fstat&lt;span class="o"&gt;(&lt;/span&gt;&lt;span class="m"&gt;1&lt;/span&gt;,&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;{&lt;/span&gt;&lt;span class="nv"&gt;st_mode&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;S_IFCHR&lt;span class="p"&gt;|&lt;/span&gt;&lt;span class="m"&gt;0620&lt;/span&gt;,&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nv"&gt;st_rdev&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;makedev&lt;span class="o"&gt;(&lt;/span&gt;&lt;span class="m"&gt;136&lt;/span&gt;,&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="m"&gt;0&lt;/span&gt;&lt;span class="o"&gt;)&lt;/span&gt;,&lt;span class="w"&gt; &lt;/span&gt;...&lt;span class="o"&gt;})&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="m"&gt;0&lt;/span&gt;
+mmap&lt;span class="o"&gt;(&lt;/span&gt;NULL,&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="m"&gt;4096&lt;/span&gt;,&lt;span class="w"&gt; &lt;/span&gt;PROT_READ&lt;span class="p"&gt;|&lt;/span&gt;PROT_WRITE,&lt;span class="w"&gt; &lt;/span&gt;MAP_PRIVATE&lt;span class="p"&gt;|&lt;/span&gt;MAP_ANONYMOUS,&lt;span class="w"&gt; &lt;/span&gt;-1,&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="m"&gt;0&lt;/span&gt;&lt;span class="o"&gt;)&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;0x7fb97a060000
+write&lt;span class="o"&gt;(&lt;/span&gt;&lt;span class="m"&gt;1&lt;/span&gt;,&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="s2"&gt;&amp;quot;test_dir  test.txt\n&amp;quot;&lt;/span&gt;,&lt;span class="w"&gt; &lt;/span&gt;19test_dir&lt;span class="w"&gt;  &lt;/span&gt;test.txt
+&lt;span class="o"&gt;)&lt;/span&gt;&lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="m"&gt;19&lt;/span&gt;
+close&lt;span class="o"&gt;(&lt;/span&gt;&lt;span class="m"&gt;1&lt;/span&gt;&lt;span class="o"&gt;)&lt;/span&gt;&lt;span class="w"&gt;                                &lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="m"&gt;0&lt;/span&gt;
+munmap&lt;span class="o"&gt;(&lt;/span&gt;0x7fb97a060000,&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="m"&gt;4096&lt;/span&gt;&lt;span class="o"&gt;)&lt;/span&gt;&lt;span class="w"&gt;            &lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="m"&gt;0&lt;/span&gt;
+close&lt;span class="o"&gt;(&lt;/span&gt;&lt;span class="m"&gt;2&lt;/span&gt;&lt;span class="o"&gt;)&lt;/span&gt;&lt;span class="w"&gt;                                &lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="m"&gt;0&lt;/span&gt;
+exit_group&lt;span class="o"&gt;(&lt;/span&gt;&lt;span class="m"&gt;0&lt;/span&gt;&lt;span class="o"&gt;)&lt;/span&gt;&lt;span class="w"&gt;                           &lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;?
++++&lt;span class="w"&gt; &lt;/span&gt;exited&lt;span class="w"&gt; &lt;/span&gt;with&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="m"&gt;0&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;+++
 &lt;/pre&gt;&lt;/div&gt;
 &lt;p&gt;比如下面的这个输出:&lt;/p&gt;
 &lt;pre class="literal-block"&gt;
@@ -271,11 +271,11 @@ access(&amp;quot;/etc/ld.so.preload&amp;quot;, R_OK)      = -1 ENOENT (No such f
 &lt;p&gt;后面这个 &lt;tt class="docutils literal"&gt;ENOENT (No such file or directory)&lt;/tt&gt; 中的 &lt;tt class="docutils literal"&gt;ENOENT&lt;/tt&gt; 是错误码，
 &lt;tt class="docutils literal"&gt;(No such file or directory)&lt;/tt&gt; 是错误码的解释。&lt;/p&gt;
 &lt;p&gt;上面是系统调用相关的输出格式和含义，下面再看一个进程信号(signal)的输出格式：&lt;/p&gt;
-&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;$ strace -p 15718
-Process &lt;span class="m"&gt;15718&lt;/span&gt; attached
-&lt;span class="k"&gt;select&lt;/span&gt;&lt;span class="o"&gt;(&lt;/span&gt;1, &lt;span class="o"&gt;[&lt;/span&gt;0&lt;span class="o"&gt;]&lt;/span&gt;, NULL, NULL, NULL&lt;span class="o"&gt;)&lt;/span&gt;        &lt;span class="o"&gt;=&lt;/span&gt; ? ERESTARTNOHAND &lt;span class="o"&gt;(&lt;/span&gt;To be restarted &lt;span class="k"&gt;if&lt;/span&gt; no handler&lt;span class="o"&gt;)&lt;/span&gt;
---- SIGTERM &lt;span class="o"&gt;{&lt;/span&gt;&lt;span class="nv"&gt;si_signo&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;SIGTERM, &lt;span class="nv"&gt;si_code&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;SI_USER, &lt;span class="nv"&gt;si_pid&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;15757, &lt;span class="nv"&gt;si_uid&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;500&lt;span class="o"&gt;}&lt;/span&gt; ---
-+++ killed by SIGTERM +++
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;$&lt;span class="w"&gt; &lt;/span&gt;strace&lt;span class="w"&gt; &lt;/span&gt;-p&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="m"&gt;15718&lt;/span&gt;
+Process&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="m"&gt;15718&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;attached
+&lt;span class="k"&gt;select&lt;/span&gt;&lt;span class="o"&gt;(&lt;/span&gt;&lt;span class="m"&gt;1&lt;/span&gt;,&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;[&lt;/span&gt;&lt;span class="m"&gt;0&lt;/span&gt;&lt;span class="o"&gt;]&lt;/span&gt;,&lt;span class="w"&gt; &lt;/span&gt;NULL,&lt;span class="w"&gt; &lt;/span&gt;NULL,&lt;span class="w"&gt; &lt;/span&gt;NULL&lt;span class="o"&gt;)&lt;/span&gt;&lt;span class="w"&gt;        &lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;?&lt;span class="w"&gt; &lt;/span&gt;ERESTARTNOHAND&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;(&lt;/span&gt;To&lt;span class="w"&gt; &lt;/span&gt;be&lt;span class="w"&gt; &lt;/span&gt;restarted&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="k"&gt;if&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;no&lt;span class="w"&gt; &lt;/span&gt;handler&lt;span class="o"&gt;)&lt;/span&gt;
+---&lt;span class="w"&gt; &lt;/span&gt;SIGTERM&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;{&lt;/span&gt;&lt;span class="nv"&gt;si_signo&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;SIGTERM,&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nv"&gt;si_code&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;SI_USER,&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nv"&gt;si_pid&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="m"&gt;15757&lt;/span&gt;,&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nv"&gt;si_uid&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="m"&gt;500&lt;/span&gt;&lt;span class="o"&gt;}&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;---
++++&lt;span class="w"&gt; &lt;/span&gt;killed&lt;span class="w"&gt; &lt;/span&gt;by&lt;span class="w"&gt; &lt;/span&gt;SIGTERM&lt;span class="w"&gt; &lt;/span&gt;+++
 &lt;/pre&gt;&lt;/div&gt;
 &lt;p&gt;其中:&lt;/p&gt;
 &lt;pre class="literal-block"&gt;
@@ -283,8 +283,8 @@ Process &lt;span class="m"&gt;15718&lt;/span&gt; attached
 &lt;/pre&gt;
 &lt;p&gt;这一句就是进程接收到的具体 signal 的信息。&lt;/p&gt;
 &lt;/div&gt;
-&lt;div class="section" id="id3"&gt;
-&lt;h2 id="hidid3"&gt;常用命令行参数&lt;a class="headerlink" href="#hidid3" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;div class="section" id="section-3"&gt;
+&lt;h2 id="hidsection-3"&gt;常用命令行参数&lt;a class="headerlink" href="#hidsection-3" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;p&gt;常用的参数组合:&lt;/p&gt;
 &lt;pre class="literal-block"&gt;
 strace -f -s 1024 -tt -T -yy -p &amp;lt;pid&amp;gt;
@@ -404,8 +404,8 @@ read(3, &amp;quot;&amp;quot;, 131072)                     = 0
 &lt;li&gt;&lt;p class="first"&gt;&lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;-v&lt;/span&gt;&lt;/tt&gt;: 显示系统调用时传入的参数变量的具体内容，而不是默认显示为 &lt;tt class="docutils literal"&gt;/* 8 vars */&lt;/tt&gt;&lt;/p&gt;
 &lt;/li&gt;
 &lt;/ul&gt;
-&lt;div class="section" id="id4"&gt;
-&lt;h3 id="hidid4"&gt;常用过滤表达式&lt;a class="headerlink" href="#hidid4" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
+&lt;div class="section" id="section-4"&gt;
+&lt;h3 id="hidsection-4"&gt;常用过滤表达式&lt;a class="headerlink" href="#hidsection-4" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
 &lt;p&gt;&lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;-e&lt;/span&gt; &amp;lt;expr&amp;gt;&lt;/tt&gt; 这个参数可以用来指定需要 trace 哪些事件，格式如下:&lt;/p&gt;
 &lt;pre class="literal-block"&gt;
 [qualifier=][!][?]value1[,[?]value2]...
@@ -430,8 +430,8 @@ value 就是各种过滤条件了。
 &lt;/ul&gt;
 &lt;/div&gt;
 &lt;/div&gt;
-&lt;div class="section" id="id5"&gt;
-&lt;h2 id="hidid5"&gt;常见系统调用&lt;a class="headerlink" href="#hidid5" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;div class="section" id="section-5"&gt;
+&lt;h2 id="hidsection-5"&gt;常见系统调用&lt;a class="headerlink" href="#hidsection-5" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;ul class="simple"&gt;
 &lt;li&gt;&lt;a class="reference external" href="http://man7.org/linux/man-pages/man2/open.2.html"&gt;open()&lt;/a&gt; : 用于打开或创建一个文件。&lt;/li&gt;
 &lt;li&gt;&lt;a class="reference external" href="http://man7.org/linux/man-pages/man2/read.2.html"&gt;read()&lt;/a&gt; : 用于读取一个文件。&lt;/li&gt;
@@ -444,29 +444,29 @@ value 就是各种过滤条件了。
 &lt;p&gt;更多关于某个系统调用的含义/用途可以通过 &lt;tt class="docutils literal"&gt;man 2 &amp;lt;syscall&amp;gt;&lt;/tt&gt; （把 &lt;tt class="docutils literal"&gt;&amp;lt;syscall&amp;gt;&lt;/tt&gt; 替换为实际的系统调用名称，比如 &lt;tt class="docutils literal"&gt;man 2 open&lt;/tt&gt; ）命令行查看或者访问
 &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;http://man7.org/linux/man-pages/man2/&amp;lt;syscall&amp;gt;.2.html&lt;/span&gt;&lt;/tt&gt; 这个网址（把 &lt;tt class="docutils literal"&gt;&amp;lt;syscall&amp;gt;&lt;/tt&gt; 替换为实际的系统调用名称, 比如 &lt;a class="reference external" href="http://man7.org/linux/man-pages/man2/open.2.html"&gt;http://man7.org/linux/man-pages/man2/open.2.html&lt;/a&gt;）亦或是 Google 一下。&lt;/p&gt;
 &lt;/div&gt;
-&lt;div class="section" id="id6"&gt;
-&lt;h2 id="hidid6"&gt;总结&lt;a class="headerlink" href="#hidid6" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;div class="section" id="section-6"&gt;
+&lt;h2 id="hidsection-6"&gt;总结&lt;a class="headerlink" href="#hidsection-6" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;p&gt;更多关于 strace 的信息可以从参考资料的 strace(1) 中获取，如果对输出中系统调用不了解的话可以参考参考资料中的 syscalls(2) 中的信息，同时也别忘了搜索引擎是你的好朋友，有啥不明白的记得 Google 一下。&lt;/p&gt;
 &lt;/div&gt;
-&lt;div class="section" id="id7"&gt;
-&lt;h2 id="hidid7"&gt;参考资料&lt;a class="headerlink" href="#hidid7" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;div class="section" id="section-7"&gt;
+&lt;h2 id="hidsection-7"&gt;参考资料&lt;a class="headerlink" href="#hidsection-7" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;ul class="simple"&gt;
 &lt;li&gt;&lt;a class="reference external" href="http://man7.org/linux/man-pages/man1/strace.1.html"&gt;strace(1) - Linux manual page&lt;/a&gt;&lt;/li&gt;
 &lt;li&gt;&lt;a class="reference external" href="http://man7.org/linux/man-pages/man2/syscalls.2.html"&gt;syscalls(2) - Linux manual page&lt;/a&gt;&lt;/li&gt;
 &lt;li&gt;&lt;a class="reference external" href="http://man7.org/linux/man-pages/man7/regex.7.html"&gt;regex(7) - Linux manual page&lt;/a&gt;&lt;/li&gt;
 &lt;/ul&gt;
 &lt;/div&gt;
-</summary><category term="strace"></category><category term="debug"></category></entry><entry><title>Bash Shell 常用语法和操作</title><link href="https://mozillazg.com/2018/08/linux-bash-shell-script-cookbook.html" rel="alternate"></link><updated>2018-08-12T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2018-08-12:2018/08/linux-bash-shell-script-cookbook.html</id><summary type="html">&lt;div class="section" id="id1"&gt;
-&lt;h2 id="hidid1"&gt;变量&lt;a class="headerlink" href="#hidid1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+</summary><category term="strace"></category><category term="debug"></category></entry><entry><title>Bash Shell 常用语法和操作</title><link href="https://mozillazg.com/2018/08/linux-bash-shell-script-cookbook.html" rel="alternate"></link><published>2018-08-12T00:00:00+00:00</published><updated>2018-08-12T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2018-08-12:2018/08/linux-bash-shell-script-cookbook.html</id><summary type="html">&lt;div class="section" id="section-1"&gt;
+&lt;h2 id="hidsection-1"&gt;变量&lt;a class="headerlink" href="#hidsection-1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;p&gt;&lt;tt class="docutils literal"&gt;变量名=值&lt;/tt&gt; :&lt;/p&gt;
 &lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="nv"&gt;a&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="s2"&gt;&amp;quot;abc&amp;quot;&lt;/span&gt;
-&lt;span class="nb"&gt;echo&lt;/span&gt; &lt;span class="s2"&gt;&amp;quot;&lt;/span&gt;&lt;span class="nv"&gt;$a&lt;/span&gt;&lt;span class="s2"&gt;&amp;quot;&lt;/span&gt;
+&lt;span class="nb"&gt;echo&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="s2"&gt;&amp;quot;&lt;/span&gt;&lt;span class="nv"&gt;$a&lt;/span&gt;&lt;span class="s2"&gt;&amp;quot;&lt;/span&gt;
 &lt;/pre&gt;&lt;/div&gt;
 &lt;/div&gt;
-&lt;div class="section" id="id2"&gt;
-&lt;h2 id="hidid2"&gt;数组&lt;a class="headerlink" href="#hidid2" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
-&lt;div class="section" id="id3"&gt;
-&lt;h3 id="hidid3"&gt;定义一个数组变量&lt;a class="headerlink" href="#hidid3" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
+&lt;div class="section" id="section-2"&gt;
+&lt;h2 id="hidsection-2"&gt;数组&lt;a class="headerlink" href="#hidsection-2" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;div class="section" id="section-3"&gt;
+&lt;h3 id="hidsection-3"&gt;定义一个数组变量&lt;a class="headerlink" href="#hidsection-3" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
 &lt;/div&gt;
 &lt;div class="section" id="range"&gt;
 &lt;h3 id="hidrange"&gt;range&lt;a class="headerlink" href="#hidrange" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
@@ -475,15 +475,15 @@ value 就是各种过滤条件了。
 &lt;/pre&gt;&lt;/div&gt;
 &lt;p&gt;示例：&lt;/p&gt;
 &lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="c1"&gt;# 输出 1 2 3&lt;/span&gt;
-&lt;span class="k"&gt;for&lt;/span&gt; value in &lt;span class="o"&gt;{&lt;/span&gt;1..3&lt;span class="o"&gt;}&lt;/span&gt;
+&lt;span class="k"&gt;for&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;value&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="k"&gt;in&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;{&lt;/span&gt;&lt;span class="m"&gt;1&lt;/span&gt;..3&lt;span class="o"&gt;}&lt;/span&gt;
 &lt;span class="k"&gt;do&lt;/span&gt;
-    &lt;span class="nb"&gt;echo&lt;/span&gt; &lt;span class="nv"&gt;$value&lt;/span&gt;
+&lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="nb"&gt;echo&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nv"&gt;$value&lt;/span&gt;
 &lt;span class="k"&gt;done&lt;/span&gt;
 
 &lt;span class="c1"&gt;# 输出 1 3 5&lt;/span&gt;
-&lt;span class="k"&gt;for&lt;/span&gt; value in &lt;span class="o"&gt;{&lt;/span&gt;1..6..2&lt;span class="o"&gt;}&lt;/span&gt;
+&lt;span class="k"&gt;for&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;value&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="k"&gt;in&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;{&lt;/span&gt;&lt;span class="m"&gt;1&lt;/span&gt;..6..2&lt;span class="o"&gt;}&lt;/span&gt;
 &lt;span class="k"&gt;do&lt;/span&gt;
-    &lt;span class="nb"&gt;echo&lt;/span&gt; &lt;span class="nv"&gt;$value&lt;/span&gt;
+&lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="nb"&gt;echo&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nv"&gt;$value&lt;/span&gt;
 &lt;span class="k"&gt;done&lt;/span&gt;
 &lt;/pre&gt;&lt;/div&gt;
 &lt;/div&gt;
@@ -491,29 +491,29 @@ value 就是各种过滤条件了。
 &lt;div class="section" id="if"&gt;
 &lt;h2 id="hidif"&gt;if&lt;a class="headerlink" href="#hidif" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;p&gt;if 语句的语法如下：&lt;/p&gt;
-&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="k"&gt;if&lt;/span&gt; &lt;span class="o"&gt;[&lt;/span&gt; &amp;lt;some test&amp;gt; &lt;span class="o"&gt;]&lt;/span&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="k"&gt;if&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;[&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&amp;lt;some&lt;span class="w"&gt; &lt;/span&gt;test&amp;gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;]&lt;/span&gt;
 &lt;span class="k"&gt;then&lt;/span&gt;
-    &amp;lt;commands&amp;gt;
-&lt;span class="k"&gt;elif&lt;/span&gt; &lt;span class="o"&gt;[&lt;/span&gt; &amp;lt;some test&amp;gt; &lt;span class="o"&gt;]&lt;/span&gt;
+&lt;span class="w"&gt;    &lt;/span&gt;&amp;lt;commands&amp;gt;
+&lt;span class="k"&gt;elif&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;[&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&amp;lt;some&lt;span class="w"&gt; &lt;/span&gt;test&amp;gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;]&lt;/span&gt;
 &lt;span class="k"&gt;then&lt;/span&gt;
-    &amp;lt;different commands&amp;gt;
+&lt;span class="w"&gt;    &lt;/span&gt;&amp;lt;different&lt;span class="w"&gt; &lt;/span&gt;commands&amp;gt;
 &lt;span class="k"&gt;else&lt;/span&gt;
-    &amp;lt;other commands&amp;gt;
+&lt;span class="w"&gt;    &lt;/span&gt;&amp;lt;other&lt;span class="w"&gt; &lt;/span&gt;commands&amp;gt;
 &lt;span class="k"&gt;fi&lt;/span&gt;
 &lt;/pre&gt;&lt;/div&gt;
 &lt;p&gt;比如:&lt;/p&gt;
-&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="k"&gt;if&lt;/span&gt; &lt;span class="o"&gt;[&lt;/span&gt; &lt;span class="s2"&gt;&amp;quot;&lt;/span&gt;&lt;span class="nv"&gt;$age&lt;/span&gt;&lt;span class="s2"&gt;&amp;quot;&lt;/span&gt; -gt &lt;span class="m"&gt;18&lt;/span&gt; &lt;span class="o"&gt;]&lt;/span&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="k"&gt;if&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;[&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="s2"&gt;&amp;quot;&lt;/span&gt;&lt;span class="nv"&gt;$age&lt;/span&gt;&lt;span class="s2"&gt;&amp;quot;&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;-gt&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="m"&gt;18&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;]&lt;/span&gt;
 &lt;span class="k"&gt;then&lt;/span&gt;
-    &lt;span class="nb"&gt;echo&lt;/span&gt; &lt;span class="s2"&gt;&amp;quot;you are &lt;/span&gt;&lt;span class="nv"&gt;$age&lt;/span&gt;&lt;span class="s2"&gt; &amp;gt; 18&amp;quot;&lt;/span&gt;
-&lt;span class="k"&gt;elif&lt;/span&gt; &lt;span class="o"&gt;[&lt;/span&gt; &lt;span class="s2"&gt;&amp;quot;&lt;/span&gt;&lt;span class="nv"&gt;$age&lt;/span&gt;&lt;span class="s2"&gt;&amp;quot;&lt;/span&gt; -eq &lt;span class="m"&gt;18&lt;/span&gt; &lt;span class="o"&gt;]&lt;/span&gt;
+&lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="nb"&gt;echo&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="s2"&gt;&amp;quot;you are &lt;/span&gt;&lt;span class="nv"&gt;$age&lt;/span&gt;&lt;span class="s2"&gt; &amp;gt; 18&amp;quot;&lt;/span&gt;
+&lt;span class="k"&gt;elif&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;[&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="s2"&gt;&amp;quot;&lt;/span&gt;&lt;span class="nv"&gt;$age&lt;/span&gt;&lt;span class="s2"&gt;&amp;quot;&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;-eq&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="m"&gt;18&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;]&lt;/span&gt;
 &lt;span class="k"&gt;then&lt;/span&gt;
-    &lt;span class="nb"&gt;echo&lt;/span&gt; &lt;span class="s2"&gt;&amp;quot;you are &lt;/span&gt;&lt;span class="nv"&gt;$age&lt;/span&gt;&lt;span class="s2"&gt; == 18&amp;quot;&lt;/span&gt;
+&lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="nb"&gt;echo&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="s2"&gt;&amp;quot;you are &lt;/span&gt;&lt;span class="nv"&gt;$age&lt;/span&gt;&lt;span class="s2"&gt; == 18&amp;quot;&lt;/span&gt;
 &lt;span class="k"&gt;else&lt;/span&gt;
-    &lt;span class="nb"&gt;echo&lt;/span&gt; &lt;span class="s2"&gt;&amp;quot;you are &lt;/span&gt;&lt;span class="nv"&gt;$age&lt;/span&gt;&lt;span class="s2"&gt; &amp;lt; 18&amp;quot;&lt;/span&gt;
+&lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="nb"&gt;echo&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="s2"&gt;&amp;quot;you are &lt;/span&gt;&lt;span class="nv"&gt;$age&lt;/span&gt;&lt;span class="s2"&gt; &amp;lt; 18&amp;quot;&lt;/span&gt;
 &lt;span class="k"&gt;fi&lt;/span&gt;
 &lt;/pre&gt;&lt;/div&gt;
-&lt;div class="section" id="id4"&gt;
-&lt;h3 id="hidid4"&gt;常用的条件判断&lt;a class="headerlink" href="#hidid4" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
+&lt;div class="section" id="section-4"&gt;
+&lt;h3 id="hidsection-4"&gt;常用的条件判断&lt;a class="headerlink" href="#hidsection-4" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
 &lt;table border="1" class="docutils"&gt;
 &lt;colgroup&gt;
 &lt;col width="38%" /&gt;
@@ -570,12 +570,12 @@ value 就是各种过滤条件了。
 &lt;/tbody&gt;
 &lt;/table&gt;
 &lt;p&gt;&lt;tt class="docutils literal"&gt;[]&lt;/tt&gt; 实际调用的是 &lt;tt class="docutils literal"&gt;test&lt;/tt&gt; 命令，我们可以用 &lt;tt class="docutils literal"&gt;test&lt;/tt&gt; 命令来测试条件表达式：&lt;/p&gt;
-&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;$ &lt;span class="nb"&gt;test&lt;/span&gt; &lt;span class="s2"&gt;&amp;quot;abc&amp;quot;&lt;/span&gt; &lt;span class="o"&gt;==&lt;/span&gt; 18
-$ &lt;span class="nb"&gt;echo&lt;/span&gt; &lt;span class="nv"&gt;$?&lt;/span&gt;
-1
-$ &lt;span class="nb"&gt;test&lt;/span&gt; &lt;span class="m"&gt;1&lt;/span&gt; -eq 1
-$ &lt;span class="nb"&gt;echo&lt;/span&gt; &lt;span class="nv"&gt;$?&lt;/span&gt;
-0
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;$&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nb"&gt;test&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="s2"&gt;&amp;quot;abc&amp;quot;&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;==&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="m"&gt;18&lt;/span&gt;
+$&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nb"&gt;echo&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nv"&gt;$?&lt;/span&gt;
+&lt;span class="m"&gt;1&lt;/span&gt;
+$&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nb"&gt;test&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="m"&gt;1&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;-eq&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="m"&gt;1&lt;/span&gt;
+$&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nb"&gt;echo&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nv"&gt;$?&lt;/span&gt;
+&lt;span class="m"&gt;0&lt;/span&gt;
 &lt;/pre&gt;&lt;/div&gt;
 &lt;p&gt;以及可以用 &lt;tt class="docutils literal"&gt;&amp;amp;&amp;amp;&lt;/tt&gt; 和 &lt;tt class="docutils literal"&gt;||&lt;/tt&gt; 组合判断多个条件表达式，实现 and 和 or 的功能&lt;/p&gt;
 &lt;/div&gt;
@@ -583,95 +583,95 @@ $ &lt;span class="nb"&gt;echo&lt;/span&gt; &lt;span class="nv"&gt;$?&lt;/span&gt
 &lt;div class="section" id="case-switch-case"&gt;
 &lt;h2 id="hidcase-switch-case"&gt;case(switch case)&lt;a class="headerlink" href="#hidcase-switch-case" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;p&gt;语法:&lt;/p&gt;
-&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="k"&gt;case&lt;/span&gt; &amp;lt;variable&amp;gt; in
-&amp;lt;pattern 1&amp;gt;&lt;span class="o"&gt;)&lt;/span&gt;
-    &amp;lt;commands&amp;gt;
-    &lt;span class="p"&gt;;;&lt;/span&gt;
-&amp;lt;pattern 2&amp;gt;&lt;span class="o"&gt;)&lt;/span&gt;
-    &amp;lt;other commands&amp;gt;
-    &lt;span class="p"&gt;;;&lt;/span&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="k"&gt;case&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&amp;lt;variable&amp;gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="k"&gt;in&lt;/span&gt;
+&amp;lt;pattern&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="m"&gt;1&lt;/span&gt;&amp;gt;&lt;span class="o"&gt;)&lt;/span&gt;
+&lt;span class="w"&gt;    &lt;/span&gt;&amp;lt;commands&amp;gt;
+&lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="p"&gt;;;&lt;/span&gt;
+&amp;lt;pattern&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="m"&gt;2&lt;/span&gt;&amp;gt;&lt;span class="o"&gt;)&lt;/span&gt;
+&lt;span class="w"&gt;    &lt;/span&gt;&amp;lt;other&lt;span class="w"&gt; &lt;/span&gt;commands&amp;gt;
+&lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="p"&gt;;;&lt;/span&gt;
 &lt;span class="k"&gt;esac&lt;/span&gt;
 &lt;/pre&gt;&lt;/div&gt;
 &lt;p&gt;例子：&lt;/p&gt;
-&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="k"&gt;case&lt;/span&gt; &lt;span class="nv"&gt;$1&lt;/span&gt; in
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="k"&gt;case&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nv"&gt;$1&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="k"&gt;in&lt;/span&gt;
 start&lt;span class="o"&gt;)&lt;/span&gt;
-    &lt;span class="nb"&gt;echo&lt;/span&gt; starting
-    &lt;span class="p"&gt;;;&lt;/span&gt;
+&lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="nb"&gt;echo&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;starting
+&lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="p"&gt;;;&lt;/span&gt;
 stop&lt;span class="o"&gt;)&lt;/span&gt;
-    &lt;span class="nb"&gt;echo&lt;/span&gt; stoping
-    &lt;span class="p"&gt;;;&lt;/span&gt;
+&lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="nb"&gt;echo&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;stoping
+&lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="p"&gt;;;&lt;/span&gt;
 restart&lt;span class="o"&gt;)&lt;/span&gt;
-    &lt;span class="nb"&gt;echo&lt;/span&gt; restarting
-    &lt;span class="p"&gt;;;&lt;/span&gt;
+&lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="nb"&gt;echo&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;restarting
+&lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="p"&gt;;;&lt;/span&gt;
 *&lt;span class="o"&gt;)&lt;/span&gt;
-    &lt;span class="nb"&gt;echo&lt;/span&gt; don&lt;span class="se"&gt;\&amp;#39;&lt;/span&gt;t know
-    &lt;span class="p"&gt;;;&lt;/span&gt;
+&lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="nb"&gt;echo&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;don&lt;span class="se"&gt;\&amp;#39;&lt;/span&gt;t&lt;span class="w"&gt; &lt;/span&gt;know
+&lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="p"&gt;;;&lt;/span&gt;
 &lt;span class="k"&gt;esac&lt;/span&gt;
 &lt;/pre&gt;&lt;/div&gt;
 &lt;/div&gt;
 &lt;div class="section" id="for"&gt;
 &lt;h2 id="hidfor"&gt;for&lt;a class="headerlink" href="#hidfor" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;p&gt;语法：&lt;/p&gt;
-&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="k"&gt;for&lt;/span&gt; var in &amp;lt;list&amp;gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="k"&gt;for&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;var&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="k"&gt;in&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&amp;lt;list&amp;gt;
 &lt;span class="k"&gt;do&lt;/span&gt;
-    &amp;lt;commands&amp;gt;
+&lt;span class="w"&gt;    &lt;/span&gt;&amp;lt;commands&amp;gt;
 &lt;span class="k"&gt;done&lt;/span&gt;
 &lt;/pre&gt;&lt;/div&gt;
 &lt;p&gt;同时 &lt;tt class="docutils literal"&gt;for&lt;/tt&gt; 也支持 &lt;tt class="docutils literal"&gt;break&lt;/tt&gt; 和 &lt;tt class="docutils literal"&gt;continue&lt;/tt&gt;&lt;/p&gt;
 &lt;p&gt;例子：&lt;/p&gt;
 &lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="nv"&gt;names&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;tom jim jake&amp;#39;&lt;/span&gt;
-&lt;span class="k"&gt;for&lt;/span&gt; name in &lt;span class="nv"&gt;$names&lt;/span&gt;
+&lt;span class="k"&gt;for&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;name&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="k"&gt;in&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nv"&gt;$names&lt;/span&gt;
 &lt;span class="k"&gt;do&lt;/span&gt;
-    &lt;span class="nb"&gt;echo&lt;/span&gt; &lt;span class="nv"&gt;$name&lt;/span&gt;
+&lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="nb"&gt;echo&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nv"&gt;$name&lt;/span&gt;
 &lt;span class="k"&gt;done&lt;/span&gt;
 &lt;/pre&gt;&lt;/div&gt;
-&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="k"&gt;for&lt;/span&gt; age in &lt;span class="o"&gt;{&lt;/span&gt;1..10&lt;span class="o"&gt;}&lt;/span&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="k"&gt;for&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;age&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="k"&gt;in&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;{&lt;/span&gt;&lt;span class="m"&gt;1&lt;/span&gt;..10&lt;span class="o"&gt;}&lt;/span&gt;
 &lt;span class="k"&gt;do&lt;/span&gt;
-    &lt;span class="k"&gt;if&lt;/span&gt; &lt;span class="o"&gt;[&lt;/span&gt; &lt;span class="nv"&gt;$age&lt;/span&gt; -eq &lt;span class="m"&gt;3&lt;/span&gt; &lt;span class="o"&gt;]&lt;/span&gt;
-    &lt;span class="k"&gt;then&lt;/span&gt;
-        &lt;span class="k"&gt;continue&lt;/span&gt;
-    &lt;span class="k"&gt;fi&lt;/span&gt;
+&lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="k"&gt;if&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;[&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nv"&gt;$age&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;-eq&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="m"&gt;3&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;]&lt;/span&gt;
+&lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="k"&gt;then&lt;/span&gt;
+&lt;span class="w"&gt;        &lt;/span&gt;&lt;span class="k"&gt;continue&lt;/span&gt;
+&lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="k"&gt;fi&lt;/span&gt;
 
-    &lt;span class="nb"&gt;echo&lt;/span&gt; &lt;span class="nv"&gt;$age&lt;/span&gt;
+&lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="nb"&gt;echo&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nv"&gt;$age&lt;/span&gt;
 
-    &lt;span class="k"&gt;if&lt;/span&gt; &lt;span class="o"&gt;[&lt;/span&gt; &lt;span class="nv"&gt;$age&lt;/span&gt; -gt &lt;span class="m"&gt;5&lt;/span&gt; &lt;span class="o"&gt;]&lt;/span&gt;
-    &lt;span class="k"&gt;then&lt;/span&gt;
-        &lt;span class="nb"&gt;break&lt;/span&gt;
-    &lt;span class="k"&gt;fi&lt;/span&gt;
+&lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="k"&gt;if&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;[&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nv"&gt;$age&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;-gt&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="m"&gt;5&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;]&lt;/span&gt;
+&lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="k"&gt;then&lt;/span&gt;
+&lt;span class="w"&gt;        &lt;/span&gt;&lt;span class="k"&gt;break&lt;/span&gt;
+&lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="k"&gt;fi&lt;/span&gt;
 &lt;span class="k"&gt;done&lt;/span&gt;
 &lt;/pre&gt;&lt;/div&gt;
 &lt;/div&gt;
 &lt;div class="section" id="while"&gt;
 &lt;h2 id="hidwhile"&gt;while&lt;a class="headerlink" href="#hidwhile" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;p&gt;语法：&lt;/p&gt;
-&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="k"&gt;while&lt;/span&gt; &lt;span class="o"&gt;[&lt;/span&gt; &amp;lt;some test&amp;gt; &lt;span class="o"&gt;]&lt;/span&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="k"&gt;while&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;[&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&amp;lt;some&lt;span class="w"&gt; &lt;/span&gt;test&amp;gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;]&lt;/span&gt;
 &lt;span class="k"&gt;do&lt;/span&gt;
-    &amp;lt;commands&amp;gt;
+&lt;span class="w"&gt;    &lt;/span&gt;&amp;lt;commands&amp;gt;
 &lt;span class="k"&gt;done&lt;/span&gt;
 &lt;/pre&gt;&lt;/div&gt;
 &lt;p&gt;例子：&lt;/p&gt;
-&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="nv"&gt;total&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;1
-&lt;span class="k"&gt;while&lt;/span&gt; &lt;span class="o"&gt;[&lt;/span&gt; &lt;span class="nv"&gt;$total&lt;/span&gt; -le &lt;span class="m"&gt;3&lt;/span&gt; &lt;span class="o"&gt;]&lt;/span&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="nv"&gt;total&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="m"&gt;1&lt;/span&gt;
+&lt;span class="k"&gt;while&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;[&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nv"&gt;$total&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;-le&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="m"&gt;3&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;]&lt;/span&gt;
 &lt;span class="k"&gt;do&lt;/span&gt;
-    &lt;span class="nb"&gt;echo&lt;/span&gt; &lt;span class="nv"&gt;$total&lt;/span&gt;
-    &lt;span class="o"&gt;((&lt;/span&gt;total++&lt;span class="o"&gt;))&lt;/span&gt;
+&lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="nb"&gt;echo&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nv"&gt;$total&lt;/span&gt;
+&lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="o"&gt;((&lt;/span&gt;total++&lt;span class="o"&gt;))&lt;/span&gt;
 &lt;span class="k"&gt;done&lt;/span&gt;
 &lt;/pre&gt;&lt;/div&gt;
 &lt;/div&gt;
 &lt;div class="section" id="until"&gt;
 &lt;h2 id="hiduntil"&gt;until&lt;a class="headerlink" href="#hiduntil" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;p&gt;语法：&lt;/p&gt;
-&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="k"&gt;until&lt;/span&gt; &lt;span class="o"&gt;[&lt;/span&gt; &amp;lt;some test&amp;gt; &lt;span class="o"&gt;]&lt;/span&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="k"&gt;until&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;[&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&amp;lt;some&lt;span class="w"&gt; &lt;/span&gt;test&amp;gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;]&lt;/span&gt;
 &lt;span class="k"&gt;do&lt;/span&gt;
-    &amp;lt;commands&amp;gt;
+&lt;span class="w"&gt;    &lt;/span&gt;&amp;lt;commands&amp;gt;
 &lt;span class="k"&gt;done&lt;/span&gt;
 &lt;/pre&gt;&lt;/div&gt;
 &lt;p&gt;例子：&lt;/p&gt;
-&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="nv"&gt;total&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;1
-&lt;span class="k"&gt;until&lt;/span&gt; &lt;span class="o"&gt;[&lt;/span&gt; &lt;span class="nv"&gt;$total&lt;/span&gt; -gt &lt;span class="m"&gt;3&lt;/span&gt; &lt;span class="o"&gt;]&lt;/span&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="nv"&gt;total&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="m"&gt;1&lt;/span&gt;
+&lt;span class="k"&gt;until&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;[&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nv"&gt;$total&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;-gt&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="m"&gt;3&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;]&lt;/span&gt;
 &lt;span class="k"&gt;do&lt;/span&gt;
-    &lt;span class="nb"&gt;echo&lt;/span&gt; &lt;span class="nv"&gt;$total&lt;/span&gt;
-    &lt;span class="o"&gt;((&lt;/span&gt;total++&lt;span class="o"&gt;))&lt;/span&gt;
+&lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="nb"&gt;echo&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nv"&gt;$total&lt;/span&gt;
+&lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="o"&gt;((&lt;/span&gt;total++&lt;span class="o"&gt;))&lt;/span&gt;
 &lt;span class="k"&gt;done&lt;/span&gt;
 &lt;/pre&gt;&lt;/div&gt;
 &lt;/div&gt;
@@ -680,81 +680,81 @@ restart&lt;span class="o"&gt;)&lt;/span&gt;
 &lt;p&gt;选择功能一般用 case 语法用的多，不过 select 也可以实现，
 select 的功能类似 while + case，比较适合反复询问用户选择项直到用户选择了输入了合法的选择项。&lt;/p&gt;
 &lt;p&gt;语法：&lt;/p&gt;
-&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="k"&gt;select&lt;/span&gt; var in &amp;lt;list&amp;gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="k"&gt;select&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;var&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="k"&gt;in&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&amp;lt;list&amp;gt;
 &lt;span class="k"&gt;do&lt;/span&gt;
-    &amp;lt;commands&amp;gt;
-    &lt;span class="o"&gt;[&lt;/span&gt;break&lt;span class="o"&gt;]&lt;/span&gt;
+&lt;span class="w"&gt;    &lt;/span&gt;&amp;lt;commands&amp;gt;
+&lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="o"&gt;[&lt;/span&gt;&lt;span class="k"&gt;break&lt;/span&gt;&lt;span class="o"&gt;]&lt;/span&gt;
 &lt;span class="k"&gt;done&lt;/span&gt;
 &lt;/pre&gt;&lt;/div&gt;
 &lt;p&gt;可以用 break 跳出 select 以及可以通过修改 PS3 变量的值修改提示内容。&lt;/p&gt;
 &lt;p&gt;示例：&lt;/p&gt;
 &lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="nv"&gt;PS3&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;please choice: &amp;#39;&lt;/span&gt;
 
-&lt;span class="k"&gt;select&lt;/span&gt; value in &lt;span class="o"&gt;{&lt;/span&gt;1..5&lt;span class="o"&gt;}&lt;/span&gt;
+&lt;span class="k"&gt;select&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;value&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="k"&gt;in&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;{&lt;/span&gt;&lt;span class="m"&gt;1&lt;/span&gt;..5&lt;span class="o"&gt;}&lt;/span&gt;
 &lt;span class="k"&gt;do&lt;/span&gt;
-    &lt;span class="nb"&gt;echo&lt;/span&gt; &lt;span class="nv"&gt;$value&lt;/span&gt;
+&lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="nb"&gt;echo&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nv"&gt;$value&lt;/span&gt;
 
-    &lt;span class="k"&gt;if&lt;/span&gt; &lt;span class="o"&gt;[&lt;/span&gt; &lt;span class="nv"&gt;$value&lt;/span&gt; -gt &lt;span class="m"&gt;3&lt;/span&gt; &lt;span class="o"&gt;]&lt;/span&gt;
-    &lt;span class="k"&gt;then&lt;/span&gt;
-        &lt;span class="nb"&gt;break&lt;/span&gt;
-    &lt;span class="k"&gt;fi&lt;/span&gt;
+&lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="k"&gt;if&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;[&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nv"&gt;$value&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;-gt&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="m"&gt;3&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;]&lt;/span&gt;
+&lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="k"&gt;then&lt;/span&gt;
+&lt;span class="w"&gt;        &lt;/span&gt;&lt;span class="k"&gt;break&lt;/span&gt;
+&lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="k"&gt;fi&lt;/span&gt;
 
 &lt;span class="k"&gt;done&lt;/span&gt;
 &lt;/pre&gt;&lt;/div&gt;
 &lt;/div&gt;
-&lt;div class="section" id="id5"&gt;
-&lt;h2 id="hidid5"&gt;函数&lt;a class="headerlink" href="#hidid5" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;div class="section" id="section-5"&gt;
+&lt;h2 id="hidsection-5"&gt;函数&lt;a class="headerlink" href="#hidsection-5" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;p&gt;语法:&lt;/p&gt;
-&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;function_name &lt;span class="o"&gt;()&lt;/span&gt; &lt;span class="o"&gt;{&lt;/span&gt;
-    &amp;lt;commands&amp;gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;function_name&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;()&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;{&lt;/span&gt;
+&lt;span class="w"&gt;    &lt;/span&gt;&amp;lt;commands&amp;gt;
 &lt;span class="o"&gt;}&lt;/span&gt;
 
 &lt;span class="c1"&gt;# or&lt;/span&gt;
 
-&lt;span class="k"&gt;function&lt;/span&gt; function_name &lt;span class="o"&gt;{&lt;/span&gt;
-    &amp;lt;commands&amp;gt;
+&lt;span class="k"&gt;function&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;function_name&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;{&lt;/span&gt;
+&lt;span class="w"&gt;    &lt;/span&gt;&amp;lt;commands&amp;gt;
 &lt;span class="o"&gt;}&lt;/span&gt;
 &lt;/pre&gt;&lt;/div&gt;
-&lt;div class="section" id="id6"&gt;
-&lt;h3 id="hidid6"&gt;参数&lt;a class="headerlink" href="#hidid6" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
+&lt;div class="section" id="section-6"&gt;
+&lt;h3 id="hidsection-6"&gt;参数&lt;a class="headerlink" href="#hidsection-6" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
 &lt;p&gt;在函数体内可以通过 $1, $2, $3, ... 获取调用时传入的位置参数&lt;/p&gt;
 &lt;/div&gt;
-&lt;div class="section" id="id7"&gt;
-&lt;h3 id="hidid7"&gt;返回值&lt;a class="headerlink" href="#hidid7" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
+&lt;div class="section" id="section-7"&gt;
+&lt;h3 id="hidsection-7"&gt;返回值&lt;a class="headerlink" href="#hidsection-7" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
 &lt;p&gt;不支持返回值功能，不过可以用 return x 指定一个状态吗:&lt;/p&gt;
-&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="k"&gt;function&lt;/span&gt; &lt;span class="nb"&gt;test&lt;/span&gt; &lt;span class="o"&gt;{&lt;/span&gt;
-    &lt;span class="nb"&gt;echo&lt;/span&gt; &lt;span class="s2"&gt;&amp;quot;test&amp;quot;&lt;/span&gt;
-    &lt;span class="k"&gt;return&lt;/span&gt; 3
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="k"&gt;function&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nb"&gt;test&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;{&lt;/span&gt;
+&lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="nb"&gt;echo&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="s2"&gt;&amp;quot;test&amp;quot;&lt;/span&gt;
+&lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="k"&gt;return&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="m"&gt;3&lt;/span&gt;
 &lt;span class="o"&gt;}&lt;/span&gt;
 
 &lt;span class="nb"&gt;test&lt;/span&gt;
-&lt;span class="nb"&gt;echo&lt;/span&gt; &lt;span class="nv"&gt;$?&lt;/span&gt;   &lt;span class="c1"&gt;# 3&lt;/span&gt;
+&lt;span class="nb"&gt;echo&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nv"&gt;$?&lt;/span&gt;&lt;span class="w"&gt;   &lt;/span&gt;&lt;span class="c1"&gt;# 3&lt;/span&gt;
 &lt;/pre&gt;&lt;/div&gt;
 &lt;/div&gt;
-&lt;div class="section" id="id8"&gt;
-&lt;h3 id="hidid8"&gt;变量作用域&lt;a class="headerlink" href="#hidid8" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
+&lt;div class="section" id="section-8"&gt;
+&lt;h3 id="hidsection-8"&gt;变量作用域&lt;a class="headerlink" href="#hidsection-8" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
 &lt;p&gt;默认函数类的变量是全局变量，可以通过 local 定义局部变量：&lt;/p&gt;
-&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="k"&gt;function&lt;/span&gt; &lt;span class="nb"&gt;test&lt;/span&gt; &lt;span class="o"&gt;{&lt;/span&gt;
-    &lt;span class="nb"&gt;local&lt;/span&gt; &lt;span class="nv"&gt;a&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;local&amp;#39;&lt;/span&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="k"&gt;function&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nb"&gt;test&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;{&lt;/span&gt;
+&lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="nb"&gt;local&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nv"&gt;a&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;local&amp;#39;&lt;/span&gt;
 
-    &lt;span class="nv"&gt;a&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;233&amp;#39;&lt;/span&gt;
-    &lt;span class="nv"&gt;b&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;666&amp;#39;&lt;/span&gt;
-    &lt;span class="nb"&gt;echo&lt;/span&gt; &lt;span class="nv"&gt;$a&lt;/span&gt;, &lt;span class="nv"&gt;$b&lt;/span&gt;
+&lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="nv"&gt;a&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;233&amp;#39;&lt;/span&gt;
+&lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="nv"&gt;b&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;666&amp;#39;&lt;/span&gt;
+&lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="nb"&gt;echo&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nv"&gt;$a&lt;/span&gt;,&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nv"&gt;$b&lt;/span&gt;
 &lt;span class="o"&gt;}&lt;/span&gt;
 
 &lt;span class="nv"&gt;b&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;global&amp;#39;&lt;/span&gt;
 
 &lt;span class="nb"&gt;test&lt;/span&gt;
 
-&lt;span class="nb"&gt;echo&lt;/span&gt; &lt;span class="nv"&gt;$b&lt;/span&gt;
-&lt;span class="nb"&gt;echo&lt;/span&gt; &lt;span class="nv"&gt;$a&lt;/span&gt;
+&lt;span class="nb"&gt;echo&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nv"&gt;$b&lt;/span&gt;
+&lt;span class="nb"&gt;echo&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nv"&gt;$a&lt;/span&gt;
 &lt;/pre&gt;&lt;/div&gt;
 &lt;/div&gt;
-&lt;div class="section" id="id9"&gt;
-&lt;h3 id="hidid9"&gt;创建跟外部命令同名的函数&lt;a class="headerlink" href="#hidid9" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
+&lt;div class="section" id="section-9"&gt;
+&lt;h3 id="hidsection-9"&gt;创建跟外部命令同名的函数&lt;a class="headerlink" href="#hidsection-9" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
 &lt;p&gt;例子：&lt;/p&gt;
-&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="k"&gt;function&lt;/span&gt; ls &lt;span class="o"&gt;{&lt;/span&gt;
-    &lt;span class="nb"&gt;command&lt;/span&gt; ls -lh
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="k"&gt;function&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;ls&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;{&lt;/span&gt;
+&lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="nb"&gt;command&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;ls&lt;span class="w"&gt; &lt;/span&gt;-lh
 &lt;span class="o"&gt;}&lt;/span&gt;
 
 ls
@@ -762,57 +762,57 @@ ls
 &lt;p&gt;主要是不要忘了加 command，不加的话，上面的 ls 会无限递归不会按预期的调用 ls 命令。&lt;/p&gt;
 &lt;/div&gt;
 &lt;/div&gt;
-&lt;div class="section" id="id10"&gt;
-&lt;h2 id="hidid10"&gt;字符串操作&lt;a class="headerlink" href="#hidid10" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
-&lt;div class="section" id="id11"&gt;
-&lt;h3 id="hidid11"&gt;字符串替换&lt;a class="headerlink" href="#hidid11" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
-&lt;div class="section" id="id12"&gt;
-&lt;h4 id="hidid12"&gt;替换子串&lt;a class="headerlink" href="#hidid12" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h4&gt;
-&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;$ &lt;span class="nv"&gt;test&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="s2"&gt;&amp;quot;hello_world&amp;quot;&lt;/span&gt;
-$ &lt;span class="nb"&gt;echo&lt;/span&gt; &lt;span class="s2"&gt;&amp;quot;&lt;/span&gt;&lt;span class="si"&gt;${&lt;/span&gt;&lt;span class="nv"&gt;test&lt;/span&gt;&lt;span class="p"&gt;/_/-&lt;/span&gt;&lt;span class="si"&gt;}&lt;/span&gt;&lt;span class="s2"&gt;&amp;quot;&lt;/span&gt;
+&lt;div class="section" id="section-10"&gt;
+&lt;h2 id="hidsection-10"&gt;字符串操作&lt;a class="headerlink" href="#hidsection-10" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;div class="section" id="section-11"&gt;
+&lt;h3 id="hidsection-11"&gt;字符串替换&lt;a class="headerlink" href="#hidsection-11" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
+&lt;div class="section" id="section-12"&gt;
+&lt;h4 id="hidsection-12"&gt;替换子串&lt;a class="headerlink" href="#hidsection-12" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h4&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;$&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nv"&gt;test&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="s2"&gt;&amp;quot;hello_world&amp;quot;&lt;/span&gt;
+$&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nb"&gt;echo&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="s2"&gt;&amp;quot;&lt;/span&gt;&lt;span class="si"&gt;${&lt;/span&gt;&lt;span class="nv"&gt;test&lt;/span&gt;&lt;span class="p"&gt;/_/-&lt;/span&gt;&lt;span class="si"&gt;}&lt;/span&gt;&lt;span class="s2"&gt;&amp;quot;&lt;/span&gt;
 hello-world
-$ &lt;span class="nb"&gt;echo&lt;/span&gt; &lt;span class="s2"&gt;&amp;quot;&lt;/span&gt;&lt;span class="si"&gt;${&lt;/span&gt;&lt;span class="nv"&gt;test&lt;/span&gt;&lt;span class="p"&gt;/world/bar&lt;/span&gt;&lt;span class="si"&gt;}&lt;/span&gt;&lt;span class="s2"&gt;&amp;quot;&lt;/span&gt;
+$&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nb"&gt;echo&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="s2"&gt;&amp;quot;&lt;/span&gt;&lt;span class="si"&gt;${&lt;/span&gt;&lt;span class="nv"&gt;test&lt;/span&gt;&lt;span class="p"&gt;/world/bar&lt;/span&gt;&lt;span class="si"&gt;}&lt;/span&gt;&lt;span class="s2"&gt;&amp;quot;&lt;/span&gt;
 hello_bar
 &lt;/pre&gt;&lt;/div&gt;
 &lt;/div&gt;
-&lt;div class="section" id="id13"&gt;
-&lt;h4 id="hidid13"&gt;删除前缀&lt;a class="headerlink" href="#hidid13" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h4&gt;
-&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;$ &lt;span class="nv"&gt;test&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="s2"&gt;&amp;quot;foofoo_bar_foofoo&amp;quot;&lt;/span&gt;
-$ &lt;span class="nb"&gt;echo&lt;/span&gt; &lt;span class="s2"&gt;&amp;quot;&lt;/span&gt;&lt;span class="si"&gt;${&lt;/span&gt;&lt;span class="nv"&gt;test&lt;/span&gt;&lt;span class="p"&gt;#foo&lt;/span&gt;&lt;span class="si"&gt;}&lt;/span&gt;&lt;span class="s2"&gt;&amp;quot;&lt;/span&gt;
+&lt;div class="section" id="section-13"&gt;
+&lt;h4 id="hidsection-13"&gt;删除前缀&lt;a class="headerlink" href="#hidsection-13" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h4&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;$&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nv"&gt;test&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="s2"&gt;&amp;quot;foofoo_bar_foofoo&amp;quot;&lt;/span&gt;
+$&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nb"&gt;echo&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="s2"&gt;&amp;quot;&lt;/span&gt;&lt;span class="si"&gt;${&lt;/span&gt;&lt;span class="nv"&gt;test&lt;/span&gt;&lt;span class="p"&gt;#foo&lt;/span&gt;&lt;span class="si"&gt;}&lt;/span&gt;&lt;span class="s2"&gt;&amp;quot;&lt;/span&gt;
 foo_bar_foofoo
-$ &lt;span class="nv"&gt;prefix&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="s2"&gt;&amp;quot;foo&amp;quot;&lt;/span&gt;
-$ &lt;span class="nb"&gt;echo&lt;/span&gt; &lt;span class="s2"&gt;&amp;quot;&lt;/span&gt;&lt;span class="si"&gt;${&lt;/span&gt;&lt;span class="nv"&gt;test&lt;/span&gt;&lt;span class="p"&gt;#&lt;/span&gt;&lt;span class="nv"&gt;$prefix&lt;/span&gt;&lt;span class="si"&gt;}&lt;/span&gt;&lt;span class="s2"&gt;&amp;quot;&lt;/span&gt;
+$&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nv"&gt;prefix&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="s2"&gt;&amp;quot;foo&amp;quot;&lt;/span&gt;
+$&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nb"&gt;echo&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="s2"&gt;&amp;quot;&lt;/span&gt;&lt;span class="si"&gt;${&lt;/span&gt;&lt;span class="nv"&gt;test&lt;/span&gt;&lt;span class="p"&gt;#&lt;/span&gt;&lt;span class="nv"&gt;$prefix&lt;/span&gt;&lt;span class="si"&gt;}&lt;/span&gt;&lt;span class="s2"&gt;&amp;quot;&lt;/span&gt;
 foo_bar_foofoo
 &lt;/pre&gt;&lt;/div&gt;
 &lt;/div&gt;
-&lt;div class="section" id="id14"&gt;
-&lt;h4 id="hidid14"&gt;删除后缀&lt;a class="headerlink" href="#hidid14" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h4&gt;
-&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;$ &lt;span class="nv"&gt;test&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="s2"&gt;&amp;quot;foofoo_bar_foofoo&amp;quot;&lt;/span&gt;
-$ &lt;span class="nb"&gt;echo&lt;/span&gt; &lt;span class="s2"&gt;&amp;quot;&lt;/span&gt;&lt;span class="si"&gt;${&lt;/span&gt;&lt;span class="nv"&gt;test&lt;/span&gt;&lt;span class="p"&gt;%foo&lt;/span&gt;&lt;span class="si"&gt;}&lt;/span&gt;&lt;span class="s2"&gt;&amp;quot;&lt;/span&gt;
+&lt;div class="section" id="section-14"&gt;
+&lt;h4 id="hidsection-14"&gt;删除后缀&lt;a class="headerlink" href="#hidsection-14" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h4&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;$&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nv"&gt;test&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="s2"&gt;&amp;quot;foofoo_bar_foofoo&amp;quot;&lt;/span&gt;
+$&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nb"&gt;echo&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="s2"&gt;&amp;quot;&lt;/span&gt;&lt;span class="si"&gt;${&lt;/span&gt;&lt;span class="nv"&gt;test&lt;/span&gt;&lt;span class="p"&gt;%foo&lt;/span&gt;&lt;span class="si"&gt;}&lt;/span&gt;&lt;span class="s2"&gt;&amp;quot;&lt;/span&gt;
 foofoo_bar_foo
-$ &lt;span class="nv"&gt;suffix&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="s2"&gt;&amp;quot;foo&amp;quot;&lt;/span&gt;
-$ &lt;span class="nb"&gt;echo&lt;/span&gt; &lt;span class="s2"&gt;&amp;quot;&lt;/span&gt;&lt;span class="si"&gt;${&lt;/span&gt;&lt;span class="nv"&gt;test&lt;/span&gt;&lt;span class="p"&gt;%&lt;/span&gt;&lt;span class="nv"&gt;$suffix&lt;/span&gt;&lt;span class="si"&gt;}&lt;/span&gt;&lt;span class="s2"&gt;&amp;quot;&lt;/span&gt;
+$&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nv"&gt;suffix&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="s2"&gt;&amp;quot;foo&amp;quot;&lt;/span&gt;
+$&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nb"&gt;echo&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="s2"&gt;&amp;quot;&lt;/span&gt;&lt;span class="si"&gt;${&lt;/span&gt;&lt;span class="nv"&gt;test&lt;/span&gt;&lt;span class="p"&gt;%&lt;/span&gt;&lt;span class="nv"&gt;$suffix&lt;/span&gt;&lt;span class="si"&gt;}&lt;/span&gt;&lt;span class="s2"&gt;&amp;quot;&lt;/span&gt;
 foofoo_bar_foo
 &lt;/pre&gt;&lt;/div&gt;
 &lt;/div&gt;
 &lt;/div&gt;
-&lt;div class="section" id="id15"&gt;
-&lt;h3 id="hidid15"&gt;打印字符串&lt;a class="headerlink" href="#hidid15" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
+&lt;div class="section" id="section-15"&gt;
+&lt;h3 id="hidsection-15"&gt;打印字符串&lt;a class="headerlink" href="#hidsection-15" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
 &lt;p&gt;推荐使用 &lt;tt class="docutils literal"&gt;printf&lt;/tt&gt;:&lt;/p&gt;
-&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="nb"&gt;printf&lt;/span&gt; &lt;span class="s2"&gt;&amp;quot;hello world\\n&amp;quot;&lt;/span&gt;
-&lt;span class="nb"&gt;printf&lt;/span&gt; &lt;span class="s2"&gt;&amp;quot;hello %s\\n&amp;quot;&lt;/span&gt; &lt;span class="s2"&gt;&amp;quot;world&amp;quot;&lt;/span&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="nb"&gt;printf&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="s2"&gt;&amp;quot;hello world\\n&amp;quot;&lt;/span&gt;
+&lt;span class="nb"&gt;printf&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="s2"&gt;&amp;quot;hello %s\\n&amp;quot;&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="s2"&gt;&amp;quot;world&amp;quot;&lt;/span&gt;
 &lt;/pre&gt;&lt;/div&gt;
 &lt;p&gt;&lt;tt class="docutils literal"&gt;echo&lt;/tt&gt; 也可以：&lt;/p&gt;
-&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="nb"&gt;echo&lt;/span&gt; hello
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="nb"&gt;echo&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;hello
 &lt;/pre&gt;&lt;/div&gt;
 &lt;/div&gt;
 &lt;/div&gt;
-&lt;div class="section" id="id16"&gt;
-&lt;h2 id="hidid16"&gt;文件操作&lt;a class="headerlink" href="#hidid16" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
-&lt;div class="section" id="id17"&gt;
-&lt;h3 id="hidid17"&gt;保存大段文本&lt;a class="headerlink" href="#hidid17" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
+&lt;div class="section" id="section-16"&gt;
+&lt;h2 id="hidsection-16"&gt;文件操作&lt;a class="headerlink" href="#hidsection-16" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;div class="section" id="section-17"&gt;
+&lt;h3 id="hidsection-17"&gt;保存大段文本&lt;a class="headerlink" href="#hidsection-17" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
 &lt;p&gt;可以使用 &lt;tt class="docutils literal"&gt;tee&lt;/tt&gt; 和 &lt;tt class="docutils literal"&gt;EOF&lt;/tt&gt;:&lt;/p&gt;
-&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;tee test.text &lt;span class="s"&gt;&amp;lt;&amp;lt;EOF&lt;/span&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;tee&lt;span class="w"&gt; &lt;/span&gt;test.text&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="s"&gt;&amp;lt;&amp;lt;EOF&lt;/span&gt;
 &lt;span class="s"&gt;hello&lt;/span&gt;
 &lt;span class="s"&gt;    world&lt;/span&gt;
 
@@ -821,181 +821,181 @@ foofoo_bar_foo
 &lt;span class="s"&gt;EOF&lt;/span&gt;
 &lt;/pre&gt;&lt;/div&gt;
 &lt;p&gt;保存包含 EOF 命令的文本可以用多个 EOF 的变种:&lt;/p&gt;
-&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;tee a.sh &lt;span class="s"&gt;&amp;lt;&amp;lt; EOF&lt;/span&gt;
-&lt;span class="s"&gt;tee b.text &amp;lt;&amp;lt; EOF&lt;/span&gt;2
- &lt;span class="nb"&gt;echo&lt;/span&gt; hello
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;tee&lt;span class="w"&gt; &lt;/span&gt;a.sh&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="s"&gt;&amp;lt;&amp;lt; EOF&lt;/span&gt;
+&lt;span class="s"&gt;tee b.text &amp;lt;&amp;lt; EOF&lt;/span&gt;&lt;span class="m"&gt;2&lt;/span&gt;
+&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nb"&gt;echo&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;hello
 EOF2
 EOF
 
 
-$ tee a.sh &lt;span class="s"&gt;&amp;lt;&amp;lt; EOF&lt;/span&gt;
-&lt;span class="s"&gt;&amp;gt; tee b.text &amp;lt;&amp;lt; EOF&lt;/span&gt;2
-&amp;gt; &lt;span class="nb"&gt;echo&lt;/span&gt; hello
-&amp;gt; EOF2
-&amp;gt; EOF
-tee b.text &lt;span class="s"&gt;&amp;lt;&amp;lt; EOF2&lt;/span&gt;
+$&lt;span class="w"&gt; &lt;/span&gt;tee&lt;span class="w"&gt; &lt;/span&gt;a.sh&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="s"&gt;&amp;lt;&amp;lt; EOF&lt;/span&gt;
+&lt;span class="s"&gt;&amp;gt; tee b.text &amp;lt;&amp;lt; EOF&lt;/span&gt;&lt;span class="m"&gt;2&lt;/span&gt;
+&amp;gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nb"&gt;echo&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;hello
+&amp;gt;&lt;span class="w"&gt; &lt;/span&gt;EOF2
+&amp;gt;&lt;span class="w"&gt; &lt;/span&gt;EOF
+tee&lt;span class="w"&gt; &lt;/span&gt;b.text&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="s"&gt;&amp;lt;&amp;lt; EOF2&lt;/span&gt;
 &lt;span class="s"&gt;echo hello&lt;/span&gt;
 &lt;span class="s"&gt;EOF2&lt;/span&gt;
 
-$ cat a.sh
-tee b.text &lt;span class="s"&gt;&amp;lt;&amp;lt; EOF2&lt;/span&gt;
+$&lt;span class="w"&gt; &lt;/span&gt;cat&lt;span class="w"&gt; &lt;/span&gt;a.sh
+tee&lt;span class="w"&gt; &lt;/span&gt;b.text&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="s"&gt;&amp;lt;&amp;lt; EOF2&lt;/span&gt;
 &lt;span class="s"&gt;echo hello&lt;/span&gt;
 &lt;span class="s"&gt;EOF2&lt;/span&gt;
 
-$ bash a.sh
-&lt;span class="nb"&gt;echo&lt;/span&gt; hello
+$&lt;span class="w"&gt; &lt;/span&gt;bash&lt;span class="w"&gt; &lt;/span&gt;a.sh
+&lt;span class="nb"&gt;echo&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;hello
 
-$ cat b.text
-&lt;span class="nb"&gt;echo&lt;/span&gt; hello
+$&lt;span class="w"&gt; &lt;/span&gt;cat&lt;span class="w"&gt; &lt;/span&gt;b.text
+&lt;span class="nb"&gt;echo&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;hello
 &lt;/pre&gt;&lt;/div&gt;
 &lt;p&gt;append 更新可以使用 &lt;tt class="docutils literal"&gt;tee &lt;span class="pre"&gt;-a&lt;/span&gt;&lt;/tt&gt;&lt;/p&gt;
 &lt;/div&gt;
 &lt;/div&gt;
-&lt;div class="section" id="id18"&gt;
-&lt;h2 id="hidid18"&gt;其他实用功能&lt;a class="headerlink" href="#hidid18" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;div class="section" id="section-18"&gt;
+&lt;h2 id="hidsection-18"&gt;其他实用功能&lt;a class="headerlink" href="#hidsection-18" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;div class="section" id="cd"&gt;
 &lt;h3&gt;隔离 &lt;tt class="docutils literal"&gt;cd&lt;/tt&gt; 命令的干扰&lt;/h3&gt;
 &lt;p&gt;可以用括号来隔离:&lt;/p&gt;
 &lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="c1"&gt;# pwd=/tmp&lt;/span&gt;
 &lt;span class="o"&gt;(&lt;/span&gt;
-    &lt;span class="nb"&gt;cd&lt;/span&gt; test/
-    ls   &lt;span class="c1"&gt;# pwd = /tmp/test/&lt;/span&gt;
+&lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="nb"&gt;cd&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;test/
+&lt;span class="w"&gt;    &lt;/span&gt;ls&lt;span class="w"&gt;   &lt;/span&gt;&lt;span class="c1"&gt;# pwd = /tmp/test/&lt;/span&gt;
 &lt;span class="o"&gt;)&lt;/span&gt;
 &lt;span class="c1"&gt;# pwd=/tmp&lt;/span&gt;
 &lt;/pre&gt;&lt;/div&gt;
 &lt;/div&gt;
-&lt;div class="section" id="id19"&gt;
-&lt;h3 id="hidid19"&gt;设置功能标志&lt;a class="headerlink" href="#hidid19" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
+&lt;div class="section" id="section-19"&gt;
+&lt;h3 id="hidsection-19"&gt;设置功能标志&lt;a class="headerlink" href="#hidsection-19" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
 &lt;p&gt;一般会在脚本中设置如下标志：&lt;/p&gt;
-&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="nb"&gt;set&lt;/span&gt; -euo pipefail
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="nb"&gt;set&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;-euo&lt;span class="w"&gt; &lt;/span&gt;pipefail
 &lt;span class="nv"&gt;IFS&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="s1"&gt;$&amp;#39;\n\t&amp;#39;&lt;/span&gt;
 &lt;/pre&gt;&lt;/div&gt;
 &lt;p&gt;常用的功能标志如下：&lt;/p&gt;
 &lt;ul class="simple"&gt;
 &lt;li&gt;运行的时候显示执行到那一条语句了: &lt;tt class="docutils literal"&gt;set &lt;span class="pre"&gt;-x&lt;/span&gt;&lt;/tt&gt;&lt;/li&gt;
 &lt;/ul&gt;
-&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;$ cat a.sh
-&lt;span class="nb"&gt;set&lt;/span&gt; -x
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;$&lt;span class="w"&gt; &lt;/span&gt;cat&lt;span class="w"&gt; &lt;/span&gt;a.sh
+&lt;span class="nb"&gt;set&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;-x
 
-&lt;span class="nb"&gt;echo&lt;/span&gt; &lt;span class="s1"&gt;&amp;#39;hello&amp;#39;&lt;/span&gt;
+&lt;span class="nb"&gt;echo&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;hello&amp;#39;&lt;/span&gt;
 
-$ bash a.sh
-+ &lt;span class="nb"&gt;echo&lt;/span&gt; hello
+$&lt;span class="w"&gt; &lt;/span&gt;bash&lt;span class="w"&gt; &lt;/span&gt;a.sh
++&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nb"&gt;echo&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;hello
 hello
 &lt;/pre&gt;&lt;/div&gt;
 &lt;p&gt;&lt;tt class="docutils literal"&gt;bash &lt;span class="pre"&gt;-x&lt;/span&gt; xx.sh&lt;/tt&gt; 也可以实现同样的效果:&lt;/p&gt;
-&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;$ cat a.sh
-&lt;span class="nb"&gt;echo&lt;/span&gt; &lt;span class="s1"&gt;&amp;#39;hello&amp;#39;&lt;/span&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;$&lt;span class="w"&gt; &lt;/span&gt;cat&lt;span class="w"&gt; &lt;/span&gt;a.sh
+&lt;span class="nb"&gt;echo&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;hello&amp;#39;&lt;/span&gt;
 
-$ bash -x a.sh
-+ &lt;span class="nb"&gt;echo&lt;/span&gt; hello
+$&lt;span class="w"&gt; &lt;/span&gt;bash&lt;span class="w"&gt; &lt;/span&gt;-x&lt;span class="w"&gt; &lt;/span&gt;a.sh
++&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nb"&gt;echo&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;hello
 hello
 &lt;/pre&gt;&lt;/div&gt;
 &lt;ul class="simple"&gt;
 &lt;li&gt;有任何命令的退出码不是 0 就退出: &lt;tt class="docutils literal"&gt;set &lt;span class="pre"&gt;-e&lt;/span&gt;&lt;/tt&gt;&lt;/li&gt;
 &lt;/ul&gt;
-&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;$ cat a.sh
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;$&lt;span class="w"&gt; &lt;/span&gt;cat&lt;span class="w"&gt; &lt;/span&gt;a.sh
 abc
-&lt;span class="nb"&gt;echo&lt;/span&gt; &lt;span class="s1"&gt;&amp;#39;hello&amp;#39;&lt;/span&gt;
+&lt;span class="nb"&gt;echo&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;hello&amp;#39;&lt;/span&gt;
 
-$ bash a.sh
-a.sh: line 1: abc: &lt;span class="nb"&gt;command&lt;/span&gt; not found
+$&lt;span class="w"&gt; &lt;/span&gt;bash&lt;span class="w"&gt; &lt;/span&gt;a.sh
+a.sh:&lt;span class="w"&gt; &lt;/span&gt;line&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="m"&gt;1&lt;/span&gt;:&lt;span class="w"&gt; &lt;/span&gt;abc:&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nb"&gt;command&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;not&lt;span class="w"&gt; &lt;/span&gt;found
 hello
 
-$ cat a.sh
-&lt;span class="nb"&gt;set&lt;/span&gt; -e
+$&lt;span class="w"&gt; &lt;/span&gt;cat&lt;span class="w"&gt; &lt;/span&gt;a.sh
+&lt;span class="nb"&gt;set&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;-e
 abc
-&lt;span class="nb"&gt;echo&lt;/span&gt; &lt;span class="s1"&gt;&amp;#39;hello&amp;#39;&lt;/span&gt;
+&lt;span class="nb"&gt;echo&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;hello&amp;#39;&lt;/span&gt;
 
-$ bash a.sh
-a.sh: line 2: abc: &lt;span class="nb"&gt;command&lt;/span&gt; not found
+$&lt;span class="w"&gt; &lt;/span&gt;bash&lt;span class="w"&gt; &lt;/span&gt;a.sh
+a.sh:&lt;span class="w"&gt; &lt;/span&gt;line&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="m"&gt;2&lt;/span&gt;:&lt;span class="w"&gt; &lt;/span&gt;abc:&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nb"&gt;command&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;not&lt;span class="w"&gt; &lt;/span&gt;found
 &lt;/pre&gt;&lt;/div&gt;
 &lt;p&gt;&lt;tt class="docutils literal"&gt;bash &lt;span class="pre"&gt;-e&lt;/span&gt; xx.sh&lt;/tt&gt; 也可以实现同样的效果。&lt;/p&gt;
 &lt;ul class="simple"&gt;
 &lt;li&gt;引用未定义的变量时出错并退出: &lt;tt class="docutils literal"&gt;set &lt;span class="pre"&gt;-u&lt;/span&gt;&lt;/tt&gt;&lt;/li&gt;
 &lt;/ul&gt;
-&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;$ cat a.sh
-&lt;span class="nb"&gt;echo&lt;/span&gt; &lt;span class="s2"&gt;&amp;quot;&lt;/span&gt;&lt;span class="nv"&gt;$abc&lt;/span&gt;&lt;span class="s2"&gt;&amp;quot;&lt;/span&gt;
-&lt;span class="nb"&gt;echo&lt;/span&gt; hello
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;$&lt;span class="w"&gt; &lt;/span&gt;cat&lt;span class="w"&gt; &lt;/span&gt;a.sh
+&lt;span class="nb"&gt;echo&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="s2"&gt;&amp;quot;&lt;/span&gt;&lt;span class="nv"&gt;$abc&lt;/span&gt;&lt;span class="s2"&gt;&amp;quot;&lt;/span&gt;
+&lt;span class="nb"&gt;echo&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;hello
 
-$ bash a.sh
+$&lt;span class="w"&gt; &lt;/span&gt;bash&lt;span class="w"&gt; &lt;/span&gt;a.sh
 
 hello
 
-$ cat a.sh
-&lt;span class="nb"&gt;set&lt;/span&gt; -u
-&lt;span class="nb"&gt;echo&lt;/span&gt; &lt;span class="s2"&gt;&amp;quot;&lt;/span&gt;&lt;span class="nv"&gt;$abc&lt;/span&gt;&lt;span class="s2"&gt;&amp;quot;&lt;/span&gt;
-&lt;span class="nb"&gt;echo&lt;/span&gt; hello
+$&lt;span class="w"&gt; &lt;/span&gt;cat&lt;span class="w"&gt; &lt;/span&gt;a.sh
+&lt;span class="nb"&gt;set&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;-u
+&lt;span class="nb"&gt;echo&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="s2"&gt;&amp;quot;&lt;/span&gt;&lt;span class="nv"&gt;$abc&lt;/span&gt;&lt;span class="s2"&gt;&amp;quot;&lt;/span&gt;
+&lt;span class="nb"&gt;echo&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;hello
 
-$ bash a.sh
-a.sh: line 2: abc: unbound variable
+$&lt;span class="w"&gt; &lt;/span&gt;bash&lt;span class="w"&gt; &lt;/span&gt;a.sh
+a.sh:&lt;span class="w"&gt; &lt;/span&gt;line&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="m"&gt;2&lt;/span&gt;:&lt;span class="w"&gt; &lt;/span&gt;abc:&lt;span class="w"&gt; &lt;/span&gt;unbound&lt;span class="w"&gt; &lt;/span&gt;variable
 &lt;/pre&gt;&lt;/div&gt;
 &lt;p&gt;&lt;tt class="docutils literal"&gt;bash &lt;span class="pre"&gt;-u&lt;/span&gt; xx.sh&lt;/tt&gt; 也可以实现同样的效果。&lt;/p&gt;
 &lt;ul class="simple"&gt;
 &lt;li&gt;管道命令中有一个命令失败整个管道操作的退出码将是失败的那个命令的退出码,
 未设置这个标志时是最后一个操作的退出码: &lt;tt class="docutils literal"&gt;set &lt;span class="pre"&gt;-o&lt;/span&gt; pipefail&lt;/tt&gt;&lt;/li&gt;
 &lt;/ul&gt;
-&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;$ cat a.sh
-la la la &lt;span class="p"&gt;|&lt;/span&gt; &lt;span class="nb"&gt;echo&lt;/span&gt; &lt;span class="s1"&gt;&amp;#39;aa&amp;#39;&lt;/span&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;$&lt;span class="w"&gt; &lt;/span&gt;cat&lt;span class="w"&gt; &lt;/span&gt;a.sh
+la&lt;span class="w"&gt; &lt;/span&gt;la&lt;span class="w"&gt; &lt;/span&gt;la&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="p"&gt;|&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nb"&gt;echo&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;aa&amp;#39;&lt;/span&gt;
 
-$ bash a.sh
-a.sh: line 1: la: &lt;span class="nb"&gt;command&lt;/span&gt; not found
+$&lt;span class="w"&gt; &lt;/span&gt;bash&lt;span class="w"&gt; &lt;/span&gt;a.sh
+a.sh:&lt;span class="w"&gt; &lt;/span&gt;line&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="m"&gt;1&lt;/span&gt;:&lt;span class="w"&gt; &lt;/span&gt;la:&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nb"&gt;command&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;not&lt;span class="w"&gt; &lt;/span&gt;found
 aa
 
-$ &lt;span class="nb"&gt;echo&lt;/span&gt; &lt;span class="nv"&gt;$?&lt;/span&gt;
-0
+$&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nb"&gt;echo&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nv"&gt;$?&lt;/span&gt;
+&lt;span class="m"&gt;0&lt;/span&gt;
 
-$ cat a.sh
-&lt;span class="nb"&gt;set&lt;/span&gt; -o pipefail
-la la la &lt;span class="p"&gt;|&lt;/span&gt; &lt;span class="nb"&gt;echo&lt;/span&gt; &lt;span class="s1"&gt;&amp;#39;aa&amp;#39;&lt;/span&gt;
+$&lt;span class="w"&gt; &lt;/span&gt;cat&lt;span class="w"&gt; &lt;/span&gt;a.sh
+&lt;span class="nb"&gt;set&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;-o&lt;span class="w"&gt; &lt;/span&gt;pipefail
+la&lt;span class="w"&gt; &lt;/span&gt;la&lt;span class="w"&gt; &lt;/span&gt;la&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="p"&gt;|&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nb"&gt;echo&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;aa&amp;#39;&lt;/span&gt;
 
-$ bash a.sh
-a.sh: line 2: la: &lt;span class="nb"&gt;command&lt;/span&gt; not found
+$&lt;span class="w"&gt; &lt;/span&gt;bash&lt;span class="w"&gt; &lt;/span&gt;a.sh
+a.sh:&lt;span class="w"&gt; &lt;/span&gt;line&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="m"&gt;2&lt;/span&gt;:&lt;span class="w"&gt; &lt;/span&gt;la:&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nb"&gt;command&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;not&lt;span class="w"&gt; &lt;/span&gt;found
 aa
 
-$ &lt;span class="nb"&gt;echo&lt;/span&gt; &lt;span class="nv"&gt;$?&lt;/span&gt;
-127
+$&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nb"&gt;echo&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nv"&gt;$?&lt;/span&gt;
+&lt;span class="m"&gt;127&lt;/span&gt;
 &lt;/pre&gt;&lt;/div&gt;
 &lt;ul class="simple"&gt;
 &lt;li&gt;设置单词切分使用的分隔符，默认是 &lt;tt class="docutils literal"&gt;$' \n\t'&lt;/tt&gt; （空格、换行、制表符），
 可以通过 &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;IFS=$'\n\t'&lt;/span&gt;&lt;/tt&gt; 设置为换行和制表符:&lt;/li&gt;
 &lt;/ul&gt;
-&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;$ cat a.sh
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;$&lt;span class="w"&gt; &lt;/span&gt;cat&lt;span class="w"&gt; &lt;/span&gt;a.sh
 &lt;span class="nv"&gt;names&lt;/span&gt;&lt;span class="o"&gt;=(&lt;/span&gt;
-    &lt;span class="s2"&gt;&amp;quot;foo bar&amp;quot;&lt;/span&gt;
-    &lt;span class="s2"&gt;&amp;quot;foobar tom&amp;quot;&lt;/span&gt;
+&lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="s2"&gt;&amp;quot;foo bar&amp;quot;&lt;/span&gt;
+&lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="s2"&gt;&amp;quot;foobar tom&amp;quot;&lt;/span&gt;
 &lt;span class="o"&gt;)&lt;/span&gt;
 
-&lt;span class="k"&gt;for&lt;/span&gt; i in &lt;span class="si"&gt;${&lt;/span&gt;&lt;span class="nv"&gt;names&lt;/span&gt;&lt;span class="p"&gt;[@]&lt;/span&gt;&lt;span class="si"&gt;}&lt;/span&gt;&lt;span class="p"&gt;;&lt;/span&gt; &lt;span class="k"&gt;do&lt;/span&gt;
-    &lt;span class="nb"&gt;echo&lt;/span&gt; &lt;span class="s2"&gt;&amp;quot;&lt;/span&gt;&lt;span class="nv"&gt;$i&lt;/span&gt;&lt;span class="s2"&gt;&amp;quot;&lt;/span&gt;
+&lt;span class="k"&gt;for&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;i&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="k"&gt;in&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="si"&gt;${&lt;/span&gt;&lt;span class="nv"&gt;names&lt;/span&gt;&lt;span class="p"&gt;[@]&lt;/span&gt;&lt;span class="si"&gt;}&lt;/span&gt;&lt;span class="p"&gt;;&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="k"&gt;do&lt;/span&gt;
+&lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="nb"&gt;echo&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="s2"&gt;&amp;quot;&lt;/span&gt;&lt;span class="nv"&gt;$i&lt;/span&gt;&lt;span class="s2"&gt;&amp;quot;&lt;/span&gt;
 &lt;span class="k"&gt;done&lt;/span&gt;
 
-$ bash a.sh
+$&lt;span class="w"&gt; &lt;/span&gt;bash&lt;span class="w"&gt; &lt;/span&gt;a.sh
 foo
 bar
 foobar
 tom
 
-$ cat a.sh
+$&lt;span class="w"&gt; &lt;/span&gt;cat&lt;span class="w"&gt; &lt;/span&gt;a.sh
 &lt;span class="nv"&gt;names&lt;/span&gt;&lt;span class="o"&gt;=(&lt;/span&gt;
-    &lt;span class="s2"&gt;&amp;quot;foo bar&amp;quot;&lt;/span&gt;
-    &lt;span class="s2"&gt;&amp;quot;foobar tom&amp;quot;&lt;/span&gt;
+&lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="s2"&gt;&amp;quot;foo bar&amp;quot;&lt;/span&gt;
+&lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="s2"&gt;&amp;quot;foobar tom&amp;quot;&lt;/span&gt;
 &lt;span class="o"&gt;)&lt;/span&gt;
 
 &lt;span class="nv"&gt;IFS&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="s1"&gt;$&amp;#39;\n\t&amp;#39;&lt;/span&gt;
-&lt;span class="k"&gt;for&lt;/span&gt; i in &lt;span class="si"&gt;${&lt;/span&gt;&lt;span class="nv"&gt;names&lt;/span&gt;&lt;span class="p"&gt;[@]&lt;/span&gt;&lt;span class="si"&gt;}&lt;/span&gt;&lt;span class="p"&gt;;&lt;/span&gt; &lt;span class="k"&gt;do&lt;/span&gt;
-    &lt;span class="nb"&gt;echo&lt;/span&gt; &lt;span class="s2"&gt;&amp;quot;&lt;/span&gt;&lt;span class="nv"&gt;$i&lt;/span&gt;&lt;span class="s2"&gt;&amp;quot;&lt;/span&gt;
+&lt;span class="k"&gt;for&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;i&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="k"&gt;in&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="si"&gt;${&lt;/span&gt;&lt;span class="nv"&gt;names&lt;/span&gt;&lt;span class="p"&gt;[@]&lt;/span&gt;&lt;span class="si"&gt;}&lt;/span&gt;&lt;span class="p"&gt;;&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="k"&gt;do&lt;/span&gt;
+&lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="nb"&gt;echo&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="s2"&gt;&amp;quot;&lt;/span&gt;&lt;span class="nv"&gt;$i&lt;/span&gt;&lt;span class="s2"&gt;&amp;quot;&lt;/span&gt;
 &lt;span class="k"&gt;done&lt;/span&gt;
 
-$ bash a.sh
-foo bar
-foobar tom
+$&lt;span class="w"&gt; &lt;/span&gt;bash&lt;span class="w"&gt; &lt;/span&gt;a.sh
+foo&lt;span class="w"&gt; &lt;/span&gt;bar
+foobar&lt;span class="w"&gt; &lt;/span&gt;tom
 &lt;/pre&gt;&lt;/div&gt;
 &lt;p&gt;更多的 set 支持的标志可以查看 &lt;a class="reference external" href="https://www.gnu.org/software/bash/manual/bashref.html#The-Set-Builtin"&gt;Bash Reference Manual&lt;/a&gt;&lt;/p&gt;
 &lt;/div&gt;
 &lt;/div&gt;
-&lt;div class="section" id="id20"&gt;
-&lt;h2 id="hidid20"&gt;数学运算&lt;a class="headerlink" href="#hidid20" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;div class="section" id="section-20"&gt;
+&lt;h2 id="hidsection-20"&gt;数学运算&lt;a class="headerlink" href="#hidsection-20" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;p&gt;可以通过 &lt;tt class="docutils literal"&gt;$(( &amp;lt;expression&amp;gt; ))&lt;/tt&gt; 执行数学运算，比如：&lt;/p&gt;
 &lt;ul class="simple"&gt;
 &lt;li&gt;&lt;tt class="docutils literal"&gt;+&lt;/tt&gt;: &lt;tt class="docutils literal"&gt;$(( 1 + 2 ))&lt;/tt&gt;&lt;/li&gt;
@@ -1006,8 +1006,8 @@ foobar tom
 &lt;/ul&gt;
 &lt;p&gt;支持变量做运算符，比如: &lt;tt class="docutils literal"&gt;$(( a + b ))&lt;/tt&gt; （推荐） 或 &lt;tt class="docutils literal"&gt;$(( $a + $b ))&lt;/tt&gt; （不推荐, 详见 &lt;a class="reference external" href="https://github.com/koalaman/shellcheck/wiki/SC2004"&gt;SC2004 - shellcheck&lt;/a&gt; ）&lt;/p&gt;
 &lt;/div&gt;
-&lt;div class="section" id="id21"&gt;
-&lt;h2 id="hidid21"&gt;参考资料&lt;a class="headerlink" href="#hidid21" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;div class="section" id="section-21"&gt;
+&lt;h2 id="hidsection-21"&gt;参考资料&lt;a class="headerlink" href="#hidsection-21" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;ul class="simple"&gt;
 &lt;li&gt;&lt;a class="reference external" href="https://ryanstutorials.net/bash-scripting-tutorial/bash-if-statements.php"&gt;If Statements - Bash Scripting Tutorial&lt;/a&gt;&lt;/li&gt;
 &lt;li&gt;&lt;a class="reference external" href="https://ryanstutorials.net/bash-scripting-tutorial/bash-loops.php"&gt;Loops - Bash Scripting Tutorial&lt;/a&gt;&lt;/li&gt;
@@ -1017,49 +1017,49 @@ foobar tom
 &lt;li&gt;&lt;a class="reference external" href="https://github.com/koalaman/shellcheck"&gt;shellcheck&lt;/a&gt;&lt;/li&gt;
 &lt;/ul&gt;
 &lt;/div&gt;
-</summary><category term="bash"></category><category term="shell"></category></entry><entry><title>tcpdump 常用操作</title><link href="https://mozillazg.com/2018/01/tcpdump-common-useful-examples-cookbook.html" rel="alternate"></link><updated>2018-01-14T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2018-01-14:2018/01/tcpdump-common-useful-examples-cookbook.html</id><summary type="html">&lt;div class="section" id="id1"&gt;
-&lt;h2 id="hidid1"&gt;常用参数&lt;a class="headerlink" href="#hidid1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+</summary><category term="bash"></category><category term="shell"></category></entry><entry><title>tcpdump 常用操作</title><link href="https://mozillazg.com/2018/01/tcpdump-common-useful-examples-cookbook.html" rel="alternate"></link><published>2018-01-14T00:00:00+00:00</published><updated>2018-01-14T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2018-01-14:2018/01/tcpdump-common-useful-examples-cookbook.html</id><summary type="html">&lt;div class="section" id="section-1"&gt;
+&lt;h2 id="hidsection-1"&gt;常用参数&lt;a class="headerlink" href="#hidsection-1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;ul class="simple"&gt;
 &lt;li&gt;&lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;-i&lt;/span&gt; interface&lt;/tt&gt;: 设置抓取的网卡名（可以使用 &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;-i&lt;/span&gt; any&lt;/tt&gt; 抓取所有网卡的数据包）&lt;/li&gt;
 &lt;/ul&gt;
-&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;tcpdump -i eth0
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;tcpdump&lt;span class="w"&gt; &lt;/span&gt;-i&lt;span class="w"&gt; &lt;/span&gt;eth0
 &lt;/pre&gt;&lt;/div&gt;
 &lt;ul class="simple"&gt;
 &lt;li&gt;&lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;-D&lt;/span&gt;&lt;/tt&gt;: 列出可用的网卡列表&lt;/li&gt;
 &lt;/ul&gt;
-&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;$ sudo tcpdump -D
-1.eth0
-2.nflog &lt;span class="o"&gt;(&lt;/span&gt;Linux netfilter log &lt;span class="o"&gt;(&lt;/span&gt;NFLOG&lt;span class="o"&gt;)&lt;/span&gt; interface&lt;span class="o"&gt;)&lt;/span&gt;
-3.nfqueue &lt;span class="o"&gt;(&lt;/span&gt;Linux netfilter queue &lt;span class="o"&gt;(&lt;/span&gt;NFQUEUE&lt;span class="o"&gt;)&lt;/span&gt; interface&lt;span class="o"&gt;)&lt;/span&gt;
-4.usbmon1 &lt;span class="o"&gt;(&lt;/span&gt;USB bus number 1&lt;span class="o"&gt;)&lt;/span&gt;
-5.any &lt;span class="o"&gt;(&lt;/span&gt;Pseudo-device that captures on all interfaces&lt;span class="o"&gt;)&lt;/span&gt;
-6.lo
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;$&lt;span class="w"&gt; &lt;/span&gt;sudo&lt;span class="w"&gt; &lt;/span&gt;tcpdump&lt;span class="w"&gt; &lt;/span&gt;-D
+&lt;span class="m"&gt;1&lt;/span&gt;.eth0
+&lt;span class="m"&gt;2&lt;/span&gt;.nflog&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;(&lt;/span&gt;Linux&lt;span class="w"&gt; &lt;/span&gt;netfilter&lt;span class="w"&gt; &lt;/span&gt;log&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;(&lt;/span&gt;NFLOG&lt;span class="o"&gt;)&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;interface&lt;span class="o"&gt;)&lt;/span&gt;
+&lt;span class="m"&gt;3&lt;/span&gt;.nfqueue&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;(&lt;/span&gt;Linux&lt;span class="w"&gt; &lt;/span&gt;netfilter&lt;span class="w"&gt; &lt;/span&gt;queue&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;(&lt;/span&gt;NFQUEUE&lt;span class="o"&gt;)&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;interface&lt;span class="o"&gt;)&lt;/span&gt;
+&lt;span class="m"&gt;4&lt;/span&gt;.usbmon1&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;(&lt;/span&gt;USB&lt;span class="w"&gt; &lt;/span&gt;bus&lt;span class="w"&gt; &lt;/span&gt;number&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="m"&gt;1&lt;/span&gt;&lt;span class="o"&gt;)&lt;/span&gt;
+&lt;span class="m"&gt;5&lt;/span&gt;.any&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;(&lt;/span&gt;Pseudo-device&lt;span class="w"&gt; &lt;/span&gt;that&lt;span class="w"&gt; &lt;/span&gt;captures&lt;span class="w"&gt; &lt;/span&gt;on&lt;span class="w"&gt; &lt;/span&gt;all&lt;span class="w"&gt; &lt;/span&gt;interfaces&lt;span class="o"&gt;)&lt;/span&gt;
+&lt;span class="m"&gt;6&lt;/span&gt;.lo
 &lt;/pre&gt;&lt;/div&gt;
 &lt;ul class="simple"&gt;
 &lt;li&gt;&lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;-w&lt;/span&gt; file&lt;/tt&gt;: 把捕获的包数据写入到文件中（可以使用 &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;-w&lt;/span&gt; -&lt;/tt&gt; 输出到标准输出）&lt;/li&gt;
 &lt;/ul&gt;
-&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;tcpdump -i eth0 -w debug.cap
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;tcpdump&lt;span class="w"&gt; &lt;/span&gt;-i&lt;span class="w"&gt; &lt;/span&gt;eth0&lt;span class="w"&gt; &lt;/span&gt;-w&lt;span class="w"&gt; &lt;/span&gt;debug.cap
 &lt;/pre&gt;&lt;/div&gt;
 &lt;ul class="simple"&gt;
 &lt;li&gt;&lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;-C&lt;/span&gt; size&lt;/tt&gt;: 使用 &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;-w&lt;/span&gt;&lt;/tt&gt; 写入文件时，限制文件的最大大小，超出时新开一个文件（单位是 1,000,000 bytes）&lt;/li&gt;
 &lt;/ul&gt;
-&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;$ sudo tcpdump -i eth0 -w debug.cap -C 1
-$ ls debug* -l
--rw-r--r-- &lt;span class="m"&gt;1&lt;/span&gt; tcpdump tcpdump &lt;span class="m"&gt;1000956&lt;/span&gt; Jan &lt;span class="m"&gt;14&lt;/span&gt; 10:16 debug.cap
--rw-r--r-- &lt;span class="m"&gt;1&lt;/span&gt; tcpdump tcpdump &lt;span class="m"&gt;1000323&lt;/span&gt; Jan &lt;span class="m"&gt;14&lt;/span&gt; 10:32 debug.cap1
--rw-r--r-- &lt;span class="m"&gt;1&lt;/span&gt; tcpdump tcpdump &lt;span class="m"&gt;1000017&lt;/span&gt; Jan &lt;span class="m"&gt;14&lt;/span&gt; 10:51 debug.cap2
--rw-r--r-- &lt;span class="m"&gt;1&lt;/span&gt; tcpdump tcpdump  &lt;span class="m"&gt;970705&lt;/span&gt; Jan &lt;span class="m"&gt;14&lt;/span&gt; 11:08 debug.cap3
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;$&lt;span class="w"&gt; &lt;/span&gt;sudo&lt;span class="w"&gt; &lt;/span&gt;tcpdump&lt;span class="w"&gt; &lt;/span&gt;-i&lt;span class="w"&gt; &lt;/span&gt;eth0&lt;span class="w"&gt; &lt;/span&gt;-w&lt;span class="w"&gt; &lt;/span&gt;debug.cap&lt;span class="w"&gt; &lt;/span&gt;-C&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="m"&gt;1&lt;/span&gt;
+$&lt;span class="w"&gt; &lt;/span&gt;ls&lt;span class="w"&gt; &lt;/span&gt;debug*&lt;span class="w"&gt; &lt;/span&gt;-l
+-rw-r--r--&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="m"&gt;1&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;tcpdump&lt;span class="w"&gt; &lt;/span&gt;tcpdump&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="m"&gt;1000956&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;Jan&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="m"&gt;14&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="m"&gt;10&lt;/span&gt;:16&lt;span class="w"&gt; &lt;/span&gt;debug.cap
+-rw-r--r--&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="m"&gt;1&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;tcpdump&lt;span class="w"&gt; &lt;/span&gt;tcpdump&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="m"&gt;1000323&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;Jan&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="m"&gt;14&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="m"&gt;10&lt;/span&gt;:32&lt;span class="w"&gt; &lt;/span&gt;debug.cap1
+-rw-r--r--&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="m"&gt;1&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;tcpdump&lt;span class="w"&gt; &lt;/span&gt;tcpdump&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="m"&gt;1000017&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;Jan&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="m"&gt;14&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="m"&gt;10&lt;/span&gt;:51&lt;span class="w"&gt; &lt;/span&gt;debug.cap2
+-rw-r--r--&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="m"&gt;1&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;tcpdump&lt;span class="w"&gt; &lt;/span&gt;tcpdump&lt;span class="w"&gt;  &lt;/span&gt;&lt;span class="m"&gt;970705&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;Jan&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="m"&gt;14&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="m"&gt;11&lt;/span&gt;:08&lt;span class="w"&gt; &lt;/span&gt;debug.cap3
 &lt;/pre&gt;&lt;/div&gt;
 &lt;ul class="simple"&gt;
 &lt;li&gt;&lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;-r&lt;/span&gt; file&lt;/tt&gt;: 从文件中读取包数据&lt;/li&gt;
 &lt;/ul&gt;
-&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;tcpdump -r debug.cap
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;tcpdump&lt;span class="w"&gt; &lt;/span&gt;-r&lt;span class="w"&gt; &lt;/span&gt;debug.cap
 &lt;/pre&gt;&lt;/div&gt;
 &lt;ul class="simple"&gt;
 &lt;li&gt;&lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;-v&lt;/span&gt;&lt;/tt&gt;: 启用 verbose output，抓包时输出包的附加信息（可以使用多个 &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;-v&lt;/span&gt;&lt;/tt&gt;: &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;-v&lt;/span&gt;&lt;/tt&gt;, &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;-vv&lt;/span&gt;&lt;/tt&gt;, &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;-vvv&lt;/span&gt;&lt;/tt&gt; 多个 &lt;tt class="docutils literal"&gt;v&lt;/tt&gt; 会显示更多更详细的信息）&lt;/li&gt;
 &lt;/ul&gt;
-&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;tcpdump -v
-tcpdump -vv
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;tcpdump&lt;span class="w"&gt; &lt;/span&gt;-v
+tcpdump&lt;span class="w"&gt; &lt;/span&gt;-vv
 &lt;/pre&gt;&lt;/div&gt;
 &lt;ul class="simple"&gt;
 &lt;li&gt;&lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;-A&lt;/span&gt;&lt;/tt&gt;: 以 ASCII 码方式显示每一个数据包(不会显示数据包中链路层头部信息). 在抓取包含网页数据的数据包时, 可方便查看数据&lt;/li&gt;
@@ -1069,42 +1069,42 @@ tcpdump -vv
 &lt;li&gt;&lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;-XX&lt;/span&gt;&lt;/tt&gt;: 打印每个包的头部数据, 同时会以16进制和 ASCII 码形式打印出每个包的数据, 其中包括数据链路层的头部&lt;/li&gt;
 &lt;li&gt;&lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;-c&lt;/span&gt; count&lt;/tt&gt;: 设置抓取到多少个包后就退出&lt;/li&gt;
 &lt;/ul&gt;
-&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;tcpdump -i eth0 -c 100
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;tcpdump&lt;span class="w"&gt; &lt;/span&gt;-i&lt;span class="w"&gt; &lt;/span&gt;eth0&lt;span class="w"&gt; &lt;/span&gt;-c&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="m"&gt;100&lt;/span&gt;
 &lt;/pre&gt;&lt;/div&gt;
 &lt;ul class="simple"&gt;
 &lt;li&gt;&lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;-n&lt;/span&gt;&lt;/tt&gt;: 不要把地址转换为主机名（直接显示 ip 不要解析为域名）&lt;/li&gt;
 &lt;/ul&gt;
-&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;tcpdump -n
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;tcpdump&lt;span class="w"&gt; &lt;/span&gt;-n
 &lt;/pre&gt;&lt;/div&gt;
 &lt;ul class="simple"&gt;
 &lt;li&gt;&lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;-nn&lt;/span&gt;&lt;/tt&gt;: 不要把转换协议和端口号（直接显示协议和端口号，不要转换为协议名称，比如 http）&lt;/li&gt;
 &lt;/ul&gt;
-&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;tcpdump -nn
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;tcpdump&lt;span class="w"&gt; &lt;/span&gt;-nn
 &lt;/pre&gt;&lt;/div&gt;
 &lt;ul class="simple"&gt;
 &lt;li&gt;&lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;-s&lt;/span&gt; snaplen&lt;/tt&gt;: 设置 tcpdump 的数据包抓取长度为 snaplen , 为 0 时表示让 tcpdump 自动选择合适的长度来抓取数据包.&lt;/li&gt;
 &lt;/ul&gt;
-&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;tcpdump -s 0
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;tcpdump&lt;span class="w"&gt; &lt;/span&gt;-s&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="m"&gt;0&lt;/span&gt;
 &lt;/pre&gt;&lt;/div&gt;
 &lt;ul class="simple"&gt;
 &lt;li&gt;&lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;-S&lt;/span&gt;&lt;/tt&gt;: 打印TCP 数据包的顺序号时, 使用绝对的顺序号, 而不是相对的顺序号.&lt;/li&gt;
 &lt;/ul&gt;
-&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;tcpdump -S
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;tcpdump&lt;span class="w"&gt; &lt;/span&gt;-S
 &lt;/pre&gt;&lt;/div&gt;
 &lt;ul class="simple"&gt;
 &lt;li&gt;&lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;-Z&lt;/span&gt; user&lt;/tt&gt;: 使tcpdump 放弃自己的超级权限(如果以root用户启动tcpdump, tcpdump将会有超级用户权限), 并把当前tcpdump的用户ID设置为user, 组ID设置为user首要所属组的ID&lt;/li&gt;
 &lt;/ul&gt;
-&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;sudo tcpdump -Z user2
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;sudo&lt;span class="w"&gt; &lt;/span&gt;tcpdump&lt;span class="w"&gt; &lt;/span&gt;-Z&lt;span class="w"&gt; &lt;/span&gt;user2
 &lt;/pre&gt;&lt;/div&gt;
 &lt;p&gt;常用的参数组合:&lt;/p&gt;
-&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;sudo tcpdump -i eth0 -nnS -s &lt;span class="m"&gt;0&lt;/span&gt; -c &lt;span class="m"&gt;100&lt;/span&gt; -Avvv &lt;span class="o"&gt;[&lt;/span&gt;&amp;lt;expression&amp;gt;&lt;span class="o"&gt;]&lt;/span&gt;
-sudo tcpdump -i eth0 -nnS -s &lt;span class="m"&gt;1024&lt;/span&gt; -c &lt;span class="m"&gt;100&lt;/span&gt; -Avvv &lt;span class="o"&gt;[&lt;/span&gt;&amp;lt;expression&amp;gt;&lt;span class="o"&gt;]&lt;/span&gt;
-sudo tcpdump -i eth0 -nnS -s &lt;span class="m"&gt;1024&lt;/span&gt; -C &lt;span class="m"&gt;10&lt;/span&gt; -c &lt;span class="m"&gt;10000&lt;/span&gt; -v -w debug.cap &lt;span class="o"&gt;[&lt;/span&gt;&amp;lt;expression&amp;gt;&lt;span class="o"&gt;]&lt;/span&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;sudo&lt;span class="w"&gt; &lt;/span&gt;tcpdump&lt;span class="w"&gt; &lt;/span&gt;-i&lt;span class="w"&gt; &lt;/span&gt;eth0&lt;span class="w"&gt; &lt;/span&gt;-nnS&lt;span class="w"&gt; &lt;/span&gt;-s&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="m"&gt;0&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;-c&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="m"&gt;100&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;-Avvv&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;[&lt;/span&gt;&amp;lt;expression&amp;gt;&lt;span class="o"&gt;]&lt;/span&gt;
+sudo&lt;span class="w"&gt; &lt;/span&gt;tcpdump&lt;span class="w"&gt; &lt;/span&gt;-i&lt;span class="w"&gt; &lt;/span&gt;eth0&lt;span class="w"&gt; &lt;/span&gt;-nnS&lt;span class="w"&gt; &lt;/span&gt;-s&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="m"&gt;1024&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;-c&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="m"&gt;100&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;-Avvv&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;[&lt;/span&gt;&amp;lt;expression&amp;gt;&lt;span class="o"&gt;]&lt;/span&gt;
+sudo&lt;span class="w"&gt; &lt;/span&gt;tcpdump&lt;span class="w"&gt; &lt;/span&gt;-i&lt;span class="w"&gt; &lt;/span&gt;eth0&lt;span class="w"&gt; &lt;/span&gt;-nnS&lt;span class="w"&gt; &lt;/span&gt;-s&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="m"&gt;1024&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;-C&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="m"&gt;10&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;-c&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="m"&gt;10000&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;-v&lt;span class="w"&gt; &lt;/span&gt;-w&lt;span class="w"&gt; &lt;/span&gt;debug.cap&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;[&lt;/span&gt;&amp;lt;expression&amp;gt;&lt;span class="o"&gt;]&lt;/span&gt;
 &lt;/pre&gt;&lt;/div&gt;
 &lt;p&gt;默认 tcpdump 会抓取所有的数据，可以通过指定过滤规则来过滤数据包。&lt;/p&gt;
 &lt;/div&gt;
-&lt;div class="section" id="id2"&gt;
-&lt;h2 id="hidid2"&gt;常用过滤规则&lt;a class="headerlink" href="#hidid2" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;div class="section" id="section-2"&gt;
+&lt;h2 id="hidsection-2"&gt;常用过滤规则&lt;a class="headerlink" href="#hidsection-2" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;p&gt;过滤规则一般包含三种修饰符的组合：&lt;/p&gt;
 &lt;ul class="simple"&gt;
 &lt;li&gt;type: 指定id 所代表的对象类型, id可以是名字也可以是数字. 可选的对象类型有: host, net, port 以及portrange，默认是 host&lt;/li&gt;
@@ -1143,8 +1143,8 @@ net 192.168.0.0/24
 net 192.168.0.0 mask 255.255.255.0
 &lt;/pre&gt;
 &lt;/div&gt;
-&lt;div class="section" id="id3"&gt;
-&lt;h3 id="hidid3"&gt;过滤端口&lt;a class="headerlink" href="#hidid3" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
+&lt;div class="section" id="section-3"&gt;
+&lt;h3 id="hidsection-3"&gt;过滤端口&lt;a class="headerlink" href="#hidsection-3" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
 &lt;p&gt;过滤 80 端口:&lt;/p&gt;
 &lt;pre class="literal-block"&gt;
 port 80
@@ -1166,8 +1166,8 @@ tcp portrange 1501-1549
 port 53
 &lt;/pre&gt;
 &lt;/div&gt;
-&lt;div class="section" id="id4"&gt;
-&lt;h3 id="hidid4"&gt;过滤协议&lt;a class="headerlink" href="#hidid4" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
+&lt;div class="section" id="section-4"&gt;
+&lt;h3 id="hidsection-4"&gt;过滤协议&lt;a class="headerlink" href="#hidsection-4" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
 &lt;p&gt;ipv4: &lt;tt class="docutils literal"&gt;ip&lt;/tt&gt;&lt;/p&gt;
 &lt;p&gt;ipv6: &lt;tt class="docutils literal"&gt;ip6&lt;/tt&gt;&lt;/p&gt;
 &lt;p&gt;tcp: &lt;tt class="docutils literal"&gt;tcp&lt;/tt&gt;&lt;/p&gt;
@@ -1175,8 +1175,8 @@ port 53
 &lt;p&gt;arp: &lt;tt class="docutils literal"&gt;arp&lt;/tt&gt;&lt;/p&gt;
 &lt;p&gt;icmp: &lt;tt class="docutils literal"&gt;icmp&lt;/tt&gt;&lt;/p&gt;
 &lt;/div&gt;
-&lt;div class="section" id="id5"&gt;
-&lt;h3 id="hidid5"&gt;过滤协议头&lt;a class="headerlink" href="#hidid5" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
+&lt;div class="section" id="section-5"&gt;
+&lt;h3 id="hidsection-5"&gt;过滤协议头&lt;a class="headerlink" href="#hidsection-5" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
 &lt;p&gt;过滤 tcp SYN 消息包:&lt;/p&gt;
 &lt;pre class="literal-block"&gt;
 'tcp[tcpflags] &amp;amp; (tcp-syn) != 0'
@@ -1259,16 +1259,16 @@ tcp-fin, tcp-syn, tcp-rst, tcp-push, tcp-ack, tcp-urg, tcp-ece, tcp-cwr
 &lt;/pre&gt;
 &lt;p&gt;自动生成 HTTP 相关过滤规则的脚本: &lt;a class="reference external" href="https://www.wireshark.org/tools/string-cf.html"&gt;https://www.wireshark.org/tools/string-cf.html&lt;/a&gt;&lt;/p&gt;
 &lt;p&gt;上面的规则可以通过括号和操作符进行各种组合，从而组合出复杂的过滤规则。&lt;/p&gt;
-&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;sudo tcpdump host 192.168.8.3 -Avv
-sudo tcpdump dst host baidu.com and dst port &lt;span class="m"&gt;80&lt;/span&gt; -i eth0 -vv
-sudo tcpdump dst host baidu.com and not dst port &lt;span class="m"&gt;80&lt;/span&gt; -i eth0 -vv
-sudo tcpdump dst host baidu.com and not &lt;span class="se"&gt;\(&lt;/span&gt;dst port &lt;span class="m"&gt;80&lt;/span&gt; or dst port 443&lt;span class="se"&gt;\)&lt;/span&gt; -i en0 -vv
-sudo tcpdump dst host baidu.com and &lt;span class="s1"&gt;&amp;#39;tcp[tcpflags] &amp;amp; (tcp-syn) != 0&amp;#39;&lt;/span&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;sudo&lt;span class="w"&gt; &lt;/span&gt;tcpdump&lt;span class="w"&gt; &lt;/span&gt;host&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="m"&gt;192&lt;/span&gt;.168.8.3&lt;span class="w"&gt; &lt;/span&gt;-Avv
+sudo&lt;span class="w"&gt; &lt;/span&gt;tcpdump&lt;span class="w"&gt; &lt;/span&gt;dst&lt;span class="w"&gt; &lt;/span&gt;host&lt;span class="w"&gt; &lt;/span&gt;baidu.com&lt;span class="w"&gt; &lt;/span&gt;and&lt;span class="w"&gt; &lt;/span&gt;dst&lt;span class="w"&gt; &lt;/span&gt;port&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="m"&gt;80&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;-i&lt;span class="w"&gt; &lt;/span&gt;eth0&lt;span class="w"&gt; &lt;/span&gt;-vv
+sudo&lt;span class="w"&gt; &lt;/span&gt;tcpdump&lt;span class="w"&gt; &lt;/span&gt;dst&lt;span class="w"&gt; &lt;/span&gt;host&lt;span class="w"&gt; &lt;/span&gt;baidu.com&lt;span class="w"&gt; &lt;/span&gt;and&lt;span class="w"&gt; &lt;/span&gt;not&lt;span class="w"&gt; &lt;/span&gt;dst&lt;span class="w"&gt; &lt;/span&gt;port&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="m"&gt;80&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;-i&lt;span class="w"&gt; &lt;/span&gt;eth0&lt;span class="w"&gt; &lt;/span&gt;-vv
+sudo&lt;span class="w"&gt; &lt;/span&gt;tcpdump&lt;span class="w"&gt; &lt;/span&gt;dst&lt;span class="w"&gt; &lt;/span&gt;host&lt;span class="w"&gt; &lt;/span&gt;baidu.com&lt;span class="w"&gt; &lt;/span&gt;and&lt;span class="w"&gt; &lt;/span&gt;not&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="se"&gt;\(&lt;/span&gt;dst&lt;span class="w"&gt; &lt;/span&gt;port&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="m"&gt;80&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;or&lt;span class="w"&gt; &lt;/span&gt;dst&lt;span class="w"&gt; &lt;/span&gt;port&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="m"&gt;443&lt;/span&gt;&lt;span class="se"&gt;\)&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;-i&lt;span class="w"&gt; &lt;/span&gt;en0&lt;span class="w"&gt; &lt;/span&gt;-vv
+sudo&lt;span class="w"&gt; &lt;/span&gt;tcpdump&lt;span class="w"&gt; &lt;/span&gt;dst&lt;span class="w"&gt; &lt;/span&gt;host&lt;span class="w"&gt; &lt;/span&gt;baidu.com&lt;span class="w"&gt; &lt;/span&gt;and&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;tcp[tcpflags] &amp;amp; (tcp-syn) != 0&amp;#39;&lt;/span&gt;
 &lt;/pre&gt;&lt;/div&gt;
 &lt;/div&gt;
 &lt;/div&gt;
-&lt;div class="section" id="id6"&gt;
-&lt;h2 id="hidid6"&gt;参考资料&lt;a class="headerlink" href="#hidid6" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;div class="section" id="section-6"&gt;
+&lt;h2 id="hidsection-6"&gt;参考资料&lt;a class="headerlink" href="#hidsection-6" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;ul class="simple"&gt;
 &lt;li&gt;&lt;a class="reference external" href="https://wiki.wireshark.org/CaptureFilters"&gt;CaptureFilters - The Wireshark Wiki&lt;/a&gt;&lt;/li&gt;
 &lt;li&gt;&lt;a class="reference external" href="http://www.tcpdump.org/manpages/pcap-filter.7.html"&gt;Manpage of PCAP-FILTER&lt;/a&gt;&lt;/li&gt;
@@ -1279,8 +1279,8 @@ sudo tcpdump dst host baidu.com and &lt;span class="s1"&gt;&amp;#39;tcp[tcpflags
 &lt;li&gt;&lt;a class="reference external" href="https://stackoverflow.com/questions/4777042/can-i-use-tcpdump-to-get-http-requests-response-header-and-response-body"&gt;android - Can I use tcpdump to get HTTP requests, response header and response body? - Stack Overflow&lt;/a&gt;&lt;/li&gt;
 &lt;/ul&gt;
 &lt;/div&gt;
-</summary><category term="tcpdump"></category></entry><entry><title>一种解决 HAProxy 节点网络异常（sendmsg: Invalid argument, Connection timed out ）的办法</title><link href="https://mozillazg.com/2017/10/linux-a-way-to-fix-haproxy-network-connection-timeout-ping-sendmsg-Invalid-argument-socket-errno-110-connection-timed-out.html" rel="alternate"></link><updated>2017-10-21T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2017-10-21:2017/10/linux-a-way-to-fix-haproxy-network-connection-timeout-ping-sendmsg-Invalid-argument-socket-errno-110-connection-timed-out.html</id><summary type="html">&lt;div class="section" id="id1"&gt;
-&lt;h2 id="hidid1"&gt;问题&lt;a class="headerlink" href="#hidid1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+</summary><category term="tcpdump"></category></entry><entry><title>一种解决 HAProxy 节点网络异常（sendmsg: Invalid argument, Connection timed out ）的办法</title><link href="https://mozillazg.com/2017/10/linux-a-way-to-fix-haproxy-network-connection-timeout-ping-sendmsg-Invalid-argument-socket-errno-110-connection-timed-out.html" rel="alternate"></link><published>2017-10-21T00:00:00+00:00</published><updated>2017-10-21T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2017-10-21:2017/10/linux-a-way-to-fix-haproxy-network-connection-timeout-ping-sendmsg-Invalid-argument-socket-errno-110-connection-timed-out.html</id><summary type="html">&lt;div class="section" id="section-1"&gt;
+&lt;h2 id="hidsection-1"&gt;问题&lt;a class="headerlink" href="#hidsection-1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;p&gt;之前连接一个 HAProxy 前端服务时总是时不时出现 &lt;tt class="docutils literal"&gt;[Errno 110] Connection timed out&lt;/tt&gt; ，并且本地 ping 服务器丢包率特别高。
 到服务器上看了以后，发现 &lt;tt class="docutils literal"&gt;ping 127.0.0.1&lt;/tt&gt; 的丢包率也特别高，而且 ping
 命令还出现 &lt;tt class="docutils literal"&gt;ping: sendmsg: Invalid argument&lt;/tt&gt; 错误:&lt;/p&gt;
@@ -1306,8 +1306,8 @@ ping: sendmsg: Invalid argument
 &lt;p&gt;需要提一下的就是，这个 HAProxy 服务在一个非常大的内网(large subnets)里，
 内网里很多机器都会去连接这个服务。&lt;/p&gt;
 &lt;/div&gt;
-&lt;div class="section" id="id2"&gt;
-&lt;h2 id="hidid2"&gt;解决方法&lt;a class="headerlink" href="#hidid2" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;div class="section" id="section-2"&gt;
+&lt;h2 id="hidsection-2"&gt;解决方法&lt;a class="headerlink" href="#hidsection-2" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;p&gt;修改了一下 sysctl, 加大了 ARP cache:&lt;/p&gt;
 &lt;pre class="literal-block"&gt;
 $ sudo sysctl -w net.ipv4.neigh.default.gc_thresh1=1024
@@ -1316,8 +1316,8 @@ $ sudo sysctl -w net.ipv4.neigh.default.gc_thresh3=4096
 $ sudo sysctl -p
 $ sudo sysctl -a |grep net.ipv4.neigh.default.gc_thresh
 &lt;/pre&gt;
-&lt;div class="section" id="id3"&gt;
-&lt;h3 id="hidid3"&gt;为什么要修改为上面的值？&lt;a class="headerlink" href="#hidid3" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
+&lt;div class="section" id="section-3"&gt;
+&lt;h3 id="hidsection-3"&gt;为什么要修改为上面的值？&lt;a class="headerlink" href="#hidsection-3" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
 &lt;p&gt;先来看看这几个配置项的含义(摘自 &lt;a class="reference external" href="https://www.kernel.org/doc/Documentation/networking/ip-sysctl.txt"&gt;https://www.kernel.org/doc/Documentation/networking/ip-sysctl.txt&lt;/a&gt;):&lt;/p&gt;
 &lt;pre class="literal-block"&gt;
 neigh/default/gc_thresh1 - INTEGER
@@ -1366,8 +1366,8 @@ net.ipv4.neigh.default.gc_thresh3 = 65536
 &lt;tt class="docutils literal"&gt;net.ipv4.neigh.default.gc_interval&lt;/tt&gt;, &lt;tt class="docutils literal"&gt;net.ipv4.neigh.default.gc_stale_time&lt;/tt&gt;&lt;/p&gt;
 &lt;/div&gt;
 &lt;/div&gt;
-&lt;div class="section" id="id5"&gt;
-&lt;h2 id="hidid5"&gt;参考资料&lt;a class="headerlink" href="#hidid5" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;div class="section" id="section-4"&gt;
+&lt;h2 id="hidsection-4"&gt;参考资料&lt;a class="headerlink" href="#hidsection-4" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;ul class="simple"&gt;
 &lt;li&gt;&lt;a class="reference external" href="https://bugzilla.redhat.com/show_bug.cgi?id=1316981"&gt;Bug 1316981 – Arp table kernel tuning necessary for large neutron environments&lt;/a&gt;&lt;/li&gt;
 &lt;li&gt;&lt;a class="reference external" href="https://bugzilla.redhat.com/show_bug.cgi?id=1498213"&gt;Bug 1498213 – Increase ARP cache size on loadbalancers&lt;/a&gt;&lt;/li&gt;
@@ -1384,7 +1384,7 @@ net.ipv4.neigh.default.gc_thresh3 = 65536
 &lt;li&gt;&lt;a class="reference external" href="https://en.wikipedia.org/wiki/Address_Resolution_Protocol"&gt;Address Resolution Protocol - Wikipedia&lt;/a&gt;&lt;/li&gt;
 &lt;/ul&gt;
 &lt;/div&gt;
-</summary><category term="ping"></category><category term="sysctl"></category><category term="HAProxy"></category><category term="ARP"></category></entry><entry><title>如何在 centos 7 上编译 boost</title><link href="https://mozillazg.com/2016/04/linux-how-to-build-boost.python-on-centos7.md.html" rel="alternate"></link><updated>2016-04-17T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2016-04-17:2016/04/linux-how-to-build-boost.python-on-centos7.md.html</id><summary type="html">&lt;p&gt;本文主要记录一下如何在 centos 7 上编译 boost 库，同时也适用于 ubuntu（安装系统包的命令需要改为 &lt;code&gt;apt-get&lt;/code&gt;）&lt;/p&gt;
+</summary><category term="ping"></category><category term="sysctl"></category><category term="HAProxy"></category><category term="ARP"></category></entry><entry><title>如何在 centos 7 上编译 boost</title><link href="https://mozillazg.com/2016/04/linux-how-to-build-boost.python-on-centos7.md.html" rel="alternate"></link><published>2016-04-17T00:00:00+00:00</published><updated>2016-04-17T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2016-04-17:2016/04/linux-how-to-build-boost.python-on-centos7.md.html</id><summary type="html">&lt;p&gt;本文主要记录一下如何在 centos 7 上编译 boost 库，同时也适用于 ubuntu（安装系统包的命令需要改为 &lt;code&gt;apt-get&lt;/code&gt;）&lt;/p&gt;
 &lt;ol&gt;
 &lt;li&gt;
 &lt;p&gt;安装编译工具 &lt;code&gt;clang&lt;/code&gt; ，也可以使用 &lt;code&gt;gcc&lt;/code&gt; 代替，只需要将下面命令中的 &lt;code&gt;clang&lt;/code&gt; 替换为 &lt;code&gt;gcc&lt;/code&gt; 即可&lt;/p&gt;
@@ -1408,19 +1408,19 @@ tar zxvf boost_1_60_0.tar.gz
 &lt;/li&gt;
 &lt;li&gt;
 &lt;p&gt;编译 boost（同时编译所有的 boost lib， &lt;strong&gt;内存和 CPU 如果不够的话可能会编译失败甚至导致系统死机&lt;/strong&gt; ）&lt;/p&gt;
-&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;cd boost_1_60_0/
-# 可以通过 ./bootstrap.sh --help 查看更多选项
-./bootstrap.sh  --with-toolset=clang --with-libraries=all
-./b2
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="n"&gt;cd&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;boost_1_60_0&lt;/span&gt;&lt;span class="o"&gt;/&lt;/span&gt;
+&lt;span class="c1"&gt;# 可以通过 ./bootstrap.sh --help 查看更多选项&lt;/span&gt;
+&lt;span class="o"&gt;./&lt;/span&gt;&lt;span class="n"&gt;bootstrap&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;sh&lt;/span&gt;&lt;span class="w"&gt;  &lt;/span&gt;&lt;span class="o"&gt;--&lt;/span&gt;&lt;span class="n"&gt;with&lt;/span&gt;&lt;span class="o"&gt;-&lt;/span&gt;&lt;span class="n"&gt;toolset&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="n"&gt;clang&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;--&lt;/span&gt;&lt;span class="n"&gt;with&lt;/span&gt;&lt;span class="o"&gt;-&lt;/span&gt;&lt;span class="n"&gt;libraries&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="n"&gt;all&lt;/span&gt;
+&lt;span class="o"&gt;./&lt;/span&gt;&lt;span class="n"&gt;b2&lt;/span&gt;
 &lt;/pre&gt;&lt;/div&gt;
 
 
 &lt;/li&gt;
 &lt;li&gt;
 &lt;p&gt;编译安装 boost.build&lt;/p&gt;
-&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;cd toos/build/
-./bootstrap.sh  --with-toolset=clang
-./b2
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="n"&gt;cd&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;toos&lt;/span&gt;&lt;span class="o"&gt;/&lt;/span&gt;&lt;span class="n"&gt;build&lt;/span&gt;&lt;span class="o"&gt;/&lt;/span&gt;
+&lt;span class="o"&gt;./&lt;/span&gt;&lt;span class="n"&gt;bootstrap&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;sh&lt;/span&gt;&lt;span class="w"&gt;  &lt;/span&gt;&lt;span class="o"&gt;--&lt;/span&gt;&lt;span class="n"&gt;with&lt;/span&gt;&lt;span class="o"&gt;-&lt;/span&gt;&lt;span class="n"&gt;toolset&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="n"&gt;clang&lt;/span&gt;
+&lt;span class="o"&gt;./&lt;/span&gt;&lt;span class="n"&gt;b2&lt;/span&gt;
 &lt;/pre&gt;&lt;/div&gt;
 
 
@@ -1435,8 +1435,8 @@ ldconfig
 &lt;/li&gt;
 &lt;li&gt;
 &lt;p&gt;需要记下的几个路径，代码编译的时候可能会用到&lt;/p&gt;
-&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;* boost 目录: `/opt/boost_1_60_0/`
-* lib 目录:  `/opt/boost_1_60_0/stage/lib`
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="k"&gt;*&lt;/span&gt; boost 目录: &lt;span class="sb"&gt;`/opt/boost_1_60_0/`&lt;/span&gt;
+&lt;span class="k"&gt;*&lt;/span&gt; lib 目录:  &lt;span class="sb"&gt;`/opt/boost_1_60_0/stage/lib`&lt;/span&gt;
 &lt;/pre&gt;&lt;/div&gt;
 
 
@@ -1445,7 +1445,7 @@ ldconfig
 &lt;h2&gt;参考资料:&lt;/h2&gt;
 &lt;ul&gt;
 &lt;li&gt;&lt;a href="http://www.boost.org/doc/libs/1_60_0/more/getting_started/unix-variants.html"&gt;Boost Getting Started on Unix Variants - 1.60.0&lt;/a&gt;&lt;/li&gt;
-&lt;/ul&gt;</summary><category term="boost"></category><category term="python"></category><category term="c++"></category></entry><entry><title>使用 wireshark 查看 tcpdump 的抓包结果</title><link href="https://mozillazg.com/2015/05/open-tcpdump-result-with-wireshark-gui.html" rel="alternate"></link><updated>2015-05-10T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2015-05-10:2015/05/open-tcpdump-result-with-wireshark-gui.html</id><summary type="html">&lt;p&gt;本文将讲解如何使用 wireshark 查看 tcpdump 的抓包结果&lt;/p&gt;
+&lt;/ul&gt;</summary><category term="boost"></category><category term="python"></category><category term="c++"></category></entry><entry><title>使用 wireshark 查看 tcpdump 的抓包结果</title><link href="https://mozillazg.com/2015/05/open-tcpdump-result-with-wireshark-gui.html" rel="alternate"></link><published>2015-05-10T00:00:00+00:00</published><updated>2015-05-10T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2015-05-10:2015/05/open-tcpdump-result-with-wireshark-gui.html</id><summary type="html">&lt;p&gt;本文将讲解如何使用 wireshark 查看 tcpdump 的抓包结果&lt;/p&gt;
 &lt;h2&gt;保存 tcpdump 抓包结果&lt;/h2&gt;
 &lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;sudo tcpdump -i eth0 -w dump.pcap
 &lt;/pre&gt;&lt;/div&gt;
@@ -1453,18 +1453,18 @@ ldconfig
 
 &lt;ul&gt;
 &lt;li&gt;&lt;code&gt;-i&lt;/code&gt; 指定要抓取的网卡&lt;/li&gt;
-&lt;li&gt;&lt;code&gt;-w&lt;/code&gt; 指定结果保存位置&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;$ sudo tcpdump -i eth0 -w dump.pcap -v
-tcpdump: listening on eth0, link-type EN10MB &lt;span class="o"&gt;(&lt;/span&gt;Ethernet&lt;span class="o"&gt;)&lt;/span&gt;, capture size &lt;span class="m"&gt;65535&lt;/span&gt; bytes
-Got 15
+&lt;li&gt;&lt;code&gt;-w&lt;/code&gt; 指定结果保存位置&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;$&lt;span class="w"&gt; &lt;/span&gt;sudo&lt;span class="w"&gt; &lt;/span&gt;tcpdump&lt;span class="w"&gt; &lt;/span&gt;-i&lt;span class="w"&gt; &lt;/span&gt;eth0&lt;span class="w"&gt; &lt;/span&gt;-w&lt;span class="w"&gt; &lt;/span&gt;dump.pcap&lt;span class="w"&gt; &lt;/span&gt;-v
+tcpdump:&lt;span class="w"&gt; &lt;/span&gt;listening&lt;span class="w"&gt; &lt;/span&gt;on&lt;span class="w"&gt; &lt;/span&gt;eth0,&lt;span class="w"&gt; &lt;/span&gt;link-type&lt;span class="w"&gt; &lt;/span&gt;EN10MB&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;(&lt;/span&gt;Ethernet&lt;span class="o"&gt;)&lt;/span&gt;,&lt;span class="w"&gt; &lt;/span&gt;capture&lt;span class="w"&gt; &lt;/span&gt;size&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="m"&gt;65535&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;bytes
+Got&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="m"&gt;15&lt;/span&gt;
 &lt;/pre&gt;&lt;/div&gt;
 
 
 &lt;p&gt;&lt;code&gt;-v&lt;/code&gt; 主要是为了得到 &lt;code&gt;Got 15&lt;/code&gt; 这个数，当想要停止的时候，按下 &lt;code&gt;ctrl + c&lt;/code&gt; 就可以了：&lt;/p&gt;
-&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;$ sudo tcpdump -i eth0 -w dump.pcap -v
-tcpdump: listening on eth0, link-type EN10MB &lt;span class="o"&gt;(&lt;/span&gt;Ethernet&lt;span class="o"&gt;)&lt;/span&gt;, capture size &lt;span class="m"&gt;65535&lt;/span&gt; bytes
-^C71 packets captured
-&lt;span class="m"&gt;71&lt;/span&gt; packets received by filter
-&lt;span class="m"&gt;0&lt;/span&gt; packets dropped by kernel
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;$&lt;span class="w"&gt; &lt;/span&gt;sudo&lt;span class="w"&gt; &lt;/span&gt;tcpdump&lt;span class="w"&gt; &lt;/span&gt;-i&lt;span class="w"&gt; &lt;/span&gt;eth0&lt;span class="w"&gt; &lt;/span&gt;-w&lt;span class="w"&gt; &lt;/span&gt;dump.pcap&lt;span class="w"&gt; &lt;/span&gt;-v
+tcpdump:&lt;span class="w"&gt; &lt;/span&gt;listening&lt;span class="w"&gt; &lt;/span&gt;on&lt;span class="w"&gt; &lt;/span&gt;eth0,&lt;span class="w"&gt; &lt;/span&gt;link-type&lt;span class="w"&gt; &lt;/span&gt;EN10MB&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;(&lt;/span&gt;Ethernet&lt;span class="o"&gt;)&lt;/span&gt;,&lt;span class="w"&gt; &lt;/span&gt;capture&lt;span class="w"&gt; &lt;/span&gt;size&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="m"&gt;65535&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;bytes
+^C71&lt;span class="w"&gt; &lt;/span&gt;packets&lt;span class="w"&gt; &lt;/span&gt;captured
+&lt;span class="m"&gt;71&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;packets&lt;span class="w"&gt; &lt;/span&gt;received&lt;span class="w"&gt; &lt;/span&gt;by&lt;span class="w"&gt; &lt;/span&gt;filter
+&lt;span class="m"&gt;0&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;packets&lt;span class="w"&gt; &lt;/span&gt;dropped&lt;span class="w"&gt; &lt;/span&gt;by&lt;span class="w"&gt; &lt;/span&gt;kernel
 &lt;/pre&gt;&lt;/div&gt;
 
 
@@ -1504,18 +1504,18 @@ tcpdump: listening on eth0, link-type EN10MB &lt;span class="o"&gt;(&lt;/span&gt
 
 
 &lt;p&gt;使用 &lt;code&gt;-A&lt;/code&gt; 参数使返回值人类可读&lt;/p&gt;
-&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;$ sudo tcpdump -A host 3sd.me and port &lt;span class="m"&gt;80&lt;/span&gt; and &lt;span class="s1"&gt;&amp;#39;tcp[((tcp[12:1] &amp;amp; 0xf0) &amp;gt;&amp;gt; 2):4] = 0x47455420&amp;#39;&lt;/span&gt;
-tcpdump: verbose output suppressed, use -v or -vv &lt;span class="k"&gt;for&lt;/span&gt; full protocol decode
-listening on eth0, link-type EN10MB &lt;span class="o"&gt;(&lt;/span&gt;Ethernet&lt;span class="o"&gt;)&lt;/span&gt;, capture size &lt;span class="m"&gt;65535&lt;/span&gt; bytes
-18:41:59.219052 IP xxx.xxx.xxx.xxxx &amp;gt; 3sd.me.http: Flags &lt;span class="o"&gt;[&lt;/span&gt;P.&lt;span class="o"&gt;]&lt;/span&gt;, seq 2875869606:2875869979, ack 2796606839, win 64240, length 373
-E.....@.r..Gh..j..P....P.jI....wP....7..GET /JbVGP HTTP/1.1
-Host: 3sd.me
-Connection: Keep-Alive
-User-Agent: Mozilla/5.0 &lt;span class="o"&gt;(&lt;/span&gt;Macintosh&lt;span class="p"&gt;;&lt;/span&gt; Intel Mac OS X 10.9&lt;span class="p"&gt;;&lt;/span&gt; rv:35.0&lt;span class="o"&gt;)&lt;/span&gt; Gecko/20100101 Firefox/35.0
-Accept: text/html, application/xml&lt;span class="p"&gt;;&lt;/span&gt;&lt;span class="nv"&gt;q&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;0.9, application/xhtml+xml, image/png, image/webp, image/jpeg, image/gif, image/x-xbitmap, */*&lt;span class="p"&gt;;&lt;/span&gt;&lt;span class="nv"&gt;q&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;0.1
-Accept-Language: en
-Accept-Encoding: gzip, deflate
-Referer: http://3sd.me/
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;$&lt;span class="w"&gt; &lt;/span&gt;sudo&lt;span class="w"&gt; &lt;/span&gt;tcpdump&lt;span class="w"&gt; &lt;/span&gt;-A&lt;span class="w"&gt; &lt;/span&gt;host&lt;span class="w"&gt; &lt;/span&gt;3sd.me&lt;span class="w"&gt; &lt;/span&gt;and&lt;span class="w"&gt; &lt;/span&gt;port&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="m"&gt;80&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;and&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;tcp[((tcp[12:1] &amp;amp; 0xf0) &amp;gt;&amp;gt; 2):4] = 0x47455420&amp;#39;&lt;/span&gt;
+tcpdump:&lt;span class="w"&gt; &lt;/span&gt;verbose&lt;span class="w"&gt; &lt;/span&gt;output&lt;span class="w"&gt; &lt;/span&gt;suppressed,&lt;span class="w"&gt; &lt;/span&gt;use&lt;span class="w"&gt; &lt;/span&gt;-v&lt;span class="w"&gt; &lt;/span&gt;or&lt;span class="w"&gt; &lt;/span&gt;-vv&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="k"&gt;for&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;full&lt;span class="w"&gt; &lt;/span&gt;protocol&lt;span class="w"&gt; &lt;/span&gt;decode
+listening&lt;span class="w"&gt; &lt;/span&gt;on&lt;span class="w"&gt; &lt;/span&gt;eth0,&lt;span class="w"&gt; &lt;/span&gt;link-type&lt;span class="w"&gt; &lt;/span&gt;EN10MB&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;(&lt;/span&gt;Ethernet&lt;span class="o"&gt;)&lt;/span&gt;,&lt;span class="w"&gt; &lt;/span&gt;capture&lt;span class="w"&gt; &lt;/span&gt;size&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="m"&gt;65535&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;bytes
+&lt;span class="m"&gt;18&lt;/span&gt;:41:59.219052&lt;span class="w"&gt; &lt;/span&gt;IP&lt;span class="w"&gt; &lt;/span&gt;xxx.xxx.xxx.xxxx&lt;span class="w"&gt; &lt;/span&gt;&amp;gt;&lt;span class="w"&gt; &lt;/span&gt;3sd.me.http:&lt;span class="w"&gt; &lt;/span&gt;Flags&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;[&lt;/span&gt;P.&lt;span class="o"&gt;]&lt;/span&gt;,&lt;span class="w"&gt; &lt;/span&gt;seq&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="m"&gt;2875869606&lt;/span&gt;:2875869979,&lt;span class="w"&gt; &lt;/span&gt;ack&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="m"&gt;2796606839&lt;/span&gt;,&lt;span class="w"&gt; &lt;/span&gt;win&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="m"&gt;64240&lt;/span&gt;,&lt;span class="w"&gt; &lt;/span&gt;length&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="m"&gt;373&lt;/span&gt;
+E.....@.r..Gh..j..P....P.jI....wP....7..GET&lt;span class="w"&gt; &lt;/span&gt;/JbVGP&lt;span class="w"&gt; &lt;/span&gt;HTTP/1.1
+Host:&lt;span class="w"&gt; &lt;/span&gt;3sd.me
+Connection:&lt;span class="w"&gt; &lt;/span&gt;Keep-Alive
+User-Agent:&lt;span class="w"&gt; &lt;/span&gt;Mozilla/5.0&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;(&lt;/span&gt;Macintosh&lt;span class="p"&gt;;&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;Intel&lt;span class="w"&gt; &lt;/span&gt;Mac&lt;span class="w"&gt; &lt;/span&gt;OS&lt;span class="w"&gt; &lt;/span&gt;X&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="m"&gt;10&lt;/span&gt;.9&lt;span class="p"&gt;;&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;rv:35.0&lt;span class="o"&gt;)&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;Gecko/20100101&lt;span class="w"&gt; &lt;/span&gt;Firefox/35.0
+Accept:&lt;span class="w"&gt; &lt;/span&gt;text/html,&lt;span class="w"&gt; &lt;/span&gt;application/xml&lt;span class="p"&gt;;&lt;/span&gt;&lt;span class="nv"&gt;q&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="m"&gt;0&lt;/span&gt;.9,&lt;span class="w"&gt; &lt;/span&gt;application/xhtml+xml,&lt;span class="w"&gt; &lt;/span&gt;image/png,&lt;span class="w"&gt; &lt;/span&gt;image/webp,&lt;span class="w"&gt; &lt;/span&gt;image/jpeg,&lt;span class="w"&gt; &lt;/span&gt;image/gif,&lt;span class="w"&gt; &lt;/span&gt;image/x-xbitmap,&lt;span class="w"&gt; &lt;/span&gt;*/*&lt;span class="p"&gt;;&lt;/span&gt;&lt;span class="nv"&gt;q&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="m"&gt;0&lt;/span&gt;.1
+Accept-Language:&lt;span class="w"&gt; &lt;/span&gt;en
+Accept-Encoding:&lt;span class="w"&gt; &lt;/span&gt;gzip,&lt;span class="w"&gt; &lt;/span&gt;deflate
+Referer:&lt;span class="w"&gt; &lt;/span&gt;http://3sd.me/
 &lt;/pre&gt;&lt;/div&gt;
 
 

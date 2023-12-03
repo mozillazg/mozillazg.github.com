@@ -182,61 +182,61 @@ mozillazg's Blog            </a>
 <li>在 eBPF 程序中，我们可以通过 <tt class="docutils literal">bpf_tail_call()</tt> 这个辅助函数 从第1步的 map 中获取 eBPF 程序然后执行该程序进行尾调用。</li>
 </ul>
 </div>
-<div class="section" id="id1">
-<h2 id="hidid1">使用示例<a class="headerlink" href="#hidid1" title="Permalink to this headline">¶</a></h2>
+<div class="section" id="section-1">
+<h2 id="hidsection-1">使用示例<a class="headerlink" href="#hidsection-1" title="Permalink to this headline">¶</a></h2>
 <p>如前面所说，要使用尾调用特性我们需要定义一个 map 以及在 eBPF 程序中使用辅助函数执行尾调用。下面将以示例的代码的方式讲述每个步骤的关键代码。</p>
 <div class="section" id="bpf-map-type-prog-array-map">
 <h3 id="hidbpf-map-type-prog-array-map">定义 BPF_MAP_TYPE_PROG_ARRAY 类型的 map<a class="headerlink" href="#hidbpf-map-type-prog-array-map" title="Permalink to this headline">¶</a></h3>
 <p>可以通过下面的方法定义一个 <tt class="docutils literal">BPF_MAP_TYPE_PROG_ARRAY</tt> 类型的 map:</p>
-<div class="highlight"><pre><span></span><span class="k">struct</span> <span class="p">{</span>
-        <span class="n">__uint</span><span class="p">(</span><span class="n">type</span><span class="p">,</span> <span class="n">BPF_MAP_TYPE_PROG_ARRAY</span><span class="p">);</span>
-        <span class="n">__uint</span><span class="p">(</span><span class="n">key_size</span><span class="p">,</span> <span class="k">sizeof</span><span class="p">(</span><span class="n">u32</span><span class="p">));</span>
-        <span class="n">__uint</span><span class="p">(</span><span class="n">value_size</span><span class="p">,</span> <span class="k">sizeof</span><span class="p">(</span><span class="n">u32</span><span class="p">));</span>
-        <span class="n">__uint</span><span class="p">(</span><span class="n">max_entries</span><span class="p">,</span> <span class="mi">1024</span><span class="p">);</span>
-<span class="p">}</span> <span class="n">tail_jmp_map</span> <span class="n">SEC</span><span class="p">(</span><span class="s">&quot;.maps&quot;</span><span class="p">);</span>
+<div class="highlight"><pre><span></span><span class="k">struct</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="n">__uint</span><span class="p">(</span><span class="n">type</span><span class="p">,</span><span class="w"> </span><span class="n">BPF_MAP_TYPE_PROG_ARRAY</span><span class="p">);</span>
+<span class="w">        </span><span class="n">__uint</span><span class="p">(</span><span class="n">key_size</span><span class="p">,</span><span class="w"> </span><span class="k">sizeof</span><span class="p">(</span><span class="n">u32</span><span class="p">));</span>
+<span class="w">        </span><span class="n">__uint</span><span class="p">(</span><span class="n">value_size</span><span class="p">,</span><span class="w"> </span><span class="k">sizeof</span><span class="p">(</span><span class="n">u32</span><span class="p">));</span>
+<span class="w">        </span><span class="n">__uint</span><span class="p">(</span><span class="n">max_entries</span><span class="p">,</span><span class="w"> </span><span class="mi">1024</span><span class="p">);</span>
+<span class="p">}</span><span class="w"> </span><span class="n">tail_jmp_map</span><span class="w"> </span><span class="n">SEC</span><span class="p">(</span><span class="s">&quot;.maps&quot;</span><span class="p">);</span>
 </pre></div>
 <p>如果想要在定义这个 map 的时候初始化一些值的话，可以用下面的方法：</p>
-<div class="highlight"><pre><span></span><span class="k">struct</span> <span class="p">{</span>
-        <span class="n">__uint</span><span class="p">(</span><span class="n">type</span><span class="p">,</span> <span class="n">BPF_MAP_TYPE_PROG_ARRAY</span><span class="p">);</span>
-        <span class="n">__uint</span><span class="p">(</span><span class="n">key_size</span><span class="p">,</span> <span class="k">sizeof</span><span class="p">(</span><span class="n">u32</span><span class="p">));</span>
-        <span class="n">__uint</span><span class="p">(</span><span class="n">value_size</span><span class="p">,</span> <span class="k">sizeof</span><span class="p">(</span><span class="n">u32</span><span class="p">));</span>
-        <span class="n">__uint</span><span class="p">(</span><span class="n">max_entries</span><span class="p">,</span> <span class="mi">1024</span><span class="p">);</span>
-        <span class="n">__array</span><span class="p">(</span><span class="n">values</span><span class="p">,</span> <span class="kt">int</span> <span class="p">(</span><span class="kt">void</span> <span class="o">*</span><span class="p">));</span>   <span class="c1">// 这个 values 必须有</span>
-<span class="p">}</span> <span class="n">tail_jmp_map</span> <span class="n">SEC</span><span class="p">(</span><span class="s">&quot;.maps&quot;</span><span class="p">)</span> <span class="o">=</span> <span class="p">{</span>
-        <span class="p">.</span><span class="n">values</span> <span class="o">=</span> <span class="p">{</span>                      <span class="c1">// 初始化一些值</span>
-                <span class="p">[</span><span class="mi">268</span><span class="p">]</span> <span class="o">=</span> <span class="p">(</span><span class="kt">void</span> <span class="o">*</span><span class="p">)</span><span class="o">&amp;</span><span class="n">enter_fchmodat</span><span class="p">,</span>
-        <span class="p">},</span>
+<div class="highlight"><pre><span></span><span class="k">struct</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="n">__uint</span><span class="p">(</span><span class="n">type</span><span class="p">,</span><span class="w"> </span><span class="n">BPF_MAP_TYPE_PROG_ARRAY</span><span class="p">);</span>
+<span class="w">        </span><span class="n">__uint</span><span class="p">(</span><span class="n">key_size</span><span class="p">,</span><span class="w"> </span><span class="k">sizeof</span><span class="p">(</span><span class="n">u32</span><span class="p">));</span>
+<span class="w">        </span><span class="n">__uint</span><span class="p">(</span><span class="n">value_size</span><span class="p">,</span><span class="w"> </span><span class="k">sizeof</span><span class="p">(</span><span class="n">u32</span><span class="p">));</span>
+<span class="w">        </span><span class="n">__uint</span><span class="p">(</span><span class="n">max_entries</span><span class="p">,</span><span class="w"> </span><span class="mi">1024</span><span class="p">);</span>
+<span class="w">        </span><span class="n">__array</span><span class="p">(</span><span class="n">values</span><span class="p">,</span><span class="w"> </span><span class="kt">int</span><span class="w"> </span><span class="p">(</span><span class="kt">void</span><span class="w"> </span><span class="o">*</span><span class="p">));</span><span class="w">   </span><span class="c1">// 这个 values 必须有</span>
+<span class="p">}</span><span class="w"> </span><span class="n">tail_jmp_map</span><span class="w"> </span><span class="n">SEC</span><span class="p">(</span><span class="s">&quot;.maps&quot;</span><span class="p">)</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="p">.</span><span class="n">values</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">{</span><span class="w">                      </span><span class="c1">// 初始化一些值</span>
+<span class="w">                </span><span class="p">[</span><span class="mi">268</span><span class="p">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">(</span><span class="kt">void</span><span class="w"> </span><span class="o">*</span><span class="p">)</span><span class="o">&amp;</span><span class="n">enter_fchmodat</span><span class="p">,</span>
+<span class="w">        </span><span class="p">},</span>
 <span class="p">};</span>
 </pre></div>
 </div>
 <div class="section" id="map">
 <h3 id="hidmap">用户态更新 map<a class="headerlink" href="#hidmap" title="Permalink to this headline">¶</a></h3>
 <p>在用户态程序中可以通过 <tt class="docutils literal">bpf_map_update_elem</tt> 函数更新这个 map:</p>
-<div class="highlight"><pre><span></span><span class="n">tail_jump_map_fd</span> <span class="o">=</span> <span class="n">bpf_object__find_map_fd_by_name</span><span class="p">(</span><span class="n">bpf_obj</span><span class="p">,</span> <span class="s">&quot;tail_jmp_map&quot;</span><span class="p">);</span>
-<span class="n">bpf_map_update_elem</span><span class="p">(</span><span class="n">tail_jump_map_fd</span><span class="p">,</span> <span class="o">&amp;</span><span class="n">key</span><span class="p">,</span> <span class="o">&amp;</span><span class="n">bpf_program_fd</span><span class="p">,</span> <span class="n">BPF_ANY</span><span class="p">);</span>
+<div class="highlight"><pre><span></span><span class="n">tail_jump_map_fd</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">bpf_object__find_map_fd_by_name</span><span class="p">(</span><span class="n">bpf_obj</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;tail_jmp_map&quot;</span><span class="p">);</span>
+<span class="n">bpf_map_update_elem</span><span class="p">(</span><span class="n">tail_jump_map_fd</span><span class="p">,</span><span class="w"> </span><span class="o">&amp;</span><span class="n">key</span><span class="p">,</span><span class="w"> </span><span class="o">&amp;</span><span class="n">bpf_program_fd</span><span class="p">,</span><span class="w"> </span><span class="n">BPF_ANY</span><span class="p">);</span>
 </pre></div>
 </div>
-<div class="section" id="id2">
-<h3 id="hidid2">尾调用<a class="headerlink" href="#hidid2" title="Permalink to this headline">¶</a></h3>
+<div class="section" id="section-2">
+<h3 id="hidsection-2">尾调用<a class="headerlink" href="#hidsection-2" title="Permalink to this headline">¶</a></h3>
 <p>eBPF 程序中可以通过 <tt class="docutils literal">bpf_tail_call</tt> 辅助函数执行尾调用：</p>
 <div class="highlight"><pre><span></span><span class="n">SEC</span><span class="p">(</span><span class="s">&quot;raw_tracepoint/sys_enter&quot;</span><span class="p">)</span>
-<span class="kt">int</span> <span class="n">raw_tracepoint__sys_enter</span><span class="p">(</span><span class="k">struct</span> <span class="n">bpf_raw_tracepoint_args</span> <span class="o">*</span><span class="n">ctx</span><span class="p">)</span> <span class="p">{</span>
-        <span class="n">u32</span> <span class="n">syscall_id</span> <span class="o">=</span> <span class="n">ctx</span><span class="o">-&gt;</span><span class="n">args</span><span class="p">[</span><span class="mi">1</span><span class="p">];</span>
+<span class="kt">int</span><span class="w"> </span><span class="n">raw_tracepoint__sys_enter</span><span class="p">(</span><span class="k">struct</span><span class="w"> </span><span class="nc">bpf_raw_tracepoint_args</span><span class="w"> </span><span class="o">*</span><span class="n">ctx</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="n">u32</span><span class="w"> </span><span class="n">syscall_id</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">ctx</span><span class="o">-&gt;</span><span class="n">args</span><span class="p">[</span><span class="mi">1</span><span class="p">];</span>
 
-        <span class="c1">// 执行尾调用</span>
-        <span class="n">bpf_tail_call</span><span class="p">(</span><span class="n">ctx</span><span class="p">,</span> <span class="o">&amp;</span><span class="n">tail_jmp_map</span><span class="p">,</span> <span class="n">syscall_id</span><span class="p">);</span>
+<span class="w">        </span><span class="c1">// 执行尾调用</span>
+<span class="w">        </span><span class="n">bpf_tail_call</span><span class="p">(</span><span class="n">ctx</span><span class="p">,</span><span class="w"> </span><span class="o">&amp;</span><span class="n">tail_jmp_map</span><span class="p">,</span><span class="w"> </span><span class="n">syscall_id</span><span class="p">);</span>
 
-        <span class="c1">// 如果在 map 中找不到对应的 ebpf 程序的话，会继续走到后面的代码</span>
-        <span class="kt">char</span> <span class="n">fmt</span><span class="p">[]</span> <span class="o">=</span> <span class="s">&quot;no bpf program for syscall %d</span><span class="se">\n</span><span class="s">&quot;</span><span class="p">;</span>
-        <span class="n">bpf_trace_printk</span><span class="p">(</span><span class="n">fmt</span><span class="p">,</span> <span class="k">sizeof</span><span class="p">(</span><span class="n">fmt</span><span class="p">),</span> <span class="n">syscall_id</span><span class="p">);</span>
-        <span class="k">return</span> <span class="mi">0</span><span class="p">;</span>
+<span class="w">        </span><span class="c1">// 如果在 map 中找不到对应的 ebpf 程序的话，会继续走到后面的代码</span>
+<span class="w">        </span><span class="kt">char</span><span class="w"> </span><span class="n">fmt</span><span class="p">[]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">&quot;no bpf program for syscall %d</span><span class="se">\n</span><span class="s">&quot;</span><span class="p">;</span>
+<span class="w">        </span><span class="n">bpf_trace_printk</span><span class="p">(</span><span class="n">fmt</span><span class="p">,</span><span class="w"> </span><span class="k">sizeof</span><span class="p">(</span><span class="n">fmt</span><span class="p">),</span><span class="w"> </span><span class="n">syscall_id</span><span class="p">);</span>
+<span class="w">        </span><span class="k">return</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span>
 <span class="p">}</span>
 </pre></div>
 <p>完整的示例程序，详见： <a class="reference external" href="https://github.com/mozillazg/hello-libbpfgo/tree/master/22-tail-calls">https://github.com/mozillazg/hello-libbpfgo/tree/master/22-tail-calls</a></p>
 </div>
 </div>
-<div class="section" id="id3">
-<h2 id="hidid3">参考资料<a class="headerlink" href="#hidid3" title="Permalink to this headline">¶</a></h2>
+<div class="section" id="section-3">
+<h2 id="hidsection-3">参考资料<a class="headerlink" href="#hidsection-3" title="Permalink to this headline">¶</a></h2>
 <ul class="simple">
 <li><a class="reference external" href="https://docs.cilium.io/en/v1.12/bpf/">BPF and XDP Reference Guide — Cilium 1.12.2 documentation</a></li>
 <li><a class="reference external" href="https://man7.org/linux/man-pages/man2/bpf.2.html">bpf(2) - Linux manual page</a></li>
@@ -261,11 +261,11 @@ mozillazg's Blog            </a>
 <section class="well" id="related-posts">
     <p>Related Posts:</p>
     <ul>
-        <li><a href="https://mozillazg.com/2022/05/ebpf-libbpf-tracepoint-common-questions.html">ebpf/libbpf 程序使用 tracepoint 的常见问题</a></li>
+        <li><a href="https://mozillazg.com/2022/11/ebpf-libbpfgo-tools-port-rewriting-the-control-plane-of-bcc-libbpf-tools-in-golang-with-libbpfgo.html">使用 libbpfgo 重写 BCC libbpf-tools 中各个工具的用户态程序</a></li>
+        <li><a href="https://mozillazg.com/2022/06/ebpf-libbpf-btf-powered-enabled-raw-tracepoint-common-questions.html">ebpf/libbpf 程序使用 btf raw tracepoint 的常见问题</a></li>
         <li><a href="https://mozillazg.com/2022/05/ebpf-libbpf-raw-tracepoint-common-questions.html">ebpf/libbpf 程序使用 raw tracepoint 的常见问题</a></li>
-        <li><a href="https://mozillazg.com/2022/05/ebpf-libbpfgo-get-container-info-via-process-info.rst.html">根据进程信息获取对应进程所属的容器/Pod 信息（一）</a></li>
-        <li><a href="https://mozillazg.com/2022/05/ebpf-libbpfgo-get-process-info.html">libbpfgo 使用示例：在 ebpf 程序中获取进程信息</a></li>
-        <li><a href="https://mozillazg.com/2022/05/ebpf-libbpfgo-use-perfbuf-map.html">libbpfgo 使用示例：编写使用 perfbuf map 的 ebpf 程序</a></li>
+        <li><a href="https://mozillazg.com/2022/05/ebpf-libbpfgo-use-map-example.html">libbpfgo 使用示例：在内核态和用户态使用 ebpf map</a></li>
+        <li><a href="https://mozillazg.com/2022/05/ebpf-libbpf-tracepoint-common-questions.html">ebpf/libbpf 程序使用 tracepoint 的常见问题</a></li>
     </ul>
 </section>
     <hr/>
@@ -281,7 +281,7 @@ mozillazg's Blog            </a>
                 var disqus_url = 'https://mozillazg.com/2022/10/ebpf-libbpf-use-tail-calls.html';
 
             var disqus_config = function () {
-                this.language = "zh";
+                this.language = "";
             };
 
             /* * * DON'T EDIT BELOW THIS LINE * * */
@@ -308,7 +308,7 @@ mozillazg's Blog            </a>
    <div class="container">
       <hr>
       <div class="row">
-         <div class="col-xs-10">&copy; 2022 mozillazg
+         <div class="col-xs-10">&copy; 2023 mozillazg
             &middot; Powered by <a href="https://github.com/DandyDev/pelican-bootstrap3" target="_blank">pelican-bootstrap3</a>,
             <a href="http://docs.getpelican.com/" target="_blank">Pelican</a>,
             <a href="http://getbootstrap.com" target="_blank">Bootstrap</a>

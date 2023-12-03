@@ -171,8 +171,8 @@ mozillazg's Blog            </a>
 </footer><!-- /.post-info -->                </div>
                 <div class="js-toc"></div>
                 <div>
-                <div class="section" id="id1">
-<h2 id="hidid1">前言<a class="headerlink" href="#hidid1" title="Permalink to this headline">¶</a></h2>
+                <div class="section" id="section-1">
+<h2 id="hidsection-1">前言<a class="headerlink" href="#hidsection-1" title="Permalink to this headline">¶</a></h2>
 <p>记录一些编写 ebpf/libbpf 程序（比如编写类型为 <tt class="docutils literal">BPF_PROG_TYPE_TRACEPOINT</tt> 的 ebpf 程序）时
 涉及到的 tracepoint 相关的常见问题。</p>
 </div>
@@ -207,8 +207,8 @@ SEC(&quot;tp/&lt;category&gt;/&lt;name&gt;&quot;)
 <p><tt class="docutils literal">&lt;category&gt;</tt> 和 <tt class="docutils literal">&lt;name&gt;</tt> 的值均取值前面 available_events 文件中列出的内容。</p>
 <p><tt class="docutils literal"><span class="pre">SEC(&quot;tp/xx/yy&quot;)</span></tt> 跟 <tt class="docutils literal"><span class="pre">SEC(&quot;tracepoint/xx/yy&quot;)</span></tt> 其实是等效的，看个人喜好随便用哪种都行。</p>
 </div>
-<div class="section" id="id2">
-<h2 id="hidid2">如何确定 tracepoint 事件处理函数的参数类型，获取对应的内核调用参数<a class="headerlink" href="#hidid2" title="Permalink to this headline">¶</a></h2>
+<div class="section" id="tracepoint-1">
+<h2 id="hidtracepoint-1">如何确定 tracepoint 事件处理函数的参数类型，获取对应的内核调用参数<a class="headerlink" href="#hidtracepoint-1" title="Permalink to this headline">¶</a></h2>
 <p>假设，我们想通过 tracepoint 监控 <tt class="docutils literal">chmod</tt> 这个命令涉及的 <tt class="docutils literal">fchmodat</tt> 系统调用，
 那么，如何确定ebpf 中事件处理函数的参数类型，以及如何获取到对应的 <tt class="docutils literal">fchmodat</tt> 这个系统调用涉及的参数的内容，
 比如拿到操作文件名称以及操作的权限 mode 的值。</p>
@@ -232,11 +232,11 @@ syscalls:sys_enter_fchmodat
 <tt class="docutils literal">sys_exit_xx</tt> 对应 <tt class="docutils literal">trace_event_raw_sys_exit</tt> ，
 其他的一般对应 <tt class="docutils literal">trace_event_raw_&lt;name&gt;</tt> ，如果没找到的话，可以参考 <tt class="docutils literal">trace_event_raw_sys_enter</tt>
 的例子找它相近的 struct。 对于 <tt class="docutils literal">sys_enter_fchmodat</tt> ，我们使用 <tt class="docutils literal">trace_event_raw_sys_enter</tt> 这个 struct:</p>
-<div class="highlight"><pre><span></span><span class="k">struct</span> <span class="n">trace_event_raw_sys_enter</span> <span class="p">{</span>
-    <span class="k">struct</span> <span class="n">trace_entry</span> <span class="n">ent</span><span class="p">;</span>
-    <span class="kt">long</span> <span class="kt">int</span> <span class="n">id</span><span class="p">;</span>
-    <span class="kt">long</span> <span class="kt">unsigned</span> <span class="kt">int</span> <span class="n">args</span><span class="p">[</span><span class="mi">6</span><span class="p">];</span>
-    <span class="kt">char</span> <span class="n">__data</span><span class="p">[</span><span class="mi">0</span><span class="p">];</span>
+<div class="highlight"><pre><span></span><span class="k">struct</span><span class="w"> </span><span class="nc">trace_event_raw_sys_enter</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="k">struct</span><span class="w"> </span><span class="nc">trace_entry</span><span class="w"> </span><span class="n">ent</span><span class="p">;</span>
+<span class="w">    </span><span class="kt">long</span><span class="w"> </span><span class="kt">int</span><span class="w"> </span><span class="n">id</span><span class="p">;</span>
+<span class="w">    </span><span class="kt">long</span><span class="w"> </span><span class="kt">unsigned</span><span class="w"> </span><span class="kt">int</span><span class="w"> </span><span class="n">args</span><span class="p">[</span><span class="mi">6</span><span class="p">];</span>
+<span class="w">    </span><span class="kt">char</span><span class="w"> </span><span class="n">__data</span><span class="p">[</span><span class="mi">0</span><span class="p">];</span>
 <span class="p">};</span>
 </pre></div>
 <p>其中 <tt class="docutils literal">args</tt> 中就存储了事件相关的我们可以获取的信息，至于里面包含了哪些信息就是第四步需要确定的信息。</p>
@@ -268,15 +268,15 @@ print fmt: &quot;dfd: 0x%08lx, filename: 0x%08lx, mode: 0x%08lx&quot;, ((unsigne
 这些字段的值可以通过 <tt class="docutils literal">trace_event_raw_sys_enter</tt> 的 <tt class="docutils literal">args</tt> 数组获取，即通过 <tt class="docutils literal">args[0]</tt> 获取 <tt class="docutils literal">dfd</tt> , <tt class="docutils literal">args[1]</tt> 获取 <tt class="docutils literal">filename</tt> 以此类推。</p>
 <p>信息都确定好了，就可以写程序了。比如上面 <tt class="docutils literal">sys_enter_fchmodat</tt> 事件的示例 ebpf 程序如下:</p>
 <div class="highlight"><pre><span></span><span class="n">SEC</span><span class="p">(</span><span class="s">&quot;tracepoint/syscalls/sys_enter_fchmodat&quot;</span><span class="p">)</span>
-<span class="kt">int</span> <span class="n">tracepoint__syscalls__sys_enter_fchmodat</span><span class="p">(</span><span class="k">struct</span> <span class="n">trace_event_raw_sys_enter</span> <span class="o">*</span><span class="n">ctx</span><span class="p">)</span>
+<span class="kt">int</span><span class="w"> </span><span class="n">tracepoint__syscalls__sys_enter_fchmodat</span><span class="p">(</span><span class="k">struct</span><span class="w"> </span><span class="nc">trace_event_raw_sys_enter</span><span class="w"> </span><span class="o">*</span><span class="n">ctx</span><span class="p">)</span>
 <span class="p">{</span>
-        <span class="c1">// ...</span>
+<span class="w">        </span><span class="c1">// ...</span>
 
-        <span class="kt">char</span> <span class="o">*</span><span class="n">filename_ptr</span> <span class="o">=</span> <span class="p">(</span><span class="kt">char</span> <span class="o">*</span><span class="p">)</span> <span class="n">BPF_CORE_READ</span><span class="p">(</span><span class="n">ctx</span><span class="p">,</span> <span class="n">args</span><span class="p">[</span><span class="mi">1</span><span class="p">]);</span>
-        <span class="n">bpf_core_read_user_str</span><span class="p">(</span><span class="o">&amp;</span><span class="n">event</span><span class="o">-&gt;</span><span class="n">filename</span><span class="p">,</span> <span class="k">sizeof</span><span class="p">(</span><span class="n">event</span><span class="o">-&gt;</span><span class="n">filename</span><span class="p">),</span> <span class="n">filename_ptr</span><span class="p">);</span>
-        <span class="n">event</span><span class="o">-&gt;</span><span class="n">mode</span> <span class="o">=</span> <span class="n">BPF_CORE_READ</span><span class="p">(</span><span class="n">ctx</span><span class="p">,</span> <span class="n">args</span><span class="p">[</span><span class="mi">2</span><span class="p">]);</span>
+<span class="w">        </span><span class="kt">char</span><span class="w"> </span><span class="o">*</span><span class="n">filename_ptr</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">(</span><span class="kt">char</span><span class="w"> </span><span class="o">*</span><span class="p">)</span><span class="w"> </span><span class="n">BPF_CORE_READ</span><span class="p">(</span><span class="n">ctx</span><span class="p">,</span><span class="w"> </span><span class="n">args</span><span class="p">[</span><span class="mi">1</span><span class="p">]);</span>
+<span class="w">        </span><span class="n">bpf_core_read_user_str</span><span class="p">(</span><span class="o">&amp;</span><span class="n">event</span><span class="o">-&gt;</span><span class="n">filename</span><span class="p">,</span><span class="w"> </span><span class="k">sizeof</span><span class="p">(</span><span class="n">event</span><span class="o">-&gt;</span><span class="n">filename</span><span class="p">),</span><span class="w"> </span><span class="n">filename_ptr</span><span class="p">);</span>
+<span class="w">        </span><span class="n">event</span><span class="o">-&gt;</span><span class="n">mode</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">BPF_CORE_READ</span><span class="p">(</span><span class="n">ctx</span><span class="p">,</span><span class="w"> </span><span class="n">args</span><span class="p">[</span><span class="mi">2</span><span class="p">]);</span>
 
-        <span class="c1">// ...</span>
+<span class="w">        </span><span class="c1">// ...</span>
 <span class="p">}</span>
 </pre></div>
 <p>完整的示例程序详见：</p>
@@ -285,8 +285,8 @@ print fmt: &quot;dfd: 0x%08lx, filename: 0x%08lx, mode: 0x%08lx&quot;, ((unsigne
 <li><a class="reference external" href="https://github.com/mozillazg/hello-libbpfgo/tree/master/14-tracepoint-args-sched_switch">https://github.com/mozillazg/hello-libbpfgo/tree/master/14-tracepoint-args-sched_switch</a></li>
 </ul>
 </div>
-<div class="section" id="id3">
-<h2 id="hidid3">参考资料<a class="headerlink" href="#hidid3" title="Permalink to this headline">¶</a></h2>
+<div class="section" id="section-2">
+<h2 id="hidsection-2">参考资料<a class="headerlink" href="#hidsection-2" title="Permalink to this headline">¶</a></h2>
 <ul class="simple">
 <li><a class="reference external" href="https://nakryiko.com/posts/bpf-core-reference-guide/">BPF CO-RE reference guide</a></li>
 <li><a class="reference external" href="https://github.com/libbpf/libbpf/blob/12e932ac0e18546dd7247e66ea1b4aa236d2ef38/src/libbpf.c#L9002-L9081">libbpf/libbpf.c at 12e932ac0e18546dd7247e66ea1b4aa236d2ef38 · libbpf/libbpf</a></li>
@@ -310,11 +310,11 @@ print fmt: &quot;dfd: 0x%08lx, filename: 0x%08lx, mode: 0x%08lx&quot;, ((unsigne
 <section class="well" id="related-posts">
     <p>Related Posts:</p>
     <ul>
+        <li><a href="https://mozillazg.com/2022/11/ebpf-libbpfgo-tools-port-rewriting-the-control-plane-of-bcc-libbpf-tools-in-golang-with-libbpfgo.html">使用 libbpfgo 重写 BCC libbpf-tools 中各个工具的用户态程序</a></li>
+        <li><a href="https://mozillazg.com/2022/10/ebpf-libbpf-use-tail-calls.html">在 ebpf/libbpf 程序中使用尾调用（tail calls）</a></li>
+        <li><a href="https://mozillazg.com/2022/06/ebpf-libbpf-btf-powered-enabled-raw-tracepoint-common-questions.html">ebpf/libbpf 程序使用 btf raw tracepoint 的常见问题</a></li>
         <li><a href="https://mozillazg.com/2022/05/ebpf-libbpf-raw-tracepoint-common-questions.html">ebpf/libbpf 程序使用 raw tracepoint 的常见问题</a></li>
-        <li><a href="https://mozillazg.com/2022/05/ebpf-libbpfgo-get-container-info-via-process-info.rst.html">根据进程信息获取对应进程所属的容器/Pod 信息（一）</a></li>
-        <li><a href="https://mozillazg.com/2022/05/ebpf-libbpfgo-get-process-info.html">libbpfgo 使用示例：在 ebpf 程序中获取进程信息</a></li>
-        <li><a href="https://mozillazg.com/2022/05/ebpf-libbpfgo-use-perfbuf-map.html">libbpfgo 使用示例：编写使用 perfbuf map 的 ebpf 程序</a></li>
-        <li><a href="https://mozillazg.com/2022/05/ebpf-libbpfgo-develop-env-and-hello-world.html">libbpfgo 使用示例：搭建开发环境以及编写第一个 ebpf 程序</a></li>
+        <li><a href="https://mozillazg.com/2022/05/ebpf-libbpfgo-use-map-example.html">libbpfgo 使用示例：在内核态和用户态使用 ebpf map</a></li>
     </ul>
 </section>
     <hr/>
@@ -330,7 +330,7 @@ print fmt: &quot;dfd: 0x%08lx, filename: 0x%08lx, mode: 0x%08lx&quot;, ((unsigne
                 var disqus_url = 'https://mozillazg.com/2022/05/ebpf-libbpf-tracepoint-common-questions.html';
 
             var disqus_config = function () {
-                this.language = "zh";
+                this.language = "";
             };
 
             /* * * DON'T EDIT BELOW THIS LINE * * */
@@ -357,7 +357,7 @@ print fmt: &quot;dfd: 0x%08lx, filename: 0x%08lx, mode: 0x%08lx&quot;, ((unsigne
    <div class="container">
       <hr>
       <div class="row">
-         <div class="col-xs-10">&copy; 2022 mozillazg
+         <div class="col-xs-10">&copy; 2023 mozillazg
             &middot; Powered by <a href="https://github.com/DandyDev/pelican-bootstrap3" target="_blank">pelican-bootstrap3</a>,
             <a href="http://docs.getpelican.com/" target="_blank">Pelican</a>,
             <a href="http://getbootstrap.com" target="_blank">Bootstrap</a>

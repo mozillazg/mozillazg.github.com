@@ -165,29 +165,29 @@ mozillazg's Blog            </a>
                 <div>
                 <p>一直以为注册的 ModelAdmin 是线程安全的，直到最近看到<a href="http://stackoverflow.com/questions/727928/django-admin-how-to-access-the-request-object-in-admin-py-for-list-display-met#comment27035661_729879">有人提到</a> ModelAdmin 不是线程安全的。</p>
 <p>然后看了一下 Django admin.register 的源码，才发现确实不是线程安全的。 <a href="https://github.com/django/django/blob/927b30a6ab33ea33e5e3b1e7408ac1d5d267ff6a/django/contrib/admin/sites.py#L110">核心代码</a> 如下：</p>
-<div class="highlight"><pre><span></span># Instantiate the admin class to save in the registry
-self._registry[model] = admin_class(model, self)
+<div class="highlight"><pre><span></span><span class="err">#</span><span class="w"> </span><span class="n">Instantiate</span><span class="w"> </span><span class="n">the</span><span class="w"> </span><span class="k">admin</span><span class="w"> </span><span class="k">class</span><span class="w"> </span><span class="k">to</span><span class="w"> </span><span class="k">save</span><span class="w"> </span><span class="ow">in</span><span class="w"> </span><span class="n">the</span><span class="w"> </span><span class="n">registry</span>
+<span class="n">self</span><span class="p">.</span><span class="n">_registry</span><span class="o">[</span><span class="n">model</span><span class="o">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">admin_class</span><span class="p">(</span><span class="n">model</span><span class="p">,</span><span class="w"> </span><span class="n">self</span><span class="p">)</span>
 </pre></div>
 
 
 <p>当配置如下代码后：</p>
-<div class="highlight"><pre><span></span>@admin.register(Foo)
-class FooAdmin(admin.ModelAdmin):
-    pass
+<div class="highlight"><pre><span></span><span class="nv">@admin</span><span class="p">.</span><span class="n">register</span><span class="p">(</span><span class="n">Foo</span><span class="p">)</span>
+<span class="k">class</span><span class="w"> </span><span class="n">FooAdmin</span><span class="p">(</span><span class="k">admin</span><span class="p">.</span><span class="n">ModelAdmin</span><span class="p">)</span><span class="err">:</span>
+<span class="w">    </span><span class="n">pass</span>
 </pre></div>
 
 
 <p>实际上注册的是一个 FooAdmin 实例，也就是说 FooAdmin 这个类在启动的时候就实例化了，所有的请求访问的都是同一个实例。
 所以类似下面的代码就会有非线程安全的问题，因为 FooAdmin 实例(self)会共享给所有子线程/所有请求：</p>
-<div class="highlight"><pre><span></span>@admin.register(Foo)
-class FooAdmin(admin.ModelAdmin):
+<div class="highlight"><pre><span></span><span class="nv">@admin</span><span class="p">.</span><span class="n">register</span><span class="p">(</span><span class="n">Foo</span><span class="p">)</span>
+<span class="k">class</span><span class="w"> </span><span class="n">FooAdmin</span><span class="p">(</span><span class="k">admin</span><span class="p">.</span><span class="n">ModelAdmin</span><span class="p">)</span><span class="err">:</span>
 
-    def foobar(self):
-        print(self.param)
+<span class="w">    </span><span class="n">def</span><span class="w"> </span><span class="n">foobar</span><span class="p">(</span><span class="n">self</span><span class="p">)</span><span class="err">:</span>
+<span class="w">        </span><span class="k">print</span><span class="p">(</span><span class="n">self</span><span class="p">.</span><span class="n">param</span><span class="p">)</span>
 
-    def changelist_view(self, request, extra_context=None):
-        self.param = request.GET[&#39;param&#39;]
-        return super(FooAdmin,self).changelist_view(request, extra_context=extra_context)
+<span class="w">    </span><span class="n">def</span><span class="w"> </span><span class="n">changelist_view</span><span class="p">(</span><span class="n">self</span><span class="p">,</span><span class="w"> </span><span class="n">request</span><span class="p">,</span><span class="w"> </span><span class="n">extra_context</span><span class="o">=</span><span class="k">None</span><span class="p">)</span><span class="err">:</span>
+<span class="w">        </span><span class="n">self</span><span class="p">.</span><span class="n">param</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">request</span><span class="p">.</span><span class="k">GET</span><span class="o">[</span><span class="n">&#39;param&#39;</span><span class="o">]</span>
+<span class="w">        </span><span class="k">return</span><span class="w"> </span><span class="n">super</span><span class="p">(</span><span class="n">FooAdmin</span><span class="p">,</span><span class="n">self</span><span class="p">).</span><span class="n">changelist_view</span><span class="p">(</span><span class="n">request</span><span class="p">,</span><span class="w"> </span><span class="n">extra_context</span><span class="o">=</span><span class="n">extra_context</span><span class="p">)</span>
 </pre></div>
 
 
@@ -195,13 +195,13 @@ class FooAdmin(admin.ModelAdmin):
 <div class="highlight"><pre><span></span><span class="kn">from</span> <span class="nn">threading</span> <span class="kn">import</span> <span class="n">local</span>
 <span class="n">g</span> <span class="o">=</span> <span class="n">local</span><span class="p">()</span>
 
-<span class="nd">@admin.register</span><span class="p">(</span><span class="n">Foo</span><span class="p">)</span>
+<span class="nd">@admin</span><span class="o">.</span><span class="n">register</span><span class="p">(</span><span class="n">Foo</span><span class="p">)</span>
 <span class="k">class</span> <span class="nc">FooAdmin</span><span class="p">(</span><span class="n">admin</span><span class="o">.</span><span class="n">ModelAdmin</span><span class="p">):</span>
 
     <span class="k">def</span> <span class="nf">foobar</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
-        <span class="k">print</span><span class="p">(</span><span class="n">g</span><span class="o">.</span><span class="n">param</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="n">g</span><span class="o">.</span><span class="n">param</span><span class="p">)</span>
 
-    <span class="k">def</span> <span class="nf">changelist_view</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">request</span><span class="p">,</span> <span class="n">extra_context</span><span class="o">=</span><span class="bp">None</span><span class="p">):</span>
+    <span class="k">def</span> <span class="nf">changelist_view</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">request</span><span class="p">,</span> <span class="n">extra_context</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
         <span class="n">g</span><span class="o">.</span><span class="n">param</span> <span class="o">=</span> <span class="n">request</span><span class="o">.</span><span class="n">GET</span><span class="p">[</span><span class="s1">&#39;param&#39;</span><span class="p">]</span>
         <span class="k">return</span> <span class="nb">super</span><span class="p">(</span><span class="n">FooAdmin</span><span class="p">,</span><span class="bp">self</span><span class="p">)</span><span class="o">.</span><span class="n">changelist_view</span><span class="p">(</span><span class="n">request</span><span class="p">,</span> <span class="n">extra_context</span><span class="o">=</span><span class="n">extra_context</span><span class="p">)</span>
 </pre></div>
@@ -248,7 +248,7 @@ class FooAdmin(admin.ModelAdmin):
                 var disqus_url = 'https://mozillazg.com/2015/07/dango-admin.register-ModelAdmin-is-not-thread-safe.html';
 
             var disqus_config = function () {
-                this.language = "zh";
+                this.language = "";
             };
 
             /* * * DON'T EDIT BELOW THIS LINE * * */
@@ -275,7 +275,7 @@ class FooAdmin(admin.ModelAdmin):
    <div class="container">
       <hr>
       <div class="row">
-         <div class="col-xs-10">&copy; 2022 mozillazg
+         <div class="col-xs-10">&copy; 2023 mozillazg
             &middot; Powered by <a href="https://github.com/DandyDev/pelican-bootstrap3" target="_blank">pelican-bootstrap3</a>,
             <a href="http://docs.getpelican.com/" target="_blank">Pelican</a>,
             <a href="http://getbootstrap.com" target="_blank">Bootstrap</a>

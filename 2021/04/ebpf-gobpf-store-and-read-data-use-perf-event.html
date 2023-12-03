@@ -172,8 +172,8 @@ mozillazg's Blog            </a>
 </footer><!-- /.post-info -->                </div>
                 <div class="js-toc"></div>
                 <div>
-                <div class="section" id="id1">
-<h2 id="hidid1">前言<a class="headerlink" href="#hidid1" title="Permalink to this headline">¶</a></h2>
+                <div class="section" id="section-1">
+<h2 id="hidsection-1">前言<a class="headerlink" href="#hidsection-1" title="Permalink to this headline">¶</a></h2>
 <p>前面 hello 示例中我们是通过 <tt class="docutils literal">sudo cat&nbsp; /sys/kernel/debug/tracing/trace_pipe</tt> 的方式来查看数据的，
 本文简单讲述如何通过 perf event 来保存 eBPF 数据然后再在 Go 程序中读取 perf event 中保存的数据。</p>
 </div>
@@ -181,53 +181,53 @@ mozillazg's Blog            </a>
 <h2 id="hidperf-event">使用 perf event 保存数据<a class="headerlink" href="#hidperf-event" title="Permalink to this headline">¶</a></h2>
 <p>还是前面的那个 <tt class="docutils literal">hello.c</tt> ，不过这次会使用 perf event 来保存 open 的文件名称</p>
 <p>eBPF C 代码如下（hello.c）:</p>
-<div class="highlight"><pre><span></span><span class="cp">#include</span> <span class="cpf">&lt;linux/bpf.h&gt;</span><span class="cp"></span>
-<span class="cp">#include</span> <span class="cpf">&lt;linux/ptrace.h&gt;</span><span class="cp"></span>
-<span class="cp">#include</span> <span class="cpf">&quot;include/bpf_helpers.h&quot;</span><span class="cp"></span>
+<div class="highlight"><pre><span></span><span class="cp">#include</span><span class="w"> </span><span class="cpf">&lt;linux/bpf.h&gt;</span>
+<span class="cp">#include</span><span class="w"> </span><span class="cpf">&lt;linux/ptrace.h&gt;</span>
+<span class="cp">#include</span><span class="w"> </span><span class="cpf">&quot;include/bpf_helpers.h&quot;</span>
 
-<span class="k">struct</span> <span class="n">bpf_map_def</span> <span class="nf">SEC</span><span class="p">(</span><span class="s">&quot;maps/open_event&quot;</span><span class="p">)</span> <span class="n">open_event</span> <span class="o">=</span> <span class="p">{</span>
-    <span class="p">.</span><span class="n">type</span> <span class="o">=</span> <span class="n">BPF_MAP_TYPE_PERF_EVENT_ARRAY</span><span class="p">,</span>
-    <span class="p">.</span><span class="n">key_size</span> <span class="o">=</span> <span class="k">sizeof</span><span class="p">(</span><span class="kt">int</span><span class="p">),</span>
-    <span class="p">.</span><span class="n">value_size</span> <span class="o">=</span> <span class="k">sizeof</span><span class="p">(</span><span class="n">__u32</span><span class="p">),</span>
-    <span class="p">.</span><span class="n">max_entries</span> <span class="o">=</span> <span class="mi">128</span><span class="p">,</span>
-    <span class="p">.</span><span class="n">pinning</span> <span class="o">=</span> <span class="mi">0</span><span class="p">,</span>
-    <span class="p">.</span><span class="n">namespace</span> <span class="o">=</span> <span class="s">&quot;&quot;</span><span class="p">,</span>
+<span class="k">struct</span><span class="w"> </span><span class="nc">bpf_map_def</span><span class="w"> </span><span class="n">SEC</span><span class="p">(</span><span class="s">&quot;maps/open_event&quot;</span><span class="p">)</span><span class="w"> </span><span class="n">open_event</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="p">.</span><span class="n">type</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">BPF_MAP_TYPE_PERF_EVENT_ARRAY</span><span class="p">,</span>
+<span class="w">    </span><span class="p">.</span><span class="n">key_size</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">sizeof</span><span class="p">(</span><span class="kt">int</span><span class="p">),</span>
+<span class="w">    </span><span class="p">.</span><span class="n">value_size</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">sizeof</span><span class="p">(</span><span class="n">__u32</span><span class="p">),</span>
+<span class="w">    </span><span class="p">.</span><span class="n">max_entries</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">128</span><span class="p">,</span>
+<span class="w">    </span><span class="p">.</span><span class="n">pinning</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span>
+<span class="w">    </span><span class="p">.</span><span class="n">namespace</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">&quot;&quot;</span><span class="p">,</span>
 <span class="p">};</span>
 
-<span class="k">struct</span> <span class="n">data_t</span> <span class="p">{</span>
-    <span class="n">__u32</span> <span class="n">pid</span><span class="p">;</span>
-    <span class="kt">char</span> <span class="n">file_name</span><span class="p">[</span><span class="mi">256</span><span class="p">];</span>
+<span class="k">struct</span><span class="w"> </span><span class="nc">data_t</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="n">__u32</span><span class="w"> </span><span class="n">pid</span><span class="p">;</span>
+<span class="w">    </span><span class="kt">char</span><span class="w"> </span><span class="n">file_name</span><span class="p">[</span><span class="mi">256</span><span class="p">];</span>
 <span class="p">};</span>
 
 <span class="n">SEC</span><span class="p">(</span><span class="s">&quot;kprobe/do_sys_open&quot;</span><span class="p">)</span>
-<span class="kt">int</span> <span class="n">kprobe__do_sys_open</span><span class="p">(</span><span class="k">struct</span> <span class="n">pt_regs</span> <span class="o">*</span><span class="n">ctx</span><span class="p">)</span> <span class="p">{</span>
-        <span class="k">struct</span> <span class="n">data_t</span> <span class="n">data</span> <span class="o">=</span> <span class="p">{};</span>
+<span class="kt">int</span><span class="w"> </span><span class="n">kprobe__do_sys_open</span><span class="p">(</span><span class="k">struct</span><span class="w"> </span><span class="nc">pt_regs</span><span class="w"> </span><span class="o">*</span><span class="n">ctx</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="k">struct</span><span class="w"> </span><span class="nc">data_t</span><span class="w"> </span><span class="n">data</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">{};</span>
 
-        <span class="n">data</span><span class="p">.</span><span class="n">pid</span> <span class="o">=</span> <span class="n">bpf_get_current_pid_tgid</span><span class="p">()</span> <span class="o">&gt;&gt;</span> <span class="mi">32</span><span class="p">;</span>
-        <span class="n">__u32</span> <span class="n">cpu</span> <span class="o">=</span> <span class="n">bpf_get_smp_processor_id</span><span class="p">();</span>
+<span class="w">        </span><span class="n">data</span><span class="p">.</span><span class="n">pid</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">bpf_get_current_pid_tgid</span><span class="p">()</span><span class="w"> </span><span class="o">&gt;&gt;</span><span class="w"> </span><span class="mi">32</span><span class="p">;</span>
+<span class="w">        </span><span class="n">__u32</span><span class="w"> </span><span class="n">cpu</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">bpf_get_smp_processor_id</span><span class="p">();</span>
 
-        <span class="n">bpf_probe_read</span><span class="p">(</span><span class="o">&amp;</span><span class="n">data</span><span class="p">.</span><span class="n">file_name</span><span class="p">,</span> <span class="k">sizeof</span><span class="p">(</span><span class="n">data</span><span class="p">.</span><span class="n">file_name</span><span class="p">),</span> <span class="n">PT_REGS_PARM2</span><span class="p">(</span><span class="n">ctx</span><span class="p">));</span>
+<span class="w">        </span><span class="n">bpf_probe_read</span><span class="p">(</span><span class="o">&amp;</span><span class="n">data</span><span class="p">.</span><span class="n">file_name</span><span class="p">,</span><span class="w"> </span><span class="k">sizeof</span><span class="p">(</span><span class="n">data</span><span class="p">.</span><span class="n">file_name</span><span class="p">),</span><span class="w"> </span><span class="n">PT_REGS_PARM2</span><span class="p">(</span><span class="n">ctx</span><span class="p">));</span>
 
-        <span class="n">bpf_perf_event_output</span><span class="p">(</span><span class="n">ctx</span><span class="p">,</span> <span class="o">&amp;</span><span class="n">open_event</span><span class="p">,</span> <span class="n">cpu</span><span class="p">,</span> <span class="o">&amp;</span><span class="n">data</span><span class="p">,</span> <span class="k">sizeof</span><span class="p">(</span><span class="n">data</span><span class="p">));</span>
+<span class="w">        </span><span class="n">bpf_perf_event_output</span><span class="p">(</span><span class="n">ctx</span><span class="p">,</span><span class="w"> </span><span class="o">&amp;</span><span class="n">open_event</span><span class="p">,</span><span class="w"> </span><span class="n">cpu</span><span class="p">,</span><span class="w"> </span><span class="o">&amp;</span><span class="n">data</span><span class="p">,</span><span class="w"> </span><span class="k">sizeof</span><span class="p">(</span><span class="n">data</span><span class="p">));</span>
 
-        <span class="k">return</span> <span class="mi">0</span><span class="p">;</span>
+<span class="w">        </span><span class="k">return</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span>
 <span class="p">}</span>
 
-<span class="kt">char</span> <span class="n">_license</span><span class="p">[]</span> <span class="n">SEC</span><span class="p">(</span><span class="s">&quot;license&quot;</span><span class="p">)</span> <span class="o">=</span> <span class="s">&quot;GPL&quot;</span><span class="p">;</span>
+<span class="kt">char</span><span class="w"> </span><span class="n">_license</span><span class="p">[]</span><span class="w"> </span><span class="n">SEC</span><span class="p">(</span><span class="s">&quot;license&quot;</span><span class="p">)</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">&quot;GPL&quot;</span><span class="p">;</span>
 </pre></div>
 <p>简单来说就是定义一个 type 为 <tt class="docutils literal">BPF_MAP_TYPE_PERF_EVENT_ARRAY</tt> 的 <tt class="docutils literal">bpf_map_def</tt> 变量 open_event，
 然后通过 <tt class="docutils literal">bpf_perf_event_output</tt> 函数将数据写入到定义的 open_event 中。</p>
 </div>
 <div class="section" id="go-perf-event">
 <h2 id="hidgo-perf-event">在 Go 程序中读取 perf event 数据<a class="headerlink" href="#hidgo-perf-event" title="Permalink to this headline">¶</a></h2>
-<div class="highlight"><pre><span></span><span class="kn">package</span> <span class="nx">main</span>
+<div class="highlight"><pre><span></span><span class="kn">package</span><span class="w"> </span><span class="nx">main</span>
 
-<span class="kn">import</span> <span class="p">(</span>
-    <span class="s">&quot;fmt&quot;</span>
-    <span class="s">&quot;os&quot;</span>
-    <span class="s">&quot;unsafe&quot;</span>
+<span class="kn">import</span><span class="w"> </span><span class="p">(</span>
+<span class="w">    </span><span class="s">&quot;fmt&quot;</span>
+<span class="w">    </span><span class="s">&quot;os&quot;</span>
+<span class="w">    </span><span class="s">&quot;unsafe&quot;</span>
 
-    <span class="s">&quot;github.com/iovisor/gobpf/elf&quot;</span>
+<span class="w">    </span><span class="s">&quot;github.com/iovisor/gobpf/elf&quot;</span>
 <span class="p">)</span>
 
 <span class="cm">/*</span>
@@ -237,57 +237,57 @@ mozillazg's Blog            </a>
 <span class="cm">    char file_name[256];</span>
 <span class="cm">};</span>
 <span class="cm">*/</span>
-<span class="kn">import</span> <span class="s">&quot;C&quot;</span>
+<span class="kn">import</span><span class="w"> </span><span class="s">&quot;C&quot;</span>
 
-<span class="kd">type</span> <span class="nx">Event</span> <span class="kd">struct</span> <span class="p">{</span>
-    <span class="nx">Pid</span>      <span class="kt">uint32</span>
-    <span class="nx">FileName</span> <span class="kt">string</span>
+<span class="kd">type</span><span class="w"> </span><span class="nx">Event</span><span class="w"> </span><span class="kd">struct</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="nx">Pid</span><span class="w">      </span><span class="kt">uint32</span>
+<span class="w">    </span><span class="nx">FileName</span><span class="w"> </span><span class="kt">string</span>
 <span class="p">}</span>
 
-<span class="kd">func</span> <span class="nx">main</span><span class="p">()</span> <span class="p">{</span>
-    <span class="nx">mod</span> <span class="o">:=</span> <span class="nx">elf</span><span class="p">.</span><span class="nx">NewModule</span><span class="p">(</span><span class="s">&quot;hello.o&quot;</span><span class="p">)</span>
-    <span class="nx">err</span> <span class="o">:=</span> <span class="nx">mod</span><span class="p">.</span><span class="nx">Load</span><span class="p">(</span><span class="kc">nil</span><span class="p">)</span>
-    <span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
-        <span class="nb">panic</span><span class="p">(</span><span class="nx">err</span><span class="p">)</span>
-    <span class="p">}</span>
-    <span class="k">defer</span> <span class="nx">mod</span><span class="p">.</span><span class="nx">Close</span><span class="p">()</span>
-    <span class="nx">err</span> <span class="p">=</span> <span class="nx">mod</span><span class="p">.</span><span class="nx">EnableKprobes</span><span class="p">(</span><span class="mi">128</span><span class="p">)</span>
-    <span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
-        <span class="nb">panic</span><span class="p">(</span><span class="nx">err</span><span class="p">)</span>
-    <span class="p">}</span>
+<span class="kd">func</span><span class="w"> </span><span class="nx">main</span><span class="p">()</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="nx">mod</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="nx">elf</span><span class="p">.</span><span class="nx">NewModule</span><span class="p">(</span><span class="s">&quot;hello.o&quot;</span><span class="p">)</span>
+<span class="w">    </span><span class="nx">err</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="nx">mod</span><span class="p">.</span><span class="nx">Load</span><span class="p">(</span><span class="kc">nil</span><span class="p">)</span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="nx">err</span><span class="w"> </span><span class="o">!=</span><span class="w"> </span><span class="kc">nil</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="nb">panic</span><span class="p">(</span><span class="nx">err</span><span class="p">)</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="w">    </span><span class="k">defer</span><span class="w"> </span><span class="nx">mod</span><span class="p">.</span><span class="nx">Close</span><span class="p">()</span>
+<span class="w">    </span><span class="nx">err</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="nx">mod</span><span class="p">.</span><span class="nx">EnableKprobes</span><span class="p">(</span><span class="mi">128</span><span class="p">)</span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="nx">err</span><span class="w"> </span><span class="o">!=</span><span class="w"> </span><span class="kc">nil</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="nb">panic</span><span class="p">(</span><span class="nx">err</span><span class="p">)</span>
+<span class="w">    </span><span class="p">}</span>
 
-    <span class="nx">channel</span> <span class="o">:=</span> <span class="nb">make</span><span class="p">(</span><span class="kd">chan</span> <span class="p">[]</span><span class="kt">byte</span><span class="p">)</span>
-    <span class="nx">lost</span> <span class="o">:=</span> <span class="nb">make</span><span class="p">(</span><span class="kd">chan</span> <span class="kt">uint64</span><span class="p">)</span>
+<span class="w">    </span><span class="nx">channel</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="nb">make</span><span class="p">(</span><span class="kd">chan</span><span class="w"> </span><span class="p">[]</span><span class="kt">byte</span><span class="p">)</span>
+<span class="w">    </span><span class="nx">lost</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="nb">make</span><span class="p">(</span><span class="kd">chan</span><span class="w"> </span><span class="kt">uint64</span><span class="p">)</span>
 
-    <span class="nx">perfMap</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">elf</span><span class="p">.</span><span class="nx">InitPerfMap</span><span class="p">(</span><span class="nx">mod</span><span class="p">,</span> <span class="s">&quot;open_event&quot;</span><span class="p">,</span> <span class="nx">channel</span><span class="p">,</span> <span class="nx">lost</span><span class="p">)</span>
-    <span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
-        <span class="nx">fmt</span><span class="p">.</span><span class="nx">Fprintf</span><span class="p">(</span><span class="nx">os</span><span class="p">.</span><span class="nx">Stderr</span><span class="p">,</span> <span class="s">&quot;Failed to init perf map: %s\n&quot;</span><span class="p">,</span> <span class="nx">err</span><span class="p">)</span>
-        <span class="nx">os</span><span class="p">.</span><span class="nx">Exit</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span>
-    <span class="p">}</span>
-    <span class="k">go</span> <span class="kd">func</span><span class="p">()</span> <span class="p">{</span>
-        <span class="k">for</span> <span class="p">{</span>
-            <span class="nx">l</span> <span class="o">:=</span> <span class="o">&lt;-</span><span class="nx">lost</span>
-            <span class="nx">fmt</span><span class="p">.</span><span class="nx">Println</span><span class="p">(</span><span class="nx">l</span><span class="p">)</span>
-        <span class="p">}</span>
-    <span class="p">}()</span>
-    <span class="nx">perfMap</span><span class="p">.</span><span class="nx">PollStart</span><span class="p">()</span>
-    <span class="k">defer</span> <span class="nx">perfMap</span><span class="p">.</span><span class="nx">PollStop</span><span class="p">()</span>
+<span class="w">    </span><span class="nx">perfMap</span><span class="p">,</span><span class="w"> </span><span class="nx">err</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="nx">elf</span><span class="p">.</span><span class="nx">InitPerfMap</span><span class="p">(</span><span class="nx">mod</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;open_event&quot;</span><span class="p">,</span><span class="w"> </span><span class="nx">channel</span><span class="p">,</span><span class="w"> </span><span class="nx">lost</span><span class="p">)</span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="nx">err</span><span class="w"> </span><span class="o">!=</span><span class="w"> </span><span class="kc">nil</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="nx">fmt</span><span class="p">.</span><span class="nx">Fprintf</span><span class="p">(</span><span class="nx">os</span><span class="p">.</span><span class="nx">Stderr</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;Failed to init perf map: %s\n&quot;</span><span class="p">,</span><span class="w"> </span><span class="nx">err</span><span class="p">)</span>
+<span class="w">        </span><span class="nx">os</span><span class="p">.</span><span class="nx">Exit</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="w">    </span><span class="k">go</span><span class="w"> </span><span class="kd">func</span><span class="p">()</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="k">for</span><span class="w"> </span><span class="p">{</span>
+<span class="w">            </span><span class="nx">l</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="o">&lt;-</span><span class="nx">lost</span>
+<span class="w">            </span><span class="nx">fmt</span><span class="p">.</span><span class="nx">Println</span><span class="p">(</span><span class="nx">l</span><span class="p">)</span>
+<span class="w">        </span><span class="p">}</span>
+<span class="w">    </span><span class="p">}()</span>
+<span class="w">    </span><span class="nx">perfMap</span><span class="p">.</span><span class="nx">PollStart</span><span class="p">()</span>
+<span class="w">    </span><span class="k">defer</span><span class="w"> </span><span class="nx">perfMap</span><span class="p">.</span><span class="nx">PollStop</span><span class="p">()</span>
 
-    <span class="k">for</span> <span class="p">{</span>
-        <span class="kd">var</span> <span class="nx">event</span> <span class="nx">Event</span>
-        <span class="nx">data</span> <span class="o">:=</span> <span class="o">&lt;-</span><span class="nx">channel</span>
-        <span class="nx">event</span> <span class="p">=</span> <span class="nx">openEventToGo</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">data</span><span class="p">)</span>
-        <span class="nx">fmt</span><span class="p">.</span><span class="nx">Printf</span><span class="p">(</span><span class="s">&quot;pid %d open file %s\n&quot;</span><span class="p">,</span> <span class="nx">event</span><span class="p">.</span><span class="nx">Pid</span><span class="p">,</span> <span class="nx">event</span><span class="p">.</span><span class="nx">FileName</span><span class="p">)</span>
-    <span class="p">}</span>
+<span class="w">    </span><span class="k">for</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="kd">var</span><span class="w"> </span><span class="nx">event</span><span class="w"> </span><span class="nx">Event</span>
+<span class="w">        </span><span class="nx">data</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="o">&lt;-</span><span class="nx">channel</span>
+<span class="w">        </span><span class="nx">event</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="nx">openEventToGo</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">data</span><span class="p">)</span>
+<span class="w">        </span><span class="nx">fmt</span><span class="p">.</span><span class="nx">Printf</span><span class="p">(</span><span class="s">&quot;pid %d open file %s\n&quot;</span><span class="p">,</span><span class="w"> </span><span class="nx">event</span><span class="p">.</span><span class="nx">Pid</span><span class="p">,</span><span class="w"> </span><span class="nx">event</span><span class="p">.</span><span class="nx">FileName</span><span class="p">)</span>
+<span class="w">    </span><span class="p">}</span>
 <span class="p">}</span>
 
-<span class="kd">func</span> <span class="nx">openEventToGo</span><span class="p">(</span><span class="nx">data</span> <span class="o">*</span><span class="p">[]</span><span class="kt">byte</span><span class="p">)</span> <span class="p">(</span><span class="nx">event</span> <span class="nx">Event</span><span class="p">)</span> <span class="p">{</span>
-    <span class="nx">eventC</span> <span class="o">:=</span> <span class="p">(</span><span class="o">*</span><span class="nx">C</span><span class="p">.</span><span class="nx">struct_data_t</span><span class="p">)(</span><span class="nx">unsafe</span><span class="p">.</span><span class="nx">Pointer</span><span class="p">(</span><span class="o">&amp;</span><span class="p">(</span><span class="o">*</span><span class="nx">data</span><span class="p">)[</span><span class="mi">0</span><span class="p">]))</span>
+<span class="kd">func</span><span class="w"> </span><span class="nx">openEventToGo</span><span class="p">(</span><span class="nx">data</span><span class="w"> </span><span class="o">*</span><span class="p">[]</span><span class="kt">byte</span><span class="p">)</span><span class="w"> </span><span class="p">(</span><span class="nx">event</span><span class="w"> </span><span class="nx">Event</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="nx">eventC</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="p">(</span><span class="o">*</span><span class="nx">C</span><span class="p">.</span><span class="nx">struct_data_t</span><span class="p">)(</span><span class="nx">unsafe</span><span class="p">.</span><span class="nx">Pointer</span><span class="p">(</span><span class="o">&amp;</span><span class="p">(</span><span class="o">*</span><span class="nx">data</span><span class="p">)[</span><span class="mi">0</span><span class="p">]))</span>
 
-    <span class="nx">event</span><span class="p">.</span><span class="nx">Pid</span> <span class="p">=</span> <span class="nb">uint32</span><span class="p">(</span><span class="nx">eventC</span><span class="p">.</span><span class="nx">pid</span><span class="p">)</span>
-    <span class="nx">event</span><span class="p">.</span><span class="nx">FileName</span> <span class="p">=</span> <span class="nx">C</span><span class="p">.</span><span class="nx">GoString</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">eventC</span><span class="p">.</span><span class="nx">file_name</span><span class="p">[</span><span class="mi">0</span><span class="p">])</span>
+<span class="w">    </span><span class="nx">event</span><span class="p">.</span><span class="nx">Pid</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="nb">uint32</span><span class="p">(</span><span class="nx">eventC</span><span class="p">.</span><span class="nx">pid</span><span class="p">)</span>
+<span class="w">    </span><span class="nx">event</span><span class="p">.</span><span class="nx">FileName</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="nx">C</span><span class="p">.</span><span class="nx">GoString</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">eventC</span><span class="p">.</span><span class="nx">file_name</span><span class="p">[</span><span class="mi">0</span><span class="p">])</span>
 
-    <span class="k">return</span>
+<span class="w">    </span><span class="k">return</span>
 <span class="p">}</span>
 </pre></div>
 <p>通过 <tt class="docutils literal">elf.InitPerfMap</tt> 指定要读取的 perf event map 的变量的名称
@@ -306,8 +306,8 @@ pid 364 open file /proc/493/comm
 <p>可以看到已经可以在 go 程序中读取到 eBPF 程序保存的数据了。</p>
 <p>P.S. 本文的所有代码在 Github 上都有一份完整版： <a class="reference external" href="https://github.com/mozillazg/gobpf-examples/tree/master/2-perf-event">https://github.com/mozillazg/gobpf-examples/tree/master/2-perf-event</a></p>
 </div>
-<div class="section" id="id2">
-<h2 id="hidid2">参考资料<a class="headerlink" href="#hidid2" title="Permalink to this headline">¶</a></h2>
+<div class="section" id="section-2">
+<h2 id="hidsection-2">参考资料<a class="headerlink" href="#hidsection-2" title="Permalink to this headline">¶</a></h2>
 <ul class="simple">
 <li><a class="reference external" href="https://github.com/iovisor/gobpf">iovisor/gobpf: Go bindings for creating BPF programs.</a></li>
 <li><a class="reference external" href="https://github.com/kinvolk/bpf-exercises">kinvolk/bpf-exercises</a></li>
@@ -332,10 +332,10 @@ pid 364 open file /proc/493/comm
     <p>Related Posts:</p>
     <ul>
         <li><a href="https://mozillazg.com/2021/05/ebpf-gobpf-how-to-find-system-call-kernel-function-for-kprobe-elf-section.html">gobpf 使用示例：如何找到一个系统调用对应的可用于 kprobe SEC 的内核函数</a></li>
-        <li><a href="https://mozillazg.com/2021/04/ebpf-gobpf-dev-env-and-hello-first-program.html">gobpf 使用示例：开发环境及 Hello World</a></li>
         <li><a href="https://mozillazg.com/2021/05/ebpf-gobpf-get-function-argument-values-from-pt_regs.html">gobpf 使用示例：从 pt_regs 中获取内核函数的参数的值</a></li>
+        <li><a href="https://mozillazg.com/2021/04/ebpf-gobpf-dev-env-and-hello-first-program.html">gobpf 使用示例：开发环境及 Hello World</a></li>
+        <li><a href="https://mozillazg.com/2022/07/ebpf-libbpf-what-is-load_byte-load_half-load_word.html">ebpf 程序中常用的 load_byte/load_half/load_word 功能介绍</a></li>
         <li><a href="https://mozillazg.com/2022/05/ebpf-libbpfgo-get-container-info-via-process-info.rst.html">根据进程信息获取对应进程所属的容器/Pod 信息（一）</a></li>
-        <li><a href="https://mozillazg.com/2022/05/ebpf-libbpfgo-develop-env-and-hello-world.html">libbpfgo 使用示例：搭建开发环境以及编写第一个 ebpf 程序</a></li>
     </ul>
 </section>
     <hr/>
@@ -351,7 +351,7 @@ pid 364 open file /proc/493/comm
                 var disqus_url = 'https://mozillazg.com/2021/04/ebpf-gobpf-store-and-read-data-use-perf-event.html';
 
             var disqus_config = function () {
-                this.language = "zh";
+                this.language = "";
             };
 
             /* * * DON'T EDIT BELOW THIS LINE * * */
@@ -378,7 +378,7 @@ pid 364 open file /proc/493/comm
    <div class="container">
       <hr>
       <div class="row">
-         <div class="col-xs-10">&copy; 2022 mozillazg
+         <div class="col-xs-10">&copy; 2023 mozillazg
             &middot; Powered by <a href="https://github.com/DandyDev/pelican-bootstrap3" target="_blank">pelican-bootstrap3</a>,
             <a href="http://docs.getpelican.com/" target="_blank">Pelican</a>,
             <a href="http://getbootstrap.com" target="_blank">Bootstrap</a>

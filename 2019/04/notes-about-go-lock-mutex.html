@@ -166,63 +166,63 @@ mozillazg's Blog            </a>
 </footer><!-- /.post-info -->                </div>
                 <div class="js-toc"></div>
                 <div>
-                <div class="section" id="id1">
-<h2 id="hidid1">前言<a class="headerlink" href="#hidid1" title="Permalink to this headline">¶</a></h2>
+                <div class="section" id="section-1">
+<h2 id="hidsection-1">前言<a class="headerlink" href="#hidsection-1" title="Permalink to this headline">¶</a></h2>
 <p>最近踩了一个锁的坑，所以在这里简单记录一些 Go 中关于锁（mutex）使用的一些注意事项。</p>
 </div>
-<div class="section" id="id2">
-<h2 id="hidid2">尽量减少锁的持有时间<a class="headerlink" href="#hidid2" title="Permalink to this headline">¶</a></h2>
+<div class="section" id="section-2">
+<h2 id="hidsection-2">尽量减少锁的持有时间<a class="headerlink" href="#hidsection-2" title="Permalink to this headline">¶</a></h2>
 <p>尽量减少锁的持有时间，毕竟使用锁是有代价的，通过减少锁的持有时间来减轻这个代价：</p>
 <ul class="simple">
 <li>细化锁的粒度。通过细化锁的粒度来减少锁的持有时间以及避免在持有锁操作的时候做各种耗时的操作。</li>
 <li>不要在持有锁的时候做 IO 操作。尽量只通过持有锁来保护 IO 操作需要的资源而不是 IO 操作本身：</li>
 </ul>
-<div class="highlight"><pre><span></span><span class="kd">func</span> <span class="nx">doSomething</span><span class="p">()</span> <span class="p">{</span>
-    <span class="nx">m</span><span class="p">.</span><span class="nx">Lock</span><span class="p">()</span>
-    <span class="nx">item</span> <span class="o">:=</span> <span class="o">...</span>
-    <span class="nx">http</span><span class="p">.</span><span class="nx">Get</span><span class="p">()</span>  <span class="c1">// 各种耗时的 IO 操作</span>
-    <span class="nx">m</span><span class="p">.</span><span class="nx">Unlock</span><span class="p">()</span>
+<div class="highlight"><pre><span></span><span class="kd">func</span><span class="w"> </span><span class="nx">doSomething</span><span class="p">()</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="nx">m</span><span class="p">.</span><span class="nx">Lock</span><span class="p">()</span>
+<span class="w">    </span><span class="nx">item</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="o">...</span>
+<span class="w">    </span><span class="nx">http</span><span class="p">.</span><span class="nx">Get</span><span class="p">()</span><span class="w">  </span><span class="c1">// 各种耗时的 IO 操作</span>
+<span class="w">    </span><span class="nx">m</span><span class="p">.</span><span class="nx">Unlock</span><span class="p">()</span>
 <span class="p">}</span>
 
 <span class="c1">// 改为</span>
-<span class="kd">func</span> <span class="nx">doSomething</span><span class="p">()</span> <span class="p">{</span>
-    <span class="nx">m</span><span class="p">.</span><span class="nx">Lock</span><span class="p">()</span>
-    <span class="nx">item</span> <span class="o">:=</span> <span class="o">...</span>
-    <span class="nx">m</span><span class="p">.</span><span class="nx">Unlock</span><span class="p">()</span>
+<span class="kd">func</span><span class="w"> </span><span class="nx">doSomething</span><span class="p">()</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="nx">m</span><span class="p">.</span><span class="nx">Lock</span><span class="p">()</span>
+<span class="w">    </span><span class="nx">item</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="o">...</span>
+<span class="w">    </span><span class="nx">m</span><span class="p">.</span><span class="nx">Unlock</span><span class="p">()</span>
 
-    <span class="nx">http</span><span class="p">.</span><span class="nx">Get</span><span class="p">()</span>
+<span class="w">    </span><span class="nx">http</span><span class="p">.</span><span class="nx">Get</span><span class="p">()</span>
 <span class="p">}</span>
 </pre></div>
 </div>
 <div class="section" id="defer">
 <h2 id="hiddefer">善用 defer 来确保在函数内正确释放了锁<a class="headerlink" href="#hiddefer" title="Permalink to this headline">¶</a></h2>
 <p>尤其是在那些内部有好几个通过 <tt class="docutils literal">if err != nil</tt> 判断来提前返回的函数中，通过 <tt class="docutils literal">defer</tt> 可以确保不会遗漏释放锁操作，避免出现死锁问题，以及避免函数内非预期的 panic 导致死锁的问题：</p>
-<div class="highlight"><pre><span></span><span class="kd">func</span> <span class="nx">doSomething</span><span class="p">()</span> <span class="p">{</span>
-    <span class="nx">m</span><span class="p">.</span><span class="nx">Lock</span><span class="p">()</span>
-    <span class="k">defer</span> <span class="nx">m</span><span class="p">.</span><span class="nx">Unlock</span><span class="p">()</span>
+<div class="highlight"><pre><span></span><span class="kd">func</span><span class="w"> </span><span class="nx">doSomething</span><span class="p">()</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="nx">m</span><span class="p">.</span><span class="nx">Lock</span><span class="p">()</span>
+<span class="w">    </span><span class="k">defer</span><span class="w"> </span><span class="nx">m</span><span class="p">.</span><span class="nx">Unlock</span><span class="p">()</span>
 
-    <span class="nx">err</span> <span class="o">:=</span> <span class="o">...</span>
-    <span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
-        <span class="k">return</span>
-    <span class="p">}</span>
+<span class="w">    </span><span class="nx">err</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="o">...</span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="nx">err</span><span class="w"> </span><span class="o">!=</span><span class="w"> </span><span class="kc">nil</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="k">return</span>
+<span class="w">    </span><span class="p">}</span>
 
-    <span class="nx">err</span> <span class="p">=</span> <span class="o">...</span>
-    <span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
-        <span class="k">return</span>
-    <span class="p">}</span>
+<span class="w">    </span><span class="nx">err</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="o">...</span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="nx">err</span><span class="w"> </span><span class="o">!=</span><span class="w"> </span><span class="kc">nil</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="k">return</span>
+<span class="w">    </span><span class="p">}</span>
 
-    <span class="o">...</span>
-    <span class="k">return</span>
+<span class="w">    </span><span class="o">...</span>
+<span class="w">    </span><span class="k">return</span>
 <span class="p">}</span>
 </pre></div>
 <p>不过使用 defer 的时候也要注意别因为习惯性的 <tt class="docutils literal">defer m.Unlock()</tt> 导致无意中在持有锁的时候做了 IO 操作，出现了非预期的持有锁时间太长的问题。</p>
 <div class="highlight"><pre><span></span><span class="c1">// 非预期的在持有锁期间做 IO 操作</span>
-<span class="kd">func</span> <span class="nx">doSomething</span><span class="p">()</span> <span class="p">{</span>
-    <span class="nx">m</span><span class="p">.</span><span class="nx">Lock</span><span class="p">()</span>
-    <span class="k">defer</span> <span class="nx">m</span><span class="p">.</span><span class="nx">Unlock</span><span class="p">()</span>
+<span class="kd">func</span><span class="w"> </span><span class="nx">doSomething</span><span class="p">()</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="nx">m</span><span class="p">.</span><span class="nx">Lock</span><span class="p">()</span>
+<span class="w">    </span><span class="k">defer</span><span class="w"> </span><span class="nx">m</span><span class="p">.</span><span class="nx">Unlock</span><span class="p">()</span>
 
-    <span class="nx">item</span> <span class="o">:=</span> <span class="o">...</span>
-    <span class="nx">http</span><span class="p">.</span><span class="nx">Get</span><span class="p">()</span>  <span class="c1">// 各种耗时的 IO 操作</span>
+<span class="w">    </span><span class="nx">item</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="o">...</span>
+<span class="w">    </span><span class="nx">http</span><span class="p">.</span><span class="nx">Get</span><span class="p">()</span><span class="w">  </span><span class="c1">// 各种耗时的 IO 操作</span>
 <span class="p">}</span>
 </pre></div>
 <p>以及 <tt class="docutils literal">defer</tt> 其实是有点 <a class="reference external" href="https://medium.com/i0exception/runtime-overhead-of-using-defer-in-go-7140d5c40e32">性能</a> <a class="reference external" href="https://github.com/golang/go/issues/14939">消耗</a> 的，需要取舍下酌情使用。</p>
@@ -230,93 +230,93 @@ mozillazg's Blog            </a>
 <div class="section" id="rwmutex">
 <h2 id="hidrwmutex">在适当时候使用 RWMutex<a class="headerlink" href="#hidrwmutex" title="Permalink to this headline">¶</a></h2>
 <p>当确定操作不会修改保护的资源时，可以使用 RWMutex 来减少锁等待时间（不同的 goroutine 可以同时持有 RLock, 但是 Lock 限制了只能有一个 goroutine 持有 Lock）：</p>
-<div class="highlight"><pre><span></span><span class="kd">func</span> <span class="nx">nickName</span><span class="p">()</span> <span class="kt">string</span> <span class="p">{</span>
-    <span class="nx">rw</span><span class="p">.</span><span class="nx">RLock</span><span class="p">()</span>
-    <span class="k">defer</span> <span class="nx">rw</span><span class="p">.</span><span class="nx">RUnlock</span><span class="p">()</span>
+<div class="highlight"><pre><span></span><span class="kd">func</span><span class="w"> </span><span class="nx">nickName</span><span class="p">()</span><span class="w"> </span><span class="kt">string</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="nx">rw</span><span class="p">.</span><span class="nx">RLock</span><span class="p">()</span>
+<span class="w">    </span><span class="k">defer</span><span class="w"> </span><span class="nx">rw</span><span class="p">.</span><span class="nx">RUnlock</span><span class="p">()</span>
 
-    <span class="k">return</span> <span class="nx">name</span>
+<span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="nx">name</span>
 <span class="p">}</span>
 
-<span class="kd">func</span> <span class="nx">SetName</span><span class="p">(</span><span class="nx">s</span> <span class="kt">string</span><span class="p">)</span> <span class="kt">string</span> <span class="p">{</span>
-    <span class="nx">rw</span><span class="p">.</span><span class="nx">Lock</span><span class="p">()</span>
-    <span class="k">defer</span> <span class="nx">rw</span><span class="p">.</span><span class="nx">Unlock</span><span class="p">()</span>
+<span class="kd">func</span><span class="w"> </span><span class="nx">SetName</span><span class="p">(</span><span class="nx">s</span><span class="w"> </span><span class="kt">string</span><span class="p">)</span><span class="w"> </span><span class="kt">string</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="nx">rw</span><span class="p">.</span><span class="nx">Lock</span><span class="p">()</span>
+<span class="w">    </span><span class="k">defer</span><span class="w"> </span><span class="nx">rw</span><span class="p">.</span><span class="nx">Unlock</span><span class="p">()</span>
 
-    <span class="nx">name</span> <span class="p">=</span> <span class="nx">s</span>
+<span class="w">    </span><span class="nx">name</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="nx">s</span>
 <span class="p">}</span>
 </pre></div>
 </div>
 <div class="section" id="copy">
 <h2 id="hidcopy">copy 结构体操作可能导致非预期的死锁<a class="headerlink" href="#hidcopy" title="Permalink to this headline">¶</a></h2>
 <p>copy 结构体时，如果结构体中有锁的话，记得重新初始化一个锁对象，否则会出现非预期的死锁：</p>
-<table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre> 1
- 2
- 3
- 4
- 5
- 6
- 7
- 8
- 9
-10
-11
-12
-13
-14
-15
-16
-17
-18
-19
-20
-21
-22
-23
-24
-25
-26
-27
-28</pre></div></td><td class="code"><div class="highlight"><pre><span></span> <span class="kn">package</span> <span class="nx">main</span>
+<div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal"> 1</span>
+<span class="normal"> 2</span>
+<span class="normal"> 3</span>
+<span class="normal"> 4</span>
+<span class="normal"> 5</span>
+<span class="normal"> 6</span>
+<span class="normal"> 7</span>
+<span class="normal"> 8</span>
+<span class="normal"> 9</span>
+<span class="normal">10</span>
+<span class="normal">11</span>
+<span class="normal">12</span>
+<span class="normal">13</span>
+<span class="normal">14</span>
+<span class="normal">15</span>
+<span class="normal">16</span>
+<span class="normal">17</span>
+<span class="normal">18</span>
+<span class="normal">19</span>
+<span class="normal">20</span>
+<span class="normal">21</span>
+<span class="normal">22</span>
+<span class="normal">23</span>
+<span class="normal">24</span>
+<span class="normal">25</span>
+<span class="normal">26</span>
+<span class="normal">27</span>
+<span class="normal">28</span></pre></div></td><td class="code"><div><pre><span></span><span class="w"> </span><span class="kn">package</span><span class="w"> </span><span class="nx">main</span>
 
- <span class="kn">import</span> <span class="p">(</span>
-     <span class="s">&quot;fmt&quot;</span>
-     <span class="s">&quot;sync&quot;</span>
- <span class="p">)</span>
+<span class="w"> </span><span class="kn">import</span><span class="w"> </span><span class="p">(</span>
+<span class="w">     </span><span class="s">&quot;fmt&quot;</span>
+<span class="w">     </span><span class="s">&quot;sync&quot;</span>
+<span class="w"> </span><span class="p">)</span>
 
- <span class="kd">type</span> <span class="nx">User</span> <span class="kd">struct</span> <span class="p">{</span>
-     <span class="nx">sync</span><span class="p">.</span><span class="nx">Mutex</span>
+<span class="w"> </span><span class="kd">type</span><span class="w"> </span><span class="nx">User</span><span class="w"> </span><span class="kd">struct</span><span class="w"> </span><span class="p">{</span>
+<span class="w">     </span><span class="nx">sync</span><span class="p">.</span><span class="nx">Mutex</span>
 
-     <span class="nx">name</span> <span class="kt">string</span>
- <span class="p">}</span>
+<span class="w">     </span><span class="nx">name</span><span class="w"> </span><span class="kt">string</span>
+<span class="w"> </span><span class="p">}</span>
 
- <span class="kd">func</span> <span class="nx">main</span><span class="p">()</span> <span class="p">{</span>
-     <span class="nx">u1</span> <span class="o">:=</span> <span class="o">&amp;</span><span class="nx">User</span><span class="p">{</span><span class="nx">name</span><span class="p">:</span> <span class="s">&quot;test&quot;</span><span class="p">}</span>
-     <span class="nx">u1</span><span class="p">.</span><span class="nx">Lock</span><span class="p">()</span>
-     <span class="k">defer</span> <span class="nx">u1</span><span class="p">.</span><span class="nx">Unlock</span><span class="p">()</span>
+<span class="w"> </span><span class="kd">func</span><span class="w"> </span><span class="nx">main</span><span class="p">()</span><span class="w"> </span><span class="p">{</span>
+<span class="w">     </span><span class="nx">u1</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="o">&amp;</span><span class="nx">User</span><span class="p">{</span><span class="nx">name</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;test&quot;</span><span class="p">}</span>
+<span class="w">     </span><span class="nx">u1</span><span class="p">.</span><span class="nx">Lock</span><span class="p">()</span>
+<span class="w">     </span><span class="k">defer</span><span class="w"> </span><span class="nx">u1</span><span class="p">.</span><span class="nx">Unlock</span><span class="p">()</span>
 
-<span class="hll">     <span class="nx">tmp</span> <span class="o">:=</span> <span class="o">*</span><span class="nx">u1</span>
-</span><span class="hll">     <span class="nx">u2</span> <span class="o">:=</span> <span class="o">&amp;</span><span class="nx">tmp</span>
-</span><span class="hll">     <span class="c1">// u2.Mutex = sync.Mutex{} // 没有这一行就会死锁</span>
+<span class="hll"><span class="w">     </span><span class="nx">tmp</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="o">*</span><span class="nx">u1</span>
+</span><span class="hll"><span class="w">     </span><span class="nx">u2</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="o">&amp;</span><span class="nx">tmp</span>
+</span><span class="hll"><span class="w">     </span><span class="c1">// u2.Mutex = sync.Mutex{} // 没有这一行就会死锁</span>
 </span>
-     <span class="nx">fmt</span><span class="p">.</span><span class="nx">Printf</span><span class="p">(</span><span class="s">&quot;%#p\n&quot;</span><span class="p">,</span> <span class="nx">u1</span><span class="p">)</span>
-     <span class="nx">fmt</span><span class="p">.</span><span class="nx">Printf</span><span class="p">(</span><span class="s">&quot;%#p\n&quot;</span><span class="p">,</span> <span class="nx">u2</span><span class="p">)</span>
+<span class="w">     </span><span class="nx">fmt</span><span class="p">.</span><span class="nx">Printf</span><span class="p">(</span><span class="s">&quot;%#p\n&quot;</span><span class="p">,</span><span class="w"> </span><span class="nx">u1</span><span class="p">)</span>
+<span class="w">     </span><span class="nx">fmt</span><span class="p">.</span><span class="nx">Printf</span><span class="p">(</span><span class="s">&quot;%#p\n&quot;</span><span class="p">,</span><span class="w"> </span><span class="nx">u2</span><span class="p">)</span>
 
-     <span class="nx">u2</span><span class="p">.</span><span class="nx">Lock</span><span class="p">()</span>
-     <span class="k">defer</span> <span class="nx">u2</span><span class="p">.</span><span class="nx">Unlock</span><span class="p">()</span>
- <span class="p">}</span>
-</pre></div>
-</td></tr></table><div class="highlight"><pre><span></span>$ go run main.go
+<span class="w">     </span><span class="nx">u2</span><span class="p">.</span><span class="nx">Lock</span><span class="p">()</span>
+<span class="w">     </span><span class="k">defer</span><span class="w"> </span><span class="nx">u2</span><span class="p">.</span><span class="nx">Unlock</span><span class="p">()</span>
+<span class="w"> </span><span class="p">}</span>
+</pre></div></td></tr></table></div>
+<div class="highlight"><pre><span></span>$<span class="w"> </span>go<span class="w"> </span>run<span class="w"> </span>main.go
 c00000a080
 c00000a0a0
-fatal error: all goroutines are asleep - deadlock!
+fatal<span class="w"> </span>error:<span class="w"> </span>all<span class="w"> </span>goroutines<span class="w"> </span>are<span class="w"> </span>asleep<span class="w"> </span>-<span class="w"> </span>deadlock!
 
-goroutine <span class="m">1</span> <span class="o">[</span>semacquire<span class="o">]</span>:
-sync.runtime_SemacquireMutex<span class="o">(</span>0xc00000a0a4, 0x0<span class="o">)</span>
-    /usr/local/Cellar/go/1.11/libexec/src/runtime/sema.go:71 +0x3d
+goroutine<span class="w"> </span><span class="m">1</span><span class="w"> </span><span class="o">[</span>semacquire<span class="o">]</span>:
+sync.runtime_SemacquireMutex<span class="o">(</span>0xc00000a0a4,<span class="w"> </span>0x0<span class="o">)</span>
+<span class="w">    </span>/usr/local/Cellar/go/1.11/libexec/src/runtime/sema.go:71<span class="w"> </span>+0x3d
 sync.<span class="o">(</span>*Mutex<span class="o">)</span>.Lock<span class="o">(</span>0xc00000a0a0<span class="o">)</span>
-    /usr/local/Cellar/go/1.11/libexec/src/sync/mutex.go:134 +0xff
+<span class="w">    </span>/usr/local/Cellar/go/1.11/libexec/src/sync/mutex.go:134<span class="w"> </span>+0xff
 main.main<span class="o">()</span>
-    /Users/xxx/tmp/golang/main.go:26 +0x17f
-<span class="nb">exit</span> status 2
+<span class="w">    </span>/Users/xxx/tmp/golang/main.go:26<span class="w"> </span>+0x17f
+<span class="nb">exit</span><span class="w"> </span>status<span class="w"> </span><span class="m">2</span>
 </pre></div>
 <p>文档中也有类似的警告：</p>
 <blockquote>
@@ -338,166 +338,166 @@ $ go vet main.go
 <div class="section" id="build-test-race">
 <h2 id="hidbuild-test-race">build/test 时使用 -race 参数以便运行时检测数据竞争问题<a class="headerlink" href="#hidbuild-test-race" title="Permalink to this headline">¶</a></h2>
 <p>可以在执行 go build 或 go test 时增加一个 <tt class="docutils literal"><span class="pre">-race</span></tt> 参数来开启数据竞争检测功能，通过这种方式来实现在本地开发环境/CI/测试环境阶段发现程序中可能存在的数据竞争问题：</p>
-<div class="highlight"><pre><span></span><span class="kn">package</span> <span class="nx">main</span>
+<div class="highlight"><pre><span></span><span class="kn">package</span><span class="w"> </span><span class="nx">main</span>
 
-<span class="kn">import</span> <span class="p">(</span>
-    <span class="s">&quot;fmt&quot;</span>
-    <span class="s">&quot;sync&quot;</span>
+<span class="kn">import</span><span class="w"> </span><span class="p">(</span>
+<span class="w">    </span><span class="s">&quot;fmt&quot;</span>
+<span class="w">    </span><span class="s">&quot;sync&quot;</span>
 <span class="p">)</span>
 
-<span class="kd">type</span> <span class="nx">Todo</span> <span class="kd">struct</span> <span class="p">{</span>
-    <span class="nx">sync</span><span class="p">.</span><span class="nx">Mutex</span>
+<span class="kd">type</span><span class="w"> </span><span class="nx">Todo</span><span class="w"> </span><span class="kd">struct</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="nx">sync</span><span class="p">.</span><span class="nx">Mutex</span>
 
-    <span class="nx">tasks</span> <span class="p">[]</span><span class="kt">string</span>
+<span class="w">    </span><span class="nx">tasks</span><span class="w"> </span><span class="p">[]</span><span class="kt">string</span>
 <span class="p">}</span>
 
-<span class="kd">func</span> <span class="p">(</span><span class="nx">t</span> <span class="o">*</span><span class="nx">Todo</span><span class="p">)</span> <span class="nx">do</span><span class="p">()</span> <span class="p">{</span>
-    <span class="k">for</span> <span class="nx">_</span><span class="p">,</span> <span class="nx">task</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">t</span><span class="p">.</span><span class="nx">tasks</span> <span class="p">{</span>
-        <span class="nx">fmt</span><span class="p">.</span><span class="nx">Println</span><span class="p">(</span><span class="nx">task</span><span class="p">)</span>
-    <span class="p">}</span>
+<span class="kd">func</span><span class="w"> </span><span class="p">(</span><span class="nx">t</span><span class="w"> </span><span class="o">*</span><span class="nx">Todo</span><span class="p">)</span><span class="w"> </span><span class="nx">do</span><span class="p">()</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="k">for</span><span class="w"> </span><span class="nx">_</span><span class="p">,</span><span class="w"> </span><span class="nx">task</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="k">range</span><span class="w"> </span><span class="nx">t</span><span class="p">.</span><span class="nx">tasks</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="nx">fmt</span><span class="p">.</span><span class="nx">Println</span><span class="p">(</span><span class="nx">task</span><span class="p">)</span>
+<span class="w">    </span><span class="p">}</span>
 <span class="p">}</span>
 
-<span class="kd">func</span> <span class="p">(</span><span class="nx">t</span> <span class="o">*</span><span class="nx">Todo</span><span class="p">)</span> <span class="nx">Add</span><span class="p">(</span><span class="nx">task</span> <span class="kt">string</span><span class="p">)</span> <span class="p">{</span>
-    <span class="nx">t</span><span class="p">.</span><span class="nx">Lock</span><span class="p">()</span>
-    <span class="k">defer</span> <span class="nx">t</span><span class="p">.</span><span class="nx">Unlock</span><span class="p">()</span>
+<span class="kd">func</span><span class="w"> </span><span class="p">(</span><span class="nx">t</span><span class="w"> </span><span class="o">*</span><span class="nx">Todo</span><span class="p">)</span><span class="w"> </span><span class="nx">Add</span><span class="p">(</span><span class="nx">task</span><span class="w"> </span><span class="kt">string</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="nx">t</span><span class="p">.</span><span class="nx">Lock</span><span class="p">()</span>
+<span class="w">    </span><span class="k">defer</span><span class="w"> </span><span class="nx">t</span><span class="p">.</span><span class="nx">Unlock</span><span class="p">()</span>
 
-    <span class="nx">t</span><span class="p">.</span><span class="nx">tasks</span> <span class="p">=</span> <span class="nb">append</span><span class="p">(</span><span class="nx">t</span><span class="p">.</span><span class="nx">tasks</span><span class="p">,</span> <span class="nx">task</span><span class="p">)</span>
+<span class="w">    </span><span class="nx">t</span><span class="p">.</span><span class="nx">tasks</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="nb">append</span><span class="p">(</span><span class="nx">t</span><span class="p">.</span><span class="nx">tasks</span><span class="p">,</span><span class="w"> </span><span class="nx">task</span><span class="p">)</span>
 <span class="p">}</span>
 
-<span class="kd">func</span> <span class="nx">main</span><span class="p">()</span> <span class="p">{</span>
-    <span class="nx">t</span> <span class="o">:=</span> <span class="o">&amp;</span><span class="nx">Todo</span><span class="p">{}</span>
+<span class="kd">func</span><span class="w"> </span><span class="nx">main</span><span class="p">()</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="nx">t</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="o">&amp;</span><span class="nx">Todo</span><span class="p">{}</span>
 
-    <span class="k">for</span> <span class="nx">i</span> <span class="o">:=</span> <span class="mi">0</span><span class="p">;</span> <span class="nx">i</span> <span class="p">&lt;</span> <span class="mi">2</span><span class="p">;</span> <span class="nx">i</span><span class="o">++</span> <span class="p">{</span>
-        <span class="k">go</span> <span class="nx">t</span><span class="p">.</span><span class="nx">Add</span><span class="p">(</span><span class="nx">fmt</span><span class="p">.</span><span class="nx">Sprintf</span><span class="p">(</span><span class="s">&quot;%d&quot;</span><span class="p">,</span> <span class="nx">i</span><span class="p">))</span>
-    <span class="p">}</span>
-    <span class="k">for</span> <span class="nx">i</span> <span class="o">:=</span> <span class="mi">0</span><span class="p">;</span> <span class="nx">i</span> <span class="p">&lt;</span> <span class="mi">2</span><span class="p">;</span> <span class="nx">i</span><span class="o">++</span> <span class="p">{</span>
-        <span class="nx">t</span><span class="p">.</span><span class="nx">do</span><span class="p">()</span>
-    <span class="p">}</span>
+<span class="w">    </span><span class="k">for</span><span class="w"> </span><span class="nx">i</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span><span class="w"> </span><span class="nx">i</span><span class="w"> </span><span class="p">&lt;</span><span class="w"> </span><span class="mi">2</span><span class="p">;</span><span class="w"> </span><span class="nx">i</span><span class="o">++</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="k">go</span><span class="w"> </span><span class="nx">t</span><span class="p">.</span><span class="nx">Add</span><span class="p">(</span><span class="nx">fmt</span><span class="p">.</span><span class="nx">Sprintf</span><span class="p">(</span><span class="s">&quot;%d&quot;</span><span class="p">,</span><span class="w"> </span><span class="nx">i</span><span class="p">))</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="w">    </span><span class="k">for</span><span class="w"> </span><span class="nx">i</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span><span class="w"> </span><span class="nx">i</span><span class="w"> </span><span class="p">&lt;</span><span class="w"> </span><span class="mi">2</span><span class="p">;</span><span class="w"> </span><span class="nx">i</span><span class="o">++</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="nx">t</span><span class="p">.</span><span class="nx">do</span><span class="p">()</span>
+<span class="w">    </span><span class="p">}</span>
 <span class="p">}</span>
 </pre></div>
 <p><tt class="docutils literal"><span class="pre">-race</span></tt> 参数可以开启数据竞争检测（详见： <a class="reference external" href="https://golang.org/doc/articles/race_detector.html">Data Race Detector - The Go Programming Language</a> ）：</p>
-<div class="highlight"><pre><span></span>$ go build -race -o main .
+<div class="highlight"><pre><span></span>$<span class="w"> </span>go<span class="w"> </span>build<span class="w"> </span>-race<span class="w"> </span>-o<span class="w"> </span>main<span class="w"> </span>.
 $
-$ ./main
+$<span class="w"> </span>./main
 <span class="o">==================</span>
-WARNING: DATA RACE
-Read at 0x00c0000a0048 by main goroutine:
-  main.<span class="o">(</span>*Todo<span class="o">)</span>.do<span class="o">()</span>
-      /Users/xxx/tmp/golang/race/main.go:15 +0x42
-  main.main<span class="o">()</span>
-      /Users/xxx/tmp/golang/race/main.go:34 +0x154
+WARNING:<span class="w"> </span>DATA<span class="w"> </span>RACE
+Read<span class="w"> </span>at<span class="w"> </span>0x00c0000a0048<span class="w"> </span>by<span class="w"> </span>main<span class="w"> </span>goroutine:
+<span class="w">  </span>main.<span class="o">(</span>*Todo<span class="o">)</span>.do<span class="o">()</span>
+<span class="w">      </span>/Users/xxx/tmp/golang/race/main.go:15<span class="w"> </span>+0x42
+<span class="w">  </span>main.main<span class="o">()</span>
+<span class="w">      </span>/Users/xxx/tmp/golang/race/main.go:34<span class="w"> </span>+0x154
 
-Previous write at 0x00c0000a0048 by goroutine 6:
-  main.<span class="o">(</span>*Todo<span class="o">)</span>.Add<span class="o">()</span>
-      /Users/xxx/tmp/golang/race/main.go:24 +0x11d
+Previous<span class="w"> </span>write<span class="w"> </span>at<span class="w"> </span>0x00c0000a0048<span class="w"> </span>by<span class="w"> </span>goroutine<span class="w"> </span><span class="m">6</span>:
+<span class="w">  </span>main.<span class="o">(</span>*Todo<span class="o">)</span>.Add<span class="o">()</span>
+<span class="w">      </span>/Users/xxx/tmp/golang/race/main.go:24<span class="w"> </span>+0x11d
 
-Goroutine <span class="m">6</span> <span class="o">(</span>finished<span class="o">)</span> created at:
-  main.main<span class="o">()</span>
-      /Users/xxx/tmp/golang/race/main.go:31 +0x127
+Goroutine<span class="w"> </span><span class="m">6</span><span class="w"> </span><span class="o">(</span>finished<span class="o">)</span><span class="w"> </span>created<span class="w"> </span>at:
+<span class="w">  </span>main.main<span class="o">()</span>
+<span class="w">      </span>/Users/xxx/tmp/golang/race/main.go:31<span class="w"> </span>+0x127
 <span class="o">==================</span>
 <span class="nv">0</span>
 <span class="o">==================</span>
-WARNING: DATA RACE
-Read at 0x00c0000b0010 by main goroutine:
-  main.<span class="o">(</span>*Todo<span class="o">)</span>.do<span class="o">()</span>
-      /Users/xxx/tmp/golang/race/main.go:15 +0x85
-  main.main<span class="o">()</span>
-      /Users/xxx/tmp/golang/race/main.go:34 +0x154
+WARNING:<span class="w"> </span>DATA<span class="w"> </span>RACE
+Read<span class="w"> </span>at<span class="w"> </span>0x00c0000b0010<span class="w"> </span>by<span class="w"> </span>main<span class="w"> </span>goroutine:
+<span class="w">  </span>main.<span class="o">(</span>*Todo<span class="o">)</span>.do<span class="o">()</span>
+<span class="w">      </span>/Users/xxx/tmp/golang/race/main.go:15<span class="w"> </span>+0x85
+<span class="w">  </span>main.main<span class="o">()</span>
+<span class="w">      </span>/Users/xxx/tmp/golang/race/main.go:34<span class="w"> </span>+0x154
 
-Previous write at 0x00c0000b0010 by goroutine 7:
-  main.<span class="o">(</span>*Todo<span class="o">)</span>.Add<span class="o">()</span>
-      /Users/xxx/tmp/golang/race/main.go:24 +0xe3
+Previous<span class="w"> </span>write<span class="w"> </span>at<span class="w"> </span>0x00c0000b0010<span class="w"> </span>by<span class="w"> </span>goroutine<span class="w"> </span><span class="m">7</span>:
+<span class="w">  </span>main.<span class="o">(</span>*Todo<span class="o">)</span>.Add<span class="o">()</span>
+<span class="w">      </span>/Users/xxx/tmp/golang/race/main.go:24<span class="w"> </span>+0xe3
 
-Goroutine <span class="m">7</span> <span class="o">(</span>finished<span class="o">)</span> created at:
-  main.main<span class="o">()</span>
-      /Users/xxx/tmp/golang/race/main.go:31 +0x127
+Goroutine<span class="w"> </span><span class="m">7</span><span class="w"> </span><span class="o">(</span>finished<span class="o">)</span><span class="w"> </span>created<span class="w"> </span>at:
+<span class="w">  </span>main.main<span class="o">()</span>
+<span class="w">      </span>/Users/xxx/tmp/golang/race/main.go:31<span class="w"> </span>+0x127
 <span class="o">==================</span>
-1
-0
-1
-Found <span class="m">2</span> data race<span class="o">(</span>s<span class="o">)</span>
+<span class="m">1</span>
+<span class="m">0</span>
+<span class="m">1</span>
+Found<span class="w"> </span><span class="m">2</span><span class="w"> </span>data<span class="w"> </span>race<span class="o">(</span>s<span class="o">)</span>
 </pre></div>
 </div>
 <div class="section" id="go-deadlock">
 <h2 id="hidgo-deadlock">使用 go-deadlock 检测死锁或锁等待问题<a class="headerlink" href="#hidgo-deadlock" title="Permalink to this headline">¶</a></h2>
 <p>上面说的在持有锁的时候做 IO 操作或其他非预期的耗时超时的问题，一方面需要在写程序的时候注意一下，另一方面也有可能是无意中代入进去的（比如上面提到的习惯性 defer 导致的）。对于那些无意中代入进去的锁等待的问题人为的去 review 的话通常很难发现，此时就需要用工具来检测了。恰好有一个叫 <a class="reference external" href="https://github.com/sasha-s/go-deadlock">go-deadlock</a> 的工具可以实现这个功能。</p>
-<div class="highlight"><pre><span></span><span class="kn">package</span> <span class="nx">main</span>
+<div class="highlight"><pre><span></span><span class="kn">package</span><span class="w"> </span><span class="nx">main</span>
 
-<span class="kn">import</span> <span class="p">(</span>
-    <span class="s">&quot;net/http&quot;</span>
-    <span class="s">&quot;time&quot;</span>
+<span class="kn">import</span><span class="w"> </span><span class="p">(</span>
+<span class="w">    </span><span class="s">&quot;net/http&quot;</span>
+<span class="w">    </span><span class="s">&quot;time&quot;</span>
 
-    <span class="nx">sync</span> <span class="s">&quot;github.com/sasha-s/go-deadlock&quot;</span>
+<span class="w">    </span><span class="nx">sync</span><span class="w"> </span><span class="s">&quot;github.com/sasha-s/go-deadlock&quot;</span>
 <span class="p">)</span>
 
-<span class="kd">var</span> <span class="nx">mu</span> <span class="nx">sync</span><span class="p">.</span><span class="nx">Mutex</span>
-<span class="kd">var</span> <span class="nx">url</span> <span class="p">=</span> <span class="s">&quot;http://baidu.com:90&quot;</span>
+<span class="kd">var</span><span class="w"> </span><span class="nx">mu</span><span class="w"> </span><span class="nx">sync</span><span class="p">.</span><span class="nx">Mutex</span>
+<span class="kd">var</span><span class="w"> </span><span class="nx">url</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="s">&quot;http://baidu.com:90&quot;</span>
 
-<span class="kd">func</span> <span class="nx">do</span><span class="p">()</span> <span class="p">{</span>
-    <span class="nx">mu</span><span class="p">.</span><span class="nx">Lock</span><span class="p">()</span>
-    <span class="k">defer</span> <span class="nx">mu</span><span class="p">.</span><span class="nx">Unlock</span><span class="p">()</span>
+<span class="kd">func</span><span class="w"> </span><span class="nx">do</span><span class="p">()</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="nx">mu</span><span class="p">.</span><span class="nx">Lock</span><span class="p">()</span>
+<span class="w">    </span><span class="k">defer</span><span class="w"> </span><span class="nx">mu</span><span class="p">.</span><span class="nx">Unlock</span><span class="p">()</span>
 
-    <span class="nx">u</span> <span class="o">:=</span> <span class="nx">url</span>
-    <span class="nx">http</span><span class="p">.</span><span class="nx">Get</span><span class="p">(</span><span class="nx">u</span><span class="p">)</span>  <span class="c1">// 非预期的在持有锁期间做 IO 操作，导致锁等待时间变长</span>
+<span class="w">    </span><span class="nx">u</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="nx">url</span>
+<span class="w">    </span><span class="nx">http</span><span class="p">.</span><span class="nx">Get</span><span class="p">(</span><span class="nx">u</span><span class="p">)</span><span class="w">  </span><span class="c1">// 非预期的在持有锁期间做 IO 操作，导致锁等待时间变长</span>
 <span class="p">}</span>
 
-<span class="kd">func</span> <span class="nx">main</span><span class="p">()</span> <span class="p">{</span>
-    <span class="c1">// 检测超过 100 ms 的锁等待</span>
-    <span class="nx">sync</span><span class="p">.</span><span class="nx">Opts</span><span class="p">.</span><span class="nx">DeadlockTimeout</span> <span class="p">=</span> <span class="nx">time</span><span class="p">.</span><span class="nx">Millisecond</span> <span class="o">*</span> <span class="mi">100</span>
+<span class="kd">func</span><span class="w"> </span><span class="nx">main</span><span class="p">()</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="c1">// 检测超过 100 ms 的锁等待</span>
+<span class="w">    </span><span class="nx">sync</span><span class="p">.</span><span class="nx">Opts</span><span class="p">.</span><span class="nx">DeadlockTimeout</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="nx">time</span><span class="p">.</span><span class="nx">Millisecond</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="mi">100</span>
 
-    <span class="kd">var</span> <span class="nx">wg</span> <span class="nx">sync</span><span class="p">.</span><span class="nx">WaitGroup</span>
-    <span class="k">for</span> <span class="nx">i</span> <span class="o">:=</span> <span class="mi">0</span><span class="p">;</span> <span class="nx">i</span> <span class="p">&lt;</span> <span class="mi">3</span><span class="p">;</span> <span class="nx">i</span><span class="o">++</span> <span class="p">{</span>
-        <span class="nx">wg</span><span class="p">.</span><span class="nx">Add</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span>
-        <span class="k">go</span> <span class="kd">func</span><span class="p">()</span> <span class="p">{</span>
-            <span class="k">defer</span> <span class="nx">wg</span><span class="p">.</span><span class="nx">Done</span><span class="p">()</span>
-            <span class="nx">do</span><span class="p">()</span>
-        <span class="p">}()</span>
-    <span class="p">}</span>
+<span class="w">    </span><span class="kd">var</span><span class="w"> </span><span class="nx">wg</span><span class="w"> </span><span class="nx">sync</span><span class="p">.</span><span class="nx">WaitGroup</span>
+<span class="w">    </span><span class="k">for</span><span class="w"> </span><span class="nx">i</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span><span class="w"> </span><span class="nx">i</span><span class="w"> </span><span class="p">&lt;</span><span class="w"> </span><span class="mi">3</span><span class="p">;</span><span class="w"> </span><span class="nx">i</span><span class="o">++</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="nx">wg</span><span class="p">.</span><span class="nx">Add</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span>
+<span class="w">        </span><span class="k">go</span><span class="w"> </span><span class="kd">func</span><span class="p">()</span><span class="w"> </span><span class="p">{</span>
+<span class="w">            </span><span class="k">defer</span><span class="w"> </span><span class="nx">wg</span><span class="p">.</span><span class="nx">Done</span><span class="p">()</span>
+<span class="w">            </span><span class="nx">do</span><span class="p">()</span>
+<span class="w">        </span><span class="p">}()</span>
+<span class="w">    </span><span class="p">}</span>
 
-    <span class="nx">wg</span><span class="p">.</span><span class="nx">Wait</span><span class="p">()</span>
+<span class="w">    </span><span class="nx">wg</span><span class="p">.</span><span class="nx">Wait</span><span class="p">()</span>
 <span class="p">}</span>
 </pre></div>
 <p>执行结果：</p>
-<div class="highlight"><pre><span></span>$ go run main.go
-POTENTIAL DEADLOCK:
-Previous place where the lock was grabbed
-goroutine <span class="m">36</span> lock 0x1483b90
-main.go:14 main.do <span class="o">{</span> mu.Lock<span class="o">()</span> <span class="o">}</span> <span class="o">&lt;&lt;&lt;</span><span class="s">&lt;&lt;</span>
-<span class="s">main.go:30 main</span>.main.func1 <span class="o">{</span> <span class="k">do</span><span class="o">()</span> <span class="o">}</span>
+<div class="highlight"><pre><span></span>$<span class="w"> </span>go<span class="w"> </span>run<span class="w"> </span>main.go
+POTENTIAL<span class="w"> </span>DEADLOCK:
+Previous<span class="w"> </span>place<span class="w"> </span>where<span class="w"> </span>the<span class="w"> </span>lock<span class="w"> </span>was<span class="w"> </span>grabbed
+goroutine<span class="w"> </span><span class="m">36</span><span class="w"> </span>lock<span class="w"> </span>0x1483b90
+main.go:14<span class="w"> </span>main.do<span class="w"> </span><span class="o">{</span><span class="w"> </span>mu.Lock<span class="o">()</span><span class="w"> </span><span class="o">}</span><span class="w"> </span><span class="o">&lt;&lt;&lt;</span><span class="s">&lt;&lt;</span>
+<span class="s">main.go:30 main</span>.main.func1<span class="w"> </span><span class="o">{</span><span class="w"> </span><span class="k">do</span><span class="o">()</span><span class="w"> </span><span class="o">}</span>
 
-Have been trying to lock it again <span class="k">for</span> more than 100ms
-goroutine <span class="m">35</span> lock 0x1483b90
-main.go:14 main.do <span class="o">{</span> mu.Lock<span class="o">()</span> <span class="o">}</span> <span class="o">&lt;&lt;&lt;</span><span class="s">&lt;&lt;</span>
-<span class="s">main.go:30 main</span>.main.func1 <span class="o">{</span> <span class="k">do</span><span class="o">()</span> <span class="o">}</span>
+Have<span class="w"> </span>been<span class="w"> </span>trying<span class="w"> </span>to<span class="w"> </span>lock<span class="w"> </span>it<span class="w"> </span>again<span class="w"> </span><span class="k">for</span><span class="w"> </span>more<span class="w"> </span>than<span class="w"> </span>100ms
+goroutine<span class="w"> </span><span class="m">35</span><span class="w"> </span>lock<span class="w"> </span>0x1483b90
+main.go:14<span class="w"> </span>main.do<span class="w"> </span><span class="o">{</span><span class="w"> </span>mu.Lock<span class="o">()</span><span class="w"> </span><span class="o">}</span><span class="w"> </span><span class="o">&lt;&lt;&lt;</span><span class="s">&lt;&lt;</span>
+<span class="s">main.go:30 main</span>.main.func1<span class="w"> </span><span class="o">{</span><span class="w"> </span><span class="k">do</span><span class="o">()</span><span class="w"> </span><span class="o">}</span>
 
-Here is what goroutine <span class="m">36</span> doing now
-goroutine <span class="m">36</span> <span class="o">[</span><span class="k">select</span><span class="o">]</span>:
-net/http.<span class="o">(</span>*Transport<span class="o">)</span>.getConn<span class="o">(</span>0x14616c0, 0xc00015e150, 0x0, 0x128adb3, 0x4, 0xc000014100, 0xc, 0x0, 0x0, 0xc0000559e8<span class="o">)</span>
-    /usr/local/Cellar/go/1.11/libexec/src/net/http/transport.go:1004 +0x58e
-net/http.<span class="o">(</span>*Transport<span class="o">)</span>.roundTrip<span class="o">(</span>0x14616c0, 0xc000160000, 0x203000, 0xc000055c90, 0x11d823a<span class="o">)</span>
-    /usr/local/Cellar/go/1.11/libexec/src/net/http/transport.go:451 +0x690
-net/http.<span class="o">(</span>*Transport<span class="o">)</span>.RoundTrip<span class="o">(</span>0x14616c0, 0xc000160000, 0x14616c0, 0x0, 0x0<span class="o">)</span>
-    /usr/local/Cellar/go/1.11/libexec/src/net/http/roundtrip.go:17 +0x35
-net/http.send<span class="o">(</span>0xc000160000, 0x12c78a0, 0x14616c0, 0x0, 0x0, 0x0, 0xc00000e030, 0x1708000, 0xc000055d20, 0x1<span class="o">)</span>
-    /usr/local/Cellar/go/1.11/libexec/src/net/http/client.go:250 +0x14b
-net/http.<span class="o">(</span>*Client<span class="o">)</span>.send<span class="o">(</span>0x1466200, 0xc000160000, 0x0, 0x0, 0x0, 0xc00000e030, 0x0, 0x1, 0x0<span class="o">)</span>
-    /usr/local/Cellar/go/1.11/libexec/src/net/http/client.go:174 +0xfa
-net/http.<span class="o">(</span>*Client<span class="o">)</span>.do<span class="o">(</span>0x1466200, 0xc000160000, 0x0, 0x0, 0x0<span class="o">)</span>
-    /usr/local/Cellar/go/1.11/libexec/src/net/http/client.go:641 +0x2a8
-net/http.<span class="o">(</span>*Client<span class="o">)</span>.Do<span class="o">(</span>0x1466200, 0xc000160000, 0x128adb3, 0x13, 0x0<span class="o">)</span>
-    /usr/local/Cellar/go/1.11/libexec/src/net/http/client.go:509 +0x35
-net/http.<span class="o">(</span>*Client<span class="o">)</span>.Get<span class="o">(</span>0x1466200, 0x128adb3, 0x13, 0xc0000220c0, 0x12412c0, 0xc000055f80<span class="o">)</span>
-    /usr/local/Cellar/go/1.11/libexec/src/net/http/client.go:398 +0x9d
-net/http.Get<span class="o">(</span>0x128adb3, 0x13, 0x1483b90, 0x0, 0xc000114fb8<span class="o">)</span>
-    /usr/local/Cellar/go/1.11/libexec/src/net/http/client.go:370 +0x41
+Here<span class="w"> </span>is<span class="w"> </span>what<span class="w"> </span>goroutine<span class="w"> </span><span class="m">36</span><span class="w"> </span>doing<span class="w"> </span>now
+goroutine<span class="w"> </span><span class="m">36</span><span class="w"> </span><span class="o">[</span><span class="k">select</span><span class="o">]</span>:
+net/http.<span class="o">(</span>*Transport<span class="o">)</span>.getConn<span class="o">(</span>0x14616c0,<span class="w"> </span>0xc00015e150,<span class="w"> </span>0x0,<span class="w"> </span>0x128adb3,<span class="w"> </span>0x4,<span class="w"> </span>0xc000014100,<span class="w"> </span>0xc,<span class="w"> </span>0x0,<span class="w"> </span>0x0,<span class="w"> </span>0xc0000559e8<span class="o">)</span>
+<span class="w">    </span>/usr/local/Cellar/go/1.11/libexec/src/net/http/transport.go:1004<span class="w"> </span>+0x58e
+net/http.<span class="o">(</span>*Transport<span class="o">)</span>.roundTrip<span class="o">(</span>0x14616c0,<span class="w"> </span>0xc000160000,<span class="w"> </span>0x203000,<span class="w"> </span>0xc000055c90,<span class="w"> </span>0x11d823a<span class="o">)</span>
+<span class="w">    </span>/usr/local/Cellar/go/1.11/libexec/src/net/http/transport.go:451<span class="w"> </span>+0x690
+net/http.<span class="o">(</span>*Transport<span class="o">)</span>.RoundTrip<span class="o">(</span>0x14616c0,<span class="w"> </span>0xc000160000,<span class="w"> </span>0x14616c0,<span class="w"> </span>0x0,<span class="w"> </span>0x0<span class="o">)</span>
+<span class="w">    </span>/usr/local/Cellar/go/1.11/libexec/src/net/http/roundtrip.go:17<span class="w"> </span>+0x35
+net/http.send<span class="o">(</span>0xc000160000,<span class="w"> </span>0x12c78a0,<span class="w"> </span>0x14616c0,<span class="w"> </span>0x0,<span class="w"> </span>0x0,<span class="w"> </span>0x0,<span class="w"> </span>0xc00000e030,<span class="w"> </span>0x1708000,<span class="w"> </span>0xc000055d20,<span class="w"> </span>0x1<span class="o">)</span>
+<span class="w">    </span>/usr/local/Cellar/go/1.11/libexec/src/net/http/client.go:250<span class="w"> </span>+0x14b
+net/http.<span class="o">(</span>*Client<span class="o">)</span>.send<span class="o">(</span>0x1466200,<span class="w"> </span>0xc000160000,<span class="w"> </span>0x0,<span class="w"> </span>0x0,<span class="w"> </span>0x0,<span class="w"> </span>0xc00000e030,<span class="w"> </span>0x0,<span class="w"> </span>0x1,<span class="w"> </span>0x0<span class="o">)</span>
+<span class="w">    </span>/usr/local/Cellar/go/1.11/libexec/src/net/http/client.go:174<span class="w"> </span>+0xfa
+net/http.<span class="o">(</span>*Client<span class="o">)</span>.do<span class="o">(</span>0x1466200,<span class="w"> </span>0xc000160000,<span class="w"> </span>0x0,<span class="w"> </span>0x0,<span class="w"> </span>0x0<span class="o">)</span>
+<span class="w">    </span>/usr/local/Cellar/go/1.11/libexec/src/net/http/client.go:641<span class="w"> </span>+0x2a8
+net/http.<span class="o">(</span>*Client<span class="o">)</span>.Do<span class="o">(</span>0x1466200,<span class="w"> </span>0xc000160000,<span class="w"> </span>0x128adb3,<span class="w"> </span>0x13,<span class="w"> </span>0x0<span class="o">)</span>
+<span class="w">    </span>/usr/local/Cellar/go/1.11/libexec/src/net/http/client.go:509<span class="w"> </span>+0x35
+net/http.<span class="o">(</span>*Client<span class="o">)</span>.Get<span class="o">(</span>0x1466200,<span class="w"> </span>0x128adb3,<span class="w"> </span>0x13,<span class="w"> </span>0xc0000220c0,<span class="w"> </span>0x12412c0,<span class="w"> </span>0xc000055f80<span class="o">)</span>
+<span class="w">    </span>/usr/local/Cellar/go/1.11/libexec/src/net/http/client.go:398<span class="w"> </span>+0x9d
+net/http.Get<span class="o">(</span>0x128adb3,<span class="w"> </span>0x13,<span class="w"> </span>0x1483b90,<span class="w"> </span>0x0,<span class="w"> </span>0xc000114fb8<span class="o">)</span>
+<span class="w">    </span>/usr/local/Cellar/go/1.11/libexec/src/net/http/client.go:370<span class="w"> </span>+0x41
 main.do<span class="o">()</span>
-    /Users/xxx/tmp/golang/deadlock/main.go:18 +0x75
+<span class="w">    </span>/Users/xxx/tmp/golang/deadlock/main.go:18<span class="w"> </span>+0x75
 main.main.func1<span class="o">(</span>0xc00009c3f4<span class="o">)</span>
-    /Users/xxx/tmp/golang/deadlock/main.go:30 +0x48
-created by main.main
-    /Users/xxx/tmp/golang/deadlock/main.go:28 +0x83
+<span class="w">    </span>/Users/xxx/tmp/golang/deadlock/main.go:30<span class="w"> </span>+0x48
+created<span class="w"> </span>by<span class="w"> </span>main.main
+<span class="w">    </span>/Users/xxx/tmp/golang/deadlock/main.go:28<span class="w"> </span>+0x83
 
-<span class="nb">exit</span> status 2
+<span class="nb">exit</span><span class="w"> </span>status<span class="w"> </span><span class="m">2</span>
 </pre></div>
 <p>通过上面的输出可以知道 goroutine 36 持有锁的时间过长导致其他 goroutine 获取锁的等待时间超过了 100 ms ，并且 goroutine 36 在持有锁期间正在做 18 行的 http 操作。可以看到 go-deadlock 在优化锁等待时间方面有很大的帮助，可以帮助我们及时发现异常的锁使用姿势。</p>
 </div>
@@ -510,12 +510,12 @@ created by main.main
 <h2 id="hidchannel">改为使用 channel<a class="headerlink" href="#hidchannel" title="Permalink to this headline">¶</a></h2>
 <p>有些时候可能使用 channel 会更符合需求，对于这些更适合 channel 的场景可以改为使用 channel 而不是 lock （可以参考 <a class="reference external" href="https://blog.golang.org/share-memory-by-communicating">Share Memory By Communicating - The Go Blog</a> 这篇文章），合适的场景选择合适的方法即可，既不需要畏惧 channel 也不必畏惧 lock 。</p>
 </div>
-<div class="section" id="id3">
-<h2 id="hidid3">总结<a class="headerlink" href="#hidid3" title="Permalink to this headline">¶</a></h2>
+<div class="section" id="section-3">
+<h2 id="hidsection-3">总结<a class="headerlink" href="#hidsection-3" title="Permalink to this headline">¶</a></h2>
 <p>目前能想到的就是这些注意事项了，欢迎纠正和补充。</p>
 </div>
-<div class="section" id="id4">
-<h2 id="hidid4">参考资料<a class="headerlink" href="#hidid4" title="Permalink to this headline">¶</a></h2>
+<div class="section" id="section-4">
+<h2 id="hidsection-4">参考资料<a class="headerlink" href="#hidsection-4" title="Permalink to this headline">¶</a></h2>
 <ul class="simple">
 <li><a class="reference external" href="https://godoc.org/sync">sync - GoDoc</a></li>
 <li><a class="reference external" href="https://github.com/sasha-s/go-deadlock">sasha-s/go-deadlock: Online deadlock detection in go (golang)</a></li>
@@ -558,7 +558,7 @@ created by main.main
                 var disqus_url = 'https://mozillazg.com/2019/04/notes-about-go-lock-mutex.html';
 
             var disqus_config = function () {
-                this.language = "zh";
+                this.language = "";
             };
 
             /* * * DON'T EDIT BELOW THIS LINE * * */
@@ -585,7 +585,7 @@ created by main.main
    <div class="container">
       <hr>
       <div class="row">
-         <div class="col-xs-10">&copy; 2022 mozillazg
+         <div class="col-xs-10">&copy; 2023 mozillazg
             &middot; Powered by <a href="https://github.com/DandyDev/pelican-bootstrap3" target="_blank">pelican-bootstrap3</a>,
             <a href="http://docs.getpelican.com/" target="_blank">Pelican</a>,
             <a href="http://getbootstrap.com" target="_blank">Bootstrap</a>

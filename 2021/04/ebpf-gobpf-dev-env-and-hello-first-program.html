@@ -172,94 +172,94 @@ mozillazg's Blog            </a>
 </footer><!-- /.post-info -->                </div>
                 <div class="js-toc"></div>
                 <div>
-                <div class="section" id="id1">
-<h2 id="hidid1">前言<a class="headerlink" href="#hidid1" title="Permalink to this headline">¶</a></h2>
+                <div class="section" id="section-1">
+<h2 id="hidsection-1">前言<a class="headerlink" href="#hidsection-1" title="Permalink to this headline">¶</a></h2>
 <p>gobpf 使用示例系列记录使用 <a class="reference external" href="https://github.com/iovisor/gobpf">gobpf</a> 编写 eBPF 程序的一些例子。</p>
 </div>
-<div class="section" id="id2">
-<h2 id="hidid2">搭建开发环境<a class="headerlink" href="#hidid2" title="Permalink to this headline">¶</a></h2>
+<div class="section" id="section-2">
+<h2 id="hidsection-2">搭建开发环境<a class="headerlink" href="#hidsection-2" title="Permalink to this headline">¶</a></h2>
 <p>所有示例程序都基于 Ubuntu 20.04 和 Go 1.6 进行编写，同时所有示例使用的 github.com/iovisor/gobpf 版本为 v0.1.1</p>
 <ul class="simple">
 <li>可以通过各种方式安装 Ubuntu 20.04</li>
 <li>同样可以通过各种方式安装 Go 1.6</li>
 </ul>
 <p>安装完 Ubuntu 和 Go 后，还需要安装编译 eBPF 程序所需的编译工具和内核源码：</p>
-<div class="highlight"><pre><span></span>$ sudo apt update
-$ sudo apt install build-essential git make libelf-dev libelf1 <span class="se">\</span>
-clang llvm strace tar make bpfcc-tools linux-headers-<span class="k">$(</span>uname -r<span class="k">)</span> gcc-multilib
+<div class="highlight"><pre><span></span>$<span class="w"> </span>sudo<span class="w"> </span>apt<span class="w"> </span>update
+$<span class="w"> </span>sudo<span class="w"> </span>apt<span class="w"> </span>install<span class="w"> </span>build-essential<span class="w"> </span>git<span class="w"> </span>make<span class="w"> </span>libelf-dev<span class="w"> </span>libelf1<span class="w"> </span><span class="se">\</span>
+clang<span class="w"> </span>llvm<span class="w"> </span>strace<span class="w"> </span>tar<span class="w"> </span>make<span class="w"> </span>bpfcc-tools<span class="w"> </span>linux-headers-<span class="k">$(</span>uname<span class="w"> </span>-r<span class="k">)</span><span class="w"> </span>gcc-multilib
 
-$ <span class="nb">cd</span> /tmp/ <span class="o">&amp;&amp;</span> <span class="se">\</span>
-    git clone --depth <span class="m">1</span> git://kernel.ubuntu.com/ubuntu/ubuntu-focal.git <span class="o">&amp;&amp;</span> <span class="se">\</span>
-    sudo mv ubuntu-focal  /kernel-src <span class="o">&amp;&amp;</span> <span class="se">\</span>
-    <span class="nb">cd</span> /kernel-src/tools/lib/bpf <span class="o">&amp;&amp;</span> <span class="se">\</span>
-    sudo make <span class="o">&amp;&amp;</span> sudo make install <span class="nv">prefix</span><span class="o">=</span>/usr/local <span class="o">&amp;&amp;</span> <span class="se">\</span>
-    sudo mv /usr/local/lib64/libbpf.* /lib/x86_64-linux-gnu/
+$<span class="w"> </span><span class="nb">cd</span><span class="w"> </span>/tmp/<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>git<span class="w"> </span>clone<span class="w"> </span>--depth<span class="w"> </span><span class="m">1</span><span class="w"> </span>git://kernel.ubuntu.com/ubuntu/ubuntu-focal.git<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>sudo<span class="w"> </span>mv<span class="w"> </span>ubuntu-focal<span class="w">  </span>/kernel-src<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span><span class="nb">cd</span><span class="w"> </span>/kernel-src/tools/lib/bpf<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>sudo<span class="w"> </span>make<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>sudo<span class="w"> </span>make<span class="w"> </span>install<span class="w"> </span><span class="nv">prefix</span><span class="o">=</span>/usr/local<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>sudo<span class="w"> </span>mv<span class="w"> </span>/usr/local/lib64/libbpf.*<span class="w"> </span>/lib/x86_64-linux-gnu/
 </pre></div>
 </div>
 <div class="section" id="ebpf">
 <h2 id="hidebpf">第一个 eBPF 程序<a class="headerlink" href="#hidebpf" title="Permalink to this headline">¶</a></h2>
 <p>第一个 eBPF 程序将 trace 所有的 <tt class="docutils literal">open</tt> 系统调用，显示 <tt class="docutils literal">open</tt> 系统调用调用时的文件路径参数</p>
 <p>eBPF C 代码如下（hello.c）:</p>
-<div class="highlight"><pre><span></span><span class="cp">#include</span> <span class="cpf">&lt;linux/bpf.h&gt;</span><span class="cp"></span>
-<span class="cp">#include</span> <span class="cpf">&lt;linux/ptrace.h&gt;</span><span class="cp"></span>
-<span class="cp">#include</span> <span class="cpf">&lt;linux/version.h&gt;</span><span class="cp"></span>
-<span class="cp">#include</span> <span class="cpf">&lt;bpf_helpers.h&gt;</span><span class="cp"></span>
+<div class="highlight"><pre><span></span><span class="cp">#include</span><span class="w"> </span><span class="cpf">&lt;linux/bpf.h&gt;</span>
+<span class="cp">#include</span><span class="w"> </span><span class="cpf">&lt;linux/ptrace.h&gt;</span>
+<span class="cp">#include</span><span class="w"> </span><span class="cpf">&lt;linux/version.h&gt;</span>
+<span class="cp">#include</span><span class="w"> </span><span class="cpf">&lt;bpf_helpers.h&gt;</span>
 
 <span class="n">SEC</span><span class="p">(</span><span class="s">&quot;kprobe/do_sys_open&quot;</span><span class="p">)</span>
-<span class="kt">int</span> <span class="n">kprobe__do_sys_open</span><span class="p">(</span><span class="k">struct</span> <span class="n">pt_regs</span> <span class="o">*</span><span class="n">ctx</span><span class="p">)</span>
+<span class="kt">int</span><span class="w"> </span><span class="n">kprobe__do_sys_open</span><span class="p">(</span><span class="k">struct</span><span class="w"> </span><span class="nc">pt_regs</span><span class="w"> </span><span class="o">*</span><span class="n">ctx</span><span class="p">)</span>
 <span class="p">{</span>
-        <span class="kt">char</span> <span class="n">file_name</span><span class="p">[</span><span class="mi">256</span><span class="p">];</span>
+<span class="w">        </span><span class="kt">char</span><span class="w"> </span><span class="n">file_name</span><span class="p">[</span><span class="mi">256</span><span class="p">];</span>
 
-        <span class="n">bpf_probe_read</span><span class="p">(</span><span class="n">file_name</span><span class="p">,</span> <span class="k">sizeof</span><span class="p">(</span><span class="n">file_name</span><span class="p">),</span> <span class="n">PT_REGS_PARM2</span><span class="p">(</span><span class="n">ctx</span><span class="p">));</span>
+<span class="w">        </span><span class="n">bpf_probe_read</span><span class="p">(</span><span class="n">file_name</span><span class="p">,</span><span class="w"> </span><span class="k">sizeof</span><span class="p">(</span><span class="n">file_name</span><span class="p">),</span><span class="w"> </span><span class="n">PT_REGS_PARM2</span><span class="p">(</span><span class="n">ctx</span><span class="p">));</span>
 
-        <span class="kt">char</span> <span class="n">fmt</span><span class="p">[]</span> <span class="o">=</span> <span class="s">&quot;open file %s</span><span class="se">\n</span><span class="s">&quot;</span><span class="p">;</span>
-        <span class="n">bpf_trace_printk</span><span class="p">(</span><span class="n">fmt</span><span class="p">,</span> <span class="k">sizeof</span><span class="p">(</span><span class="n">fmt</span><span class="p">),</span> <span class="o">&amp;</span><span class="n">file_name</span><span class="p">);</span>
+<span class="w">        </span><span class="kt">char</span><span class="w"> </span><span class="n">fmt</span><span class="p">[]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">&quot;open file %s</span><span class="se">\n</span><span class="s">&quot;</span><span class="p">;</span>
+<span class="w">        </span><span class="n">bpf_trace_printk</span><span class="p">(</span><span class="n">fmt</span><span class="p">,</span><span class="w"> </span><span class="k">sizeof</span><span class="p">(</span><span class="n">fmt</span><span class="p">),</span><span class="w"> </span><span class="o">&amp;</span><span class="n">file_name</span><span class="p">);</span>
 
-        <span class="k">return</span> <span class="mi">0</span><span class="p">;</span>
+<span class="w">        </span><span class="k">return</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span>
 <span class="p">}</span>
 
-<span class="kt">char</span> <span class="n">_license</span><span class="p">[]</span> <span class="n">SEC</span><span class="p">(</span><span class="s">&quot;license&quot;</span><span class="p">)</span> <span class="o">=</span> <span class="s">&quot;GPL&quot;</span><span class="p">;</span>
+<span class="kt">char</span><span class="w"> </span><span class="n">_license</span><span class="p">[]</span><span class="w"> </span><span class="n">SEC</span><span class="p">(</span><span class="s">&quot;license&quot;</span><span class="p">)</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">&quot;GPL&quot;</span><span class="p">;</span>
 </pre></div>
 <p>通过下面的方法编译出最终的 hello.o 文件:</p>
-<div class="highlight"><pre><span></span>$ clang -O2 -emit-llvm -I/kernel-src/tools/testing/selftests/bpf -c hello.c -o hello.ll
-hello.c:11:48: warning: incompatible integer to pointer conversion passing <span class="s1">&#39;unsigned long&#39;</span> to parameter of <span class="nb">type</span> <span class="s1">&#39;const void *&#39;</span> <span class="o">[</span>-Wint-conversion<span class="o">]</span>
-                bpf_probe_read<span class="o">(</span>file_name, sizeof<span class="o">(</span>file_name<span class="o">)</span>, PT_REGS_PARM2<span class="o">(</span>ctx<span class="o">))</span><span class="p">;</span>
-                                                             ^~~~~~~~~~~~~~~~~~
-/kernel-src/tools/testing/selftests/bpf/bpf_helpers.h:398:26: note: expanded from macro <span class="s1">&#39;PT_REGS_PARM2&#39;</span>
+<div class="highlight"><pre><span></span>$<span class="w"> </span>clang<span class="w"> </span>-O2<span class="w"> </span>-emit-llvm<span class="w"> </span>-I/kernel-src/tools/testing/selftests/bpf<span class="w"> </span>-c<span class="w"> </span>hello.c<span class="w"> </span>-o<span class="w"> </span>hello.ll
+hello.c:11:48:<span class="w"> </span>warning:<span class="w"> </span>incompatible<span class="w"> </span>integer<span class="w"> </span>to<span class="w"> </span>pointer<span class="w"> </span>conversion<span class="w"> </span>passing<span class="w"> </span><span class="s1">&#39;unsigned long&#39;</span><span class="w"> </span>to<span class="w"> </span>parameter<span class="w"> </span>of<span class="w"> </span><span class="nb">type</span><span class="w"> </span><span class="s1">&#39;const void *&#39;</span><span class="w"> </span><span class="o">[</span>-Wint-conversion<span class="o">]</span>
+<span class="w">                </span>bpf_probe_read<span class="o">(</span>file_name,<span class="w"> </span>sizeof<span class="o">(</span>file_name<span class="o">)</span>,<span class="w"> </span>PT_REGS_PARM2<span class="o">(</span>ctx<span class="o">))</span><span class="p">;</span>
+<span class="w">                                                             </span>^~~~~~~~~~~~~~~~~~
+/kernel-src/tools/testing/selftests/bpf/bpf_helpers.h:398:26:<span class="w"> </span>note:<span class="w"> </span>expanded<span class="w"> </span>from<span class="w"> </span>macro<span class="w"> </span><span class="s1">&#39;PT_REGS_PARM2&#39;</span>
 <span class="c1">#define PT_REGS_PARM2(x) ((x)-&gt;rsi)</span>
-                         ^~~~~~~~~~
-<span class="m">1</span> warning generated.
-$ llc -march<span class="o">=</span>bpf -filetype<span class="o">=</span>obj -o hello.o hello.ll
+<span class="w">                         </span>^~~~~~~~~~
+<span class="m">1</span><span class="w"> </span>warning<span class="w"> </span>generated.
+$<span class="w"> </span>llc<span class="w"> </span>-march<span class="o">=</span>bpf<span class="w"> </span>-filetype<span class="o">=</span>obj<span class="w"> </span>-o<span class="w"> </span>hello.o<span class="w"> </span>hello.ll
 
-$ ls hello.o
+$<span class="w"> </span>ls<span class="w"> </span>hello.o
 hello.o
 </pre></div>
 <p>然后在 Go 中使用 gobpf 加载的方法如下(hello.go):</p>
-<div class="highlight"><pre><span></span><span class="kn">package</span> <span class="nx">main</span>
+<div class="highlight"><pre><span></span><span class="kn">package</span><span class="w"> </span><span class="nx">main</span>
 
-<span class="kn">import</span> <span class="p">(</span>
-    <span class="s">&quot;fmt&quot;</span>
-    <span class="s">&quot;time&quot;</span>
-    <span class="s">&quot;github.com/iovisor/gobpf/elf&quot;</span>
+<span class="kn">import</span><span class="w"> </span><span class="p">(</span>
+<span class="w">    </span><span class="s">&quot;fmt&quot;</span>
+<span class="w">    </span><span class="s">&quot;time&quot;</span>
+<span class="w">    </span><span class="s">&quot;github.com/iovisor/gobpf/elf&quot;</span>
 <span class="p">)</span>
 
-<span class="kd">func</span> <span class="nx">main</span><span class="p">()</span> <span class="p">{</span>
-    <span class="nx">mod</span> <span class="o">:=</span> <span class="nx">elf</span><span class="p">.</span><span class="nx">NewModule</span><span class="p">(</span><span class="s">&quot;hello.o&quot;</span><span class="p">)</span>
+<span class="kd">func</span><span class="w"> </span><span class="nx">main</span><span class="p">()</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="nx">mod</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="nx">elf</span><span class="p">.</span><span class="nx">NewModule</span><span class="p">(</span><span class="s">&quot;hello.o&quot;</span><span class="p">)</span>
 
-    <span class="nx">err</span> <span class="o">:=</span> <span class="nx">mod</span><span class="p">.</span><span class="nx">Load</span><span class="p">(</span><span class="kc">nil</span><span class="p">)</span>
-    <span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
-            <span class="nb">panic</span><span class="p">(</span><span class="nx">err</span><span class="p">)</span>
-    <span class="p">}</span>
+<span class="w">    </span><span class="nx">err</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="nx">mod</span><span class="p">.</span><span class="nx">Load</span><span class="p">(</span><span class="kc">nil</span><span class="p">)</span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="nx">err</span><span class="w"> </span><span class="o">!=</span><span class="w"> </span><span class="kc">nil</span><span class="w"> </span><span class="p">{</span>
+<span class="w">            </span><span class="nb">panic</span><span class="p">(</span><span class="nx">err</span><span class="p">)</span>
+<span class="w">    </span><span class="p">}</span>
 
-    <span class="nx">err</span> <span class="p">=</span> <span class="nx">mod</span><span class="p">.</span><span class="nx">EnableKprobes</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span>
-    <span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
-            <span class="nb">panic</span><span class="p">(</span><span class="nx">err</span><span class="p">)</span>
-    <span class="p">}</span>
+<span class="w">    </span><span class="nx">err</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="nx">mod</span><span class="p">.</span><span class="nx">EnableKprobes</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="nx">err</span><span class="w"> </span><span class="o">!=</span><span class="w"> </span><span class="kc">nil</span><span class="w"> </span><span class="p">{</span>
+<span class="w">            </span><span class="nb">panic</span><span class="p">(</span><span class="nx">err</span><span class="p">)</span>
+<span class="w">    </span><span class="p">}</span>
 
-    <span class="k">for</span> <span class="p">{</span>
-            <span class="nx">fmt</span><span class="p">.</span><span class="nx">Println</span><span class="p">(</span><span class="s">&quot;Waiting...&quot;</span><span class="p">)</span>
-            <span class="nx">time</span><span class="p">.</span><span class="nx">Sleep</span><span class="p">(</span><span class="mi">10</span> <span class="o">*</span> <span class="nx">time</span><span class="p">.</span><span class="nx">Second</span><span class="p">)</span>
-    <span class="p">}</span>
+<span class="w">    </span><span class="k">for</span><span class="w"> </span><span class="p">{</span>
+<span class="w">            </span><span class="nx">fmt</span><span class="p">.</span><span class="nx">Println</span><span class="p">(</span><span class="s">&quot;Waiting...&quot;</span><span class="p">)</span>
+<span class="w">            </span><span class="nx">time</span><span class="p">.</span><span class="nx">Sleep</span><span class="p">(</span><span class="mi">10</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="nx">time</span><span class="p">.</span><span class="nx">Second</span><span class="p">)</span>
+<span class="w">    </span><span class="p">}</span>
 <span class="p">}</span>
 </pre></div>
 <p>编译运行:</p>
@@ -293,8 +293,8 @@ $ echo &quot;&quot; |sudo tee /sys/kernel/debug/tracing/kprobe_events
 <p>然后再运行 <tt class="docutils literal">sudo ./hello</tt> 就不会有问题了。</p>
 <p>P.S. 本文的所有代码在 Github 上都有一份完整版：<a class="reference external" href="https://github.com/mozillazg/gobpf-examples/tree/master/1-helloword">https://github.com/mozillazg/gobpf-examples/tree/master/1-helloword</a></p>
 </div>
-<div class="section" id="id3">
-<h2 id="hidid3">参考资料<a class="headerlink" href="#hidid3" title="Permalink to this headline">¶</a></h2>
+<div class="section" id="section-3">
+<h2 id="hidsection-3">参考资料<a class="headerlink" href="#hidsection-3" title="Permalink to this headline">¶</a></h2>
 <ul class="simple">
 <li><a class="reference external" href="https://github.com/bpftools/linux-observability-with-bpf">bpftools/linux-observability-with-bpf: Code snippets from the O'Reilly book</a></li>
 <li><a class="reference external" href="https://github.com/iovisor/gobpf">iovisor/gobpf: Go bindings for creating BPF programs.</a></li>
@@ -322,8 +322,8 @@ $ echo &quot;&quot; |sudo tee /sys/kernel/debug/tracing/kprobe_events
         <li><a href="https://mozillazg.com/2021/05/ebpf-gobpf-how-to-find-system-call-kernel-function-for-kprobe-elf-section.html">gobpf 使用示例：如何找到一个系统调用对应的可用于 kprobe SEC 的内核函数</a></li>
         <li><a href="https://mozillazg.com/2021/05/ebpf-gobpf-get-function-argument-values-from-pt_regs.html">gobpf 使用示例：从 pt_regs 中获取内核函数的参数的值</a></li>
         <li><a href="https://mozillazg.com/2021/04/ebpf-gobpf-store-and-read-data-use-perf-event.html">gobpf 使用示例：使用 perf event 保存数据</a></li>
+        <li><a href="https://mozillazg.com/2022/07/ebpf-libbpf-what-is-load_byte-load_half-load_word.html">ebpf 程序中常用的 load_byte/load_half/load_word 功能介绍</a></li>
         <li><a href="https://mozillazg.com/2022/05/ebpf-libbpfgo-get-container-info-via-process-info.rst.html">根据进程信息获取对应进程所属的容器/Pod 信息（一）</a></li>
-        <li><a href="https://mozillazg.com/2022/05/ebpf-libbpfgo-develop-env-and-hello-world.html">libbpfgo 使用示例：搭建开发环境以及编写第一个 ebpf 程序</a></li>
     </ul>
 </section>
     <hr/>
@@ -339,7 +339,7 @@ $ echo &quot;&quot; |sudo tee /sys/kernel/debug/tracing/kprobe_events
                 var disqus_url = 'https://mozillazg.com/2021/04/ebpf-gobpf-dev-env-and-hello-first-program.html';
 
             var disqus_config = function () {
-                this.language = "zh";
+                this.language = "";
             };
 
             /* * * DON'T EDIT BELOW THIS LINE * * */
@@ -366,7 +366,7 @@ $ echo &quot;&quot; |sudo tee /sys/kernel/debug/tracing/kprobe_events
    <div class="container">
       <hr>
       <div class="row">
-         <div class="col-xs-10">&copy; 2022 mozillazg
+         <div class="col-xs-10">&copy; 2023 mozillazg
             &middot; Powered by <a href="https://github.com/DandyDev/pelican-bootstrap3" target="_blank">pelican-bootstrap3</a>,
             <a href="http://docs.getpelican.com/" target="_blank">Pelican</a>,
             <a href="http://getbootstrap.com" target="_blank">Bootstrap</a>
