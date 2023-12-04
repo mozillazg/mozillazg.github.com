@@ -366,7 +366,8 @@ LISTEN&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="m"&gt;0&lt;/span&gt;&l
 &lt;/div&gt;
 &lt;div class="section" id="servce-account-iam"&gt;
 &lt;h2 id="hidservce-account-iam"&gt;servce account 关联 IAM 角色&lt;a class="headerlink" href="#hidservce-account-iam" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
-&lt;p&gt;为了简化用户为 service account 关联 IAM 角色的操作，EKS 新增了一组用于管理 service account 与 IAM 角色关联关系的 API。&lt;/p&gt;
+&lt;p&gt;为了简化用户为 service account 关联 IAM 角色的操作，EKS 新增了一组用于管理 service account 与 IAM 角色关联关系的 API。
+同时还增加了对应的 EKS 控制台操作页面，并且关联关系都存储在 EKS 侧，并没有去修改角色的信任策略。&lt;/p&gt;
 &lt;ul class="simple"&gt;
 &lt;li&gt;&lt;a class="reference external" href="https://docs.aws.amazon.com/eks/latest/APIReference/API_CreatePodIdentityAssociation.html"&gt;CreatePodIdentityAssociation&lt;/a&gt; ：为 service account 关联角色。&lt;/li&gt;
 &lt;li&gt;&lt;a class="reference external" href="https://docs.aws.amazon.com/eks/latest/APIReference/API_DescribePodIdentityAssociation.html"&gt;DescribePodIdentityAssociation&lt;/a&gt; : 查看单条角色关联记录的详情。&lt;/li&gt;
@@ -379,7 +380,7 @@ LISTEN&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="m"&gt;0&lt;/span&gt;&l
 &lt;h2 id="hidsection-4"&gt;权限控制&lt;a class="headerlink" href="#hidsection-4" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;p&gt;在 IRSA 方案中，我们需要在 IAM 角色的信任策略中配置允许的集群 oidc provider 以及 service account 信息。
 但是，在 EKS Pod Identity 方案中，我们不再需要修改角色的信任策略，只需要使用前面介绍的方法使用 EKS 控制台或者 EKS API
-即可完成控制角色能被哪些集群的哪些 service account 使用。&lt;/p&gt;
+即可完成控制角色能被哪些集群的哪些 service account 使用，这些关联关系存储在 EKS 侧，不再需要频繁的更新角色的信任策略。&lt;/p&gt;
 &lt;p&gt;通过这种方式， EKS Pod Identity 解决了 IRSA 中因为角色信任策略的内容大小限制导致一个角色只能被有限的几个
 service account 关联使用的问题 （详见 &lt;a class="reference external" href="https://github.com/aws/containers-roadmap/issues/1408"&gt;#148&lt;/a&gt; ），
 在 EKS Pod Identity 方案中，一个角色可以与不限数量的 service account 进行关联。&lt;/p&gt;
@@ -474,37 +475,13 @@ service account 关联使用的问题 （详见 &lt;a class="reference external"
 &lt;/tr&gt;
 &lt;/thead&gt;
 &lt;tbody valign="top"&gt;
-&lt;tr&gt;&lt;td rowspan="2"&gt;集群类型&lt;/td&gt;
-&lt;td rowspan="2"&gt;只支持 EKS 集群，不支持 AWS Outposts、
-不支持 EKS Anywhere、AWS Fargate (Fargate)、自建集群&lt;/td&gt;
-&lt;td rowspan="2"&gt;&lt;strong&gt;仅不支持 AWS Outposts&lt;/strong&gt;&lt;/td&gt;
-&lt;/tr&gt;
-&lt;tr&gt;&lt;/tr&gt;
-&lt;tr&gt;&lt;td&gt;数据面依赖&lt;/td&gt;
-&lt;td&gt;kubelet + eks-pod-identity-agent&lt;/td&gt;
-&lt;td&gt;&lt;strong&gt;kublet&lt;/strong&gt;&lt;/td&gt;
-&lt;/tr&gt;
-&lt;tr&gt;&lt;td rowspan="5"&gt;稳定性风险&lt;/td&gt;
-&lt;td rowspan="5"&gt;依赖集群数据面的稳定性 + EKS API；
-同时还依赖 aks-pod-identity-agent 的稳定性；
-应用 pod 如果先于 eks-pod-identity-agent pod
-启动/就绪会出现短暂的内无法获取到 sts token 的问题
-（比如，同样配置了 &lt;tt class="docutils literal"&gt;hostNetwork&lt;/tt&gt; 的 pod 在
-自动伸缩场景可能会遇到这种情况，以及不建议 CNI、CSI
-这些常常会先于 agent pod 启动的组件使用）&lt;/td&gt;
-&lt;td rowspan="5"&gt;&lt;strong&gt;依赖集群数据面的稳定性 + STS API&lt;/strong&gt;&lt;/td&gt;
-&lt;/tr&gt;
-&lt;tr&gt;&lt;/tr&gt;
-&lt;tr&gt;&lt;/tr&gt;
-&lt;tr&gt;&lt;/tr&gt;
-&lt;tr&gt;&lt;/tr&gt;
 &lt;tr&gt;&lt;td&gt;节点 IAM 角色增加额外权限&lt;/td&gt;
 &lt;td&gt;需要增加 &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;eks-auth:AssumeRoleForPodIdentity&lt;/span&gt;&lt;/tt&gt; 权限&lt;/td&gt;
 &lt;td&gt;&lt;strong&gt;不需要&lt;/strong&gt;&lt;/td&gt;
 &lt;/tr&gt;
 &lt;tr&gt;&lt;td&gt;创建 IAM oidc provider&lt;/td&gt;
 &lt;td&gt;&lt;strong&gt;不需要&lt;/strong&gt;&lt;/td&gt;
-&lt;td&gt;需要&lt;/td&gt;
+&lt;td&gt;需要为每个集群创建一个 oidc provider&lt;/td&gt;
 &lt;/tr&gt;
 &lt;tr&gt;&lt;td&gt;service account 关联角色&lt;/td&gt;
 &lt;td&gt;&lt;strong&gt;通过 EKS API/控制台&lt;/strong&gt;&lt;/td&gt;
@@ -520,10 +497,41 @@ service account 关联使用的问题 （详见 &lt;a class="reference external"
 &lt;td&gt;一个&lt;/td&gt;
 &lt;td&gt;无限制&lt;/td&gt;
 &lt;/tr&gt;
+&lt;tr&gt;&lt;td rowspan="2"&gt;角色信任策略修改次数&lt;/td&gt;
+&lt;td rowspan="2"&gt;&lt;strong&gt;只需修改一次&lt;/strong&gt; 确保信任
+&lt;tt class="docutils literal"&gt;pods.eks.amazonaws.com&lt;/tt&gt;
+以及包含所需的 action&lt;/td&gt;
+&lt;td rowspan="2"&gt;需要为每个关联的集群修改至少一次&lt;/td&gt;
+&lt;/tr&gt;
+&lt;tr&gt;&lt;/tr&gt;
 &lt;tr&gt;&lt;td&gt;基于 service account 相关属性进行访问控制&lt;/td&gt;
 &lt;td&gt;&lt;strong&gt;通过 ABAC 进行支持&lt;/strong&gt;&lt;/td&gt;
 &lt;td&gt;不支持&lt;/td&gt;
 &lt;/tr&gt;
+&lt;tr&gt;&lt;td rowspan="2"&gt;集群类型&lt;/td&gt;
+&lt;td rowspan="2"&gt;只支持 EKS 集群，不支持 AWS Outposts、
+不支持 EKS Anywhere、AWS Fargate (Fargate)、自建集群&lt;/td&gt;
+&lt;td rowspan="2"&gt;&lt;strong&gt;仅不支持 AWS Outposts&lt;/strong&gt;&lt;/td&gt;
+&lt;/tr&gt;
+&lt;tr&gt;&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;数据面依赖&lt;/td&gt;
+&lt;td&gt;kubelet + eks-pod-identity-agent&lt;/td&gt;
+&lt;td&gt;&lt;strong&gt;kublet&lt;/strong&gt;&lt;/td&gt;
+&lt;/tr&gt;
+&lt;tr&gt;&lt;td rowspan="5"&gt;稳定性风险&lt;/td&gt;
+&lt;td rowspan="5"&gt;依赖集群控制面和数据面的稳定性 + EKS API；
+同时还依赖 aks-pod-identity-agent 的稳定性；
+应用 pod 如果先于 eks-pod-identity-agent pod
+启动/就绪会出现短暂的无法获取到 sts token 的问题
+（比如，同样配置了 &lt;tt class="docutils literal"&gt;hostNetwork&lt;/tt&gt; 的 pod 在
+自动伸缩场景可能会遇到这种情况，以及不建议 CNI、CSI
+这些常常会先于 agent pod 启动的组件使用）&lt;/td&gt;
+&lt;td rowspan="5"&gt;&lt;strong&gt;依赖集群控制面和数据面的稳定性 + STS API&lt;/strong&gt;&lt;/td&gt;
+&lt;/tr&gt;
+&lt;tr&gt;&lt;/tr&gt;
+&lt;tr&gt;&lt;/tr&gt;
+&lt;tr&gt;&lt;/tr&gt;
+&lt;tr&gt;&lt;/tr&gt;
 &lt;/tbody&gt;
 &lt;/table&gt;
 &lt;/div&gt;
