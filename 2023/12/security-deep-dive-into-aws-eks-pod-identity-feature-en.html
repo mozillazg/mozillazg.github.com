@@ -1,0 +1,880 @@
+<!DOCTYPE html>
+<html lang="en"  prefix="og: http://ogp.me/ns# fb: https://www.facebook.com/2008/fbml" class="han-init">
+<head>
+    <title>Exploring the New Features of Amazon EKS Pod Identity - mozillazg's Blog</title>
+    <!-- Using the latest rendering mode for IE -->
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <!-- share.css -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/social-share.js@1.0.16/dist/css/share.min.css">
+
+
+    <link href="https://mozillazg.com/favicon.ico" rel="icon">
+
+<link rel="canonical" href="https://mozillazg.com/2023/12/security-deep-dive-into-aws-eks-pod-identity-feature-en.html">
+
+        <meta name="author" content="mozillazg" />
+        <meta name="keywords" content="security,kubernetes,k8s,aws,eks,pod-identity,irsa,cloud-security,en-version" />
+    <meta name="description" content="In this piece, we&#39;re taking a quick dive into a fresh security feature for EKS introduced this week by AWS, aptly called Amazon EKS Pod Identity. Introducing the Features Amazon EKS Pod Identity enhances AWS&#39;s existing IAM roles for service accounts (IRSA) feature. This new addition allows users to more easily assign secure AWS API access permissions to Pods. Moreover, all related configuration and management tasks can be handled directly via the AWS API or its console interface. How to Use To securely provide AWS API access to applications inside Pods using the EKS Pod Identity feature, users simply need to follow these steps: Start by creating an IAM role, making sure it trusts pods.eks.amazonaws.com. Here&#39;s an example of what the role trust policy might look like: { &#34;Version&#34;: &#34;2012-10-17&#34;, &#34;Statement&#34;: [ { &#34;Effect&#34;: &#34;Allow&#34;, &#34;Principal&#34;: { &#34;Service&#34;: &#34;pods.eks.amazonaws.com&#34; }, &#34;Action&#34;: [ &#34;sts:AssumeRole&#34;, &#34;sts:TagSession&#34; ] } ] } The next step is to install the eks-pod-identity-agent within your EKS cluster, which can be done via the console. aws eks create-addon \ --cluster-name &lt;CLUSTER_NAME&gt; \ --addon-name eks-pod-identity-agent \ --addon-version v1.0.0-eksbuild.1 Following that, set up the link between the Service Account utilized by your application Pod and the AWS IAM role. This configuration allows apps using this Service Account to assume a designated IAM role, and it can be managed via the console. aws eks create-pod-identity-association \ --cluster-name &lt;CLUSTER_NAME&gt; \ --namespace &lt;NAMESPACE&gt; \ --service-account &lt;SERVICE_ACCOUNT_NAME&gt; \ --role-arn &lt;IAM_ROLE_ARN&gt; Lastly, update your applications to incorporate the most recent AWS SDK version that&#39;s compatible with EKS Pod Identity. In your code, either use the SDK&#39;s built-in default credential search logic or make explicit calls to the Container credential provider which is a dependency of EKS Pod Identity. Workflow Explained The workflow for the EKS Pod Identity feature operates in the following manner: When a user or Controller submits a Pod to the apiserver, this action initiates the mutating webhook process of eks-pod-identity-webhook. The mutating webhook process of eks-pod-identity-webhook is responsible for mounting the service account OIDC token file to the Pod and setting up the necessary environment variables, namely AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE and AWS_CONTAINER_CREDENTIALS_FULL_URI. - env: - name: AWS_STS_REGIONAL_ENDPOINTS value: regional - name: AWS_DEFAULT_REGION value: us-west-2 - name: AWS_REGION value: us-west-2 - name: AWS_CONTAINER_CREDENTIALS_FULL_URI value: http://169.254.170.23/v1/credentials - name: AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE value: /var/run/secrets/pods.eks.amazonaws.com/serviceaccount/eks-pod-identity-token volumeMounts: - mountPath: /var/run/secrets/pods.eks.amazonaws.com/serviceaccount name: eks-pod-identity-token readOnly: true volumes: - name: eks-pod-identity-token projected: defaultMode: 420 sources: - serviceAccountToken: audience: pods.eks.amazonaws.com expirationSeconds: 86400 path: eks-pod-identity-token Applications inside the Pod container, utilizing AWS SDK, will employ the service account OIDC token, sourced from the AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE environment variable. This token is used to access the URL specified by AWS_CONTAINER_CREDENTIALS_FULL_URI (http://169.254.170.23/v1/credentials) to acquire the AWS STS token. $ curl $AWS_CONTAINER_CREDENTIALS_FULL_URI -H &#34;Authorization: $(cat $AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE)&#34; 2&gt;/dev/null |jq { &#34;AccessKeyId&#34;: &#34;ASXXXXXXXXXXXXX&#34;, &#34;SecretAccessKey&#34;: &#34;+j5XXXXXXXX&#34;, &#34;Token&#34;: &#34;IQoJb3JpXXXXXXX&#34;, &#34;AccountId&#34;: &#34;5XXXXXXXXXXX&#34;, &#34;Expiration&#34;: &#34;2023-12-03T13:13:26Z&#34; } The URL referred to by AWS_CONTAINER_CREDENTIALS_FULL_URI actually connects to the service exposed by the eks-pod-identity-agent component&#39;s Pod, deployed on the same node as the requesting Pod. Upon receiving a request, the eks-pod-identity-agent uses the provided OIDC token to interact with EKS&#39;s recently introduced AssumeRoleForPodIdentity API. This process is to acquire the needed AWS STS token, which is then relayed back to the client. $ aws eks-auth assume-role-for-pod-identity --cluster-name test --token $(cat $AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE) |jq { &#34;subject&#34;: { &#34;namespace&#34;: &#34;default&#34;, &#34;serviceAccount&#34;: &#34;default&#34; }, &#34;audience&#34;: &#34;pods.eks.amazonaws.com&#34;, &#34;podIdentityAssociation&#34;: { &#34;associationArn&#34;: &#34;arn:aws:eks:us-west-2:5XXXXXXXXXXX:podidentityassociation/test/a-6aaXXXXXXXXXXXXXX&#34;, &#34;associationId&#34;: &#34;a-6aaXXXXXXXXXXXXXX&#34; }, &#34;assumedRoleUser&#34;: { &#34;arn&#34;: &#34;arn:aws:sts::5XXXXXXXXXXX:assumed-role/test-eks-pod-identity/eks-test-XXXXXXXXXXXXXXXX&#34;, &#34;assumeRoleId&#34;: &#34;ARXXXXXXXXXXXXXXXXXXX:eks-test-XXXXXXXXXXXXXXXXXX&#34; }, &#34;credentials&#34;: { &#34;sessionToken&#34;: &#34;IQoXXXXX&#34;, &#34;secretAccessKey&#34;: &#34;nR4XXXXXX&#34;, &#34;accessKeyId&#34;: &#34;ASXXXXXXXXXXXXXXXXXX&#34;, &#34;expiration&#34;: &#34;2023-12-03T13:37:22+00:00&#34; } } The AWS SDK utilized by the application leverages the acquired STS token to access the specific AWS cloud product APIs it needs. In this process, there are a few crucial components and pieces of information that merit particular emphasis. Let&#39;s break them down one by one. eks-pod-identity-webhook The EKS Pod Identity functionality seamlessly integrates with the eks-pod-identity-webhook component, originally part of the IRSA feature. This component is responsible for automatically adding the necessary OIDC token and environment variable settings to the Pods. Moreover, the eks-pod-identity-webhook deployed in the EKS cluster control plane has been specially tailored for EKS Pod Identity. It only adds EKS Pod Identity configurations to Pods when the corresponding service account lacks IRSA-specific settings and is linked to IAM role information, as outlined in the previously mentioned usage instructions. The changes implemented in eks-pod-identity-webhook to facilitate EKS Pod Identity can be reviewed in its open-source version, though it&#39;s important to note that this version does not include the logic for identifying associated roles. The pertinent Pull Requests (PRs) that detail these modifications are #189 and #196. eks-pod-identity-agent The EKS Pod Identity implementation suggested by the official documentation involves deploying a component called eks-pod-identity-agent within the cluster. The YAML configuration for this component&#39;s workload is outlined below. apiVersion: apps/v1 kind: DaemonSet metadata: annotations: deprecated.daemonset.template.generation: &#34;1&#34; creationTimestamp: &#34;2023-12-03T04:24:15Z&#34; generation: 1 labels: app.kubernetes.io/instance: eks-pod-identity-agent app.kubernetes.io/managed-by: Helm app.kubernetes.io/name: eks-pod-identity-agent app.kubernetes.io/version: 0.0.25 helm.sh/chart: eks-pod-identity-agent-1.0.0 name: eks-pod-identity-agent namespace: kube-system resourceVersion: &#34;8978&#34; uid: 08c03e91-69d4-460b-8acb-b9f9f546dd87 spec: revisionHistoryLimit: 10 selector: matchLabels: app.kubernetes.io/instance: eks-pod-identity-agent app.kubernetes.io/name: eks-pod-identity-agent template: metadata: creationTimestamp: null labels: app.kubernetes.io/instance: eks-pod-identity-agent app.kubernetes.io/name: eks-pod-identity-agent spec: affinity: nodeAffinity: requiredDuringSchedulingIgnoredDuringExecution: nodeSelectorTerms: - matchExpressions: - key: kubernetes.io/os operator: In values: - linux - key: kubernetes.io/arch operator: In values: - amd64 - arm64 - key: eks.amazonaws.com/compute-type operator: NotIn values: - fargate containers: - args: - --port - &#34;80&#34; - --cluster-name - test - --probe-port - &#34;2703&#34; command: - /go-runner - /eks-pod-identity-agent - server env: - name: AWS_REGION value: us-west-2 image: 602401143452.dkr.ecr.us-west-2.amazonaws.com/eks/eks-pod-identity-agent:0.0.25 imagePullPolicy: Always livenessProbe: failureThreshold: 3 httpGet: host: localhost path: /healthz port: probes-port scheme: HTTP initialDelaySeconds: 30 periodSeconds: 10 successThreshold: 1 timeoutSeconds: 10 name: eks-pod-identity-agent ports: - containerPort: 80 name: proxy protocol: TCP - containerPort: 2703 name: probes-port protocol: TCP readinessProbe: failureThreshold: 30 httpGet: host: localhost path: /readyz port: probes-port scheme: HTTP initialDelaySeconds: 1 periodSeconds: 10 successThreshold: 1 timeoutSeconds: 10 resources: {} securityContext: capabilities: add: - CAP_NET_BIND_SERVICE terminationMessagePath: /dev/termination-log terminationMessagePolicy: File dnsPolicy: ClusterFirst hostNetwork: true initContainers: - command: - /go-runner - /eks-pod-identity-agent - initialize image: 602401143452.dkr.ecr.us-west-2.amazonaws.com/eks/eks-pod-identity-agent:0.0.25 imagePullPolicy: Always name: eks-pod-identity-agent-init resources: {} securityContext: privileged: true terminationMessagePath: /dev/termination-log terminationMessagePolicy: File priorityClassName: system-node-critical restartPolicy: Always schedulerName: default-scheduler securityContext: {} terminationGracePeriodSeconds: 30 updateStrategy: rollingUpdate: maxSurge: 0 maxUnavailable: 10% type: RollingUpdate status: currentNumberScheduled: 1 desiredNumberScheduled: 1 numberAvailable: 1 numberMisscheduled: 0 numberReady: 1 observedGeneration: 1 The eks-pod-identity-agent component is characterized by the following features: It depends on the node IAM role having been assigned specific IAM permission policies as follows. { &#34;Version&#34;: &#34;2012-10-17&#34;, &#34;Statement&#34;: [ { &#34;Effect&#34;: &#34;Allow&#34;, &#34;Action&#34;: [ &#34;eks-auth:AssumeRoleForPodIdentity&#34;, ], &#34;Resource&#34;: &#34;*&#34; } ] } The component&#39;s Pod is configured to use hostNetwork. The service inside the component is set up to listen on ports 80 and 2703. For port 80, it listens on the IPv4 address 169.254.170.23 and the IPv6 address [fd00:ec2::23]. $ ss -anltp |grep eks-pod LISTEN 0 4096 127.0.0.1:2703 0.0.0.0:* users:((&#34;eks-pod-identit&#34;,pid=3798,fd=5)) LISTEN 0 4096 169.254.170.23:80 0.0.0.0:* users:((&#34;eks-pod-identit&#34;,pid=3798,fd=4)) LISTEN 0 4096 [fd00:ec2::23]:80 [::]:* users:((&#34;eks-pod-identit&#34;,pid=3798,fd=3)) The component employs an init container to establish a network interface named pod-id-link0 on the node. This interface is configured with the IPv4 address 169.254.170.23 and the IPv6 address [fd00:ec2::23]. pod-id-link0: flags=195&lt;UP,BROADCAST,RUNNING,NOARP&gt; mtu 1500 inet 169.254.170.23 netmask 255.255.255.255 broadcast 0.0.0.0 inet6 fe80::2078:53ff:fe2f:c723 prefixlen 64 scopeid 0x20&lt;link&gt; inet6 fd00:ec2::23 prefixlen 128 scopeid 0x0&lt;global&gt; ether 22:78:53:2f:c7:23 txqueuelen 1000 (Ethernet) RX packets 0 bytes 0 (0.0 B) RX errors 0 dropped 0 overruns 0 frame 0 TX packets 10 bytes 700 (700.0 B) TX errors 0 dropped 0 overruns 0 carrier 0 collisions 0 Additionally, the init container configures specific routing rules to guarantee that traffic directed to 169.254.170.23 is handled on the local machine. 169.254.170.23 dev pod-id-link0 AssumeRoleForPodIdentity EKS has introduced a new API, AssumeRoleForPodIdentity. This API is utilized to acquire an STS token that enables the assuming of the IAM role linked to a service account, through the use of the service account&#39;s OIDC token. service account oidc token 中的 payload 的内容示例如下。 { &#34;aud&#34;: [ &#34;pods.eks.amazonaws.com&#34; ], &#34;exp&#34;: 1701672885, &#34;iat&#34;: 1701586485, &#34;iss&#34;: &#34;https://oidc.eks.us-west-2.amazonaws.com/id/DA16E524AXXXXXX&#34;, &#34;kubernetes.io&#34;: { &#34;namespace&#34;: &#34;default&#34;, &#34;pod&#34;: { &#34;name&#34;: &#34;test-596475c6d5-xgvml&#34;, &#34;uid&#34;: &#34;924e66b2-841e-4969-9fa7-a19f3f6f1029&#34; }, &#34;serviceaccount&#34;: { &#34;name&#34;: &#34;default&#34;, &#34;uid&#34;: &#34;eca98cb1-ca2e-469b-8f9d-2be9f5a3354f&#34; } }, &#34;nbf&#34;: 1701586485, &#34;sub&#34;: &#34;system:serviceaccount:default:default&#34; } This OIDC token, when compared to the one used in the IRSA solution, differs only in its audience (aud) field, which is sts.amazonaws.com in IRSA&#39;s case. Otherwise, they are identical. From this, I infer that the backend process of AssumeRoleForPodIdentity likely follows these steps: Initially, the client&#39;s OIDC token is parsed and its validity and legitimacy are verified based on the OIDC protocol. Next, the role that needs to be assumed is identified, using the service account&#39;s configured association with an IAM role. Finally, the STS API is invoked to assume the identified role, thereby generating the STS token required by the client. Association of Service Account with IAM Role EKS has introduced a suite of APIs to streamline the process for users to link service accounts with IAM roles. This enhancement is complemented by new interfaces on the EKS console for managing these associations. Notably, these associations are maintained within EKS and do not alter the trust policy of the roles. CreatePodIdentityAssociation: To link a role with a service account. DescribePodIdentityAssociation: To view detailed information about a specific role association. UpdatePodIdentityAssociation: To alter the role information linked to a service account. DeletePodIdentityAssociation: To remove a particular role association record. ListPodIdentityAssociations: To access a list of all current role association records. Access and Permission Management Under the IRSA approach, it&#39;s necessary to include the permissible cluster OIDC provider and service account details in the IAM role&#39;s trust policy. However, with EKS Pod Identity, altering the role&#39;s trust policy is no longer required. Instead, you can specify which roles are accessible to which service accounts in specific clusters using the EKS console or the EKS API, as explained earlier. These associations are maintained within EKS, reducing the need for regular updates to the trust policy of roles. This method allows EKS Pod Identity to address a limitation encountered in IRSA, where a role&#39;s trust policy size constraints meant it could only be linked to a few service accounts (details available in #148). With EKS Pod Identity, there&#39;s no limit to the number of service accounts that can be associated with a single role. attribute-based access control (ABAC) EKS Pod Identity also ushers in an advanced attribute-based access control (ABAC) feature. STS tokens acquired via EKS Pod Identity inherently include tags like cluster details, namespace, and service account. Utilizing IAM&#39;s tag-based authorization functionality, users can now employ these attributes for more granular access control when setting up permission policies for roles. STS tokens acquired via EKS Pod Identity automatically include these tags: eks-cluster-arn: ARN of the current cluster. eks-cluster-name: Name of the current cluster. kubernetes-namespace: Name of the namespace containing the service account. kubernetes-service-account: Name of the service account. kubernetes-pod-name: Name of the pod utilizing the service account. kubernetes-pod-uid: UID of the pod that is using the service account. &#34;tags&#34;: [ { &#34;key&#34;: &#34;eks-cluster-arn&#34;, &#34;value&#34;: &#34;arn:aws:eks:us-west-2:5XXXXXXXXXXX:cluster/test&#34; }, { &#34;key&#34;: &#34;eks-cluster-name&#34;, &#34;value&#34;: &#34;test&#34; }, { &#34;key&#34;: &#34;kubernetes-namespace&#34;, &#34;value&#34;: &#34;default&#34; }, { &#34;key&#34;: &#34;kubernetes-service-account&#34;, &#34;value&#34;: &#34;default&#34; }, { &#34;key&#34;: &#34;kubernetes-pod-name&#34;, &#34;value&#34;: &#34;test-596475c6d5-xgvml&#34; }, { &#34;key&#34;: &#34;kubernetes-pod-uid&#34;, &#34;value&#34;: &#34;924e66b2-841e-4969-9fa7-a19f3f6f1029&#34; } ] In the process of crafting role permission policies, the format ${aws:PrincipalTag/&lt;tag-key&gt;} can be employed. This approach is used within the Condition section of the permission policy to denote the value of a particular tag present in the attributes of the credentials. { &#34;Version&#34;: &#34;2012-10-17&#34;, &#34;Statement&#34;: [ { &#34;Effect&#34;: &#34;Allow&#34;, &#34;Action&#34;: [ &#34;s3:GetObject&#34;, &#34;s3:GetObjectTagging&#34; ], &#34;Resource&#34;: &#34;*&#34;, &#34;Condition&#34;: { &#34;StringEquals&#34;: { &#34;s3:ExistingObjectTag/eks-cluster-name&#34;: &#34;${aws:PrincipalTag/eks-cluster-name}&#34; }, &#34;StringEqualsIfExists&#34;: { &#34;aws:ResourceTag/kubernetes-namespace&#34;: &#34;s3-demo&#34;, &#34;aws:Resourcelag/kubernetes-service-account&#34;: &#34;${aws:PrincipalTag/kubernetes-service-account}&#34; } } } ] } With the example permission policy provided earlier, we can tailor the permissions of STS tokens acquired via the EKS Pod Identity feature in the following ways: Allow access only to S3 objects tagged with eks-cluster-name, where the tag&#39;s value aligns with the name of the cluster tied to the current STS token. Permit access to an S3 object only if it carries a kubernetes-namespace tag, and only if this tag&#39;s value is s3-demo. Authorize access to an S3 object only if it bears a kubernetes-service-account tag, and solely if the tag&#39;s value corresponds to the name of the service account associated with the current STS token. Distinguishing from IRSA Considering the details shared earlier, a comparison between EKS Pod Identity and IRSA highlights several key differences, which are as follows: Comparison Item EKS Pod Identity IRSA Additional Permissions for Node IAM Role Requires eks-auth:AssumeRoleForPodIdentity Not Required Creation of IAM OIDC Provider Not Required Necessary for Each Cluster Associating Roles with Service Account Via EKS API/Console Service Account Annotation + Role Trust Policy Modification No. of Service Accounts Per Role Unlimited Limited by 4096-Character Trust Policy, Typically Around 10 Service Accounts or Clusters No. of Roles Per Service Account One Unlimited Role Trust Policy Modification Frequency Once Only for Trust with pods.eks.amazonaws.com and Necessary Actions At Least Once for Each Cluster Access Control Based on Service Account Attributes Supported via ABAC Not Supported Supported Cluster Types Only EKS, Not AWS Outposts, EKS Anywhere, AWS Fargate, or Self-Built Clusters All Except AWS Outposts Data Plane Dependencies kubelet + eks-pod-identity-agent kublet Stability Risks Relies on Stability of Cluster Control/Data Plane + EKS API; Dependency on eks-pod-identity-agent Stability; Risks of STS Token Access Issues if Application Pods Launch Before eks-pod-identity-agent Pod (like in Auto-Scaling Scenarios with Same hostNetwork Config, Not Recommended for CNI, CSI, etc). Depends on Stability of Cluster Control/Data Plane + STS API References Amazon EKS Pod Identity simplifies IAM permissions for applications on Amazon EKS clusters | AWS News Blog Introducing fine-grained IAM roles for service accounts | AWS Open Source Blog EKS Pod Identities - Amazon EKS aws/amazon-eks-pod-identity-webhook: Amazon EKS Pod Identity Webhook Define permissions for EKS Pod Identities to assume roles based on tags - Amazon EKS Controlling access to and for IAM users and roles using tags - AWS Identity and Access Management IAM JSON policy elements: Condition - AWS Identity and Access Management Deep dive into the new Amazon EKS Pod Identity feature | Datadog Security Labs" />
+
+    <style>
+      .js-toc {
+        margin-bottom: 20px;
+      }
+      .donate-modal {
+        text-align: center;
+      }
+      #donate-modal-container .donate-image {
+        max-height: 300px !important;
+        min-height: inherit !important;
+      }
+    </style>
+
+        <meta property="og:site_name" content="mozillazg's Blog" />
+        <meta property="og:type" content="article"/>
+        <meta property="og:title" content="Exploring the New Features of Amazon EKS Pod Identity"/>
+        <meta property="og:url" content="https://mozillazg.com/2023/12/security-deep-dive-into-aws-eks-pod-identity-feature-en.html"/>
+        <meta property="og:description" content="In this piece, we&#39;re taking a quick dive into a fresh security feature for EKS introduced this week by AWS, aptly called Amazon EKS Pod Identity. Introducing the Features Amazon EKS Pod Identity enhances AWS&#39;s existing IAM roles for service accounts (IRSA) feature. This new addition allows users to more easily assign secure AWS API access permissions to Pods. Moreover, all related configuration and management tasks can be handled directly via the AWS API or its console interface. How to Use To securely provide AWS API access to applications inside Pods using the EKS Pod Identity feature, users simply need to follow these steps: Start by creating an IAM role, making sure it trusts pods.eks.amazonaws.com. Here&#39;s an example of what the role trust policy might look like: { &#34;Version&#34;: &#34;2012-10-17&#34;, &#34;Statement&#34;: [ { &#34;Effect&#34;: &#34;Allow&#34;, &#34;Principal&#34;: { &#34;Service&#34;: &#34;pods.eks.amazonaws.com&#34; }, &#34;Action&#34;: [ &#34;sts:AssumeRole&#34;, &#34;sts:TagSession&#34; ] } ] } The next step is to install the eks-pod-identity-agent within your EKS cluster, which can be done via the console. aws eks create-addon \ --cluster-name &lt;CLUSTER_NAME&gt; \ --addon-name eks-pod-identity-agent \ --addon-version v1.0.0-eksbuild.1 Following that, set up the link between the Service Account utilized by your application Pod and the AWS IAM role. This configuration allows apps using this Service Account to assume a designated IAM role, and it can be managed via the console. aws eks create-pod-identity-association \ --cluster-name &lt;CLUSTER_NAME&gt; \ --namespace &lt;NAMESPACE&gt; \ --service-account &lt;SERVICE_ACCOUNT_NAME&gt; \ --role-arn &lt;IAM_ROLE_ARN&gt; Lastly, update your applications to incorporate the most recent AWS SDK version that&#39;s compatible with EKS Pod Identity. In your code, either use the SDK&#39;s built-in default credential search logic or make explicit calls to the Container credential provider which is a dependency of EKS Pod Identity. Workflow Explained The workflow for the EKS Pod Identity feature operates in the following manner: When a user or Controller submits a Pod to the apiserver, this action initiates the mutating webhook process of eks-pod-identity-webhook. The mutating webhook process of eks-pod-identity-webhook is responsible for mounting the service account OIDC token file to the Pod and setting up the necessary environment variables, namely AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE and AWS_CONTAINER_CREDENTIALS_FULL_URI. - env: - name: AWS_STS_REGIONAL_ENDPOINTS value: regional - name: AWS_DEFAULT_REGION value: us-west-2 - name: AWS_REGION value: us-west-2 - name: AWS_CONTAINER_CREDENTIALS_FULL_URI value: http://169.254.170.23/v1/credentials - name: AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE value: /var/run/secrets/pods.eks.amazonaws.com/serviceaccount/eks-pod-identity-token volumeMounts: - mountPath: /var/run/secrets/pods.eks.amazonaws.com/serviceaccount name: eks-pod-identity-token readOnly: true volumes: - name: eks-pod-identity-token projected: defaultMode: 420 sources: - serviceAccountToken: audience: pods.eks.amazonaws.com expirationSeconds: 86400 path: eks-pod-identity-token Applications inside the Pod container, utilizing AWS SDK, will employ the service account OIDC token, sourced from the AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE environment variable. This token is used to access the URL specified by AWS_CONTAINER_CREDENTIALS_FULL_URI (http://169.254.170.23/v1/credentials) to acquire the AWS STS token. $ curl $AWS_CONTAINER_CREDENTIALS_FULL_URI -H &#34;Authorization: $(cat $AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE)&#34; 2&gt;/dev/null |jq { &#34;AccessKeyId&#34;: &#34;ASXXXXXXXXXXXXX&#34;, &#34;SecretAccessKey&#34;: &#34;+j5XXXXXXXX&#34;, &#34;Token&#34;: &#34;IQoJb3JpXXXXXXX&#34;, &#34;AccountId&#34;: &#34;5XXXXXXXXXXX&#34;, &#34;Expiration&#34;: &#34;2023-12-03T13:13:26Z&#34; } The URL referred to by AWS_CONTAINER_CREDENTIALS_FULL_URI actually connects to the service exposed by the eks-pod-identity-agent component&#39;s Pod, deployed on the same node as the requesting Pod. Upon receiving a request, the eks-pod-identity-agent uses the provided OIDC token to interact with EKS&#39;s recently introduced AssumeRoleForPodIdentity API. This process is to acquire the needed AWS STS token, which is then relayed back to the client. $ aws eks-auth assume-role-for-pod-identity --cluster-name test --token $(cat $AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE) |jq { &#34;subject&#34;: { &#34;namespace&#34;: &#34;default&#34;, &#34;serviceAccount&#34;: &#34;default&#34; }, &#34;audience&#34;: &#34;pods.eks.amazonaws.com&#34;, &#34;podIdentityAssociation&#34;: { &#34;associationArn&#34;: &#34;arn:aws:eks:us-west-2:5XXXXXXXXXXX:podidentityassociation/test/a-6aaXXXXXXXXXXXXXX&#34;, &#34;associationId&#34;: &#34;a-6aaXXXXXXXXXXXXXX&#34; }, &#34;assumedRoleUser&#34;: { &#34;arn&#34;: &#34;arn:aws:sts::5XXXXXXXXXXX:assumed-role/test-eks-pod-identity/eks-test-XXXXXXXXXXXXXXXX&#34;, &#34;assumeRoleId&#34;: &#34;ARXXXXXXXXXXXXXXXXXXX:eks-test-XXXXXXXXXXXXXXXXXX&#34; }, &#34;credentials&#34;: { &#34;sessionToken&#34;: &#34;IQoXXXXX&#34;, &#34;secretAccessKey&#34;: &#34;nR4XXXXXX&#34;, &#34;accessKeyId&#34;: &#34;ASXXXXXXXXXXXXXXXXXX&#34;, &#34;expiration&#34;: &#34;2023-12-03T13:37:22+00:00&#34; } } The AWS SDK utilized by the application leverages the acquired STS token to access the specific AWS cloud product APIs it needs. In this process, there are a few crucial components and pieces of information that merit particular emphasis. Let&#39;s break them down one by one. eks-pod-identity-webhook The EKS Pod Identity functionality seamlessly integrates with the eks-pod-identity-webhook component, originally part of the IRSA feature. This component is responsible for automatically adding the necessary OIDC token and environment variable settings to the Pods. Moreover, the eks-pod-identity-webhook deployed in the EKS cluster control plane has been specially tailored for EKS Pod Identity. It only adds EKS Pod Identity configurations to Pods when the corresponding service account lacks IRSA-specific settings and is linked to IAM role information, as outlined in the previously mentioned usage instructions. The changes implemented in eks-pod-identity-webhook to facilitate EKS Pod Identity can be reviewed in its open-source version, though it&#39;s important to note that this version does not include the logic for identifying associated roles. The pertinent Pull Requests (PRs) that detail these modifications are #189 and #196. eks-pod-identity-agent The EKS Pod Identity implementation suggested by the official documentation involves deploying a component called eks-pod-identity-agent within the cluster. The YAML configuration for this component&#39;s workload is outlined below. apiVersion: apps/v1 kind: DaemonSet metadata: annotations: deprecated.daemonset.template.generation: &#34;1&#34; creationTimestamp: &#34;2023-12-03T04:24:15Z&#34; generation: 1 labels: app.kubernetes.io/instance: eks-pod-identity-agent app.kubernetes.io/managed-by: Helm app.kubernetes.io/name: eks-pod-identity-agent app.kubernetes.io/version: 0.0.25 helm.sh/chart: eks-pod-identity-agent-1.0.0 name: eks-pod-identity-agent namespace: kube-system resourceVersion: &#34;8978&#34; uid: 08c03e91-69d4-460b-8acb-b9f9f546dd87 spec: revisionHistoryLimit: 10 selector: matchLabels: app.kubernetes.io/instance: eks-pod-identity-agent app.kubernetes.io/name: eks-pod-identity-agent template: metadata: creationTimestamp: null labels: app.kubernetes.io/instance: eks-pod-identity-agent app.kubernetes.io/name: eks-pod-identity-agent spec: affinity: nodeAffinity: requiredDuringSchedulingIgnoredDuringExecution: nodeSelectorTerms: - matchExpressions: - key: kubernetes.io/os operator: In values: - linux - key: kubernetes.io/arch operator: In values: - amd64 - arm64 - key: eks.amazonaws.com/compute-type operator: NotIn values: - fargate containers: - args: - --port - &#34;80&#34; - --cluster-name - test - --probe-port - &#34;2703&#34; command: - /go-runner - /eks-pod-identity-agent - server env: - name: AWS_REGION value: us-west-2 image: 602401143452.dkr.ecr.us-west-2.amazonaws.com/eks/eks-pod-identity-agent:0.0.25 imagePullPolicy: Always livenessProbe: failureThreshold: 3 httpGet: host: localhost path: /healthz port: probes-port scheme: HTTP initialDelaySeconds: 30 periodSeconds: 10 successThreshold: 1 timeoutSeconds: 10 name: eks-pod-identity-agent ports: - containerPort: 80 name: proxy protocol: TCP - containerPort: 2703 name: probes-port protocol: TCP readinessProbe: failureThreshold: 30 httpGet: host: localhost path: /readyz port: probes-port scheme: HTTP initialDelaySeconds: 1 periodSeconds: 10 successThreshold: 1 timeoutSeconds: 10 resources: {} securityContext: capabilities: add: - CAP_NET_BIND_SERVICE terminationMessagePath: /dev/termination-log terminationMessagePolicy: File dnsPolicy: ClusterFirst hostNetwork: true initContainers: - command: - /go-runner - /eks-pod-identity-agent - initialize image: 602401143452.dkr.ecr.us-west-2.amazonaws.com/eks/eks-pod-identity-agent:0.0.25 imagePullPolicy: Always name: eks-pod-identity-agent-init resources: {} securityContext: privileged: true terminationMessagePath: /dev/termination-log terminationMessagePolicy: File priorityClassName: system-node-critical restartPolicy: Always schedulerName: default-scheduler securityContext: {} terminationGracePeriodSeconds: 30 updateStrategy: rollingUpdate: maxSurge: 0 maxUnavailable: 10% type: RollingUpdate status: currentNumberScheduled: 1 desiredNumberScheduled: 1 numberAvailable: 1 numberMisscheduled: 0 numberReady: 1 observedGeneration: 1 The eks-pod-identity-agent component is characterized by the following features: It depends on the node IAM role having been assigned specific IAM permission policies as follows. { &#34;Version&#34;: &#34;2012-10-17&#34;, &#34;Statement&#34;: [ { &#34;Effect&#34;: &#34;Allow&#34;, &#34;Action&#34;: [ &#34;eks-auth:AssumeRoleForPodIdentity&#34;, ], &#34;Resource&#34;: &#34;*&#34; } ] } The component&#39;s Pod is configured to use hostNetwork. The service inside the component is set up to listen on ports 80 and 2703. For port 80, it listens on the IPv4 address 169.254.170.23 and the IPv6 address [fd00:ec2::23]. $ ss -anltp |grep eks-pod LISTEN 0 4096 127.0.0.1:2703 0.0.0.0:* users:((&#34;eks-pod-identit&#34;,pid=3798,fd=5)) LISTEN 0 4096 169.254.170.23:80 0.0.0.0:* users:((&#34;eks-pod-identit&#34;,pid=3798,fd=4)) LISTEN 0 4096 [fd00:ec2::23]:80 [::]:* users:((&#34;eks-pod-identit&#34;,pid=3798,fd=3)) The component employs an init container to establish a network interface named pod-id-link0 on the node. This interface is configured with the IPv4 address 169.254.170.23 and the IPv6 address [fd00:ec2::23]. pod-id-link0: flags=195&lt;UP,BROADCAST,RUNNING,NOARP&gt; mtu 1500 inet 169.254.170.23 netmask 255.255.255.255 broadcast 0.0.0.0 inet6 fe80::2078:53ff:fe2f:c723 prefixlen 64 scopeid 0x20&lt;link&gt; inet6 fd00:ec2::23 prefixlen 128 scopeid 0x0&lt;global&gt; ether 22:78:53:2f:c7:23 txqueuelen 1000 (Ethernet) RX packets 0 bytes 0 (0.0 B) RX errors 0 dropped 0 overruns 0 frame 0 TX packets 10 bytes 700 (700.0 B) TX errors 0 dropped 0 overruns 0 carrier 0 collisions 0 Additionally, the init container configures specific routing rules to guarantee that traffic directed to 169.254.170.23 is handled on the local machine. 169.254.170.23 dev pod-id-link0 AssumeRoleForPodIdentity EKS has introduced a new API, AssumeRoleForPodIdentity. This API is utilized to acquire an STS token that enables the assuming of the IAM role linked to a service account, through the use of the service account&#39;s OIDC token. service account oidc token 中的 payload 的内容示例如下。 { &#34;aud&#34;: [ &#34;pods.eks.amazonaws.com&#34; ], &#34;exp&#34;: 1701672885, &#34;iat&#34;: 1701586485, &#34;iss&#34;: &#34;https://oidc.eks.us-west-2.amazonaws.com/id/DA16E524AXXXXXX&#34;, &#34;kubernetes.io&#34;: { &#34;namespace&#34;: &#34;default&#34;, &#34;pod&#34;: { &#34;name&#34;: &#34;test-596475c6d5-xgvml&#34;, &#34;uid&#34;: &#34;924e66b2-841e-4969-9fa7-a19f3f6f1029&#34; }, &#34;serviceaccount&#34;: { &#34;name&#34;: &#34;default&#34;, &#34;uid&#34;: &#34;eca98cb1-ca2e-469b-8f9d-2be9f5a3354f&#34; } }, &#34;nbf&#34;: 1701586485, &#34;sub&#34;: &#34;system:serviceaccount:default:default&#34; } This OIDC token, when compared to the one used in the IRSA solution, differs only in its audience (aud) field, which is sts.amazonaws.com in IRSA&#39;s case. Otherwise, they are identical. From this, I infer that the backend process of AssumeRoleForPodIdentity likely follows these steps: Initially, the client&#39;s OIDC token is parsed and its validity and legitimacy are verified based on the OIDC protocol. Next, the role that needs to be assumed is identified, using the service account&#39;s configured association with an IAM role. Finally, the STS API is invoked to assume the identified role, thereby generating the STS token required by the client. Association of Service Account with IAM Role EKS has introduced a suite of APIs to streamline the process for users to link service accounts with IAM roles. This enhancement is complemented by new interfaces on the EKS console for managing these associations. Notably, these associations are maintained within EKS and do not alter the trust policy of the roles. CreatePodIdentityAssociation: To link a role with a service account. DescribePodIdentityAssociation: To view detailed information about a specific role association. UpdatePodIdentityAssociation: To alter the role information linked to a service account. DeletePodIdentityAssociation: To remove a particular role association record. ListPodIdentityAssociations: To access a list of all current role association records. Access and Permission Management Under the IRSA approach, it&#39;s necessary to include the permissible cluster OIDC provider and service account details in the IAM role&#39;s trust policy. However, with EKS Pod Identity, altering the role&#39;s trust policy is no longer required. Instead, you can specify which roles are accessible to which service accounts in specific clusters using the EKS console or the EKS API, as explained earlier. These associations are maintained within EKS, reducing the need for regular updates to the trust policy of roles. This method allows EKS Pod Identity to address a limitation encountered in IRSA, where a role&#39;s trust policy size constraints meant it could only be linked to a few service accounts (details available in #148). With EKS Pod Identity, there&#39;s no limit to the number of service accounts that can be associated with a single role. attribute-based access control (ABAC) EKS Pod Identity also ushers in an advanced attribute-based access control (ABAC) feature. STS tokens acquired via EKS Pod Identity inherently include tags like cluster details, namespace, and service account. Utilizing IAM&#39;s tag-based authorization functionality, users can now employ these attributes for more granular access control when setting up permission policies for roles. STS tokens acquired via EKS Pod Identity automatically include these tags: eks-cluster-arn: ARN of the current cluster. eks-cluster-name: Name of the current cluster. kubernetes-namespace: Name of the namespace containing the service account. kubernetes-service-account: Name of the service account. kubernetes-pod-name: Name of the pod utilizing the service account. kubernetes-pod-uid: UID of the pod that is using the service account. &#34;tags&#34;: [ { &#34;key&#34;: &#34;eks-cluster-arn&#34;, &#34;value&#34;: &#34;arn:aws:eks:us-west-2:5XXXXXXXXXXX:cluster/test&#34; }, { &#34;key&#34;: &#34;eks-cluster-name&#34;, &#34;value&#34;: &#34;test&#34; }, { &#34;key&#34;: &#34;kubernetes-namespace&#34;, &#34;value&#34;: &#34;default&#34; }, { &#34;key&#34;: &#34;kubernetes-service-account&#34;, &#34;value&#34;: &#34;default&#34; }, { &#34;key&#34;: &#34;kubernetes-pod-name&#34;, &#34;value&#34;: &#34;test-596475c6d5-xgvml&#34; }, { &#34;key&#34;: &#34;kubernetes-pod-uid&#34;, &#34;value&#34;: &#34;924e66b2-841e-4969-9fa7-a19f3f6f1029&#34; } ] In the process of crafting role permission policies, the format ${aws:PrincipalTag/&lt;tag-key&gt;} can be employed. This approach is used within the Condition section of the permission policy to denote the value of a particular tag present in the attributes of the credentials. { &#34;Version&#34;: &#34;2012-10-17&#34;, &#34;Statement&#34;: [ { &#34;Effect&#34;: &#34;Allow&#34;, &#34;Action&#34;: [ &#34;s3:GetObject&#34;, &#34;s3:GetObjectTagging&#34; ], &#34;Resource&#34;: &#34;*&#34;, &#34;Condition&#34;: { &#34;StringEquals&#34;: { &#34;s3:ExistingObjectTag/eks-cluster-name&#34;: &#34;${aws:PrincipalTag/eks-cluster-name}&#34; }, &#34;StringEqualsIfExists&#34;: { &#34;aws:ResourceTag/kubernetes-namespace&#34;: &#34;s3-demo&#34;, &#34;aws:Resourcelag/kubernetes-service-account&#34;: &#34;${aws:PrincipalTag/kubernetes-service-account}&#34; } } } ] } With the example permission policy provided earlier, we can tailor the permissions of STS tokens acquired via the EKS Pod Identity feature in the following ways: Allow access only to S3 objects tagged with eks-cluster-name, where the tag&#39;s value aligns with the name of the cluster tied to the current STS token. Permit access to an S3 object only if it carries a kubernetes-namespace tag, and only if this tag&#39;s value is s3-demo. Authorize access to an S3 object only if it bears a kubernetes-service-account tag, and solely if the tag&#39;s value corresponds to the name of the service account associated with the current STS token. Distinguishing from IRSA Considering the details shared earlier, a comparison between EKS Pod Identity and IRSA highlights several key differences, which are as follows: Comparison Item EKS Pod Identity IRSA Additional Permissions for Node IAM Role Requires eks-auth:AssumeRoleForPodIdentity Not Required Creation of IAM OIDC Provider Not Required Necessary for Each Cluster Associating Roles with Service Account Via EKS API/Console Service Account Annotation + Role Trust Policy Modification No. of Service Accounts Per Role Unlimited Limited by 4096-Character Trust Policy, Typically Around 10 Service Accounts or Clusters No. of Roles Per Service Account One Unlimited Role Trust Policy Modification Frequency Once Only for Trust with pods.eks.amazonaws.com and Necessary Actions At Least Once for Each Cluster Access Control Based on Service Account Attributes Supported via ABAC Not Supported Supported Cluster Types Only EKS, Not AWS Outposts, EKS Anywhere, AWS Fargate, or Self-Built Clusters All Except AWS Outposts Data Plane Dependencies kubelet + eks-pod-identity-agent kublet Stability Risks Relies on Stability of Cluster Control/Data Plane + EKS API; Dependency on eks-pod-identity-agent Stability; Risks of STS Token Access Issues if Application Pods Launch Before eks-pod-identity-agent Pod (like in Auto-Scaling Scenarios with Same hostNetwork Config, Not Recommended for CNI, CSI, etc). Depends on Stability of Cluster Control/Data Plane + STS API References Amazon EKS Pod Identity simplifies IAM permissions for applications on Amazon EKS clusters | AWS News Blog Introducing fine-grained IAM roles for service accounts | AWS Open Source Blog EKS Pod Identities - Amazon EKS aws/amazon-eks-pod-identity-webhook: Amazon EKS Pod Identity Webhook Define permissions for EKS Pod Identities to assume roles based on tags - Amazon EKS Controlling access to and for IAM users and roles using tags - AWS Identity and Access Management IAM JSON policy elements: Condition - AWS Identity and Access Management Deep dive into the new Amazon EKS Pod Identity feature | Datadog Security Labs"/>
+        <meta property="article:published_time" content="2023-12-03" />
+            <meta property="article:section" content="security" />
+            <meta property="article:tag" content="security" />
+            <meta property="article:tag" content="kubernetes" />
+            <meta property="article:tag" content="k8s" />
+            <meta property="article:tag" content="aws" />
+            <meta property="article:tag" content="eks" />
+            <meta property="article:tag" content="pod-identity" />
+            <meta property="article:tag" content="irsa" />
+            <meta property="article:tag" content="cloud-security" />
+            <meta property="article:tag" content="en-version" />
+            <meta property="article:author" content="mozillazg" />
+            <meta property="og:image"
+                  content="https://mozillazg.com/static/avatar.jpeg"/>
+
+
+    <meta name="twitter:card" content="summary">
+        <meta name="twitter:site" content="@mozillazg">
+        <meta name="twitter:creator" content="@mozillazg">
+    <meta name="twitter:domain" content="https://mozillazg.com">
+            <meta property="twitter:image"
+                  content="https://mozillazg.com/static/avatar.jpeg"/>
+
+    <!-- Bootstrap -->
+        <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@3.3.4/dist/css/bootstrap.min.css" type="text/css"/>
+    <link href="https://cdn.jsdelivr.net/npm/font-awesome@4.3.0/css/font-awesome.min.css" rel="stylesheet">
+
+    <link href="https://cdn.jsdelivr.net/npm/pygments-css@1.0.0/github.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://mozillazg.com/theme/css/style.css" type="text/css"/>
+            <link href="https://mozillazg.com/static/custom.css" rel="stylesheet">
+
+        <link href="https://mozillazg.com/feeds/all.atom.xml" type="application/atom+xml" rel="alternate"
+              title="mozillazg's Blog ATOM Feed"/>
+
+        <link href="https://mozillazg.com/feeds/all.rss.xml" type="application/rss+xml" rel="alternate"
+              title="mozillazg's Blog RSS Feed"/>
+
+
+        <link href="https://mozillazg.com/feeds/security.atom.xml" type="application/atom+xml" rel="alternate"
+              title="mozillazg's Blog security ATOM Feed"/>
+
+
+    <script type="application/ld+json">
+    {
+        "@context": "https://schema.org",
+        "@type": "BlogPosting",
+        "publisher": {
+            "@type": "Person",
+            "name": "mozillazg",
+            "logo": "https://mozillazg.com/static/avatar.jpeg"
+        },
+        "author": {
+            "@type": "Person",
+            "name": "mozillazg",
+            "image": "https://mozillazg.com/static/avatar.jpeg",
+            "url": "https://mozillazg.com",
+            "sameAs": []
+        },
+        "headline": "Exploring the New Features of Amazon EKS Pod Identity",
+        "url": "https://mozillazg.com/2023/12/security-deep-dive-into-aws-eks-pod-identity-feature-en.html",
+        "image": [
+            "https://mozillazg.com/static/avatar.jpeg"
+         ],
+        "keywords": "security, kubernetes, k8s, aws, eks, pod-identity, irsa, cloud-security, en-version",
+        "description": "In this piece, we&#39;re taking a quick dive into a fresh security feature for EKS introduced this week by AWS, aptly called Amazon EKS Pod Identity. Introducing the Features Amazon EKS Pod Identity enhances AWS&#39;s existing IAM roles for service accounts (IRSA) feature. This new addition allows users to more easily assign secure AWS API access permissions to Pods. Moreover, all related configuration and management tasks can be handled directly via the AWS API or its console interface. How to Use To securely provide AWS API access to applications inside Pods using the EKS Pod Identity feature, users simply need to follow these steps: Start by creating an IAM role, making sure it trusts pods.eks.amazonaws.com. Here&#39;s an example of what the role trust policy might look like: { &#34;Version&#34;: &#34;2012-10-17&#34;, &#34;Statement&#34;: [ { &#34;Effect&#34;: &#34;Allow&#34;, &#34;Principal&#34;: { &#34;Service&#34;: &#34;pods.eks.amazonaws.com&#34; }, &#34;Action&#34;: [ &#34;sts:AssumeRole&#34;, &#34;sts:TagSession&#34; ] } ] } The next step is to install the eks-pod-identity-agent within your EKS cluster, which can be done via the console. aws eks create-addon \\ --cluster-name &lt;CLUSTER_NAME&gt; \\ --addon-name eks-pod-identity-agent \\ --addon-version v1.0.0-eksbuild.1 Following that, set up the link between the Service Account utilized by your application Pod and the AWS IAM role. This configuration allows apps using this Service Account to assume a designated IAM role, and it can be managed via the console. aws eks create-pod-identity-association \\ --cluster-name &lt;CLUSTER_NAME&gt; \\ --namespace &lt;NAMESPACE&gt; \\ --service-account &lt;SERVICE_ACCOUNT_NAME&gt; \\ --role-arn &lt;IAM_ROLE_ARN&gt; Lastly, update your applications to incorporate the most recent AWS SDK version that&#39;s compatible with EKS Pod Identity. In your code, either use the SDK&#39;s built-in default credential search logic or make explicit calls to the Container credential provider which is a dependency of EKS Pod Identity. Workflow Explained The workflow for the EKS Pod Identity feature operates in the following manner: When a user or Controller submits a Pod to the apiserver, this action initiates the mutating webhook process of eks-pod-identity-webhook. The mutating webhook process of eks-pod-identity-webhook is responsible for mounting the service account OIDC token file to the Pod and setting up the necessary environment variables, namely AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE and AWS_CONTAINER_CREDENTIALS_FULL_URI. - env: - name: AWS_STS_REGIONAL_ENDPOINTS value: regional - name: AWS_DEFAULT_REGION value: us-west-2 - name: AWS_REGION value: us-west-2 - name: AWS_CONTAINER_CREDENTIALS_FULL_URI value: http://169.254.170.23/v1/credentials - name: AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE value: /var/run/secrets/pods.eks.amazonaws.com/serviceaccount/eks-pod-identity-token volumeMounts: - mountPath: /var/run/secrets/pods.eks.amazonaws.com/serviceaccount name: eks-pod-identity-token readOnly: true volumes: - name: eks-pod-identity-token projected: defaultMode: 420 sources: - serviceAccountToken: audience: pods.eks.amazonaws.com expirationSeconds: 86400 path: eks-pod-identity-token Applications inside the Pod container, utilizing AWS SDK, will employ the service account OIDC token, sourced from the AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE environment variable. This token is used to access the URL specified by AWS_CONTAINER_CREDENTIALS_FULL_URI (http://169.254.170.23/v1/credentials) to acquire the AWS STS token. $ curl $AWS_CONTAINER_CREDENTIALS_FULL_URI -H &#34;Authorization: $(cat $AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE)&#34; 2&gt;/dev/null |jq { &#34;AccessKeyId&#34;: &#34;ASXXXXXXXXXXXXX&#34;, &#34;SecretAccessKey&#34;: &#34;+j5XXXXXXXX&#34;, &#34;Token&#34;: &#34;IQoJb3JpXXXXXXX&#34;, &#34;AccountId&#34;: &#34;5XXXXXXXXXXX&#34;, &#34;Expiration&#34;: &#34;2023-12-03T13:13:26Z&#34; } The URL referred to by AWS_CONTAINER_CREDENTIALS_FULL_URI actually connects to the service exposed by the eks-pod-identity-agent component&#39;s Pod, deployed on the same node as the requesting Pod. Upon receiving a request, the eks-pod-identity-agent uses the provided OIDC token to interact with EKS&#39;s recently introduced AssumeRoleForPodIdentity API. This process is to acquire the needed AWS STS token, which is then relayed back to the client. $ aws eks-auth assume-role-for-pod-identity --cluster-name test --token $(cat $AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE) |jq { &#34;subject&#34;: { &#34;namespace&#34;: &#34;default&#34;, &#34;serviceAccount&#34;: &#34;default&#34; }, &#34;audience&#34;: &#34;pods.eks.amazonaws.com&#34;, &#34;podIdentityAssociation&#34;: { &#34;associationArn&#34;: &#34;arn:aws:eks:us-west-2:5XXXXXXXXXXX:podidentityassociation/test/a-6aaXXXXXXXXXXXXXX&#34;, &#34;associationId&#34;: &#34;a-6aaXXXXXXXXXXXXXX&#34; }, &#34;assumedRoleUser&#34;: { &#34;arn&#34;: &#34;arn:aws:sts::5XXXXXXXXXXX:assumed-role/test-eks-pod-identity/eks-test-XXXXXXXXXXXXXXXX&#34;, &#34;assumeRoleId&#34;: &#34;ARXXXXXXXXXXXXXXXXXXX:eks-test-XXXXXXXXXXXXXXXXXX&#34; }, &#34;credentials&#34;: { &#34;sessionToken&#34;: &#34;IQoXXXXX&#34;, &#34;secretAccessKey&#34;: &#34;nR4XXXXXX&#34;, &#34;accessKeyId&#34;: &#34;ASXXXXXXXXXXXXXXXXXX&#34;, &#34;expiration&#34;: &#34;2023-12-03T13:37:22+00:00&#34; } } The AWS SDK utilized by the application leverages the acquired STS token to access the specific AWS cloud product APIs it needs. In this process, there are a few crucial components and pieces of information that merit particular emphasis. Let&#39;s break them down one by one. eks-pod-identity-webhook The EKS Pod Identity functionality seamlessly integrates with the eks-pod-identity-webhook component, originally part of the IRSA feature. This component is responsible for automatically adding the necessary OIDC token and environment variable settings to the Pods. Moreover, the eks-pod-identity-webhook deployed in the EKS cluster control plane has been specially tailored for EKS Pod Identity. It only adds EKS Pod Identity configurations to Pods when the corresponding service account lacks IRSA-specific settings and is linked to IAM role information, as outlined in the previously mentioned usage instructions. The changes implemented in eks-pod-identity-webhook to facilitate EKS Pod Identity can be reviewed in its open-source version, though it&#39;s important to note that this version does not include the logic for identifying associated roles. The pertinent Pull Requests (PRs) that detail these modifications are #189 and #196. eks-pod-identity-agent The EKS Pod Identity implementation suggested by the official documentation involves deploying a component called eks-pod-identity-agent within the cluster. The YAML configuration for this component&#39;s workload is outlined below. apiVersion: apps/v1 kind: DaemonSet metadata: annotations: deprecated.daemonset.template.generation: &#34;1&#34; creationTimestamp: &#34;2023-12-03T04:24:15Z&#34; generation: 1 labels: app.kubernetes.io/instance: eks-pod-identity-agent app.kubernetes.io/managed-by: Helm app.kubernetes.io/name: eks-pod-identity-agent app.kubernetes.io/version: 0.0.25 helm.sh/chart: eks-pod-identity-agent-1.0.0 name: eks-pod-identity-agent namespace: kube-system resourceVersion: &#34;8978&#34; uid: 08c03e91-69d4-460b-8acb-b9f9f546dd87 spec: revisionHistoryLimit: 10 selector: matchLabels: app.kubernetes.io/instance: eks-pod-identity-agent app.kubernetes.io/name: eks-pod-identity-agent template: metadata: creationTimestamp: null labels: app.kubernetes.io/instance: eks-pod-identity-agent app.kubernetes.io/name: eks-pod-identity-agent spec: affinity: nodeAffinity: requiredDuringSchedulingIgnoredDuringExecution: nodeSelectorTerms: - matchExpressions: - key: kubernetes.io/os operator: In values: - linux - key: kubernetes.io/arch operator: In values: - amd64 - arm64 - key: eks.amazonaws.com/compute-type operator: NotIn values: - fargate containers: - args: - --port - &#34;80&#34; - --cluster-name - test - --probe-port - &#34;2703&#34; command: - /go-runner - /eks-pod-identity-agent - server env: - name: AWS_REGION value: us-west-2 image: 602401143452.dkr.ecr.us-west-2.amazonaws.com/eks/eks-pod-identity-agent:0.0.25 imagePullPolicy: Always livenessProbe: failureThreshold: 3 httpGet: host: localhost path: /healthz port: probes-port scheme: HTTP initialDelaySeconds: 30 periodSeconds: 10 successThreshold: 1 timeoutSeconds: 10 name: eks-pod-identity-agent ports: - containerPort: 80 name: proxy protocol: TCP - containerPort: 2703 name: probes-port protocol: TCP readinessProbe: failureThreshold: 30 httpGet: host: localhost path: /readyz port: probes-port scheme: HTTP initialDelaySeconds: 1 periodSeconds: 10 successThreshold: 1 timeoutSeconds: 10 resources: {} securityContext: capabilities: add: - CAP_NET_BIND_SERVICE terminationMessagePath: /dev/termination-log terminationMessagePolicy: File dnsPolicy: ClusterFirst hostNetwork: true initContainers: - command: - /go-runner - /eks-pod-identity-agent - initialize image: 602401143452.dkr.ecr.us-west-2.amazonaws.com/eks/eks-pod-identity-agent:0.0.25 imagePullPolicy: Always name: eks-pod-identity-agent-init resources: {} securityContext: privileged: true terminationMessagePath: /dev/termination-log terminationMessagePolicy: File priorityClassName: system-node-critical restartPolicy: Always schedulerName: default-scheduler securityContext: {} terminationGracePeriodSeconds: 30 updateStrategy: rollingUpdate: maxSurge: 0 maxUnavailable: 10% type: RollingUpdate status: currentNumberScheduled: 1 desiredNumberScheduled: 1 numberAvailable: 1 numberMisscheduled: 0 numberReady: 1 observedGeneration: 1 The eks-pod-identity-agent component is characterized by the following features: It depends on the node IAM role having been assigned specific IAM permission policies as follows. { &#34;Version&#34;: &#34;2012-10-17&#34;, &#34;Statement&#34;: [ { &#34;Effect&#34;: &#34;Allow&#34;, &#34;Action&#34;: [ &#34;eks-auth:AssumeRoleForPodIdentity&#34;, ], &#34;Resource&#34;: &#34;*&#34; } ] } The component&#39;s Pod is configured to use hostNetwork. The service inside the component is set up to listen on ports 80 and 2703. For port 80, it listens on the IPv4 address 169.254.170.23 and the IPv6 address [fd00:ec2::23]. $ ss -anltp |grep eks-pod LISTEN 0 4096 127.0.0.1:2703 0.0.0.0:* users:((&#34;eks-pod-identit&#34;,pid=3798,fd=5)) LISTEN 0 4096 169.254.170.23:80 0.0.0.0:* users:((&#34;eks-pod-identit&#34;,pid=3798,fd=4)) LISTEN 0 4096 [fd00:ec2::23]:80 [::]:* users:((&#34;eks-pod-identit&#34;,pid=3798,fd=3)) The component employs an init container to establish a network interface named pod-id-link0 on the node. This interface is configured with the IPv4 address 169.254.170.23 and the IPv6 address [fd00:ec2::23]. pod-id-link0: flags=195&lt;UP,BROADCAST,RUNNING,NOARP&gt; mtu 1500 inet 169.254.170.23 netmask 255.255.255.255 broadcast 0.0.0.0 inet6 fe80::2078:53ff:fe2f:c723 prefixlen 64 scopeid 0x20&lt;link&gt; inet6 fd00:ec2::23 prefixlen 128 scopeid 0x0&lt;global&gt; ether 22:78:53:2f:c7:23 txqueuelen 1000 (Ethernet) RX packets 0 bytes 0 (0.0 B) RX errors 0 dropped 0 overruns 0 frame 0 TX packets 10 bytes 700 (700.0 B) TX errors 0 dropped 0 overruns 0 carrier 0 collisions 0 Additionally, the init container configures specific routing rules to guarantee that traffic directed to 169.254.170.23 is handled on the local machine. 169.254.170.23 dev pod-id-link0 AssumeRoleForPodIdentity EKS has introduced a new API, AssumeRoleForPodIdentity. This API is utilized to acquire an STS token that enables the assuming of the IAM role linked to a service account, through the use of the service account&#39;s OIDC token. service account oidc token 中的 payload 的内容示例如下。 { &#34;aud&#34;: [ &#34;pods.eks.amazonaws.com&#34; ], &#34;exp&#34;: 1701672885, &#34;iat&#34;: 1701586485, &#34;iss&#34;: &#34;https://oidc.eks.us-west-2.amazonaws.com/id/DA16E524AXXXXXX&#34;, &#34;kubernetes.io&#34;: { &#34;namespace&#34;: &#34;default&#34;, &#34;pod&#34;: { &#34;name&#34;: &#34;test-596475c6d5-xgvml&#34;, &#34;uid&#34;: &#34;924e66b2-841e-4969-9fa7-a19f3f6f1029&#34; }, &#34;serviceaccount&#34;: { &#34;name&#34;: &#34;default&#34;, &#34;uid&#34;: &#34;eca98cb1-ca2e-469b-8f9d-2be9f5a3354f&#34; } }, &#34;nbf&#34;: 1701586485, &#34;sub&#34;: &#34;system:serviceaccount:default:default&#34; } This OIDC token, when compared to the one used in the IRSA solution, differs only in its audience (aud) field, which is sts.amazonaws.com in IRSA&#39;s case. Otherwise, they are identical. From this, I infer that the backend process of AssumeRoleForPodIdentity likely follows these steps: Initially, the client&#39;s OIDC token is parsed and its validity and legitimacy are verified based on the OIDC protocol. Next, the role that needs to be assumed is identified, using the service account&#39;s configured association with an IAM role. Finally, the STS API is invoked to assume the identified role, thereby generating the STS token required by the client. Association of Service Account with IAM Role EKS has introduced a suite of APIs to streamline the process for users to link service accounts with IAM roles. This enhancement is complemented by new interfaces on the EKS console for managing these associations. Notably, these associations are maintained within EKS and do not alter the trust policy of the roles. CreatePodIdentityAssociation: To link a role with a service account. DescribePodIdentityAssociation: To view detailed information about a specific role association. UpdatePodIdentityAssociation: To alter the role information linked to a service account. DeletePodIdentityAssociation: To remove a particular role association record. ListPodIdentityAssociations: To access a list of all current role association records. Access and Permission Management Under the IRSA approach, it&#39;s necessary to include the permissible cluster OIDC provider and service account details in the IAM role&#39;s trust policy. However, with EKS Pod Identity, altering the role&#39;s trust policy is no longer required. Instead, you can specify which roles are accessible to which service accounts in specific clusters using the EKS console or the EKS API, as explained earlier. These associations are maintained within EKS, reducing the need for regular updates to the trust policy of roles. This method allows EKS Pod Identity to address a limitation encountered in IRSA, where a role&#39;s trust policy size constraints meant it could only be linked to a few service accounts (details available in #148). With EKS Pod Identity, there&#39;s no limit to the number of service accounts that can be associated with a single role. attribute-based access control (ABAC) EKS Pod Identity also ushers in an advanced attribute-based access control (ABAC) feature. STS tokens acquired via EKS Pod Identity inherently include tags like cluster details, namespace, and service account. Utilizing IAM&#39;s tag-based authorization functionality, users can now employ these attributes for more granular access control when setting up permission policies for roles. STS tokens acquired via EKS Pod Identity automatically include these tags: eks-cluster-arn: ARN of the current cluster. eks-cluster-name: Name of the current cluster. kubernetes-namespace: Name of the namespace containing the service account. kubernetes-service-account: Name of the service account. kubernetes-pod-name: Name of the pod utilizing the service account. kubernetes-pod-uid: UID of the pod that is using the service account. &#34;tags&#34;: [ { &#34;key&#34;: &#34;eks-cluster-arn&#34;, &#34;value&#34;: &#34;arn:aws:eks:us-west-2:5XXXXXXXXXXX:cluster/test&#34; }, { &#34;key&#34;: &#34;eks-cluster-name&#34;, &#34;value&#34;: &#34;test&#34; }, { &#34;key&#34;: &#34;kubernetes-namespace&#34;, &#34;value&#34;: &#34;default&#34; }, { &#34;key&#34;: &#34;kubernetes-service-account&#34;, &#34;value&#34;: &#34;default&#34; }, { &#34;key&#34;: &#34;kubernetes-pod-name&#34;, &#34;value&#34;: &#34;test-596475c6d5-xgvml&#34; }, { &#34;key&#34;: &#34;kubernetes-pod-uid&#34;, &#34;value&#34;: &#34;924e66b2-841e-4969-9fa7-a19f3f6f1029&#34; } ] In the process of crafting role permission policies, the format ${aws:PrincipalTag/&lt;tag-key&gt;} can be employed. This approach is used within the Condition section of the permission policy to denote the value of a particular tag present in the attributes of the credentials. { &#34;Version&#34;: &#34;2012-10-17&#34;, &#34;Statement&#34;: [ { &#34;Effect&#34;: &#34;Allow&#34;, &#34;Action&#34;: [ &#34;s3:GetObject&#34;, &#34;s3:GetObjectTagging&#34; ], &#34;Resource&#34;: &#34;*&#34;, &#34;Condition&#34;: { &#34;StringEquals&#34;: { &#34;s3:ExistingObjectTag/eks-cluster-name&#34;: &#34;${aws:PrincipalTag/eks-cluster-name}&#34; }, &#34;StringEqualsIfExists&#34;: { &#34;aws:ResourceTag/kubernetes-namespace&#34;: &#34;s3-demo&#34;, &#34;aws:Resourcelag/kubernetes-service-account&#34;: &#34;${aws:PrincipalTag/kubernetes-service-account}&#34; } } } ] } With the example permission policy provided earlier, we can tailor the permissions of STS tokens acquired via the EKS Pod Identity feature in the following ways: Allow access only to S3 objects tagged with eks-cluster-name, where the tag&#39;s value aligns with the name of the cluster tied to the current STS token. Permit access to an S3 object only if it carries a kubernetes-namespace tag, and only if this tag&#39;s value is s3-demo. Authorize access to an S3 object only if it bears a kubernetes-service-account tag, and solely if the tag&#39;s value corresponds to the name of the service account associated with the current STS token. Distinguishing from IRSA Considering the details shared earlier, a comparison between EKS Pod Identity and IRSA highlights several key differences, which are as follows: Comparison Item EKS Pod Identity IRSA Additional Permissions for Node IAM Role Requires eks-auth:AssumeRoleForPodIdentity Not Required Creation of IAM OIDC Provider Not Required Necessary for Each Cluster Associating Roles with Service Account Via EKS API/Console Service Account Annotation + Role Trust Policy Modification No. of Service Accounts Per Role Unlimited Limited by 4096-Character Trust Policy, Typically Around 10 Service Accounts or Clusters No. of Roles Per Service Account One Unlimited Role Trust Policy Modification Frequency Once Only for Trust with pods.eks.amazonaws.com and Necessary Actions At Least Once for Each Cluster Access Control Based on Service Account Attributes Supported via ABAC Not Supported Supported Cluster Types Only EKS, Not AWS Outposts, EKS Anywhere, AWS Fargate, or Self-Built Clusters All Except AWS Outposts Data Plane Dependencies kubelet + eks-pod-identity-agent kublet Stability Risks Relies on Stability of Cluster Control/Data Plane + EKS API; Dependency on eks-pod-identity-agent Stability; Risks of STS Token Access Issues if Application Pods Launch Before eks-pod-identity-agent Pod (like in Auto-Scaling Scenarios with Same hostNetwork Config, Not Recommended for CNI, CSI, etc). Depends on Stability of Cluster Control/Data Plane + STS API References Amazon EKS Pod Identity simplifies IAM permissions for applications on Amazon EKS clusters | AWS News Blog Introducing fine-grained IAM roles for service accounts | AWS Open Source Blog EKS Pod Identities - Amazon EKS aws/amazon-eks-pod-identity-webhook: Amazon EKS Pod Identity Webhook Define permissions for EKS Pod Identities to assume roles based on tags - Amazon EKS Controlling access to and for IAM users and roles using tags - AWS Identity and Access Management IAM JSON policy elements: Condition - AWS Identity and Access Management Deep dive into the new Amazon EKS Pod Identity feature | Datadog Security Labs",
+        "mainEntityOfPage": {
+             "@type": "WebPage",
+             "@id": "https://mozillazg.com/2023/12/security-deep-dive-into-aws-eks-pod-identity-feature-en.html"
+        },
+        "datePublished": "2023-12-03"
+    }
+    </script>
+
+</head>
+<body>
+
+<div class="navbar" role="navigation">
+	<div class="container">
+        <div class="navbar-header">
+            <button type="button" class="navbar-toggle" data-toggle="collapse" data-target=".navbar-ex1-collapse">
+                <span class="sr-only">Toggle navigation</span>
+                <span class="icon-bar"></span>
+                <span class="icon-bar"></span>
+                <span class="icon-bar"></span>
+            </button>
+            <a href="https://mozillazg.com/" class="navbar-brand">
+mozillazg's Blog            </a>
+        </div>
+        <div class="collapse navbar-collapse navbar-ex1-collapse">
+            <ul class="nav navbar-nav">
+                    <li><a href="https://mozillazg.com/feeds/all.atom.xml">Feed</a></li>
+                    <li><a href="/2014/10/pages/about-me.html">About</a></li>
+            </ul>
+            <ul class="nav navbar-nav navbar-right">
+              <li><a href="https://mozillazg.com/archives.html"><i class="fa fa-th-list"></i><span class="icon-label">Archives</span></a></li>
+            </ul>
+        </div>
+        <!-- /.navbar-collapse -->
+    </div>
+</div> <!-- /.navbar -->
+<!-- Banner -->
+<!-- End Banner -->
+<div class="container">
+    <div class="row">
+        <div class="col-lg-12">
+    <section id="content" class="yue">
+        <article>
+            <header class="text-center">
+                <h1>
+                    <a href="https://mozillazg.com/2023/12/security-deep-dive-into-aws-eks-pod-identity-feature-en.html"
+                       rel="bookmark"
+                       title="Permalink to Exploring the New Features of Amazon EKS Pod Identity">
+                        Exploring the New Features of Amazon EKS Pod Identity
+                    </a>
+                </h1>
+                <p class="published">
+                    <time datetime="2023-12-03T00:00:00+00:00">
+                    2023-12-03
+                    </time>
+                </p>
+            </header>
+            <div class="entry-content">
+                <div class="well-sm article-info">
+<footer class="post-info">
+        <a href="https://mozillazg.com/category/security.html">security</a>
+
+
+<span class="label label-default hide">Tags</span>
+	<a href="https://mozillazg.com/tag/kubernetes.html">kubernetes</a>
+        /
+	<a href="https://mozillazg.com/tag/k8s.html">k8s</a>
+        /
+	<a href="https://mozillazg.com/tag/aws.html">aws</a>
+        /
+	<a href="https://mozillazg.com/tag/eks.html">eks</a>
+        /
+	<a href="https://mozillazg.com/tag/pod-identity.html">pod-identity</a>
+        /
+	<a href="https://mozillazg.com/tag/irsa.html">irsa</a>
+        /
+	<a href="https://mozillazg.com/tag/cloud-security.html">cloud-security</a>
+        /
+	<a href="https://mozillazg.com/tag/en-version.html">en-version</a>
+    <span class="label label-default">Lang</span>
+	<a href="https://mozillazg.com/2023/12/security-deep-dive-into-aws-eks-pod-identity-feature.html">zh</a>
+
+</footer><!-- /.post-info -->                </div>
+                <div class="js-toc"></div>
+                <div>
+                <p>In this piece, we're taking a quick dive into a fresh security feature for EKS introduced this week by AWS,
+aptly called <a class="reference external" href="https://aws.amazon.com/blogs/aws/amazon-eks-pod-identity-simplifies-iam-permissions-for-applications-on-amazon-eks-clusters/">Amazon EKS Pod Identity</a>.</p>
+<div class="section" id="introducing-the-features">
+<h2 id="hidintroducing-the-features">Introducing the Features<a class="headerlink" href="#hidintroducing-the-features" title="Permalink to this headline">¶</a></h2>
+<p>Amazon EKS Pod Identity enhances AWS's existing <a class="reference external" href="https://aws.amazon.com/blogs/opensource/introducing-fine-grained-iam-roles-service-accounts/">IAM roles for service accounts (IRSA)</a> feature. This new addition allows users to more easily assign secure AWS API access permissions to Pods. Moreover, all related configuration and management tasks can be handled directly via the AWS API or its console interface.</p>
+</div>
+<div class="section" id="how-to-use">
+<h2 id="hidhow-to-use">How to Use<a class="headerlink" href="#hidhow-to-use" title="Permalink to this headline">¶</a></h2>
+<p>To securely provide AWS API access to applications inside Pods using the EKS Pod Identity feature, users simply need to follow these steps:</p>
+<ol class="arabic simple">
+<li>Start by creating an IAM role, making sure it trusts <tt class="docutils literal">pods.eks.amazonaws.com</tt>. Here's an example of what the role trust policy might look like:</li>
+</ol>
+<div class="highlight"><pre><span></span><span class="p">{</span>
+<span class="w">    </span><span class="nt">&quot;Version&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;2012-10-17&quot;</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">&quot;Statement&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+<span class="w">        </span><span class="p">{</span>
+<span class="w">            </span><span class="nt">&quot;Effect&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;Allow&quot;</span><span class="p">,</span>
+<span class="w">            </span><span class="nt">&quot;Principal&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">                </span><span class="nt">&quot;Service&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;pods.eks.amazonaws.com&quot;</span>
+<span class="w">            </span><span class="p">},</span>
+<span class="w">            </span><span class="nt">&quot;Action&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+<span class="w">                </span><span class="s2">&quot;sts:AssumeRole&quot;</span><span class="p">,</span>
+<span class="w">                </span><span class="s2">&quot;sts:TagSession&quot;</span>
+<span class="w">            </span><span class="p">]</span>
+<span class="w">        </span><span class="p">}</span>
+<span class="w">    </span><span class="p">]</span>
+<span class="p">}</span>
+</pre></div>
+<ol class="arabic simple" start="2">
+<li>The next step is to install the <a class="reference external" href="https://docs.aws.amazon.com/eks/latest/userguide/pod-id-agent-setup.html">eks-pod-identity-agent</a> within your EKS cluster, which can be done via the console.</li>
+</ol>
+<div class="highlight"><pre><span></span>aws<span class="w"> </span>eks<span class="w"> </span>create-addon<span class="w"> </span><span class="se">\</span>
+--cluster-name<span class="w"> </span>&lt;CLUSTER_NAME&gt;<span class="w"> </span><span class="se">\</span>
+--addon-name<span class="w"> </span>eks-pod-identity-agent<span class="w"> </span><span class="se">\</span>
+--addon-version<span class="w"> </span>v1.0.0-eksbuild.1
+</pre></div>
+<ol class="arabic simple" start="3">
+<li>Following that, set up the link between the Service Account utilized by your application Pod and the AWS IAM role. This configuration allows apps using this Service Account to assume a designated IAM role, and it can be managed via the console.</li>
+</ol>
+<div class="highlight"><pre><span></span>aws<span class="w"> </span>eks<span class="w"> </span>create-pod-identity-association<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--cluster-name<span class="w"> </span>&lt;CLUSTER_NAME&gt;<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--namespace<span class="w"> </span>&lt;NAMESPACE&gt;<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--service-account<span class="w"> </span>&lt;SERVICE_ACCOUNT_NAME&gt;<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--role-arn<span class="w"> </span>&lt;IAM_ROLE_ARN&gt;
+</pre></div>
+<ol class="arabic simple" start="4">
+<li>Lastly, update your applications to incorporate the most recent <a class="reference external" href="https://docs.aws.amazon.com/eks/latest/userguide/pod-id-minimum-sdk.html">AWS SDK</a> version that's compatible with EKS Pod Identity. In your code, either use the SDK's built-in <a class="reference external" href="https://docs.aws.amazon.com/sdkref/latest/guide/standardized-credentials.html#credentialProviderChain">default credential search logic</a> or make explicit calls to the <a class="reference external" href="https://docs.aws.amazon.com/sdkref/latest/guide/feature-container-credentials.html">Container credential provider</a> which is a dependency of EKS Pod Identity.</li>
+</ol>
+</div>
+<div class="section" id="workflow-explained">
+<h2 id="hidworkflow-explained">Workflow Explained<a class="headerlink" href="#hidworkflow-explained" title="Permalink to this headline">¶</a></h2>
+<p>The workflow for the EKS Pod Identity feature operates in the following manner:</p>
+<p><img alt="image" src="/static/images/security/eks-pod-identity-en.png" /></p>
+<ol class="arabic simple">
+<li>When a user or Controller submits a Pod to the apiserver, this action initiates the mutating webhook process of <a class="reference external" href="https://github.com/aws/amazon-eks-pod-identity-webhook">eks-pod-identity-webhook</a>.</li>
+<li>The mutating webhook process of eks-pod-identity-webhook is responsible for mounting the service account OIDC token file to the Pod and setting up the necessary environment variables, namely <tt class="docutils literal">AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE</tt> and <tt class="docutils literal">AWS_CONTAINER_CREDENTIALS_FULL_URI</tt>.</li>
+</ol>
+<div class="highlight"><pre><span></span><span class="w"> </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">env</span><span class="p">:</span>
+<span class="w"> </span><span class="w w-Error"> </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">AWS_STS_REGIONAL_ENDPOINTS</span>
+<span class="w">    </span><span class="nt">value</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">regional</span>
+<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">AWS_DEFAULT_REGION</span>
+<span class="w">    </span><span class="nt">value</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">us-west-2</span>
+<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">AWS_REGION</span>
+<span class="w">    </span><span class="nt">value</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">us-west-2</span>
+<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">AWS_CONTAINER_CREDENTIALS_FULL_URI</span>
+<span class="w">    </span><span class="nt">value</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">http://169.254.170.23/v1/credentials</span>
+<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE</span>
+<span class="w">    </span><span class="nt">value</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">/var/run/secrets/pods.eks.amazonaws.com/serviceaccount/eks-pod-identity-token</span>
+<span class="w">  </span><span class="nt">volumeMounts</span><span class="p">:</span>
+<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">mountPath</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">/var/run/secrets/pods.eks.amazonaws.com/serviceaccount</span>
+<span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">eks-pod-identity-token</span>
+<span class="w">    </span><span class="nt">readOnly</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+<span class="nt">volumes</span><span class="p">:</span>
+<span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">eks-pod-identity-token</span>
+<span class="w">  </span><span class="nt">projected</span><span class="p">:</span>
+<span class="w">    </span><span class="nt">defaultMode</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">420</span>
+<span class="w">    </span><span class="nt">sources</span><span class="p">:</span>
+<span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">serviceAccountToken</span><span class="p">:</span>
+<span class="w">        </span><span class="nt">audience</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">pods.eks.amazonaws.com</span>
+<span class="w">        </span><span class="nt">expirationSeconds</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">86400</span>
+<span class="w">        </span><span class="nt">path</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">eks-pod-identity-token</span>
+</pre></div>
+<ol class="arabic simple" start="3">
+<li>Applications inside the Pod container, utilizing AWS SDK, will employ the service account OIDC token, sourced from the <tt class="docutils literal">AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE</tt> environment variable. This token is used to access the URL specified by <tt class="docutils literal">AWS_CONTAINER_CREDENTIALS_FULL_URI</tt> (<tt class="docutils literal"><span class="pre">http://169.254.170.23/v1/credentials</span></tt>) to acquire the AWS STS token.</li>
+</ol>
+<div class="highlight"><pre><span></span><span class="l l-Scalar l-Scalar-Plain">$ curl $AWS_CONTAINER_CREDENTIALS_FULL_URI -H &quot;Authorization</span><span class="p p-Indicator">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">$(cat $AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE)&quot; 2&gt;/dev/null |jq</span>
+<span class="p p-Indicator">{</span>
+<span class="w">  </span><span class="s">&quot;AccessKeyId&quot;</span><span class="p p-Indicator">:</span><span class="w"> </span><span class="s">&quot;ASXXXXXXXXXXXXX&quot;</span><span class="p p-Indicator">,</span>
+<span class="w">  </span><span class="s">&quot;SecretAccessKey&quot;</span><span class="p p-Indicator">:</span><span class="w"> </span><span class="s">&quot;+j5XXXXXXXX&quot;</span><span class="p p-Indicator">,</span>
+<span class="w">  </span><span class="s">&quot;Token&quot;</span><span class="p p-Indicator">:</span><span class="w"> </span><span class="s">&quot;IQoJb3JpXXXXXXX&quot;</span><span class="p p-Indicator">,</span>
+<span class="w">  </span><span class="s">&quot;AccountId&quot;</span><span class="p p-Indicator">:</span><span class="w"> </span><span class="s">&quot;5XXXXXXXXXXX&quot;</span><span class="p p-Indicator">,</span>
+<span class="w">  </span><span class="s">&quot;Expiration&quot;</span><span class="p p-Indicator">:</span><span class="w"> </span><span class="s">&quot;2023-12-03T13:13:26Z&quot;</span>
+<span class="p p-Indicator">}</span>
+</pre></div>
+<ol class="arabic simple" start="4">
+<li>The URL referred to by <tt class="docutils literal">AWS_CONTAINER_CREDENTIALS_FULL_URI</tt> actually connects to the service exposed by the eks-pod-identity-agent component's Pod, deployed on the same node as the requesting Pod. Upon receiving a request, the eks-pod-identity-agent uses the provided OIDC token to interact with EKS's recently introduced <a class="reference external" href="https://docs.aws.amazon.com/eks/latest/APIReference/API_auth_AssumeRoleForPodIdentity.html">AssumeRoleForPodIdentity</a> API. This process is to acquire the needed AWS STS token, which is then relayed back to the client.</li>
+</ol>
+<div class="highlight"><pre><span></span><span class="l l-Scalar l-Scalar-Plain">$ aws eks-auth assume-role-for-pod-identity --cluster-name test --token $(cat $AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE) |jq</span>
+<span class="l l-Scalar l-Scalar-Plain">{</span>
+<span class="w">  </span><span class="l l-Scalar l-Scalar-Plain">&quot;subject&quot;</span><span class="p p-Indicator">:</span><span class="w"> </span><span class="p p-Indicator">{</span>
+<span class="w">    </span><span class="s">&quot;namespace&quot;</span><span class="p p-Indicator">:</span><span class="w"> </span><span class="s">&quot;default&quot;</span><span class="p p-Indicator">,</span>
+<span class="w">    </span><span class="s">&quot;serviceAccount&quot;</span><span class="p p-Indicator">:</span><span class="w"> </span><span class="s">&quot;default&quot;</span>
+<span class="w">  </span><span class="p p-Indicator">}</span><span class="err">,</span>
+<span class="w">  </span><span class="s">&quot;audience&quot;</span><span class="p p-Indicator">:</span><span class="w"> </span><span class="s">&quot;pods.eks.amazonaws.com&quot;</span><span class="err">,</span>
+<span class="w">  </span><span class="s">&quot;podIdentityAssociation&quot;</span><span class="p p-Indicator">:</span><span class="w"> </span><span class="p p-Indicator">{</span>
+<span class="w">    </span><span class="s">&quot;associationArn&quot;</span><span class="p p-Indicator">:</span><span class="w"> </span><span class="s">&quot;arn:aws:eks:us-west-2:5XXXXXXXXXXX:podidentityassociation/test/a-6aaXXXXXXXXXXXXXX&quot;</span><span class="p p-Indicator">,</span>
+<span class="w">    </span><span class="s">&quot;associationId&quot;</span><span class="p p-Indicator">:</span><span class="w"> </span><span class="s">&quot;a-6aaXXXXXXXXXXXXXX&quot;</span>
+<span class="w">  </span><span class="p p-Indicator">}</span><span class="err">,</span>
+<span class="w">  </span><span class="s">&quot;assumedRoleUser&quot;</span><span class="p p-Indicator">:</span><span class="w"> </span><span class="p p-Indicator">{</span>
+<span class="w">    </span><span class="s">&quot;arn&quot;</span><span class="p p-Indicator">:</span><span class="w"> </span><span class="s">&quot;arn:aws:sts::5XXXXXXXXXXX:assumed-role/test-eks-pod-identity/eks-test-XXXXXXXXXXXXXXXX&quot;</span><span class="p p-Indicator">,</span>
+<span class="w">    </span><span class="s">&quot;assumeRoleId&quot;</span><span class="p p-Indicator">:</span><span class="w"> </span><span class="s">&quot;ARXXXXXXXXXXXXXXXXXXX:eks-test-XXXXXXXXXXXXXXXXXX&quot;</span>
+<span class="w">  </span><span class="p p-Indicator">}</span><span class="err">,</span>
+<span class="w">  </span><span class="s">&quot;credentials&quot;</span><span class="p p-Indicator">:</span><span class="w"> </span><span class="p p-Indicator">{</span>
+<span class="w">    </span><span class="s">&quot;sessionToken&quot;</span><span class="p p-Indicator">:</span><span class="w"> </span><span class="s">&quot;IQoXXXXX&quot;</span><span class="p p-Indicator">,</span>
+<span class="w">    </span><span class="s">&quot;secretAccessKey&quot;</span><span class="p p-Indicator">:</span><span class="w"> </span><span class="s">&quot;nR4XXXXXX&quot;</span><span class="p p-Indicator">,</span>
+<span class="w">    </span><span class="s">&quot;accessKeyId&quot;</span><span class="p p-Indicator">:</span><span class="w"> </span><span class="s">&quot;ASXXXXXXXXXXXXXXXXXX&quot;</span><span class="p p-Indicator">,</span>
+<span class="w">    </span><span class="s">&quot;expiration&quot;</span><span class="p p-Indicator">:</span><span class="w"> </span><span class="s">&quot;2023-12-03T13:37:22+00:00&quot;</span>
+<span class="w">  </span><span class="p p-Indicator">}</span>
+<span class="err">}</span>
+</pre></div>
+<ol class="arabic simple" start="5">
+<li>The AWS SDK utilized by the application leverages the acquired STS token to access the specific AWS cloud product APIs it needs.</li>
+</ol>
+<p>In this process, there are a few crucial components and pieces of information that merit particular emphasis. Let's break them down one by one.</p>
+</div>
+<div class="section" id="eks-pod-identity-webhook">
+<h2 id="hideks-pod-identity-webhook">eks-pod-identity-webhook<a class="headerlink" href="#hideks-pod-identity-webhook" title="Permalink to this headline">¶</a></h2>
+<p>The EKS Pod Identity functionality seamlessly integrates with the <a class="reference external" href="https://github.com/aws/amazon-eks-pod-identity-webhook">eks-pod-identity-webhook</a> component, originally part of the IRSA feature. This component is responsible for automatically adding the necessary OIDC token and environment variable settings to the Pods. Moreover, the eks-pod-identity-webhook deployed in the EKS cluster control plane has been specially tailored for EKS Pod Identity. It only adds EKS Pod Identity configurations to Pods when the corresponding service account lacks IRSA-specific settings and is linked to IAM role information, as outlined in the previously mentioned usage instructions.</p>
+<p>The changes implemented in eks-pod-identity-webhook to facilitate EKS Pod Identity can be reviewed in its open-source version, though it's important to note that this version does not include the logic for identifying associated roles. The pertinent Pull Requests (PRs) that detail these modifications are <a class="reference external" href="https://github.com/aws/amazon-eks-pod-identity-webhook/pull/189">#189</a> and <a class="reference external" href="https://github.com/aws/amazon-eks-pod-identity-webhook/pull/196">#196</a>.</p>
+</div>
+<div class="section" id="eks-pod-identity-agent">
+<h2 id="hideks-pod-identity-agent">eks-pod-identity-agent<a class="headerlink" href="#hideks-pod-identity-agent" title="Permalink to this headline">¶</a></h2>
+<p>The EKS Pod Identity implementation suggested by the official documentation involves deploying a component called <a class="reference external" href="https://docs.aws.amazon.com/eks/latest/userguide/pod-id-agent-setup.html">eks-pod-identity-agent</a> within the cluster. The YAML configuration for this component's workload is outlined below.</p>
+<div class="highlight"><pre><span></span><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">apps/v1</span>
+<span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">DaemonSet</span>
+<span class="nt">metadata</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">annotations</span><span class="p">:</span>
+<span class="w">    </span><span class="nt">deprecated.daemonset.template.generation</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;1&quot;</span>
+<span class="w">  </span><span class="nt">creationTimestamp</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;2023-12-03T04:24:15Z&quot;</span>
+<span class="w">  </span><span class="nt">generation</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1</span>
+<span class="w">  </span><span class="nt">labels</span><span class="p">:</span>
+<span class="w">    </span><span class="nt">app.kubernetes.io/instance</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">eks-pod-identity-agent</span>
+<span class="w">    </span><span class="nt">app.kubernetes.io/managed-by</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Helm</span>
+<span class="w">    </span><span class="nt">app.kubernetes.io/name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">eks-pod-identity-agent</span>
+<span class="w">    </span><span class="nt">app.kubernetes.io/version</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.0.25</span>
+<span class="w">    </span><span class="nt">helm.sh/chart</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">eks-pod-identity-agent-1.0.0</span>
+<span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">eks-pod-identity-agent</span>
+<span class="w">  </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">kube-system</span>
+<span class="w">  </span><span class="nt">resourceVersion</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;8978&quot;</span>
+<span class="w">  </span><span class="nt">uid</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">08c03e91-69d4-460b-8acb-b9f9f546dd87</span>
+<span class="nt">spec</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">revisionHistoryLimit</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">10</span>
+<span class="w">  </span><span class="nt">selector</span><span class="p">:</span>
+<span class="w">    </span><span class="nt">matchLabels</span><span class="p">:</span>
+<span class="w">      </span><span class="nt">app.kubernetes.io/instance</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">eks-pod-identity-agent</span>
+<span class="w">      </span><span class="nt">app.kubernetes.io/name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">eks-pod-identity-agent</span>
+<span class="w">  </span><span class="nt">template</span><span class="p">:</span>
+<span class="w">    </span><span class="nt">metadata</span><span class="p">:</span>
+<span class="w">      </span><span class="nt">creationTimestamp</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">null</span>
+<span class="w">      </span><span class="nt">labels</span><span class="p">:</span>
+<span class="w">        </span><span class="nt">app.kubernetes.io/instance</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">eks-pod-identity-agent</span>
+<span class="w">        </span><span class="nt">app.kubernetes.io/name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">eks-pod-identity-agent</span>
+<span class="w">    </span><span class="nt">spec</span><span class="p">:</span>
+<span class="w">      </span><span class="nt">affinity</span><span class="p">:</span>
+<span class="w">        </span><span class="nt">nodeAffinity</span><span class="p">:</span>
+<span class="w">          </span><span class="nt">requiredDuringSchedulingIgnoredDuringExecution</span><span class="p">:</span>
+<span class="w">            </span><span class="nt">nodeSelectorTerms</span><span class="p">:</span>
+<span class="w">            </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">matchExpressions</span><span class="p">:</span>
+<span class="w">              </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">key</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">kubernetes.io/os</span>
+<span class="w">                </span><span class="nt">operator</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">In</span>
+<span class="w">                </span><span class="nt">values</span><span class="p">:</span>
+<span class="w">                </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">linux</span>
+<span class="w">              </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">key</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">kubernetes.io/arch</span>
+<span class="w">                </span><span class="nt">operator</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">In</span>
+<span class="w">                </span><span class="nt">values</span><span class="p">:</span>
+<span class="w">                </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">amd64</span>
+<span class="w">                </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">arm64</span>
+<span class="w">              </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">key</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">eks.amazonaws.com/compute-type</span>
+<span class="w">                </span><span class="nt">operator</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">NotIn</span>
+<span class="w">                </span><span class="nt">values</span><span class="p">:</span>
+<span class="w">                </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">fargate</span>
+<span class="w">      </span><span class="nt">containers</span><span class="p">:</span>
+<span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">args</span><span class="p">:</span>
+<span class="w">        </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">--port</span>
+<span class="w">        </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="s">&quot;80&quot;</span>
+<span class="w">        </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">--cluster-name</span>
+<span class="w">        </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">test</span>
+<span class="w">        </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">--probe-port</span>
+<span class="w">        </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="s">&quot;2703&quot;</span>
+<span class="w">        </span><span class="nt">command</span><span class="p">:</span>
+<span class="w">        </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">/go-runner</span>
+<span class="w">        </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">/eks-pod-identity-agent</span>
+<span class="w">        </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">server</span>
+<span class="w">        </span><span class="nt">env</span><span class="p">:</span>
+<span class="w">        </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">AWS_REGION</span>
+<span class="w">          </span><span class="nt">value</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">us-west-2</span>
+<span class="w">        </span><span class="nt">image</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">602401143452.dkr.ecr.us-west-2.amazonaws.com/eks/eks-pod-identity-agent:0.0.25</span>
+<span class="w">        </span><span class="nt">imagePullPolicy</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Always</span>
+<span class="w">        </span><span class="nt">livenessProbe</span><span class="p">:</span>
+<span class="w">          </span><span class="nt">failureThreshold</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">3</span>
+<span class="w">          </span><span class="nt">httpGet</span><span class="p">:</span>
+<span class="w">            </span><span class="nt">host</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">localhost</span>
+<span class="w">            </span><span class="nt">path</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">/healthz</span>
+<span class="w">            </span><span class="nt">port</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">probes-port</span>
+<span class="w">            </span><span class="nt">scheme</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">HTTP</span>
+<span class="w">          </span><span class="nt">initialDelaySeconds</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">30</span>
+<span class="w">          </span><span class="nt">periodSeconds</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">10</span>
+<span class="w">          </span><span class="nt">successThreshold</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1</span>
+<span class="w">          </span><span class="nt">timeoutSeconds</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">10</span>
+<span class="w">        </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">eks-pod-identity-agent</span>
+<span class="w">        </span><span class="nt">ports</span><span class="p">:</span>
+<span class="w">        </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">containerPort</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">80</span>
+<span class="w">          </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">proxy</span>
+<span class="w">          </span><span class="nt">protocol</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">TCP</span>
+<span class="w">        </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">containerPort</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">2703</span>
+<span class="w">          </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">probes-port</span>
+<span class="w">          </span><span class="nt">protocol</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">TCP</span>
+<span class="w">        </span><span class="nt">readinessProbe</span><span class="p">:</span>
+<span class="w">          </span><span class="nt">failureThreshold</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">30</span>
+<span class="w">          </span><span class="nt">httpGet</span><span class="p">:</span>
+<span class="w">            </span><span class="nt">host</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">localhost</span>
+<span class="w">            </span><span class="nt">path</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">/readyz</span>
+<span class="w">            </span><span class="nt">port</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">probes-port</span>
+<span class="w">            </span><span class="nt">scheme</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">HTTP</span>
+<span class="w">          </span><span class="nt">initialDelaySeconds</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1</span>
+<span class="w">          </span><span class="nt">periodSeconds</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">10</span>
+<span class="w">          </span><span class="nt">successThreshold</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1</span>
+<span class="w">          </span><span class="nt">timeoutSeconds</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">10</span>
+<span class="w">        </span><span class="nt">resources</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{}</span>
+<span class="w">        </span><span class="nt">securityContext</span><span class="p">:</span>
+<span class="w">          </span><span class="nt">capabilities</span><span class="p">:</span>
+<span class="w">            </span><span class="nt">add</span><span class="p">:</span>
+<span class="w">            </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">CAP_NET_BIND_SERVICE</span>
+<span class="w">        </span><span class="nt">terminationMessagePath</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">/dev/termination-log</span>
+<span class="w">        </span><span class="nt">terminationMessagePolicy</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">File</span>
+<span class="w">      </span><span class="nt">dnsPolicy</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ClusterFirst</span>
+<span class="w">      </span><span class="nt">hostNetwork</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+<span class="w">      </span><span class="nt">initContainers</span><span class="p">:</span>
+<span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">command</span><span class="p">:</span>
+<span class="w">        </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">/go-runner</span>
+<span class="w">        </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">/eks-pod-identity-agent</span>
+<span class="w">        </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">initialize</span>
+<span class="w">        </span><span class="nt">image</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">602401143452.dkr.ecr.us-west-2.amazonaws.com/eks/eks-pod-identity-agent:0.0.25</span>
+<span class="w">        </span><span class="nt">imagePullPolicy</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Always</span>
+<span class="w">        </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">eks-pod-identity-agent-init</span>
+<span class="w">        </span><span class="nt">resources</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{}</span>
+<span class="w">        </span><span class="nt">securityContext</span><span class="p">:</span>
+<span class="w">          </span><span class="nt">privileged</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+<span class="w">        </span><span class="nt">terminationMessagePath</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">/dev/termination-log</span>
+<span class="w">        </span><span class="nt">terminationMessagePolicy</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">File</span>
+<span class="w">      </span><span class="nt">priorityClassName</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">system-node-critical</span>
+<span class="w">      </span><span class="nt">restartPolicy</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Always</span>
+<span class="w">      </span><span class="nt">schedulerName</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">default-scheduler</span>
+<span class="w">      </span><span class="nt">securityContext</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{}</span>
+<span class="w">      </span><span class="nt">terminationGracePeriodSeconds</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">30</span>
+<span class="w">  </span><span class="nt">updateStrategy</span><span class="p">:</span>
+<span class="w">    </span><span class="nt">rollingUpdate</span><span class="p">:</span>
+<span class="w">      </span><span class="nt">maxSurge</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0</span>
+<span class="w">      </span><span class="nt">maxUnavailable</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">10%</span>
+<span class="w">    </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">RollingUpdate</span>
+<span class="nt">status</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">currentNumberScheduled</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1</span>
+<span class="w">  </span><span class="nt">desiredNumberScheduled</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1</span>
+<span class="w">  </span><span class="nt">numberAvailable</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1</span>
+<span class="w">  </span><span class="nt">numberMisscheduled</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0</span>
+<span class="w">  </span><span class="nt">numberReady</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1</span>
+<span class="w">  </span><span class="nt">observedGeneration</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1</span>
+</pre></div>
+<p>The eks-pod-identity-agent component is characterized by the following features:</p>
+<ul class="simple">
+<li>It depends on the node IAM role having been assigned specific IAM permission policies as follows.</li>
+</ul>
+<div class="highlight"><pre><span></span><span class="p">{</span>
+<span class="w">   </span><span class="nt">&quot;Version&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;2012-10-17&quot;</span><span class="p">,</span>
+<span class="w">   </span><span class="nt">&quot;Statement&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+<span class="w">       </span><span class="p">{</span>
+<span class="w">           </span><span class="nt">&quot;Effect&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;Allow&quot;</span><span class="p">,</span>
+<span class="w">           </span><span class="nt">&quot;Action&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+<span class="w">               </span><span class="s2">&quot;eks-auth:AssumeRoleForPodIdentity&quot;</span><span class="p">,</span>
+<span class="w">           </span><span class="p">],</span>
+<span class="w">           </span><span class="nt">&quot;Resource&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;*&quot;</span>
+<span class="w">       </span><span class="p">}</span>
+<span class="w">   </span><span class="p">]</span>
+<span class="p">}</span>
+</pre></div>
+<ul class="simple">
+<li>The component's Pod is configured to use <tt class="docutils literal">hostNetwork</tt>.</li>
+<li>The service inside the component is set up to listen on ports 80 and 2703.</li>
+<li>For port 80, it listens on the IPv4 address <tt class="docutils literal">169.254.170.23</tt> and the IPv6 address <tt class="docutils literal"><span class="pre">[fd00:ec2::23]</span></tt>.</li>
+</ul>
+<div class="highlight"><pre><span></span>$<span class="w"> </span>ss<span class="w"> </span>-anltp<span class="w"> </span><span class="p">|</span>grep<span class="w"> </span>eks-pod
+LISTEN<span class="w"> </span><span class="m">0</span><span class="w">      </span><span class="m">4096</span><span class="w">        </span><span class="m">127</span>.0.0.1:2703<span class="w">       </span><span class="m">0</span>.0.0.0:*<span class="w">    </span>users:<span class="o">((</span><span class="s2">&quot;eks-pod-identit&quot;</span>,pid<span class="o">=</span><span class="m">3798</span>,fd<span class="o">=</span><span class="m">5</span><span class="o">))</span>
+LISTEN<span class="w"> </span><span class="m">0</span><span class="w">      </span><span class="m">4096</span><span class="w">   </span><span class="m">169</span>.254.170.23:80<span class="w">         </span><span class="m">0</span>.0.0.0:*<span class="w">    </span>users:<span class="o">((</span><span class="s2">&quot;eks-pod-identit&quot;</span>,pid<span class="o">=</span><span class="m">3798</span>,fd<span class="o">=</span><span class="m">4</span><span class="o">))</span>
+LISTEN<span class="w"> </span><span class="m">0</span><span class="w">      </span><span class="m">4096</span><span class="w">   </span><span class="o">[</span>fd00:ec2::23<span class="o">]</span>:80<span class="w">            </span><span class="o">[</span>::<span class="o">]</span>:*<span class="w">    </span>users:<span class="o">((</span><span class="s2">&quot;eks-pod-identit&quot;</span>,pid<span class="o">=</span><span class="m">3798</span>,fd<span class="o">=</span><span class="m">3</span><span class="o">))</span>
+</pre></div>
+<ul class="simple">
+<li>The component employs an init container to establish a network interface named <tt class="docutils literal"><span class="pre">pod-id-link0</span></tt> on the node. This interface is configured with the IPv4 address <tt class="docutils literal">169.254.170.23</tt> and the IPv6 address <tt class="docutils literal"><span class="pre">[fd00:ec2::23]</span></tt>.</li>
+</ul>
+<div class="highlight"><pre><span></span>pod-id-link0:<span class="w"> </span><span class="nv">flags</span><span class="o">=</span><span class="m">195</span>&lt;UP,BROADCAST,RUNNING,NOARP&gt;<span class="w">  </span>mtu<span class="w"> </span><span class="m">1500</span>
+<span class="w">        </span>inet<span class="w"> </span><span class="m">169</span>.254.170.23<span class="w">  </span>netmask<span class="w"> </span><span class="m">255</span>.255.255.255<span class="w">  </span>broadcast<span class="w"> </span><span class="m">0</span>.0.0.0
+<span class="w">        </span>inet6<span class="w"> </span>fe80::2078:53ff:fe2f:c723<span class="w">  </span>prefixlen<span class="w"> </span><span class="m">64</span><span class="w">  </span>scopeid<span class="w"> </span>0x20&lt;link&gt;
+<span class="w">        </span>inet6<span class="w"> </span>fd00:ec2::23<span class="w">  </span>prefixlen<span class="w"> </span><span class="m">128</span><span class="w">  </span>scopeid<span class="w"> </span>0x0&lt;global&gt;
+<span class="w">        </span>ether<span class="w"> </span><span class="m">22</span>:78:53:2f:c7:23<span class="w">  </span>txqueuelen<span class="w"> </span><span class="m">1000</span><span class="w">  </span><span class="o">(</span>Ethernet<span class="o">)</span>
+<span class="w">        </span>RX<span class="w"> </span>packets<span class="w"> </span><span class="m">0</span><span class="w">  </span>bytes<span class="w"> </span><span class="m">0</span><span class="w"> </span><span class="o">(</span><span class="m">0</span>.0<span class="w"> </span>B<span class="o">)</span>
+<span class="w">        </span>RX<span class="w"> </span>errors<span class="w"> </span><span class="m">0</span><span class="w">  </span>dropped<span class="w"> </span><span class="m">0</span><span class="w">  </span>overruns<span class="w"> </span><span class="m">0</span><span class="w">  </span>frame<span class="w"> </span><span class="m">0</span>
+<span class="w">        </span>TX<span class="w"> </span>packets<span class="w"> </span><span class="m">10</span><span class="w">  </span>bytes<span class="w"> </span><span class="m">700</span><span class="w"> </span><span class="o">(</span><span class="m">700</span>.0<span class="w"> </span>B<span class="o">)</span>
+<span class="w">        </span>TX<span class="w"> </span>errors<span class="w"> </span><span class="m">0</span><span class="w">  </span>dropped<span class="w"> </span><span class="m">0</span><span class="w"> </span>overruns<span class="w"> </span><span class="m">0</span><span class="w">  </span>carrier<span class="w"> </span><span class="m">0</span><span class="w">  </span>collisions<span class="w"> </span><span class="m">0</span>
+</pre></div>
+<ul class="simple">
+<li>Additionally, the init container configures specific routing rules to guarantee that traffic directed to <tt class="docutils literal">169.254.170.23</tt> is handled on the local machine.</li>
+</ul>
+<div class="highlight"><pre><span></span><span class="m">169</span>.254.170.23<span class="w"> </span>dev<span class="w"> </span>pod-id-link0
+</pre></div>
+</div>
+<div class="section" id="assumeroleforpodidentity">
+<h2 id="hidassumeroleforpodidentity">AssumeRoleForPodIdentity<a class="headerlink" href="#hidassumeroleforpodidentity" title="Permalink to this headline">¶</a></h2>
+<p>EKS has introduced a new API, <a class="reference external" href="https://docs.aws.amazon.com/eks/latest/APIReference/API_auth_AssumeRoleForPodIdentity.html">AssumeRoleForPodIdentity</a>. This API is utilized to acquire an STS token that enables the assuming of the IAM role linked to a service account, through the use of the service account's OIDC token.</p>
+<p>service account oidc token 中的 payload 的内容示例如下。</p>
+<div class="highlight"><pre><span></span><span class="p">{</span>
+<span class="w">  </span><span class="nt">&quot;aud&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+<span class="w">    </span><span class="s2">&quot;pods.eks.amazonaws.com&quot;</span>
+<span class="w">  </span><span class="p">],</span>
+<span class="w">  </span><span class="nt">&quot;exp&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">1701672885</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;iat&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">1701586485</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;iss&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;https://oidc.eks.us-west-2.amazonaws.com/id/DA16E524AXXXXXX&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;kubernetes.io&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="nt">&quot;namespace&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;default&quot;</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">&quot;pod&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">      </span><span class="nt">&quot;name&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;test-596475c6d5-xgvml&quot;</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">&quot;uid&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;924e66b2-841e-4969-9fa7-a19f3f6f1029&quot;</span>
+<span class="w">    </span><span class="p">},</span>
+<span class="w">    </span><span class="nt">&quot;serviceaccount&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">      </span><span class="nt">&quot;name&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;default&quot;</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">&quot;uid&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;eca98cb1-ca2e-469b-8f9d-2be9f5a3354f&quot;</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="w">  </span><span class="p">},</span>
+<span class="w">  </span><span class="nt">&quot;nbf&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">1701586485</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;sub&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;system:serviceaccount:default:default&quot;</span>
+<span class="p">}</span>
+</pre></div>
+<p>This OIDC token, when compared to the one used in the IRSA solution, differs only in its audience (aud) field, which is <tt class="docutils literal">sts.amazonaws.com</tt> in IRSA's case. Otherwise, they are identical.</p>
+<p>From this, I infer that the backend process of AssumeRoleForPodIdentity likely follows these steps:</p>
+<ol class="arabic simple">
+<li>Initially, the client's OIDC token is parsed and its validity and legitimacy are verified based on the OIDC protocol.</li>
+<li>Next, the role that needs to be assumed is identified, using the service account's configured association with an IAM role.</li>
+<li>Finally, the STS API is invoked to assume the identified role, thereby generating the STS token required by the client.</li>
+</ol>
+</div>
+<div class="section" id="association-of-service-account-with-iam-role">
+<h2 id="hidassociation-of-service-account-with-iam-role">Association of Service Account with IAM Role<a class="headerlink" href="#hidassociation-of-service-account-with-iam-role" title="Permalink to this headline">¶</a></h2>
+<p>EKS has introduced a suite of APIs to streamline the process for users to link service accounts with IAM roles. This enhancement is complemented by new interfaces on the EKS console for managing these associations. Notably, these associations are maintained within EKS and do not alter the trust policy of the roles.</p>
+<ul class="simple">
+<li><a class="reference external" href="https://docs.aws.amazon.com/eks/latest/APIReference/API_CreatePodIdentityAssociation.html">CreatePodIdentityAssociation</a>: To link a role with a service account.</li>
+<li><a class="reference external" href="https://docs.aws.amazon.com/eks/latest/APIReference/API_DescribePodIdentityAssociation.html">DescribePodIdentityAssociation</a>: To view detailed information about a specific role association.</li>
+<li><a class="reference external" href="https://docs.aws.amazon.com/eks/latest/APIReference/API_UpdatePodIdentityAssociation.html">UpdatePodIdentityAssociation</a>: To alter the role information linked to a service account.</li>
+<li><a class="reference external" href="https://docs.aws.amazon.com/eks/latest/APIReference/API_DeletePodIdentityAssociation.html">DeletePodIdentityAssociation</a>: To remove a particular role association record.</li>
+<li><a class="reference external" href="https://docs.aws.amazon.com/eks/latest/APIReference/API_ListPodIdentityAssociations.html">ListPodIdentityAssociations</a>: To access a list of all current role association records.</li>
+</ul>
+</div>
+<div class="section" id="access-and-permission-management">
+<h2 id="hidaccess-and-permission-management">Access and Permission Management<a class="headerlink" href="#hidaccess-and-permission-management" title="Permalink to this headline">¶</a></h2>
+<p>Under the IRSA approach, it's necessary to include the permissible cluster OIDC provider and service account details in the IAM role's trust policy. However, with EKS Pod Identity, altering the role's trust policy is no longer required. Instead, you can specify which roles are accessible to which service accounts in specific clusters using the EKS console or the EKS API, as explained earlier. These associations are maintained within EKS, reducing the need for regular updates to the trust policy of roles.</p>
+<p>This method allows EKS Pod Identity to address a limitation encountered in IRSA, where a role's trust policy size constraints meant it could only be linked to a few service accounts (details available in <a class="reference external" href="https://github.com/aws/containers-roadmap/issues/1408">#148</a>). With EKS Pod Identity, there's no limit to the number of service accounts that can be associated with a single role.</p>
+<div class="section" id="attribute-based-access-control-abac">
+<h3 id="hidattribute-based-access-control-abac">attribute-based access control (ABAC)<a class="headerlink" href="#hidattribute-based-access-control-abac" title="Permalink to this headline">¶</a></h3>
+<p>EKS Pod Identity also ushers in an advanced attribute-based access control (ABAC) feature. STS tokens acquired via EKS Pod Identity inherently include tags like cluster details, namespace, and service account. Utilizing IAM's <a class="reference external" href="https://docs.aws.amazon.com/IAM/latest/UserGuide/access_iam-tags.html">tag-based authorization</a> functionality, users can now employ these attributes for more granular access control when setting up permission policies for roles.</p>
+<p>STS tokens acquired via EKS Pod Identity automatically include these tags:</p>
+<ul class="simple">
+<li><tt class="docutils literal"><span class="pre">eks-cluster-arn</span></tt>: ARN of the current cluster.</li>
+<li><tt class="docutils literal"><span class="pre">eks-cluster-name</span></tt>: Name of the current cluster.</li>
+<li><tt class="docutils literal"><span class="pre">kubernetes-namespace</span></tt>: Name of the namespace containing the service account.</li>
+<li><tt class="docutils literal"><span class="pre">kubernetes-service-account</span></tt>: Name of the service account.</li>
+<li><tt class="docutils literal"><span class="pre">kubernetes-pod-name</span></tt>: Name of the pod utilizing the service account.</li>
+<li><tt class="docutils literal"><span class="pre">kubernetes-pod-uid</span></tt>: UID of the pod that is using the service account.</li>
+</ul>
+<div class="highlight"><pre><span></span><span class="nt">&quot;tags&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+<span class="w">    </span><span class="p">{</span>
+<span class="w">        </span><span class="nt">&quot;key&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;eks-cluster-arn&quot;</span><span class="p">,</span>
+<span class="w">        </span><span class="nt">&quot;value&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;arn:aws:eks:us-west-2:5XXXXXXXXXXX:cluster/test&quot;</span>
+<span class="w">    </span><span class="p">},</span>
+<span class="w">    </span><span class="p">{</span>
+<span class="w">        </span><span class="nt">&quot;key&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;eks-cluster-name&quot;</span><span class="p">,</span>
+<span class="w">        </span><span class="nt">&quot;value&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;test&quot;</span>
+<span class="w">    </span><span class="p">},</span>
+<span class="w">    </span><span class="p">{</span>
+<span class="w">        </span><span class="nt">&quot;key&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;kubernetes-namespace&quot;</span><span class="p">,</span>
+<span class="w">        </span><span class="nt">&quot;value&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;default&quot;</span>
+<span class="w">    </span><span class="p">},</span>
+<span class="w">    </span><span class="p">{</span>
+<span class="w">        </span><span class="nt">&quot;key&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;kubernetes-service-account&quot;</span><span class="p">,</span>
+<span class="w">        </span><span class="nt">&quot;value&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;default&quot;</span>
+<span class="w">    </span><span class="p">},</span>
+<span class="w">    </span><span class="p">{</span>
+<span class="w">        </span><span class="nt">&quot;key&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;kubernetes-pod-name&quot;</span><span class="p">,</span>
+<span class="w">        </span><span class="nt">&quot;value&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;test-596475c6d5-xgvml&quot;</span>
+<span class="w">    </span><span class="p">},</span>
+<span class="w">    </span><span class="p">{</span>
+<span class="w">        </span><span class="nt">&quot;key&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;kubernetes-pod-uid&quot;</span><span class="p">,</span>
+<span class="w">        </span><span class="nt">&quot;value&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;924e66b2-841e-4969-9fa7-a19f3f6f1029&quot;</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="p">]</span>
+</pre></div>
+<p>In the process of crafting role permission policies, the format <tt class="docutils literal"><span class="pre">${aws:PrincipalTag/&lt;tag-key&gt;}</span></tt> can be employed. This approach is used within the <tt class="docutils literal">Condition</tt> section of the permission policy to denote the value of a particular tag present in the attributes of the credentials.</p>
+<div class="highlight"><pre><span></span><span class="p">{</span>
+<span class="w">    </span><span class="nt">&quot;Version&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;2012-10-17&quot;</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">&quot;Statement&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+<span class="w">        </span><span class="p">{</span>
+<span class="w">            </span><span class="nt">&quot;Effect&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;Allow&quot;</span><span class="p">,</span>
+<span class="w">            </span><span class="nt">&quot;Action&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+<span class="w">                </span><span class="s2">&quot;s3:GetObject&quot;</span><span class="p">,</span>
+<span class="w">                </span><span class="s2">&quot;s3:GetObjectTagging&quot;</span>
+<span class="w">            </span><span class="p">],</span>
+<span class="w">            </span><span class="nt">&quot;Resource&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;*&quot;</span><span class="p">,</span>
+<span class="w">            </span><span class="nt">&quot;Condition&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">                </span><span class="nt">&quot;StringEquals&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">                    </span><span class="nt">&quot;s3:ExistingObjectTag/eks-cluster-name&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;${aws:PrincipalTag/eks-cluster-name}&quot;</span>
+<span class="w">                </span><span class="p">},</span>
+<span class="w">                </span><span class="nt">&quot;StringEqualsIfExists&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">                    </span><span class="nt">&quot;aws:ResourceTag/kubernetes-namespace&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;s3-demo&quot;</span><span class="p">,</span>
+<span class="w">                    </span><span class="nt">&quot;aws:Resourcelag/kubernetes-service-account&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;${aws:PrincipalTag/kubernetes-service-account}&quot;</span>
+<span class="w">                </span><span class="p">}</span>
+<span class="w">            </span><span class="p">}</span>
+<span class="w">        </span><span class="p">}</span>
+<span class="w">    </span><span class="p">]</span>
+<span class="p">}</span>
+</pre></div>
+<p>With the example permission policy provided earlier, we can tailor the permissions of STS tokens acquired via the EKS Pod Identity feature in the following ways:</p>
+<ul class="simple">
+<li>Allow access only to S3 objects tagged with <tt class="docutils literal"><span class="pre">eks-cluster-name</span></tt>, where the tag's value aligns with the name of the cluster tied to the current STS token.</li>
+<li>Permit access to an S3 object only if it carries a <tt class="docutils literal"><span class="pre">kubernetes-namespace</span></tt> tag, and only if this tag's value is <tt class="docutils literal"><span class="pre">s3-demo</span></tt>.</li>
+<li>Authorize access to an S3 object only if it bears a <tt class="docutils literal"><span class="pre">kubernetes-service-account</span></tt> tag, and solely if the tag's value corresponds to the name of the service account associated with the current STS token.</li>
+</ul>
+</div>
+</div>
+<div class="section" id="distinguishing-from-irsa">
+<h2 id="hiddistinguishing-from-irsa">Distinguishing from IRSA<a class="headerlink" href="#hiddistinguishing-from-irsa" title="Permalink to this headline">¶</a></h2>
+<p>Considering the details shared earlier, a comparison between EKS Pod Identity and IRSA highlights several key differences, which are as follows:</p>
+<table border="1" class="docutils">
+<colgroup>
+<col width="28%" />
+<col width="36%" />
+<col width="36%" />
+</colgroup>
+<thead valign="bottom">
+<tr><th class="head">Comparison Item</th>
+<th class="head">EKS Pod Identity</th>
+<th class="head">IRSA</th>
+</tr>
+</thead>
+<tbody valign="top">
+<tr><td>Additional Permissions for Node IAM Role</td>
+<td>Requires <tt class="docutils literal"><span class="pre">eks-auth:AssumeRoleForPodIdentity</span></tt></td>
+<td><strong>Not Required</strong></td>
+</tr>
+<tr><td>Creation of IAM OIDC Provider</td>
+<td><strong>Not Required</strong></td>
+<td>Necessary for Each Cluster</td>
+</tr>
+<tr><td>Associating Roles with Service Account</td>
+<td><strong>Via EKS API/Console</strong></td>
+<td>Service Account Annotation + Role Trust Policy Modification</td>
+</tr>
+<tr><td rowspan="2">No. of Service Accounts Per Role</td>
+<td rowspan="2"><strong>Unlimited</strong></td>
+<td rowspan="2">Limited by 4096-Character Trust Policy,
+Typically Around 10 Service Accounts or Clusters</td>
+</tr>
+<tr></tr>
+<tr><td>No. of Roles Per Service Account</td>
+<td>One</td>
+<td>Unlimited</td>
+</tr>
+<tr><td rowspan="2">Role Trust Policy Modification Frequency</td>
+<td rowspan="2"><strong>Once Only</strong> for Trust with
+<tt class="docutils literal">pods.eks.amazonaws.com</tt>
+and Necessary Actions</td>
+<td rowspan="2">At Least Once for Each Cluster</td>
+</tr>
+<tr></tr>
+<tr><td>Access Control Based on Service Account Attributes</td>
+<td><strong>Supported via ABAC</strong></td>
+<td>Not Supported</td>
+</tr>
+<tr><td rowspan="2">Supported Cluster Types</td>
+<td rowspan="2">Only EKS, Not AWS Outposts, EKS Anywhere,
+AWS Fargate, or Self-Built Clusters</td>
+<td rowspan="2"><strong>All Except AWS Outposts</strong></td>
+</tr>
+<tr></tr>
+<tr><td>Data Plane Dependencies</td>
+<td>kubelet + eks-pod-identity-agent</td>
+<td><strong>kublet</strong></td>
+</tr>
+<tr><td rowspan="5">Stability Risks</td>
+<td rowspan="5">Relies on Stability of Cluster Control/Data Plane + EKS API;
+Dependency on eks-pod-identity-agent Stability;
+Risks of STS Token Access Issues if Application Pods
+Launch Before eks-pod-identity-agent Pod
+(like in Auto-Scaling Scenarios with Same
+<tt class="docutils literal">hostNetwork</tt> Config, Not Recommended for CNI, CSI, etc).</td>
+<td rowspan="5"><strong>Depends on Stability of Cluster Control/Data Plane + STS API</strong></td>
+</tr>
+<tr></tr>
+<tr></tr>
+<tr></tr>
+<tr></tr>
+</tbody>
+</table>
+</div>
+<div class="section" id="references">
+<h2 id="hidreferences">References<a class="headerlink" href="#hidreferences" title="Permalink to this headline">¶</a></h2>
+<ul class="simple">
+<li><a class="reference external" href="https://aws.amazon.com/blogs/aws/amazon-eks-pod-identity-simplifies-iam-permissions-for-applications-on-amazon-eks-clusters/">Amazon EKS Pod Identity simplifies IAM permissions for applications on Amazon EKS clusters | AWS News Blog</a></li>
+<li><a class="reference external" href="https://aws.amazon.com/blogs/opensource/introducing-fine-grained-iam-roles-service-accounts/">Introducing fine-grained IAM roles for service accounts | AWS Open Source Blog</a></li>
+<li><a class="reference external" href="https://docs.aws.amazon.com/eks/latest/userguide/pod-identities.html">EKS Pod Identities - Amazon EKS</a></li>
+<li><a class="reference external" href="https://github.com/aws/amazon-eks-pod-identity-webhook">aws/amazon-eks-pod-identity-webhook: Amazon EKS Pod Identity Webhook</a></li>
+<li><a class="reference external" href="https://docs.aws.amazon.com/eks/latest/userguide/pod-id-abac.html">Define permissions for EKS Pod Identities to assume roles based on tags - Amazon EKS</a></li>
+<li><a class="reference external" href="https://docs.aws.amazon.com/IAM/latest/UserGuide/access_iam-tags.html">Controlling access to and for IAM users and roles using tags - AWS Identity and Access Management</a></li>
+<li><a class="reference external" href="https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_policies_elements_condition.html">IAM JSON policy elements: Condition - AWS Identity and Access Management</a></li>
+<li><a class="reference external" href="https://securitylabs.datadoghq.com/articles/eks-pod-identity-deep-dive/">Deep dive into the new Amazon EKS Pod Identity feature | Datadog Security Labs</a></li>
+</ul>
+</div>
+
+                </div>
+            </div>
+            <!-- /.entry-content -->
+<section class="text-center">
+  
+<div id="donate"></div>
+
+<div class="social-share"></div>
+<div class="social-comment-note">
+<p>有任何建议和想法欢迎在下方评论区留言或者加我<a href="/static/wechat.png">微信</a>交流</p>
+</div>
+
+</section>
+    <hr/>
+    <section class="comments" id="comments">
+        <h2>Comments</h2>
+
+        <div id="disqus_thread"></div>
+        <script type="text/javascript">
+            /* * * CONFIGURATION VARIABLES: EDIT BEFORE PASTING INTO YOUR WEBPAGE * * */
+            var disqus_shortname = 'my-github-blog'; // required: replace example with your forum shortname
+
+                    var disqus_identifier = 'security-deep-dive-into-aws-eks-pod-identity-feature';
+                var disqus_url = 'https://mozillazg.com/2023/12/security-deep-dive-into-aws-eks-pod-identity-feature-en.html';
+
+            var disqus_config = function () {
+                this.language = "";
+            };
+
+            /* * * DON'T EDIT BELOW THIS LINE * * */
+            (function () {
+                var dsq = document.createElement('script');
+                dsq.type = 'text/javascript';
+                dsq.async = true;
+                dsq.src = '//' + disqus_shortname + '.disqus.com/embed.js';
+                (document.getElementsByTagName('head')[0] || document.getElementsByTagName('body')[0]).appendChild(dsq);
+            })();
+        </script>
+        <noscript>Please enable JavaScript to view the <a href="http://disqus.com/?ref_noscript">comments powered by
+            Disqus.</a></noscript>
+        <a href="http://disqus.com" class="dsq-brlink">comments powered by <span class="logo-disqus">Disqus</span></a>
+
+    </section>
+        </article>
+    </section>
+
+        </div>
+    </div>
+</div>
+<footer>
+   <div class="container">
+      <hr>
+      <div class="row">
+         <div class="col-xs-10">&copy; 2023 mozillazg
+            &middot; Powered by <a href="https://github.com/DandyDev/pelican-bootstrap3" target="_blank">pelican-bootstrap3</a>,
+            <a href="http://docs.getpelican.com/" target="_blank">Pelican</a>,
+            <a href="http://getbootstrap.com" target="_blank">Bootstrap</a>
+            &middot; <a href="/privacy-policy.html" target="_blank">Privacy</a>              <p><small>  <a rel="license" href="http://creativecommons.org/licenses/by-sa/4.0/"><img alt="Creative Commons License" style="border-width:0" src="/static/images/by-sa-80x15.png" /></a>
+    &quot;<span xmlns:dct="http://purl.org/dc/terms/" property="dct:title">mozillazg's Blog</span>&quot; by <a xmlns:cc="http://creativecommons.org/ns#" href="https://mozillazg.com" property="cc:attributionName" rel="cc:attributionURL">mozillazg</a> is
+  licensed under a <a rel="license" href="http://creativecommons.org/licenses/by-sa/4.0/">Creative Commons Attribution-ShareAlike 4.0 International License</a>, except where indicated otherwise.
+</small></p>
+         </div>
+         <div class="col-xs-2"><p class="pull-right"><i class="fa fa-arrow-up"></i> <a href="#">Back to top</a></p></div>
+      </div>
+   </div>
+</footer>
+<script src="https://cdn.jsdelivr.net/npm/jquery@2.1.1/dist/jquery.min.js"></script>
+
+<!-- Include all compiled plugins (below), or include individual files as needed -->
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@3.3.4/dist/js/bootstrap.min.js"></script>
+
+<!-- Enable responsive features in IE8 with Respond.js (https://github.com/scottjehl/Respond) -->
+
+    <!-- Disqus -->
+    <script type="text/javascript">
+        /* * * CONFIGURATION VARIABLES: EDIT BEFORE PASTING INTO YOUR WEBPAGE * * */
+        var disqus_shortname = 'my-github-blog'; // required: replace example with your forum shortname
+
+        /* * * DON'T EDIT BELOW THIS LINE * * */
+        (function () {
+            var s = document.createElement('script');
+            s.async = true;
+            s.type = 'text/javascript';
+            s.src = '//' + disqus_shortname + '.disqus.com/count.js';
+            (document.getElementsByTagName('HEAD')[0] || document.getElementsByTagName('BODY')[0]).appendChild(s);
+        }());
+    </script>
+    <!-- End Disqus Code -->
+    <!-- Google Analytics Universal -->
+    <script type="text/javascript">
+        (function(i,s,o,g,r,a,m){i['GoogleAnalyticsObject']=r;i[r]=i[r]||function(){
+        (i[r].q=i[r].q||[]).push(arguments)},i[r].l=1*new Date();a=s.createElement(o),
+        m=s.getElementsByTagName(o)[0];a.async=1;a.src=g;m.parentNode.insertBefore(a,m)
+        })(window,document,'script','//www.google-analytics.com/analytics.js','ga');
+
+        ga('create', 'UA-77172981-1', 'auto');
+        ga('send', 'pageview');
+    </script>
+    <!-- End Google Analytics Universal Code -->
+
+<!-- share.js -->
+<script src="https://cdn.jsdelivr.net/npm/social-share.js@1.0.16/dist/js/social-share.min.js"></script>
+
+
+
+<script src="https://cdn.jsdelivr.net/npm/tocbot@3.0.2/dist/tocbot.min.js"></script>
+<script>
+$(document).ready(function(){
+  tocbot.init({
+    // Where to render the table of contents.
+    tocSelector: '.js-toc',
+    // Where to grab the headings to build the table of contents.
+    contentSelector: '.entry-content',
+    // Which headings to grab inside of the contentSelector element.
+    headingSelector: 'h2, h3, h4,h5',
+    // Headings that match the ignoreSelector will be skipped.
+    ignoreSelector: '.js-toc-ignore',
+    // Main class to add to links.
+    linkClass: 'toc-link',
+    // Extra classes to add to links.
+    extraLinkClasses: '',
+    // Class to add to active links,
+    // the link corresponding to the top most heading on the page.
+    activeLinkClass: 'is-active-link',
+    // Main class to add to lists.
+    listClass: 'toc-list',
+    // Extra classes to add to lists.
+    extraListClasses: '',
+    // Class that gets added when a list should be collapsed.
+    isCollapsedClass: 'is-collapsed',
+    // Class that gets added when a list should be able
+    // to be collapsed but isn't necessarily collpased.
+    collapsibleClass: 'is-collapsible',
+    // Class to add to list items.
+    listItemClass: 'toc-list-item',
+    // How many heading levels should not be collpased.
+    // For example, number 6 will show everything since
+    // there are only 6 heading levels and number 0 will collpase them all.
+    // The sections that are hidden will open
+    // and close as you scroll to headings within them.
+    collapseDepth: 6,
+    // Smooth scrolling enabled.
+    smoothScroll: true,
+    // Smooth scroll duration.
+    smoothScrollDuration: 420,
+    // Callback for scroll end (requires: smoothScroll).
+    scrollEndCallback: function (e) {},
+    // Headings offset between the headings and the top of the document (this is meant for minor adjustments).
+    headingsOffset: 0,
+    // Timeout between events firing to make sure it's
+    // not too rapid (for performance reasons).
+    throttleTimeout: 50,
+    // Element to add the positionFixedClass to.
+    positionFixedSelector: null,
+    // Fixed position class to add to make sidebar fixed after scrolling
+    // down past the fixedSidebarOffset.
+    positionFixedClass: 'is-position-fixed',
+    // fixedSidebarOffset can be any number but by default is set
+    // to auto which sets the fixedSidebarOffset to the sidebar
+    // element's offsetTop from the top of the document on init.
+    fixedSidebarOffset: 'auto',
+    // includeHtml can be set to true to include the HTML markup from the
+    // heading node instead of just including the textContent.
+    includeHtml: false
+  });
+});
+</script>
+</body>
+</html>
