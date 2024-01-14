@@ -777,6 +777,10 @@ libbpf 中是会自动保存到 &lt;tt class="docutils literal"&gt;&lt;span clas
 &lt;p&gt;记录一些编写 ebpf/libbpf 程序（比如编写类型为 &lt;tt class="docutils literal"&gt;BPF_PROG_TYPE_TRACEPOINT&lt;/tt&gt; 的 ebpf 程序）时
 涉及到的 tracepoint 相关的常见问题。&lt;/p&gt;
 &lt;/div&gt;
+&lt;div class="section" id="ebpf"&gt;
+&lt;h2 id="hidebpf"&gt;eBPF 程序类型&lt;a class="headerlink" href="#hidebpf" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;本文涉及的 eBPF 程序类型为 &lt;tt class="docutils literal"&gt;BPF_PROG_TYPE_TRACEPOINT&lt;/tt&gt; 。&lt;/p&gt;
+&lt;/div&gt;
 &lt;div class="section" id="tracepoint"&gt;
 &lt;h2 id="hidtracepoint"&gt;tracepoint 可以监控哪些事件&lt;a class="headerlink" href="#hidtracepoint" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;p&gt;可以通过查看 &lt;tt class="docutils literal"&gt;/sys/kernel/debug/tracing/available_events&lt;/tt&gt; 文件的内容找到 tracepoint 可监控的事件。
@@ -810,9 +814,11 @@ SEC(&amp;quot;tp/&amp;lt;category&amp;gt;/&amp;lt;name&amp;gt;&amp;quot;)
 &lt;/div&gt;
 &lt;div class="section" id="tracepoint-1"&gt;
 &lt;h2 id="hidtracepoint-1"&gt;如何确定 tracepoint 事件处理函数的参数类型，获取对应的内核调用参数&lt;a class="headerlink" href="#hidtracepoint-1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
-&lt;p&gt;假设，我们想通过 tracepoint 监控 &lt;tt class="docutils literal"&gt;chmod&lt;/tt&gt; 这个命令涉及的 &lt;tt class="docutils literal"&gt;fchmodat&lt;/tt&gt; 系统调用，
+&lt;p&gt;假设，我们想通过 tracepoint 追踪 &lt;tt class="docutils literal"&gt;chmod&lt;/tt&gt; 这个命令涉及的 &lt;tt class="docutils literal"&gt;fchmodat&lt;/tt&gt; 系统调用，
 那么，如何确定ebpf 中事件处理函数的参数类型，以及如何获取到对应的 &lt;tt class="docutils literal"&gt;fchmodat&lt;/tt&gt; 这个系统调用涉及的参数的内容，
 比如拿到操作文件名称以及操作的权限 mode 的值。&lt;/p&gt;
+&lt;div class="section" id="tracepoint-2"&gt;
+&lt;h3 id="hidtracepoint-2"&gt;确定需要追踪的 tracepoint 事件&lt;a class="headerlink" href="#hidtracepoint-2" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
 &lt;p&gt;第一步，先确定 &lt;tt class="docutils literal"&gt;chmod&lt;/tt&gt; 所使用的系统调用，这个比较简单，有很多种方法可以做到，比如通过 &lt;tt class="docutils literal"&gt;strace&lt;/tt&gt; 命令:&lt;/p&gt;
 &lt;pre class="literal-block"&gt;
 $ strace chmod 600 a.txt
@@ -828,11 +834,48 @@ syscalls:sys_enter_fchmodat
 &lt;/pre&gt;
 &lt;p&gt;可以看到，有 &lt;tt class="docutils literal"&gt;sys_enter_fchmodat&lt;/tt&gt; 和 &lt;tt class="docutils literal"&gt;sys_exit_fchmodat&lt;/tt&gt; 这两个事件。这里选择
 &lt;tt class="docutils literal"&gt;sys_enter_fchmodat&lt;/tt&gt; 这个事件进行后续的说明。&lt;/p&gt;
-&lt;p&gt;第三步，确定函数的参数类型。这个需要到 &lt;tt class="docutils literal"&gt;vmlinux.h&lt;/tt&gt; 文件中进行查找，
+&lt;/div&gt;
+&lt;div class="section" id="section-2"&gt;
+&lt;h3 id="hidsection-2"&gt;确定事件包含的信息&lt;a class="headerlink" href="#hidsection-2" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
+&lt;p&gt;第三步，确定事件本身可以获取到哪些信息，虽然我们知道 &lt;tt class="docutils literal"&gt;fchmodat&lt;/tt&gt; 系统调用需要提供文件名称和 mode 信息，
+但是，我们不确定是否可以在 ebpf 程序中获取到这些信息。&lt;/p&gt;
+&lt;p&gt;可以通过查看
+&lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;/sys/kernel/debug/tracing/events/&amp;lt;category&amp;gt;/&amp;lt;name&amp;gt;/format&lt;/span&gt;&lt;/tt&gt; 文件获取到我们可以获取哪些信息。&lt;/p&gt;
+&lt;p&gt;比如 &lt;tt class="docutils literal"&gt;sys_enter_fchmodat&lt;/tt&gt; 这个事件的 &lt;tt class="docutils literal"&gt;/sys/kernel/debug/tracing/events/syscalls/sys_enter_fchmodat/format&lt;/tt&gt;
+的内容如下:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+$ sudo cat /sys/kernel/debug/tracing/events/syscalls/sys_enter_fchmodat/format
+name: sys_enter_fchmodat
+ID: 647
+format:
+        field:unsigned short common_type;       offset:0;       size:2; signed:0;
+        field:unsigned char common_flags;       offset:2;       size:1; signed:0;
+        field:unsigned char common_preempt_count;       offset:3;       size:1; signed:0;
+        field:int common_pid;   offset:4;       size:4; signed:1;
+
+        field:int __syscall_nr; offset:8;       size:4; signed:1;
+        field:int dfd;  offset:16;      size:8; signed:0;
+        field:const char * filename;    offset:24;      size:8; signed:0;
+        field:umode_t mode;     offset:32;      size:8; signed:0;
+
+print fmt: &amp;quot;dfd: 0x%08lx, filename: 0x%08lx, mode: 0x%08lx&amp;quot;, ((unsigned long)(REC-&amp;gt;dfd)), ((unsigned long)(REC-&amp;gt;filename)), ((unsigned long)(REC-&amp;gt;mode))
+&lt;/pre&gt;
+&lt;p&gt;&lt;tt class="docutils literal"&gt;print fmt&lt;/tt&gt; 中引用的字段都是我们可以在 ebpf 程序中获取的信息。&lt;/p&gt;
+&lt;p&gt;从上面可以看到，我们可以获取 &lt;tt class="docutils literal"&gt;sys_enter_fchmodat&lt;/tt&gt; 事件的 &lt;tt class="docutils literal"&gt;dfd&lt;/tt&gt; 、 &lt;tt class="docutils literal"&gt;filename&lt;/tt&gt; 以及 &lt;tt class="docutils literal"&gt;mode&lt;/tt&gt; 信息，
+这里就包含了前面所说的文件名称以及权限 mode 信息。&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class="section" id="section-3"&gt;
+&lt;h3 id="hidsection-3"&gt;确定事件处理函数的参数&lt;a class="headerlink" href="#hidsection-3" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
+&lt;p&gt;第四步，确定函数的参数类型。在知道了事件本身可以提供的信息后，我们还需要知道如何在 ebpf 程序中读取这些信息。
+这里就涉及到如何确认 ebpf 事件处理函数的参数是啥，这样我们才能从函数的入参中获取到事件本身包含的信息。&lt;/p&gt;
+&lt;div class="section" id="vmlinux-h"&gt;
+&lt;h4 id="hidvmlinux-h"&gt;基于 vmlinux.h&lt;a class="headerlink" href="#hidvmlinux-h" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h4&gt;
+&lt;p&gt;一种方法是，在 &lt;tt class="docutils literal"&gt;vmlinux.h&lt;/tt&gt; 文件中进行查找，
 一般 &lt;tt class="docutils literal"&gt;sys_enter_xx&lt;/tt&gt; 对应 &lt;tt class="docutils literal"&gt;trace_event_raw_sys_enter&lt;/tt&gt; ，
 &lt;tt class="docutils literal"&gt;sys_exit_xx&lt;/tt&gt; 对应 &lt;tt class="docutils literal"&gt;trace_event_raw_sys_exit&lt;/tt&gt; ，
 其他的一般对应 &lt;tt class="docutils literal"&gt;trace_event_raw_&amp;lt;name&amp;gt;&lt;/tt&gt; ，如果没找到的话，可以参考 &lt;tt class="docutils literal"&gt;trace_event_raw_sys_enter&lt;/tt&gt;
-的例子找它相近的 struct。 对于 &lt;tt class="docutils literal"&gt;sys_enter_fchmodat&lt;/tt&gt; ，我们使用 &lt;tt class="docutils literal"&gt;trace_event_raw_sys_enter&lt;/tt&gt; 这个 struct:&lt;/p&gt;
+的例子找它相近的 struct。&lt;/p&gt;
+&lt;p&gt;对于 &lt;tt class="docutils literal"&gt;sys_enter_fchmodat&lt;/tt&gt; ，我们使用 &lt;tt class="docutils literal"&gt;trace_event_raw_sys_enter&lt;/tt&gt; 这个 struct:&lt;/p&gt;
 &lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="k"&gt;struct&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nc"&gt;trace_event_raw_sys_enter&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="p"&gt;{&lt;/span&gt;
 &lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="k"&gt;struct&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nc"&gt;trace_entry&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;ent&lt;/span&gt;&lt;span class="p"&gt;;&lt;/span&gt;
 &lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="kt"&gt;long&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="kt"&gt;int&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;id&lt;/span&gt;&lt;span class="p"&gt;;&lt;/span&gt;
@@ -840,10 +883,30 @@ syscalls:sys_enter_fchmodat
 &lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="kt"&gt;char&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;__data&lt;/span&gt;&lt;span class="p"&gt;[&lt;/span&gt;&lt;span class="mi"&gt;0&lt;/span&gt;&lt;span class="p"&gt;];&lt;/span&gt;
 &lt;span class="p"&gt;};&lt;/span&gt;
 &lt;/pre&gt;&lt;/div&gt;
-&lt;p&gt;其中 &lt;tt class="docutils literal"&gt;args&lt;/tt&gt; 中就存储了事件相关的我们可以获取的信息，至于里面包含了哪些信息就是第四步需要确定的信息。&lt;/p&gt;
-&lt;p&gt;第四步，确定事件本身可以获取到哪些信息，虽然我们知道 &lt;tt class="docutils literal"&gt;fchmodat&lt;/tt&gt; 系统调用需要提供文件名称和 mode 信息，
-但是，我们不确定是否可以在 ebpf 程序中获取到这些信息。可以通过查看
-&lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;/sys/kernel/debug/tracing/events/&amp;lt;category&amp;gt;/&amp;lt;name&amp;gt;/format&lt;/span&gt;&lt;/tt&gt; 文件获取到我们可以获取哪些信息。
+&lt;p&gt;其中 &lt;tt class="docutils literal"&gt;args&lt;/tt&gt; 中就存储了事件相关的我们可以获取的信息，即第三步中 format 文件的 &lt;tt class="docutils literal"&gt;fmt&lt;/tt&gt; 那里包含的字段。
+因此，我们可以通过 &lt;tt class="docutils literal"&gt;args[0]&lt;/tt&gt; 获取 &lt;tt class="docutils literal"&gt;dfd&lt;/tt&gt; , &lt;tt class="docutils literal"&gt;args[1]&lt;/tt&gt; 获取 &lt;tt class="docutils literal"&gt;filename&lt;/tt&gt; 以此类推。&lt;/p&gt;
+&lt;p&gt;信息都确定好了，就可以写程序了。比如上面 &lt;tt class="docutils literal"&gt;sys_enter_fchmodat&lt;/tt&gt; 事件的示例 ebpf 程序如下:&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="n"&gt;SEC&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="s"&gt;&amp;quot;tracepoint/syscalls/sys_enter_fchmodat&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+&lt;span class="kt"&gt;int&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;tracepoint__syscalls__sys_enter_fchmodat&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="k"&gt;struct&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nc"&gt;trace_event_raw_sys_enter&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;*&lt;/span&gt;&lt;span class="n"&gt;ctx&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+&lt;span class="p"&gt;{&lt;/span&gt;
+&lt;span class="w"&gt;        &lt;/span&gt;&lt;span class="c1"&gt;// ...&lt;/span&gt;
+
+&lt;span class="w"&gt;        &lt;/span&gt;&lt;span class="kt"&gt;char&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;*&lt;/span&gt;&lt;span class="n"&gt;filename_ptr&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="kt"&gt;char&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;*&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;BPF_CORE_READ&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;ctx&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;args&lt;/span&gt;&lt;span class="p"&gt;[&lt;/span&gt;&lt;span class="mi"&gt;1&lt;/span&gt;&lt;span class="p"&gt;]);&lt;/span&gt;
+&lt;span class="w"&gt;        &lt;/span&gt;&lt;span class="n"&gt;bpf_core_read_user_str&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="o"&gt;&amp;amp;&lt;/span&gt;&lt;span class="n"&gt;event&lt;/span&gt;&lt;span class="o"&gt;-&amp;gt;&lt;/span&gt;&lt;span class="n"&gt;filename&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="k"&gt;sizeof&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;event&lt;/span&gt;&lt;span class="o"&gt;-&amp;gt;&lt;/span&gt;&lt;span class="n"&gt;filename&lt;/span&gt;&lt;span class="p"&gt;),&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;filename_ptr&lt;/span&gt;&lt;span class="p"&gt;);&lt;/span&gt;
+&lt;span class="w"&gt;        &lt;/span&gt;&lt;span class="n"&gt;event&lt;/span&gt;&lt;span class="o"&gt;-&amp;gt;&lt;/span&gt;&lt;span class="n"&gt;mode&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;BPF_CORE_READ&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;ctx&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;args&lt;/span&gt;&lt;span class="p"&gt;[&lt;/span&gt;&lt;span class="mi"&gt;2&lt;/span&gt;&lt;span class="p"&gt;]);&lt;/span&gt;
+
+&lt;span class="w"&gt;        &lt;/span&gt;&lt;span class="c1"&gt;// ...&lt;/span&gt;
+&lt;span class="p"&gt;}&lt;/span&gt;
+&lt;/pre&gt;&lt;/div&gt;
+&lt;p&gt;使用该方法的完整示例程序详见：&lt;/p&gt;
+&lt;ul class="simple"&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://github.com/mozillazg/hello-libbpfgo/tree/master/07-tracepoint-args"&gt;https://github.com/mozillazg/hello-libbpfgo/tree/master/07-tracepoint-args&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://github.com/mozillazg/hello-libbpfgo/tree/master/14-tracepoint-args-sched_switch"&gt;https://github.com/mozillazg/hello-libbpfgo/tree/master/14-tracepoint-args-sched_switch&lt;/a&gt;&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/div&gt;
+&lt;div class="section" id="section-4"&gt;
+&lt;h4 id="hidsection-4"&gt;手动构造参数结构体&lt;a class="headerlink" href="#hidsection-4" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h4&gt;
+&lt;p&gt;除了使用 vmlinux.h 中预定义的结构体外，我们还可以基于第三步中 format 文件的内容自定义一个结构体来作为eBPF程序的参数。
 比如 &lt;tt class="docutils literal"&gt;sys_enter_fchmodat&lt;/tt&gt; 这个事件的 &lt;tt class="docutils literal"&gt;/sys/kernel/debug/tracing/events/syscalls/sys_enter_fchmodat/format&lt;/tt&gt;
 的内容如下:&lt;/p&gt;
 &lt;pre class="literal-block"&gt;
@@ -863,31 +926,41 @@ format:
 
 print fmt: &amp;quot;dfd: 0x%08lx, filename: 0x%08lx, mode: 0x%08lx&amp;quot;, ((unsigned long)(REC-&amp;gt;dfd)), ((unsigned long)(REC-&amp;gt;filename)), ((unsigned long)(REC-&amp;gt;mode))
 &lt;/pre&gt;
-&lt;p&gt;&lt;tt class="docutils literal"&gt;print fmt&lt;/tt&gt; 中引用的字段都是我们可以在 ebpf 程序中获取的信息。
-从上面可以看到，我们可以获取 &lt;tt class="docutils literal"&gt;sys_enter_fchmodat&lt;/tt&gt; 事件的 &lt;tt class="docutils literal"&gt;dfd&lt;/tt&gt; 、 &lt;tt class="docutils literal"&gt;filename&lt;/tt&gt; 以及 &lt;tt class="docutils literal"&gt;mode&lt;/tt&gt; 信息，
-这里就包含了前面所说的文件名称以及权限 mode 信息。
-这些字段的值可以通过 &lt;tt class="docutils literal"&gt;trace_event_raw_sys_enter&lt;/tt&gt; 的 &lt;tt class="docutils literal"&gt;args&lt;/tt&gt; 数组获取，即通过 &lt;tt class="docutils literal"&gt;args[0]&lt;/tt&gt; 获取 &lt;tt class="docutils literal"&gt;dfd&lt;/tt&gt; , &lt;tt class="docutils literal"&gt;args[1]&lt;/tt&gt; 获取 &lt;tt class="docutils literal"&gt;filename&lt;/tt&gt; 以此类推。&lt;/p&gt;
-&lt;p&gt;信息都确定好了，就可以写程序了。比如上面 &lt;tt class="docutils literal"&gt;sys_enter_fchmodat&lt;/tt&gt; 事件的示例 ebpf 程序如下:&lt;/p&gt;
+&lt;p&gt;基于此信息我们可以定义如下的结构体作为 eBPF 事件处理函数的参数:&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="k"&gt;struct&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nc"&gt;sys_enter_fchmodat_args&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="p"&gt;{&lt;/span&gt;
+&lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="kt"&gt;char&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;_&lt;/span&gt;&lt;span class="p"&gt;[&lt;/span&gt;&lt;span class="mi"&gt;16&lt;/span&gt;&lt;span class="p"&gt;];&lt;/span&gt;
+&lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="kt"&gt;long&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;dfd&lt;/span&gt;&lt;span class="p"&gt;;&lt;/span&gt;
+&lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="kt"&gt;long&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;filename_ptr&lt;/span&gt;&lt;span class="p"&gt;;&lt;/span&gt;
+&lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="kt"&gt;long&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;mode&lt;/span&gt;&lt;span class="p"&gt;;&lt;/span&gt;
+&lt;span class="p"&gt;};&lt;/span&gt;
+&lt;/pre&gt;&lt;/div&gt;
+&lt;p&gt;在这个结构体中，我们首先通过 &lt;tt class="docutils literal"&gt;char _[16]&lt;/tt&gt; 表示了前16个字节的内容，对应的是 format 文件中 &lt;tt class="docutils literal"&gt;dfd&lt;/tt&gt; 之前的所有字段，
+然后我们再一一定义了我们的程序想要获取的 &lt;tt class="docutils literal"&gt;dfd&lt;/tt&gt; 、 &lt;tt class="docutils literal"&gt;filename&lt;/tt&gt; 、 &lt;tt class="docutils literal"&gt;mode&lt;/tt&gt; 字段，
+之所以使用 &lt;tt class="docutils literal"&gt;long&lt;/tt&gt; 类型是为了确保每个成员的大小是 format 中标明的8个字节
+（每个事件中字段成员的大小不尽相同，需要根据实际的事件format文件的内容进行调整），
+你也可以使用其他类型，不过需要保证每个字段成员的偏移量跟 format 中的说明是一致的。&lt;/p&gt;
+&lt;p&gt;前面 &lt;tt class="docutils literal"&gt;sys_enter_fchmodat&lt;/tt&gt; 事件的使用手动构造的自定义结构体作为参数的示例 ebpf 程序如下:&lt;/p&gt;
 &lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="n"&gt;SEC&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="s"&gt;&amp;quot;tracepoint/syscalls/sys_enter_fchmodat&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
-&lt;span class="kt"&gt;int&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;tracepoint__syscalls__sys_enter_fchmodat&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="k"&gt;struct&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nc"&gt;trace_event_raw_sys_enter&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;*&lt;/span&gt;&lt;span class="n"&gt;ctx&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
-&lt;span class="p"&gt;{&lt;/span&gt;
-&lt;span class="w"&gt;        &lt;/span&gt;&lt;span class="c1"&gt;// ...&lt;/span&gt;
+&lt;span class="kt"&gt;int&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;tracepoint__syscalls__sys_enter_fchmodat&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="k"&gt;struct&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nc"&gt;sys_enter_fchmodat_args&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;*&lt;/span&gt;&lt;span class="n"&gt;ctx&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="p"&gt;{&lt;/span&gt;
+&lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="c1"&gt;// ...&lt;/span&gt;
 
-&lt;span class="w"&gt;        &lt;/span&gt;&lt;span class="kt"&gt;char&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;*&lt;/span&gt;&lt;span class="n"&gt;filename_ptr&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="kt"&gt;char&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;*&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;BPF_CORE_READ&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;ctx&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;args&lt;/span&gt;&lt;span class="p"&gt;[&lt;/span&gt;&lt;span class="mi"&gt;1&lt;/span&gt;&lt;span class="p"&gt;]);&lt;/span&gt;
-&lt;span class="w"&gt;        &lt;/span&gt;&lt;span class="n"&gt;bpf_core_read_user_str&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="o"&gt;&amp;amp;&lt;/span&gt;&lt;span class="n"&gt;event&lt;/span&gt;&lt;span class="o"&gt;-&amp;gt;&lt;/span&gt;&lt;span class="n"&gt;filename&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="k"&gt;sizeof&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;event&lt;/span&gt;&lt;span class="o"&gt;-&amp;gt;&lt;/span&gt;&lt;span class="n"&gt;filename&lt;/span&gt;&lt;span class="p"&gt;),&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;filename_ptr&lt;/span&gt;&lt;span class="p"&gt;);&lt;/span&gt;
-&lt;span class="w"&gt;        &lt;/span&gt;&lt;span class="n"&gt;event&lt;/span&gt;&lt;span class="o"&gt;-&amp;gt;&lt;/span&gt;&lt;span class="n"&gt;mode&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;BPF_CORE_READ&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;ctx&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;args&lt;/span&gt;&lt;span class="p"&gt;[&lt;/span&gt;&lt;span class="mi"&gt;2&lt;/span&gt;&lt;span class="p"&gt;]);&lt;/span&gt;
+&lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="kt"&gt;char&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;*&lt;/span&gt;&lt;span class="n"&gt;filename_ptr&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="kt"&gt;char&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;*&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;&lt;span class="n"&gt;ctx&lt;/span&gt;&lt;span class="o"&gt;-&amp;gt;&lt;/span&gt;&lt;span class="n"&gt;filename_ptr&lt;/span&gt;&lt;span class="p"&gt;;&lt;/span&gt;
+&lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="n"&gt;bpf_core_read_user_str&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="o"&gt;&amp;amp;&lt;/span&gt;&lt;span class="n"&gt;event&lt;/span&gt;&lt;span class="o"&gt;-&amp;gt;&lt;/span&gt;&lt;span class="n"&gt;filename&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="k"&gt;sizeof&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;event&lt;/span&gt;&lt;span class="o"&gt;-&amp;gt;&lt;/span&gt;&lt;span class="n"&gt;filename&lt;/span&gt;&lt;span class="p"&gt;),&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;filename_ptr&lt;/span&gt;&lt;span class="p"&gt;);&lt;/span&gt;
+&lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="n"&gt;event&lt;/span&gt;&lt;span class="o"&gt;-&amp;gt;&lt;/span&gt;&lt;span class="n"&gt;mode&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;u32&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;&lt;span class="n"&gt;ctx&lt;/span&gt;&lt;span class="o"&gt;-&amp;gt;&lt;/span&gt;&lt;span class="n"&gt;mode&lt;/span&gt;&lt;span class="p"&gt;;&lt;/span&gt;
 
-&lt;span class="w"&gt;        &lt;/span&gt;&lt;span class="c1"&gt;// ...&lt;/span&gt;
+&lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="c1"&gt;// ...&lt;/span&gt;
 &lt;span class="p"&gt;}&lt;/span&gt;
 &lt;/pre&gt;&lt;/div&gt;
-&lt;p&gt;完整的示例程序详见：&lt;/p&gt;
+&lt;p&gt;使用该方法的完整示例程序详见：&lt;/p&gt;
 &lt;ul class="simple"&gt;
-&lt;li&gt;&lt;a class="reference external" href="https://github.com/mozillazg/hello-libbpfgo/tree/master/07-tracepoint-args"&gt;https://github.com/mozillazg/hello-libbpfgo/tree/master/07-tracepoint-args&lt;/a&gt;&lt;/li&gt;
-&lt;li&gt;&lt;a class="reference external" href="https://github.com/mozillazg/hello-libbpfgo/tree/master/14-tracepoint-args-sched_switch"&gt;https://github.com/mozillazg/hello-libbpfgo/tree/master/14-tracepoint-args-sched_switch&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://github.com/mozillazg/hello-libbpfgo/tree/master/35-tracepoint-args-use-custom-struct"&gt;https://github.com/mozillazg/hello-libbpfgo/tree/master/35-tracepoint-args-use-custom-struct&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://github.com/mozillazg/hello-libbpfgo/tree/master/36-tracepoint-args-sched_switch-use-custom-struct"&gt;https://github.com/mozillazg/hello-libbpfgo/tree/master/36-tracepoint-args-sched_switch-use-custom-struct&lt;/a&gt;&lt;/li&gt;
 &lt;/ul&gt;
 &lt;/div&gt;
-&lt;div class="section" id="section-2"&gt;
-&lt;h2 id="hidsection-2"&gt;参考资料&lt;a class="headerlink" href="#hidsection-2" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;div class="section" id="section-5"&gt;
+&lt;h2 id="hidsection-5"&gt;参考资料&lt;a class="headerlink" href="#hidsection-5" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;ul class="simple"&gt;
 &lt;li&gt;&lt;a class="reference external" href="https://nakryiko.com/posts/bpf-core-reference-guide/"&gt;BPF CO-RE reference guide&lt;/a&gt;&lt;/li&gt;
 &lt;li&gt;&lt;a class="reference external" href="https://github.com/libbpf/libbpf/blob/12e932ac0e18546dd7247e66ea1b4aa236d2ef38/src/libbpf.c#L9002-L9081"&gt;libbpf/libbpf.c at 12e932ac0e18546dd7247e66ea1b4aa236d2ef38 · libbpf/libbpf&lt;/a&gt;&lt;/li&gt;
