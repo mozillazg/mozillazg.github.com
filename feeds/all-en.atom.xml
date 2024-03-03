@@ -1,5 +1,65 @@
 <?xml version="1.0" encoding="utf-8"?>
-<feed xmlns="http://www.w3.org/2005/Atom"><title>mozillazg's Blog</title><link href="https://mozillazg.com/" rel="alternate"></link><link href="https://mozillazg.com/feeds/all-en.atom.xml" rel="self"></link><id>https://mozillazg.com/</id><updated>2023-12-03T00:00:00+00:00</updated><entry><title>Exploring the New Features of Amazon EKS Pod Identity</title><link href="https://mozillazg.com/2023/12/security-deep-dive-into-aws-eks-pod-identity-feature-en.html" rel="alternate"></link><published>2023-12-03T00:00:00+00:00</published><updated>2023-12-03T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2023-12-03:2023/12/security-deep-dive-into-aws-eks-pod-identity-feature-en.html</id><summary type="html">&lt;p&gt;In this piece, we're taking a quick dive into a fresh security feature for EKS introduced this week by AWS,
+<feed xmlns="http://www.w3.org/2005/Atom"><title>mozillazg's Blog</title><link href="https://mozillazg.com/" rel="alternate"></link><link href="https://mozillazg.com/feeds/all-en.atom.xml" rel="self"></link><id>https://mozillazg.com/</id><updated>2024-02-24T00:00:00+00:00</updated><entry><title>Fix the problem of no listening logs when deploying a web UI service created using gradio in a Kubernetes environment</title><link href="https://mozillazg.com/2024/02/fix-gradio-app-server-no-listen-log-and-may-block-hang-issue-en-en.html" rel="alternate"></link><published>2024-02-24T00:00:00+00:00</published><updated>2024-02-24T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2024-02-24:2024/02/fix-gradio-app-server-no-listen-log-and-may-block-hang-issue-en-en.html</id><summary type="html">&lt;div class="section" id="problem-description"&gt;
+&lt;h2 id="hidproblem-description"&gt;Problem Description&lt;a class="headerlink" href="#hidproblem-description" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;When deploying a web UI service created using gradio in a Kubernetes environment, there may be no listening logs in the Pod container, and sometimes there may be a blockage from the beginning, resulting in the inability to provide HTTP services externally.&lt;/p&gt;
+&lt;p&gt;Sample Code:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+import gradio as gr
+
+def greet(name):
+    return &amp;quot;Hello &amp;quot; + name + &amp;quot;!&amp;quot;
+
+demo = gr.Interface(fn=greet, inputs=&amp;quot;textbox&amp;quot;, outputs=&amp;quot;textbox&amp;quot;)
+
+if __name__ == &amp;quot;__main__&amp;quot;:
+    demo.launch()
+&lt;/pre&gt;
+&lt;/div&gt;
+&lt;div class="section" id="cause"&gt;
+&lt;h2 id="hidcause"&gt;Cause&lt;a class="headerlink" href="#hidcause" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;The reason for the lack of listening logs is that the gradio code uses &lt;tt class="docutils literal"&gt;print()&lt;/tt&gt; to output the listening logs, and the default output of &lt;tt class="docutils literal"&gt;print()&lt;/tt&gt; uses a buffer. In container environments like Kubernetes, there may be a delay in displaying the output of &lt;tt class="docutils literal"&gt;print()&lt;/tt&gt;.&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class="section" id="solution"&gt;
+&lt;h2 id="hidsolution"&gt;Solution&lt;a class="headerlink" href="#hidsolution" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;This problem can be solved using any of the following methods.&lt;/p&gt;
+&lt;div class="section" id="set-environment-variables"&gt;
+&lt;h3 id="hidset-environment-variables"&gt;Set Environment Variables&lt;a class="headerlink" href="#hidset-environment-variables" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
+&lt;p&gt;You can solve this problem by setting the value of the environment variable &lt;tt class="docutils literal"&gt;PYTHONUNBUFFERED&lt;/tt&gt; to a non-empty string:&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;p class="first"&gt;You can set this environment variable in the Dockerfile:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+ENV PYTHONUNBUFFERED=true
+&lt;/pre&gt;
+&lt;/li&gt;
+&lt;li&gt;&lt;p class="first"&gt;You can also set this environment variable in the definition of the Pod:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+env:
+ - name: PYTHONUNBUFFERED
+   value: 'true'
+&lt;/pre&gt;
+&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/div&gt;
+&lt;div class="section" id="set-python-execution-parameters"&gt;
+&lt;h3 id="hidset-python-execution-parameters"&gt;Set Python Execution Parameters&lt;a class="headerlink" href="#hidset-python-execution-parameters" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
+&lt;p&gt;You can achieve the same effect by adding the &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;-u&lt;/span&gt;&lt;/tt&gt; parameter when running the service code with python.&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+python -u app.py
+&lt;/pre&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;div class="section" id="configure-pod-definition-to-use-standard-input"&gt;
+&lt;h2 id="hidconfigure-pod-definition-to-use-standard-input"&gt;Configure Pod Definition to Use Standard Input&lt;a class="headerlink" href="#hidconfigure-pod-definition-to-use-standard-input" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;You can also solve this problem by configuring the container definition in the Pod to use standard input.&lt;/p&gt;
+&lt;p&gt;Sample Pod YAML:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+containers:
+ - image: xxx
+   tty: true
+   stdin: true
+&lt;/pre&gt;
+&lt;/div&gt;
+</summary><category term="gradio"></category><category term="en-version"></category></entry><entry><title>Exploring the New Features of Amazon EKS Pod Identity</title><link href="https://mozillazg.com/2023/12/security-deep-dive-into-aws-eks-pod-identity-feature-en.html" rel="alternate"></link><published>2023-12-03T00:00:00+00:00</published><updated>2023-12-03T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2023-12-03:2023/12/security-deep-dive-into-aws-eks-pod-identity-feature-en.html</id><summary type="html">&lt;p&gt;In this piece, we're taking a quick dive into a fresh security feature for EKS introduced this week by AWS,
 aptly called &lt;a class="reference external" href="https://aws.amazon.com/blogs/aws/amazon-eks-pod-identity-simplifies-iam-permissions-for-applications-on-amazon-eks-clusters/"&gt;Amazon EKS Pod Identity&lt;/a&gt;.&lt;/p&gt;
 &lt;div class="section" id="introducing-the-features"&gt;
 &lt;h2 id="hidintroducing-the-features"&gt;Introducing the Features&lt;a class="headerlink" href="#hidintroducing-the-features" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
@@ -507,6 +567,7 @@ Launch Before eks-pod-identity-agent Pod
 &lt;tr&gt;&lt;/tr&gt;
 &lt;/tbody&gt;
 &lt;/table&gt;
+&lt;p&gt;By the way, although the official tutorials and documentation of the EKS Pod Identity solution mention the need to rely on the eks-pod-identity-agent component, we can also implement this solution without installing the eks-pod-identity-agent component. Specifically, we can remove the dependency on this component by directly accessing the AssumeRoleForPodIdentity API provided by EKS within the application.&lt;/p&gt;
 &lt;/div&gt;
 &lt;div class="section" id="references"&gt;
 &lt;h2 id="hidreferences"&gt;References&lt;a class="headerlink" href="#hidreferences" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
@@ -1217,170 +1278,4 @@ The meaning of these two parameters is the same as in &lt;a class="reference ext
 &lt;/ul&gt;
 &lt;!-- * https://github.com/aya-rs/aya/pull/85 --&gt;
 &lt;/div&gt;
-</summary><category term="btf"></category><category term="raw-tracepoint"></category><category term="libbpf"></category><category term="libbpfgo"></category><category term="go"></category><category term="golang"></category><category term="en-version"></category></entry><entry><title>Frequently asked questions about using raw tracepoint with ebpf/libbpf programs</title><link href="https://mozillazg.com/2022/05/ebpf-libbpf-raw-tracepoint-common-questions-en.html" rel="alternate"></link><published>2022-05-29T00:00:00+00:00</published><updated>2022-05-29T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2022-05-29:2022/05/ebpf-libbpf-raw-tracepoint-common-questions-en.html</id><summary type="html">&lt;div class="section" id="preface"&gt;
-&lt;h2 id="hidpreface"&gt;Preface&lt;a class="headerlink" href="#hidpreface" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
-&lt;p&gt;Note some common problems related to raw tracepoint when writing ebpf/libbpf programs (such as &lt;tt class="docutils literal"&gt;BPF_PROG_TYPE_RAW_TRACEPOINT&lt;/tt&gt; program).&lt;/p&gt;
-&lt;/div&gt;
-&lt;div class="section" id="what-events-can-be-monitored-by-raw-tracepoint"&gt;
-&lt;h2 id="hidwhat-events-can-be-monitored-by-raw-tracepoint"&gt;What events can be monitored by raw tracepoint&lt;a class="headerlink" href="#hidwhat-events-can-be-monitored-by-raw-tracepoint" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
-&lt;p&gt;The events that raw tracepoint can monitor can be found by looking at the contents of the &lt;tt class="docutils literal"&gt;/sys/kernel/debug/tracing/available_events&lt;/tt&gt; file.&lt;/p&gt;
-&lt;p&gt;The format of each line in the file is:&lt;/p&gt;
-&lt;pre class="literal-block"&gt;
-&amp;lt;category&amp;gt;:&amp;lt;name&amp;gt;
-&lt;/pre&gt;
-&lt;p&gt;For example:&lt;/p&gt;
-&lt;pre class="literal-block"&gt;
-sched:sched_switch
-&lt;/pre&gt;
-&lt;p&gt;However, raw tracepoint uses the value of &lt;tt class="docutils literal"&gt;&amp;lt;name&amp;gt;&lt;/tt&gt; rather than the entire &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;&amp;lt;category&amp;gt;:&amp;lt;name&amp;gt;&lt;/span&gt;&lt;/tt&gt;, as described below.&lt;/p&gt;
-&lt;!-- 内核源码中使用 ``TRACE_EVENT`` 这个宏所定义的事件都可以通过 raw tracepoint 进行监控。 --&gt;
-&lt;!-- 这些事件主要集中在 `include/trace/events/ &lt;https://elixir.bootlin.com/linux/v5.13/source/include/trace/events&gt;`__   目录下。 --&gt;
-&lt;!--  --&gt;
-&lt;!-- 定义 raw tracepoint 可用事件的内容的格式是:: --&gt;
-&lt;!--  --&gt;
-&lt;!-- TRACE_EVENT(&lt;event_name&gt;, --&gt;
-&lt;!-- TP_PROTO(...), --&gt;
-&lt;!-- TP_ARGS(...), ...) --&gt;
-&lt;!--  --&gt;
-&lt;!-- .. 比如:: --&gt;
-&lt;!--  --&gt;
-&lt;!-- TRACE_EVENT_FN(sys_enter, --&gt;
-&lt;!-- TP_PROTO(struct pt_regs *regs, long id), --&gt;
-&lt;!-- TP_ARGS(regs, id), ...) --&gt;
-&lt;!--  --&gt;
-&lt;!-- 上面这个示例表示可以使用 ``sys_enter`` 作为 raw tracepoint 事件名称。 --&gt;
-&lt;!-- 可以使用的 `include/trace/events/syscalls.h &lt;https://elixir.bootlin.com/linux/v5.13/source/include/trace/events/syscalls.h&gt;`__ 文件中定义的 ``sys_enter`` 和 ``sys_exit`` 事件来监控所有系统调用事件 --&gt;
-&lt;/div&gt;
-&lt;div class="section" id="format-of-sec-content"&gt;
-&lt;h2 id="hidformat-of-sec-content"&gt;Format of SEC content&lt;a class="headerlink" href="#hidformat-of-sec-content" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
-&lt;p&gt;The SEC format for the raw tracepoint event is:&lt;/p&gt;
-&lt;pre class="literal-block"&gt;
-SEC(&amp;quot;raw_tracepoint/&amp;lt;name&amp;gt;&amp;quot;)
-
-// for example:
-// SEC(&amp;quot;raw_tracepoint/sched_switch&amp;quot;)
-&lt;/pre&gt;
-&lt;p&gt;or:&lt;/p&gt;
-&lt;pre class="literal-block"&gt;
-SEC(&amp;quot;raw_tp/&amp;lt;name&amp;gt;&amp;quot;)
-
-// for example:
-// SEC(&amp;quot;raw_tp/sched_switch&amp;quot;)
-&lt;/pre&gt;
-&lt;p&gt;The &lt;tt class="docutils literal"&gt;&amp;lt;name&amp;gt;&lt;/tt&gt; values are those listed in the &lt;tt class="docutils literal"&gt;available_events&lt;/tt&gt; file earlier.&lt;/p&gt;
-&lt;p&gt;&lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;SEC(&amp;quot;raw_tp/xx&amp;quot;)&lt;/span&gt;&lt;/tt&gt; and  &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;SEC(&amp;quot;raw_tracepoint/xx&amp;quot;)&lt;/span&gt;&lt;/tt&gt; are actually equivalent, depending on personal preference, which one can be used at will.&lt;/p&gt;
-&lt;p&gt;There are two special cases, which are :&lt;/p&gt;
-&lt;ul class="simple"&gt;
-&lt;li&gt;Uniformly use &lt;tt class="docutils literal"&gt;sys_enter&lt;/tt&gt; to represent &lt;tt class="docutils literal"&gt;sys_enter_xxx&lt;/tt&gt; events under the &lt;tt class="docutils literal"&gt;syscalls&lt;/tt&gt; category: &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;SEC(&amp;quot;raw_tracepoint/sys_enter&amp;quot;)&lt;/span&gt;&lt;/tt&gt;&lt;/li&gt;
-&lt;li&gt;Uniformly use &lt;tt class="docutils literal"&gt;sys_exit&lt;/tt&gt; to represent &lt;tt class="docutils literal"&gt;sys_exit_xxx&lt;/tt&gt; events under the &lt;tt class="docutils literal"&gt;syscalls&lt;/tt&gt; category: &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;SEC(&amp;quot;raw_tracepoint/sys_exit&amp;quot;)&lt;/span&gt;&lt;/tt&gt;&lt;/li&gt;
-&lt;/ul&gt;
-&lt;p&gt;That is, you can use the &lt;tt class="docutils literal"&gt;sys_enter&lt;/tt&gt; and &lt;tt class="docutils literal"&gt;sys_exit&lt;/tt&gt; events to monitor all system call events.&lt;/p&gt;
-&lt;!-- 可以使用的 `include/trace/events/syscalls.h &lt;https://elixir.bootlin.com/linux/v5.13/source/include/trace/events/syscalls.h&gt;`__ 文件中定义的 ``sys_enter`` 和 ``sys_exit`` 事件来监控所有系统调用事件 --&gt;
-&lt;/div&gt;
-&lt;div class="section" id="how-to-determine-the-parameter-type-of-the-raw-tracepoint-event-handler-and-get-the-corresponding-kernel-call-parameters"&gt;
-&lt;h2 id="hidhow-to-determine-the-parameter-type-of-the-raw-tracepoint-event-handler-and-get-the-corresponding-kernel-call-parameters"&gt;How to determine the parameter type of the raw tracepoint event handler and get the corresponding kernel call parameters&lt;a class="headerlink" href="#hidhow-to-determine-the-parameter-type-of-the-raw-tracepoint-event-handler-and-get-the-corresponding-kernel-call-parameters" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
-&lt;p&gt;Suppose that we want to monitor the &lt;tt class="docutils literal"&gt;fchmodat&lt;/tt&gt; system call involved in the &lt;tt class="docutils literal"&gt;chmod&lt;/tt&gt; command via raw tracepoint. Then, how do we determine the type of parameters of the event handler in ebpf, and how do we get the content of the corresponding &lt;tt class="docutils literal"&gt;fchmodat&lt;/tt&gt; system call parameters? For example, get the name of the file to be operated on and the value of the permission mode to be operated on.&lt;/p&gt;
-&lt;p&gt;The first step is to find the raw tracepoint events that can be used for this system call. As mentioned earlier, you can use the &lt;tt class="docutils literal"&gt;sys_enter&lt;/tt&gt; and &lt;tt class="docutils literal"&gt;sys_exit&lt;/tt&gt; events to monitor all system call events.&lt;/p&gt;
-&lt;p&gt;The second step is to determine the argument type of the function. raw tracepoint uses the &lt;tt class="docutils literal"&gt;bpf_raw_tracepoint_args&lt;/tt&gt; structure uniformly.&lt;/p&gt;
-&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="k"&gt;struct&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nc"&gt;bpf_raw_tracepoint_args&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="p"&gt;{&lt;/span&gt;
-&lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="n"&gt;__u64&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;args&lt;/span&gt;&lt;span class="p"&gt;[&lt;/span&gt;&lt;span class="mi"&gt;0&lt;/span&gt;&lt;span class="p"&gt;];&lt;/span&gt;
-&lt;span class="p"&gt;};&lt;/span&gt;
-&lt;/pre&gt;&lt;/div&gt;
-&lt;p&gt;The &lt;tt class="docutils literal"&gt;args&lt;/tt&gt; stores the information we can get about the event, and what information is contained in them is what we need to determine in step 3.&lt;/p&gt;
-&lt;!-- 第四步，确定事件本身可以获取到哪些信息。前面说了，可以使用的 `include/trace/events/syscalls.h &lt;https://elixir.bootlin.com/linux/v5.13/source/include/trace/events/syscalls.h&gt;`__ 文件中定义的 ``sys_enter`` 和 ``sys_exit`` 事件来监控所有系统调用事件。这里以 ``sys_enter`` 为例： --&gt;
-&lt;p&gt;The third step is to determine what information can be obtained from the event itself. Here is an example of &lt;tt class="docutils literal"&gt;sys_enter&lt;/tt&gt; (taken from &lt;a class="reference external" href="https://elixir.bootlin.com/linux/v5.13/source/include/trace/events/syscalls.h"&gt;include/trace/events/syscalls.h&lt;/a&gt;, where most of the events are concentrated in the &lt;a class="reference external" href="https://elixir.bootlin.com/linux/v5.13/source/include/trace/events"&gt;include/trace/events/&lt;/a&gt; directory).&lt;/p&gt;
-&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="n"&gt;TRACE_EVENT_FN&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;sys_enter&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;
-&lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="n"&gt;TP_PROTO&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="k"&gt;struct&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nc"&gt;pt_regs&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;*&lt;/span&gt;&lt;span class="n"&gt;regs&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="kt"&gt;long&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;id&lt;/span&gt;&lt;span class="p"&gt;),&lt;/span&gt;
-&lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="n"&gt;TP_ARGS&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;regs&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;id&lt;/span&gt;&lt;span class="p"&gt;),&lt;/span&gt;
-&lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="n"&gt;TP_STRUCT__entry&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;
-&lt;span class="w"&gt;        &lt;/span&gt;&lt;span class="n"&gt;__field&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="kt"&gt;long&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;&lt;span class="w"&gt;           &lt;/span&gt;&lt;span class="n"&gt;id&lt;/span&gt;&lt;span class="w"&gt;              &lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
-&lt;span class="w"&gt;        &lt;/span&gt;&lt;span class="n"&gt;__array&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="kt"&gt;unsigned&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="kt"&gt;long&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;&lt;span class="w"&gt;  &lt;/span&gt;&lt;span class="n"&gt;args&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;&lt;span class="w"&gt;   &lt;/span&gt;&lt;span class="mi"&gt;6&lt;/span&gt;&lt;span class="w"&gt;       &lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
-&lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="p"&gt;),&lt;/span&gt;
-&lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="n"&gt;TP_fast_assign&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;
-&lt;span class="w"&gt;        &lt;/span&gt;&lt;span class="n"&gt;__entry&lt;/span&gt;&lt;span class="o"&gt;-&amp;gt;&lt;/span&gt;&lt;span class="n"&gt;id&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;id&lt;/span&gt;&lt;span class="p"&gt;;&lt;/span&gt;
-&lt;span class="w"&gt;        &lt;/span&gt;&lt;span class="n"&gt;syscall_get_arguments&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;current&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;regs&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;__entry&lt;/span&gt;&lt;span class="o"&gt;-&amp;gt;&lt;/span&gt;&lt;span class="n"&gt;args&lt;/span&gt;&lt;span class="p"&gt;);&lt;/span&gt;
-&lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="p"&gt;),&lt;/span&gt;
-&lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="n"&gt;TP_printk&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="s"&gt;&amp;quot;NR %ld (%lx, %lx, %lx, %lx, %lx, %lx)&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;
-&lt;span class="w"&gt;          &lt;/span&gt;&lt;span class="n"&gt;__entry&lt;/span&gt;&lt;span class="o"&gt;-&amp;gt;&lt;/span&gt;&lt;span class="n"&gt;id&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;
-&lt;span class="w"&gt;          &lt;/span&gt;&lt;span class="n"&gt;__entry&lt;/span&gt;&lt;span class="o"&gt;-&amp;gt;&lt;/span&gt;&lt;span class="n"&gt;args&lt;/span&gt;&lt;span class="p"&gt;[&lt;/span&gt;&lt;span class="mi"&gt;0&lt;/span&gt;&lt;span class="p"&gt;],&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;__entry&lt;/span&gt;&lt;span class="o"&gt;-&amp;gt;&lt;/span&gt;&lt;span class="n"&gt;args&lt;/span&gt;&lt;span class="p"&gt;[&lt;/span&gt;&lt;span class="mi"&gt;1&lt;/span&gt;&lt;span class="p"&gt;],&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;__entry&lt;/span&gt;&lt;span class="o"&gt;-&amp;gt;&lt;/span&gt;&lt;span class="n"&gt;args&lt;/span&gt;&lt;span class="p"&gt;[&lt;/span&gt;&lt;span class="mi"&gt;2&lt;/span&gt;&lt;span class="p"&gt;],&lt;/span&gt;
-&lt;span class="w"&gt;          &lt;/span&gt;&lt;span class="n"&gt;__entry&lt;/span&gt;&lt;span class="o"&gt;-&amp;gt;&lt;/span&gt;&lt;span class="n"&gt;args&lt;/span&gt;&lt;span class="p"&gt;[&lt;/span&gt;&lt;span class="mi"&gt;3&lt;/span&gt;&lt;span class="p"&gt;],&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;__entry&lt;/span&gt;&lt;span class="o"&gt;-&amp;gt;&lt;/span&gt;&lt;span class="n"&gt;args&lt;/span&gt;&lt;span class="p"&gt;[&lt;/span&gt;&lt;span class="mi"&gt;4&lt;/span&gt;&lt;span class="p"&gt;],&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;__entry&lt;/span&gt;&lt;span class="o"&gt;-&amp;gt;&lt;/span&gt;&lt;span class="n"&gt;args&lt;/span&gt;&lt;span class="p"&gt;[&lt;/span&gt;&lt;span class="mi"&gt;5&lt;/span&gt;&lt;span class="p"&gt;]),&lt;/span&gt;
-&lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="n"&gt;syscall_regfunc&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;syscall_unregfunc&lt;/span&gt;
-&lt;span class="p"&gt;);&lt;/span&gt;
-&lt;/pre&gt;&lt;/div&gt;
-&lt;p&gt;其中&lt;/p&gt;
-&lt;ul class="simple"&gt;
-&lt;li&gt;&lt;tt class="docutils literal"&gt;TP_PROTO(struct pt_regs *regs, long id)&lt;/tt&gt; defines the information that can be taken through &lt;tt class="docutils literal"&gt;args&lt;/tt&gt; of &lt;tt class="docutils literal"&gt;bpf_raw_tracepoint_args&lt;/tt&gt;.
-&lt;tt class="docutils literal"&gt;id&lt;/tt&gt; is the id of the system call, and &lt;tt class="docutils literal"&gt;regs&lt;/tt&gt; contains the arguments to the corresponding system call. You can filter by id to handle only system call events for &lt;tt class="docutils literal"&gt;fchmodat&lt;/tt&gt; (by ordering &lt;tt class="docutils literal"&gt;ausyscall fchmodat&lt;/tt&gt; to find the corresponding system call id), and&lt;/li&gt;
-&lt;/ul&gt;
-&lt;p&gt;After that, continue to get the corresponding system call parameters.&lt;/p&gt;
-&lt;p&gt;&lt;tt class="docutils literal"&gt;fchmodat&lt;/tt&gt; This system call has the following function definition:&lt;/p&gt;
-&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="kt"&gt;int&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nf"&gt;fchmodat&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="kt"&gt;int&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;dirfd&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="k"&gt;const&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="kt"&gt;char&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;*&lt;/span&gt;&lt;span class="n"&gt;pathname&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="kt"&gt;mode_t&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;mode&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="kt"&gt;int&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;flags&lt;/span&gt;&lt;span class="p"&gt;);&lt;/span&gt;
-&lt;/pre&gt;&lt;/div&gt;
-&lt;p&gt;Since &lt;tt class="docutils literal"&gt;regs&lt;/tt&gt; is of type &lt;tt class="docutils literal"&gt;pt_regs&lt;/tt&gt;, we can get the value of the first argument with &lt;tt class="docutils literal"&gt;PT_REGS_PARM1_CORE(regs)&lt;/tt&gt;, the value of the second argument with
-&lt;tt class="docutils literal"&gt;PT_REGS_PARM2_CORE(regs)&lt;/tt&gt; to get the value of the second argument, &lt;tt class="docutils literal"&gt;PT_REGS_PARM3_CORE(regs)&lt;/tt&gt; to get the value of the third argument, and so on, with &lt;tt class="docutils literal"&gt;PT_REGS_PARM4_CORE&lt;/tt&gt; and &lt;tt class="docutils literal"&gt;PT_REGS_PARM5_CORE&lt;/tt&gt; to get the value of the fourth and fifth argument in regs, respectively.&lt;/p&gt;
-&lt;p&gt;Once the information is determined, you can write the program. For example, the above example ebpf program that handles the &lt;tt class="docutils literal"&gt;fchmodat&lt;/tt&gt; system call via the &lt;tt class="docutils literal"&gt;sys_enter&lt;/tt&gt; event is as follows:&lt;/p&gt;
-&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="n"&gt;SEC&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="s"&gt;&amp;quot;raw_tracepoint/sys_enter&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
-&lt;span class="kt"&gt;int&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;raw_tracepoint__sys_enter&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="k"&gt;struct&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nc"&gt;bpf_raw_tracepoint_args&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;*&lt;/span&gt;&lt;span class="n"&gt;ctx&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
-&lt;span class="p"&gt;{&lt;/span&gt;
-&lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="kt"&gt;unsigned&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="kt"&gt;long&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;syscall_id&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;ctx&lt;/span&gt;&lt;span class="o"&gt;-&amp;gt;&lt;/span&gt;&lt;span class="n"&gt;args&lt;/span&gt;&lt;span class="p"&gt;[&lt;/span&gt;&lt;span class="mi"&gt;1&lt;/span&gt;&lt;span class="p"&gt;];&lt;/span&gt;
-&lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="k"&gt;if&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;syscall_id&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;!=&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="mi"&gt;268&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;&lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="c1"&gt;// filter fchmodat system call&lt;/span&gt;
-&lt;span class="w"&gt;        &lt;/span&gt;&lt;span class="k"&gt;return&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="mi"&gt;0&lt;/span&gt;&lt;span class="p"&gt;;&lt;/span&gt;
-
-&lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="k"&gt;struct&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nc"&gt;pt_regs&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;*&lt;/span&gt;&lt;span class="n"&gt;regs&lt;/span&gt;&lt;span class="p"&gt;;&lt;/span&gt;
-&lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="n"&gt;regs&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="k"&gt;struct&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nc"&gt;pt_regs&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;*&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;ctx&lt;/span&gt;&lt;span class="o"&gt;-&amp;gt;&lt;/span&gt;&lt;span class="n"&gt;args&lt;/span&gt;&lt;span class="p"&gt;[&lt;/span&gt;&lt;span class="mi"&gt;0&lt;/span&gt;&lt;span class="p"&gt;];&lt;/span&gt;
-
-&lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="kt"&gt;char&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;pathname&lt;/span&gt;&lt;span class="p"&gt;[&lt;/span&gt;&lt;span class="mi"&gt;256&lt;/span&gt;&lt;span class="p"&gt;];&lt;/span&gt;
-&lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="n"&gt;u32&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;mode&lt;/span&gt;&lt;span class="p"&gt;;&lt;/span&gt;
-
-&lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="c1"&gt;// xx&lt;/span&gt;
-&lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="kt"&gt;char&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;*&lt;/span&gt;&lt;span class="n"&gt;pathname_ptr&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="kt"&gt;char&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;*&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;PT_REGS_PARM2_CORE&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;regs&lt;/span&gt;&lt;span class="p"&gt;);&lt;/span&gt;
-&lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="n"&gt;bpf_core_read_user_str&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="o"&gt;&amp;amp;&lt;/span&gt;&lt;span class="n"&gt;pathname&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="k"&gt;sizeof&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;pathname&lt;/span&gt;&lt;span class="p"&gt;),&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;pathname_ptr&lt;/span&gt;&lt;span class="p"&gt;);&lt;/span&gt;
-
-&lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="c1"&gt;// xx&lt;/span&gt;
-&lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="n"&gt;mode&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;u32&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;PT_REGS_PARM3_CORE&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;regs&lt;/span&gt;&lt;span class="p"&gt;);&lt;/span&gt;
-
-&lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="kt"&gt;char&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;fmt&lt;/span&gt;&lt;span class="p"&gt;[]&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="s"&gt;&amp;quot;fchmodat %s %d&lt;/span&gt;&lt;span class="se"&gt;\n&lt;/span&gt;&lt;span class="s"&gt;&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;;&lt;/span&gt;
-&lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="n"&gt;bpf_trace_printk&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;fmt&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="k"&gt;sizeof&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;fmt&lt;/span&gt;&lt;span class="p"&gt;),&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;&amp;amp;&lt;/span&gt;&lt;span class="n"&gt;pathname&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;mode&lt;/span&gt;&lt;span class="p"&gt;);&lt;/span&gt;
-&lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="k"&gt;return&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="mi"&gt;0&lt;/span&gt;&lt;span class="p"&gt;;&lt;/span&gt;
-&lt;span class="p"&gt;}&lt;/span&gt;
-&lt;/pre&gt;&lt;/div&gt;
-&lt;p&gt;You can check out full example codes on Github:&lt;/p&gt;
-&lt;ul class="simple"&gt;
-&lt;li&gt;&lt;a class="reference external" href="https://github.com/mozillazg/hello-libbpfgo/tree/master/12-raw-tracepoint-args"&gt;https://github.com/mozillazg/hello-libbpfgo/tree/master/12-raw-tracepoint-args&lt;/a&gt;&lt;/li&gt;
-&lt;li&gt;&lt;a class="reference external" href="https://github.com/mozillazg/hello-libbpfgo/tree/master/13-raw-tracepoint-args-sched_switch"&gt;https://github.com/mozillazg/hello-libbpfgo/tree/master/13-raw-tracepoint-args-sched_switch&lt;/a&gt;&lt;/li&gt;
-&lt;/ul&gt;
-&lt;/div&gt;
-&lt;div class="section" id="the-difference-between-raw-tracepoint-and-tracepoint"&gt;
-&lt;h2 id="hidthe-difference-between-raw-tracepoint-and-tracepoint"&gt;The difference between raw tracepoint and tracepoint&lt;a class="headerlink" href="#hidthe-difference-between-raw-tracepoint-and-tracepoint" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
-&lt;p&gt;The main difference is that raw tracepoint does not pass the context to the ebpf program as tracepoint does (constructing the appropriate parameter fields), the The raw tracepoint ebpf program accesses the raw parameters of the event.&lt;/p&gt;
-&lt;p&gt;Therefore, raw tracepoint usually performs a little better than tracepoint (Data from &lt;a class="reference external" href="https://lwn.net/Articles/750569/"&gt;https://lwn.net/Articles/750569/&lt;/a&gt; )&lt;/p&gt;
-&lt;pre class="literal-block"&gt;
-samples/bpf/test_overhead performance on 1 cpu:
-
-tracepoint    base  kprobe+bpf tracepoint+bpf raw_tracepoint+bpf
-task_rename   1.1M   769K        947K            1.0M
-urandom_read  789K   697K        750K            755K
-&lt;/pre&gt;
-&lt;/div&gt;
-&lt;div class="section" id="references"&gt;
-&lt;h2 id="hidreferences"&gt;References&lt;a class="headerlink" href="#hidreferences" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
-&lt;ul class="simple"&gt;
-&lt;li&gt;&lt;a class="reference external" href="https://lwn.net/Articles/379903/"&gt;Using the TRACE_EVENT() macro (Part 1) [LWN.net]&lt;/a&gt;&lt;/li&gt;
-&lt;li&gt;&lt;a class="reference external" href="https://lwn.net/Articles/381064/"&gt;Using the TRACE_EVENT() macro (Part 2) [LWN.net]&lt;/a&gt;&lt;/li&gt;
-&lt;li&gt;&lt;a class="reference external" href="https://lwn.net/Articles/383362/"&gt;Using the TRACE_EVENT() macro (Part 3) [LWN.net]&lt;/a&gt;&lt;/li&gt;
-&lt;li&gt;&lt;a class="reference external" href="https://lwn.net/Articles/750569/"&gt;bpf, tracing: introduce bpf raw tracepoints [LWN.net]&lt;/a&gt;&lt;/li&gt;
-&lt;li&gt;&lt;a class="reference external" href="https://nakryiko.com/posts/bpf-core-reference-guide/"&gt;BPF CO-RE reference guide&lt;/a&gt;&lt;/li&gt;
-&lt;li&gt;&lt;a class="reference external" href="https://github.com/iovisor/bcc/blob/master/docs/reference_guide.md#7-raw-tracepoints"&gt;bcc/reference_guide.md at master · iovisor/bcc&lt;/a&gt;&lt;/li&gt;
-&lt;li&gt;&lt;a class="reference external" href="https://github.com/libbpf/libbpf/blob/12e932ac0e18546dd7247e66ea1b4aa236d2ef38/src/libbpf.c#L9002-L9081"&gt;libbpf/libbpf.c at 12e932ac0e18546dd7247e66ea1b4aa236d2ef38 · libbpf/libbpf&lt;/a&gt;&lt;/li&gt;
-&lt;li&gt;&lt;a class="reference external" href="https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/commit/?id=c4f6699dfcb8558d138fe838f741b2c10f416cf9"&gt;kernel/git/torvalds/linux.git - Linux kernel source tree&lt;/a&gt;&lt;/li&gt;
-&lt;li&gt;&lt;a class="reference external" href="https://nakryiko.com/posts/bcc-to-libbpf-howto-guide/"&gt;BCC to libbpf conversion guide&lt;/a&gt;&lt;/li&gt;
-&lt;li&gt;&lt;a class="reference external" href="https://sysdig.com/blog/the-art-of-writing-ebpf-programs-a-primer/"&gt;The art of writing eBPF programs: a primer. –Sysdig&lt;/a&gt;&lt;/li&gt;
-&lt;li&gt;&lt;a class="reference external" href="https://unix.stackexchange.com/questions/421750/where-do-you-find-the-syscall-table-for-linux"&gt;Where do you find the syscall table for Linux? - Unix &amp;amp; Linux Stack Exchange&lt;/a&gt;&lt;/li&gt;
-&lt;li&gt;&lt;a class="reference external" href="https://linux.die.net/man/8/ausyscall"&gt;ausyscall(8) - Linux man page&lt;/a&gt;&lt;/li&gt;
-&lt;/ul&gt;
-&lt;!-- * `linux/syscall_32.tbl at v5.13 · torvalds/linux &lt;https://github.com/torvalds/linux/blob/v5.13/arch/x86/entry/syscalls/syscall_32.tbl&gt;`__ --&gt;
-&lt;!-- * `linux/syscall_64.tbl at v5.13 · torvalds/linux &lt;https://github.com/torvalds/linux/blob/v5.13/arch/x86/entry/syscalls/syscall_64.tbl&gt;`__ --&gt;
-&lt;!-- * `linux/syscall.tbl at v5.13 · torvalds/linux &lt;https://github.com/torvalds/linux/blob/v5.13/arch/arm/tools/syscall.tbl&gt;`__ --&gt;
-&lt;!-- * `linux/unistd.h at v5.13 · torvalds/linux &lt;https://github.com/torvalds/linux/blob/v5.13/include/uapi/asm-generic/unistd.h&gt;`__ --&gt;
-&lt;/div&gt;
-</summary><category term="raw-tracepoint"></category><category term="libbpf"></category><category term="libbpfgo"></category><category term="go"></category><category term="golang"></category><category term="en-version"></category></entry></feed>
+</summary><category term="btf"></category><category term="raw-tracepoint"></category><category term="libbpf"></category><category term="libbpfgo"></category><category term="go"></category><category term="golang"></category><category term="en-version"></category></entry></feed>

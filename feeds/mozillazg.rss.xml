@@ -534,6 +534,9 @@ service account 关联使用的问题 （详见 &lt;a class="reference external"
 &lt;tr&gt;&lt;/tr&gt;
 &lt;/tbody&gt;
 &lt;/table&gt;
+&lt;p&gt;BTW, 虽然 EKS Pod Identity 方案的官方教程和文档中都是说的需要依赖 eks-pod-identity-agent 这个组件，
+但是从前面的内容中我们也可以看到：我们其实也可以在不安装 eks-pod-identity-agent 组件的情况下，使用该方案。
+具体来说就是，我们可以通过在应用程序内直接访问 EKS 提供的 AssumeRoleForPodIdentity API 的方式来解除对该组件的依赖。&lt;/p&gt;
 &lt;/div&gt;
 &lt;div class="section" id="section-5"&gt;
 &lt;h2 id="hidsection-5"&gt;参考资料&lt;a class="headerlink" href="#hidsection-5" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
@@ -1112,84 +1115,4 @@ $ chmod +x /usr/local/bin/docker-credential-acr-helper-user-1
 &lt;li&gt;&lt;a class="reference external" href="https://help.aliyun.com/document_detail/72334.html"&gt;GetAuthorizationToken - ACR Documentation&lt;/a&gt;&lt;/li&gt;
 &lt;/ul&gt;
 &lt;/div&gt;
-</description><dc:creator xmlns:dc="http://purl.org/dc/elements/1.1/">mozillazg</dc:creator><pubDate>Sun, 19 Jun 2022 00:00:00 +0000</pubDate><guid isPermaLink="false">tag:mozillazg.com,2022-06-19:2022/06/use-docker-credential-acr-helper-help-auth-alibaba-cloud-container-registry-with-temporary-password-without-docker-login.html</guid><category>ACR</category></item><item><title>ebpf/libbpf 程序使用 btf raw tracepoint 的常见问题</title><link>https://mozillazg.com/2022/06/ebpf-libbpf-btf-powered-enabled-raw-tracepoint-common-questions.html</link><description>&lt;div class="section" id="section-1"&gt;
-&lt;h2 id="hidsection-1"&gt;前言&lt;a class="headerlink" href="#hidsection-1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
-&lt;p&gt;本文记录一些编写 ebpf/libbpf 程序(比如编写类型为 &lt;tt class="docutils literal"&gt;BPF_TRACE_RAW_TP&lt;/tt&gt; 的 ebpf 程序) 时
-涉及到的 btf raw tracepoint 相关的常见问题。&lt;/p&gt;
-&lt;/div&gt;
-&lt;div class="section" id="btf-raw-tracepoint-raw-tracepoint"&gt;
-&lt;h2 id="hidbtf-raw-tracepoint-raw-tracepoint"&gt;btf raw tracepoint 跟常规 raw tracepoint 的区别&lt;a class="headerlink" href="#hidbtf-raw-tracepoint-raw-tracepoint" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
-&lt;p&gt;所谓的 btf raw tracepoint 指的是 &lt;a class="reference external" href="https://lore.kernel.org/netdev/20201203204634.1325171-1-andrii&amp;#64;kernel.org/t/"&gt;BTF-powered raw tracepoint (tp_btf) 或者说是 BTF-enabled raw tracepoint&lt;/a&gt; 。&lt;/p&gt;
-&lt;p&gt;btf raw tracepoint 跟常规 raw tracepoint 有一个 &lt;a class="reference external" href="https://nakryiko.com/posts/bpf-core-reference-guide/#btf-enabled-bpf-program-types-with-direct-memory-reads"&gt;最主要的区别&lt;/a&gt; 是：
-btf 版本可以直接在 ebpf 程序中访问内核内存，
-不需要像常规 raw tracepoint 一样需要借助类似 &lt;tt class="docutils literal"&gt;bpf_core_read&lt;/tt&gt; 或 &lt;tt class="docutils literal"&gt;bpf_probe_read_kernel&lt;/tt&gt; 这样 的辅助函数才能访问内核内存:&lt;/p&gt;
-&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="k"&gt;struct&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nc"&gt;task_struct&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;*&lt;/span&gt;&lt;span class="n"&gt;task&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="k"&gt;struct&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nc"&gt;task_struct&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;*&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;bpf_get_current_task&lt;/span&gt;&lt;span class="p"&gt;();&lt;/span&gt;
-&lt;span class="n"&gt;u32&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;ppid&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;BPF_CORE_READ&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;task&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;real_parent&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;tgid&lt;/span&gt;&lt;span class="p"&gt;);&lt;/span&gt;
-
-&lt;span class="c1"&gt;// btf enabled&lt;/span&gt;
-&lt;span class="k"&gt;struct&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nc"&gt;task_struct&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;*&lt;/span&gt;&lt;span class="n"&gt;task&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="k"&gt;struct&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nc"&gt;task_struct&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;*&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;bpf_get_current_task_btf&lt;/span&gt;&lt;span class="p"&gt;();&lt;/span&gt;
-&lt;span class="n"&gt;u32&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;ppid&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;task&lt;/span&gt;&lt;span class="o"&gt;-&amp;gt;&lt;/span&gt;&lt;span class="n"&gt;real_parent&lt;/span&gt;&lt;span class="o"&gt;-&amp;gt;&lt;/span&gt;&lt;span class="n"&gt;tgid&lt;/span&gt;&lt;span class="p"&gt;;&lt;/span&gt;
-&lt;/pre&gt;&lt;/div&gt;
-&lt;/div&gt;
-&lt;div class="section" id="btf-raw-tracepoint"&gt;
-&lt;h2 id="hidbtf-raw-tracepoint"&gt;btf raw tracepoint 可以监控哪些事件&lt;a class="headerlink" href="#hidbtf-raw-tracepoint" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
-&lt;p&gt;btf raw tracepoint 跟 &lt;a class="reference external" href="https://mozillazg.com/2022/05/ebpf-libbpf-raw-tracepoint-common-questions.html"&gt;raw tracepoint&lt;/a&gt; 所能监控的事件是一样的，这里不再赘述。&lt;/p&gt;
-&lt;/div&gt;
-&lt;div class="section" id="sec"&gt;
-&lt;h2 id="hidsec"&gt;SEC 内容的格式&lt;a class="headerlink" href="#hidsec" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
-&lt;p&gt;btf raw tracepoint 事件对应的 SEC 格式为:&lt;/p&gt;
-&lt;pre class="literal-block"&gt;
-SEC(&amp;quot;tp_btf/&amp;lt;name&amp;gt;&amp;quot;)
-
-// 比如:
-// SEC(&amp;quot;tp_btf/sched_switch&amp;quot;)
-// SEC(&amp;quot;tp_btf/sys_enter&amp;quot;)
-// SEC(&amp;quot;tp_btf/sys_exit&amp;quot;)
-&lt;/pre&gt;
-&lt;p&gt;&lt;tt class="docutils literal"&gt;&amp;lt;name&amp;gt;&lt;/tt&gt; 的值跟 &lt;a class="reference external" href="https://mozillazg.com/2022/05/ebpf-libbpf-raw-tracepoint-common-questions.html"&gt;raw tracepoint&lt;/a&gt; SEC 中使用的 &lt;tt class="docutils literal"&gt;&amp;lt;name&amp;gt;&lt;/tt&gt; 是一样的。&lt;/p&gt;
-&lt;/div&gt;
-&lt;div class="section" id="btf-raw-tracepoint-1"&gt;
-&lt;h2 id="hidbtf-raw-tracepoint-1"&gt;如何确定 btf raw tracepoint 事件处理函数的参数类型，获取对应的内核调用参数&lt;a class="headerlink" href="#hidbtf-raw-tracepoint-1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
-&lt;p&gt;所有事件都是在 vmlinux.h 中存在一个名为 &lt;tt class="docutils literal"&gt;btf_trace_&amp;lt;name&amp;gt;&lt;/tt&gt; 的定义。&lt;/p&gt;
-&lt;p&gt;比如 &lt;tt class="docutils literal"&gt;sys_enter&lt;/tt&gt; 这个事件对应的定义如下：&lt;/p&gt;
-&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="k"&gt;typedef&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="kt"&gt;void&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="o"&gt;*&lt;/span&gt;&lt;span class="n"&gt;btf_trace_sys_enter&lt;/span&gt;&lt;span class="p"&gt;)(&lt;/span&gt;&lt;span class="kt"&gt;void&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;*&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="k"&gt;struct&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nc"&gt;pt_regs&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;*&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="kt"&gt;long&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="kt"&gt;int&lt;/span&gt;&lt;span class="p"&gt;);&lt;/span&gt;
-&lt;/pre&gt;&lt;/div&gt;
-&lt;p&gt;对应的 ebpf 函数可以定义成下面这样：&lt;/p&gt;
-&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="n"&gt;SEC&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="s"&gt;&amp;quot;tp_btf/sys_enter&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
-&lt;span class="kt"&gt;int&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;btf_raw_tracepoint__sys_enter&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;u64&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;*&lt;/span&gt;&lt;span class="n"&gt;ctx&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
-&lt;span class="p"&gt;{&lt;/span&gt;
-&lt;span class="w"&gt;  &lt;/span&gt;&lt;span class="c1"&gt;// ...&lt;/span&gt;
-&lt;span class="p"&gt;}&lt;/span&gt;
-&lt;/pre&gt;&lt;/div&gt;
-&lt;p&gt;其中 &lt;tt class="docutils literal"&gt;ctx[0]&lt;/tt&gt; 对应上面 &lt;tt class="docutils literal"&gt;btf_trace_sys_enter&lt;/tt&gt; 中 &lt;tt class="docutils literal"&gt;void *&lt;/tt&gt; 后面的第一个参数 &lt;tt class="docutils literal"&gt;struct pt_regs *&lt;/tt&gt;,
-&lt;tt class="docutils literal"&gt;ctx[1]&lt;/tt&gt; 是第二个参数 &lt;tt class="docutils literal"&gt;long int&lt;/tt&gt; 。这两个参数的含义跟前面 &lt;a class="reference external" href="https://mozillazg.com/2022/05/ebpf-libbpf-raw-tracepoint-common-questions.html"&gt;raw tracepoint&lt;/a&gt; 中所说的 &lt;tt class="docutils literal"&gt;TP_PROTO(struct pt_regs *regs, long id)&lt;/tt&gt; 中的含义是一样的。&lt;/p&gt;
-&lt;p&gt;对应的，使用 btf raw tracepoint 获取 &lt;tt class="docutils literal"&gt;fchmodat&lt;/tt&gt; 系统调用事件的示例程序如下：&lt;/p&gt;
-&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="n"&gt;SEC&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="s"&gt;&amp;quot;tp_btf/sys_enter&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
-&lt;span class="kt"&gt;int&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;btf_raw_tracepoint__sys_enter&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;u64&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;*&lt;/span&gt;&lt;span class="n"&gt;ctx&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
-&lt;span class="p"&gt;{&lt;/span&gt;
-&lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="kt"&gt;long&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="kt"&gt;int&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;syscall_id&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="kt"&gt;long&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="kt"&gt;int&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;&lt;span class="n"&gt;ctx&lt;/span&gt;&lt;span class="p"&gt;[&lt;/span&gt;&lt;span class="mi"&gt;1&lt;/span&gt;&lt;span class="p"&gt;];&lt;/span&gt;
-&lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="k"&gt;if&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;syscall_id&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;!=&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="mi"&gt;268&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;&lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="c1"&gt;// fchmodat&lt;/span&gt;
-&lt;span class="w"&gt;        &lt;/span&gt;&lt;span class="k"&gt;return&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="mi"&gt;0&lt;/span&gt;&lt;span class="p"&gt;;&lt;/span&gt;
-
-&lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="k"&gt;struct&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nc"&gt;pt_regs&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;*&lt;/span&gt;&lt;span class="n"&gt;regs&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="k"&gt;struct&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nc"&gt;pt_regs&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;*&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;&lt;span class="n"&gt;ctx&lt;/span&gt;&lt;span class="p"&gt;[&lt;/span&gt;&lt;span class="mi"&gt;0&lt;/span&gt;&lt;span class="p"&gt;];&lt;/span&gt;
-&lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="c1"&gt;// 后面的逻辑跟前面 raw tracepoint 示例程序中是一样的&lt;/span&gt;
-&lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="c1"&gt;// ...&lt;/span&gt;
-&lt;span class="p"&gt;}&lt;/span&gt;
-&lt;/pre&gt;&lt;/div&gt;
-&lt;p&gt;BTW, 在 btf raw tracepoint 程序中可以通过 &lt;tt class="docutils literal"&gt;bpf_get_current_task_btf()&lt;/tt&gt; 获取 btf 版本的 task 信息。&lt;/p&gt;
-&lt;p&gt;完整的示例程序如下：&lt;/p&gt;
-&lt;ul class="simple"&gt;
-&lt;li&gt;&lt;a class="reference external" href="https://github.com/mozillazg/hello-libbpfgo/tree/master/16-btf-raw-tracepoint-args"&gt;https://github.com/mozillazg/hello-libbpfgo/tree/master/16-btf-raw-tracepoint-args&lt;/a&gt;&lt;/li&gt;
-&lt;li&gt;&lt;a class="reference external" href="https://github.com/mozillazg/hello-libbpfgo/tree/master/17-btf-raw-tracepoint-args-sched_switch"&gt;https://github.com/mozillazg/hello-libbpfgo/tree/master/17-btf-raw-tracepoint-args-sched_switch&lt;/a&gt;&lt;/li&gt;
-&lt;/ul&gt;
-&lt;/div&gt;
-&lt;div class="section" id="section-2"&gt;
-&lt;h2 id="hidsection-2"&gt;参考资料&lt;a class="headerlink" href="#hidsection-2" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
-&lt;ul class="simple"&gt;
-&lt;li&gt;&lt;a class="reference external" href="https://lore.kernel.org/netdev/20201203204634.1325171-1-andrii&amp;#64;kernel.org/t/"&gt;[PATCH v6 bpf-next 00/14] Support BTF-powered BPF tracing programs for kernel modules&lt;/a&gt;&lt;/li&gt;
-&lt;li&gt;&lt;a class="reference external" href="https://nakryiko.com/posts/bpf-core-reference-guide/#btf-enabled-bpf-program-types-with-direct-memory-reads"&gt;BPF CO-RE reference guide&lt;/a&gt;&lt;/li&gt;
-&lt;li&gt;&lt;a class="reference external" href="https://github.com/libbpf/libbpf/blob/12e932ac0e18546dd7247e66ea1b4aa236d2ef38/src/libbpf.c#L9002-L9081"&gt;libbpf/libbpf.c at 12e932ac0e18546dd7247e66ea1b4aa236d2ef38 · libbpf/libbpf&lt;/a&gt;&lt;/li&gt;
-&lt;/ul&gt;
-&lt;!-- * https://github.com/aya-rs/aya/pull/85 --&gt;
-&lt;/div&gt;
-</description><dc:creator xmlns:dc="http://purl.org/dc/elements/1.1/">mozillazg</dc:creator><pubDate>Tue, 14 Jun 2022 00:00:00 +0000</pubDate><guid isPermaLink="false">tag:mozillazg.com,2022-06-14:2022/06/ebpf-libbpf-btf-powered-enabled-raw-tracepoint-common-questions.html</guid><category>btf</category><category>raw-tracepoint</category><category>libbpf</category><category>libbpfgo</category></item></channel></rss>
+</description><dc:creator xmlns:dc="http://purl.org/dc/elements/1.1/">mozillazg</dc:creator><pubDate>Sun, 19 Jun 2022 00:00:00 +0000</pubDate><guid isPermaLink="false">tag:mozillazg.com,2022-06-19:2022/06/use-docker-credential-acr-helper-help-auth-alibaba-cloud-container-registry-with-temporary-password-without-docker-login.html</guid><category>ACR</category></item></channel></rss>
