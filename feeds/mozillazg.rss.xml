@@ -1,5 +1,433 @@
 <?xml version="1.0" encoding="utf-8"?>
-<rss version="2.0"><channel><title>mozillazg's Blog</title><link>https://mozillazg.com/</link><description></description><lastBuildDate>Sun, 10 Mar 2024 00:00:00 +0000</lastBuildDate><item><title>如何在本地 checkout GitHub 上外部贡献者提交的 PR 所在 fork 仓库的分支代码</title><link>https://mozillazg.com/2024/03/git-checkout-github-pr-codes-to-local.html</link><description>&lt;p&gt;在日常处理 GitHub 上外部贡献者提交的 PR 时，可能会想将 PR 对应的代码 checkout 到本地，
+<rss version="2.0"><channel><title>mozillazg's Blog</title><link>https://mozillazg.com/</link><description></description><lastBuildDate>Sun, 31 Mar 2024 00:00:00 +0000</lastBuildDate><item><title>一个使用 tracepoint 追踪 execve 系统调用时无法正确获取系统调用参数的场景</title><link>https://mozillazg.com/2024/03/ebpf-tracepoint-syscalls-sys-enter-execve-can-not-get-filename-argv-values-case.html</link><description>&lt;div class="section" id="section-1"&gt;
+&lt;h2 id="hidsection-1"&gt;背景&lt;a class="headerlink" href="#hidsection-1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;前段时间有网友在 slack 上的 &lt;a class="reference external" href="https://ebpf.io/slack"&gt;ebpf 频道&lt;/a&gt;
+中咨询一个他遇到的问题：&lt;/p&gt;
+&lt;!-- `问题 &lt;https://cilium.slack.com/archives/C4XCTGYEM/p1710380136906129?thread_ts=1710284853.310149&amp;cid=C4XCTGYEM&gt;`__ ： --&gt;
+&lt;p&gt;在编写使用 &lt;tt class="docutils literal"&gt;tracepoint/syscalls/sys_enter_execve&lt;/tt&gt; 追踪 execve 系统调用的 ebpf 程序时，
+遇到了记录的部分事件中存在使用 &lt;tt class="docutils literal"&gt;bpf_probe_read_user_str&lt;/tt&gt; 读取
+&lt;tt class="docutils literal"&gt;execve&lt;/tt&gt; 的 &lt;tt class="docutils literal"&gt;filename&lt;/tt&gt; 参数失败的现象，错误码为 -14/EFAULT。
+尤其是在执行 tmux 命令的时候，必定会伴随一个读取失败的事件:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+ret = bpf_probe_read_user_str(event-&amp;gt;args, ARGSIZE, (const char*)ctx-&amp;gt;args[0]);
+if (ret &amp;lt; 0) {
+        bpf_printk(&amp;quot;comm=%s XXX cannot read file name&amp;quot;, tgid, pid, event-&amp;gt;comm);
+        return 0;
+}
+
+utempter-4031732 [027] d...1 3878624.643948: bpf_trace_printk: comm=tmux: server XXX cannot read file name
+   &amp;lt;...&amp;gt;-4035723 [077] d...1 3878668.047954: bpf_trace_printk: comm=tmux: server XXX cannot read file name
+&lt;/pre&gt;
+&lt;p&gt;本文将探讨一下该问题出现的原因以及针对该场景的一种解决方法。&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class="section" id="section-2"&gt;
+&lt;h2 id="hidsection-2"&gt;复现问题的代码&lt;a class="headerlink" href="#hidsection-2" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;因为问题中提到只要执行 tmux 命令就必定会复现该问题，并且我们在 &lt;tt class="docutils literal"&gt;bpf_printk&lt;/tt&gt; 的输出中看到对应事件的进程名称为 &lt;tt class="docutils literal"&gt;utempter&lt;/tt&gt; ，
+因此，我们可以基于这两点信息来尝试编写一个简单的复现问题的程序。&lt;/p&gt;
+&lt;p&gt;通过在网络上查找 tmux 与 utempter 的关联关系，以及阅读了相关的 tmux 源代码后，我了解到了如下信息：&lt;/p&gt;
+&lt;ol class="arabic"&gt;
+&lt;li&gt;&lt;p class="first"&gt;tmux 会调用 &lt;tt class="docutils literal"&gt;utempter.h&lt;/tt&gt; 提供的
+&lt;a class="reference external" href="https://github.com/tmux/tmux/blob/b79e28b2c30e7ef9b1f7ec6233eeb70a1a177231/spawn.c#L473"&gt;utempter_add_record&lt;/a&gt;
+函数创建所需的伪终端（pseudo-terminal）:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+xasprintf(&amp;amp;cp, &amp;quot;tmux(%lu).%%%u&amp;quot;, (long)getpid(), new_wp-&amp;gt;id);
+utempter_add_record(new_wp-&amp;gt;fd, cp);
+&lt;/pre&gt;
+&lt;/li&gt;
+&lt;li&gt;&lt;p class="first"&gt;&lt;tt class="docutils literal"&gt;utempter_add_record&lt;/tt&gt; 函数中会首先使用传入的参数构造一个 &lt;tt class="docutils literal"&gt;args&lt;/tt&gt; 然后调用
+&lt;a class="reference external" href="https://github.com/altlinux/libutempter/blob/9f291816a746292547ac8aaea0c88e16fc2fb29a/libutempter/iface.c#L121"&gt;execute_helper&lt;/a&gt;
+函数:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+#define UTEMPTER_DEFAULT_PATHNAME     LIBEXECDIR &amp;quot;/utempter/utempter&amp;quot;
+static const char *utempter_pathname;
+
+int utempter_add_record(int master_fd, const char *hostname)
+  {
+      const char *const args[] = {
+          utempter_pathname ? : UTEMPTER_DEFAULT_PATHNAME,
+          &amp;quot;add&amp;quot;,
+          hostname,
+          0
+      };
+      int status = execute_helper(master_fd, args);
+      // ...
+  }
+&lt;/pre&gt;
+&lt;/li&gt;
+&lt;li&gt;&lt;p class="first"&gt;&lt;tt class="docutils literal"&gt;execute_helper&lt;/tt&gt; 函数中最终会使用传入的 &lt;tt class="docutils literal"&gt;args&lt;/tt&gt; 调用 &lt;tt class="docutils literal"&gt;fork()&lt;/tt&gt; 和 &lt;tt class="docutils literal"&gt;execv()&lt;/tt&gt; 函数启动一个新的进程
+（ &lt;a class="reference external" href="https://github.com/altlinux/libutempter/blob/9f291816a746292547ac8aaea0c88e16fc2fb29a/libutempter/iface.c#L84"&gt;源代码&lt;/a&gt; ）:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+static int execute_helper(int master_fd, const char *const argv[])
+{
+    // ...
+    child = fork();
+    if (!child) {
+        do_child(master_fd, argv[0], (char *const *) argv);
+    } else if (child &amp;lt; 0) {
+    // ...
+}
+static void __attribute__((__noreturn__))
+do_child(int master_fd, const char *path, char *const *argv)
+{
+    // ...
+    execv(path, argv);
+    print_dbg(&amp;quot;execv: %s&amp;quot;, strerror(errno));
+    //...
+}
+&lt;/pre&gt;
+&lt;/li&gt;
+&lt;/ol&gt;
+&lt;p&gt;根据上面这些信息，我们可以编写如下这个可复现该问题的程序
+&lt;a class="reference external" href="https://github.com/mozillazg/ebpf-tracepoint-execve-argv-issue/blob/master/reproduce.c"&gt;reproduce.c&lt;/a&gt;:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+#define PATHNAME &amp;quot;/usr/bin/echo&amp;quot;
+
+int main(int argc, char **argv) {
+    const char *hostname = argv[0];
+    const char *const args[] = {
+        PATHNAME,
+        &amp;quot;add&amp;quot;,
+        hostname,
+        0
+    };
+    if (!fork()) {
+        execv(args[0], (char *const *) args);
+    }
+}
+&lt;/pre&gt;
+&lt;p&gt;下面测试一下这个程序的效果:&lt;/p&gt;
+&lt;ol class="arabic"&gt;
+&lt;li&gt;&lt;p class="first"&gt;使用 gcc 编译:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+gcc -o reproduce reproduce.c
+&lt;/pre&gt;
+&lt;/li&gt;
+&lt;li&gt;&lt;p class="first"&gt;在另一个终端使用 &lt;a class="reference external" href="https://github.com/bpftrace/bpftrace"&gt;bpftrace&lt;/a&gt; 追踪 tracepoint/syscalls/sys_enter_execve 事件:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+sudo bpftrace -e 'tracepoint:syscalls:sys_enter_execve{printf(&amp;quot;%s[%d]: %s\n&amp;quot;, comm, pid, str(args-&amp;gt;filename));}'
+&lt;/pre&gt;
+&lt;/li&gt;
+&lt;li&gt;&lt;p class="first"&gt;运行示例程序:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+./reproduce
+&lt;/pre&gt;
+&lt;/li&gt;
+&lt;/ol&gt;
+&lt;p&gt;此时，运行 bpftrace 的终端将输出类似下面这样的结果:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+bash[34882]: ./reproduce
+reproduce[34883]:
+&lt;/pre&gt;
+&lt;p&gt;在上面结果中，我们没有获取到 reproduce 进程执行 &lt;tt class="docutils literal"&gt;execve()&lt;/tt&gt; 系统调用时使用的 &lt;tt class="docutils literal"&gt;filename&lt;/tt&gt; 参数的值。
+由此可见，我们的这个程序复现了最初的问题。&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class="section" id="section-3"&gt;
+&lt;h2 id="hidsection-3"&gt;原因&lt;a class="headerlink" href="#hidsection-3" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;经 &lt;a class="reference external" href="https://github.com/ssfdust"&gt;&amp;#64;ssfdust&lt;/a&gt; 提醒，bpftrace 社区之前已经有人提过类似的问题：
+&lt;a class="reference external" href="https://github.com/bpftrace/bpftrace/issues/2523"&gt;#2523&lt;/a&gt; 。
+在这个 issue 中 &lt;a class="reference external" href="https://github.com/fbs"&gt;&amp;#64;fbs&lt;/a&gt;
+给出的 &lt;a class="reference external" href="https://github.com/bpftrace/bpftrace/issues/2523#issuecomment-1466936511"&gt;解释&lt;/a&gt; 是：&lt;/p&gt;
+&lt;blockquote&gt;
+&lt;p&gt;Like I said earlier, the data you're using isn't in memory yet. These static strings are compiled in and are not actually faulted into memory until they're accessed. The access won't happen until its read, which is after your bpftrace probe ran. BPF won't pull the data in so you get an EFAULT/-14.&lt;/p&gt;
+&lt;p&gt;By printing the values or just a random print of a constant string you pull the small amount of data into memory (as it goes by page, not by var) and then it works&lt;/p&gt;
+&lt;/blockquote&gt;
+&lt;p&gt;即：&lt;/p&gt;
+&lt;ol class="arabic simple"&gt;
+&lt;li&gt;示例程序中，执行 &lt;tt class="docutils literal"&gt;execve()&lt;/tt&gt; 时传入的 &lt;tt class="docutils literal"&gt;argv[0]&lt;/tt&gt; 指向的文件名称字符串是一个静态字符串
+（这些静态字符串在程序被编译后存储在 ELF（Executable and Linkable Format） 文件的 &lt;tt class="docutils literal"&gt;.rodata&lt;/tt&gt; section），
+这些字符串只会在程序真正去访问他们的时候（访问 &lt;tt class="docutils literal"&gt;.rodata&lt;/tt&gt; section 存储的数据时）才会被加载到内存中。&lt;/li&gt;
+&lt;li&gt;由1可知，示例程序中 &lt;tt class="docutils literal"&gt;argv[0]&lt;/tt&gt; 指向的静态字符串只会在执行 &lt;tt class="docutils literal"&gt;execve()&lt;/tt&gt; 系统调用的时候被读取到内存中，
+但是我们的 ebpf 程序其实是在执行 &lt;tt class="docutils literal"&gt;execve()&lt;/tt&gt; 系统调用之前被执行的，因此 ebpf 程序里使用 &lt;tt class="docutils literal"&gt;bpf_probe_read_user_str&lt;/tt&gt;
+读取 &lt;tt class="docutils literal"&gt;argv[0]&lt;/tt&gt; 会失败并返回 &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;EFAULT/-14&lt;/span&gt;&lt;/tt&gt; 。&lt;/li&gt;
+&lt;li&gt;通过 &lt;tt class="docutils literal"&gt;printf&lt;/tt&gt; 等方式主动将字符串加载到内存中可以让该问题消失。&lt;/li&gt;
+&lt;/ol&gt;
+&lt;p&gt;来自 &lt;a class="reference external" href="https://github.com/jschwinger233"&gt;&amp;#64;jschwinger233&lt;/a&gt; 的总结：&lt;/p&gt;
+&lt;blockquote&gt;
+bpf_probe_read_user 只能读到已经载入内存 (page-faulted into memory) 的数据，
+而上面代码直到 execve(2) 之时都还未读过 .rodata，未曾触发 page fault。
+这可以用 tracepoint:exceptions:page_fault* 来验证。&lt;/blockquote&gt;
+&lt;/div&gt;
+&lt;div class="section" id="section-4"&gt;
+&lt;h2 id="hidsection-4"&gt;验证&lt;a class="headerlink" href="#hidsection-4" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;div class="section" id="printf"&gt;
+&lt;h3 id="hidprintf"&gt;增加 printf&lt;a class="headerlink" href="#hidprintf" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
+&lt;p&gt;由上面可知，其实我们只需要修改程序在执行 &lt;tt class="docutils literal"&gt;execve()&lt;/tt&gt; 之前主动将 &lt;tt class="docutils literal"&gt;.rodata&lt;/tt&gt; 中的数据加载到内存中即可避免该问题，
+比如使用 &lt;tt class="docutils literal"&gt;printf&lt;/tt&gt; 函数。&lt;/p&gt;
+&lt;p&gt;即，可以使用 &lt;tt class="docutils literal"&gt;printf&lt;/tt&gt; 函数打印 &lt;tt class="docutils literal"&gt;argv[0]&lt;/tt&gt; ，也可以直接打印一个静态字符串:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+if (!fork()) {
+    printf(&amp;quot;test\n&amp;quot;);
+    // or
+    // printf(&amp;quot;argv[0]: %s\n&amp;quot;, args[0]);
+    execv(args[0], (char *const *) args);
+}
+&lt;/pre&gt;
+&lt;p&gt;经验证，修改后的程序
+&lt;a class="reference external" href="https://github.com/mozillazg/ebpf-tracepoint-execve-argv-issue/blob/master/reproduce_printf1.c"&gt;reproduce_printf1.c&lt;/a&gt;
+确实可以让 ebpf 程序正确读取到 filename 的值。&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class="section" id="section-5"&gt;
+&lt;h3 id="hidsection-5"&gt;不使用静态字符串&lt;a class="headerlink" href="#hidsection-5" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
+&lt;p&gt;既然是因为 &lt;tt class="docutils literal"&gt;argv[0]&lt;/tt&gt; 是静态字符串导致的问题，那么可以尝试将 &lt;tt class="docutils literal"&gt;argv[0]&lt;/tt&gt; 改为使用非静态字符串，看看问题是否还存在。
+修改的内容如下:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+const char *const args[] = {
+    argv[1],
+    &amp;quot;add&amp;quot;,
+    hostname,
+    0
+};
+&lt;/pre&gt;
+&lt;p&gt;经验证，修改后的程序
+&lt;a class="reference external" href="https://github.com/mozillazg/ebpf-tracepoint-execve-argv-issue/blob/master/reproduce_non_static.c"&gt;reproduce_non_static.c&lt;/a&gt;
+也可以让 ebpf 程序正确读取到 filename 的值。&lt;/p&gt;
+&lt;p&gt;不知道大家有没有注意到，我们的复现问题的程序里 &lt;tt class="docutils literal"&gt;argv[2]&lt;/tt&gt; 的值其实是一个非静态字符串，
+所以也可以通过在 ebpf 程序中读取这个数据的内容来验证，
+预期是不做任何修改就可以读取到 &lt;tt class="docutils literal"&gt;argv[2]&lt;/tt&gt; 这个非静态字符串的内容：&lt;/p&gt;
+&lt;ol class="arabic"&gt;
+&lt;li&gt;&lt;p class="first"&gt;执行新的 bpftrace 命令:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+sudo bpftrace -e 'tracepoint:syscalls:sys_enter_execve{
+    printf(&amp;quot;%s[%d]: filename: %s, argv[1]: %s, argv[2]: %s\n&amp;quot;, comm, pid, str(args-&amp;gt;filename), str(args-&amp;gt;argv[1]), str(args-&amp;gt;argv[2]));
+}'
+&lt;/pre&gt;
+&lt;/li&gt;
+&lt;li&gt;&lt;p class="first"&gt;执行 &lt;tt class="docutils literal"&gt;./reproduce&lt;/tt&gt;&lt;/p&gt;
+&lt;/li&gt;
+&lt;li&gt;&lt;p class="first"&gt;bpftrace 命令的输出示例如下:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+bash[36523]: filename: ./reproduce, argv[1]: , argv[2]:
+reproduce[36524]: filename: , argv[1]: , argv[2]: ./reproduce
+&lt;/pre&gt;
+&lt;/li&gt;
+&lt;/ol&gt;
+&lt;/div&gt;
+&lt;div class="section" id="page-fault"&gt;
+&lt;h3 id="hidpage-fault"&gt;page fault&lt;a class="headerlink" href="#hidpage-fault" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
+&lt;p&gt;在现代 Linux 系统中，当我们运行二进制可执行文件的时候，程序加载器（ELF executable loader）
+会根据 ELF 文件中定义的信息使用 &lt;tt class="docutils literal"&gt;mmap&lt;/tt&gt; 进行懒加载（lazy loading），延迟加载一些数据。
+当程序真正去读取这些数据的时候，如果被读取的数据还没有被加载到内存里，就会触发 page fault。&lt;/p&gt;
+&lt;!-- CPU 就会生成一个缺页异常（page fault exception）。此时，内核中的缺页处理程序（page fault handler） --&gt;
+&lt;!-- 会负责处理该异常，将缺失的页面加载到内存中，然后 CPU 重新执行引起缺页异常的指令。 --&gt;
+&lt;p&gt;ELF 文件的 .rodata section 中存储的数据恰好就是会被延迟加载的数据。&lt;/p&gt;
+&lt;div class="section" id="rodata"&gt;
+&lt;h4 id="hidrodata"&gt;.rodata&lt;a class="headerlink" href="#hidrodata" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h4&gt;
+&lt;p&gt;ELF 文件中的 .rodata section 存储了一些只读数据，比如静态字符串。
+我们首先来看一下编译后的示例程序二进制 ELF 文件中的 .rodata section 的数据。&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;p class="first"&gt;可以使用 &lt;tt class="docutils literal"&gt;objdump&lt;/tt&gt; 命令进行查看:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+$ objdump -s -j .rodata ./reproduce
+
+./reproduce:     file format elf64-x86-64
+
+Contents of section .rodata:
+2000 01000200 2f757372 2f62696e 2f656368  ..../usr/bin/ech
+2010 6f006164 6400                        o.add.
+&lt;/pre&gt;
+&lt;/li&gt;
+&lt;li&gt;&lt;p class="first"&gt;也可以使用 python 社区的 &lt;a class="reference external" href="https://docs.pwntools.com/en/stable/"&gt;pwntools&lt;/a&gt; 库进行读取:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+&amp;gt;&amp;gt;&amp;gt; from pwn import ELF
+&amp;gt;&amp;gt;&amp;gt; elf = ELF('reproduce')
+&amp;gt;&amp;gt;&amp;gt; elf.section('.rodata')
+b'\x01\x00\x02\x00/usr/bin/echo\x00add\x00'
+&lt;/pre&gt;
+&lt;/li&gt;
+&lt;/ul&gt;
+&lt;p&gt;从上面的输出中可以看到其中包含了源码中使用的两个静态字符串。&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class="section" id="page-fault-1"&gt;
+&lt;h4 id="hidpage-fault-1"&gt;观测 page fault&lt;a class="headerlink" href="#hidpage-fault-1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h4&gt;
+&lt;p&gt;在 Linux 系统中，当内核执行 &lt;tt class="docutils literal"&gt;execve()&lt;/tt&gt; 系统调用时，
+会使用内核函数 &lt;tt class="docutils literal"&gt;strncpy_from_user&lt;/tt&gt; 将 &lt;tt class="docutils literal"&gt;argv&lt;/tt&gt; 中包含的字符串数据从用户态复制到内核态，
+这个过程涉及读取用户态数据的操作。
+如果被读取的用户态数据还未被加载到内存中，就会触发 page fault。&lt;/p&gt;
+&lt;p&gt;我们可以通过观测 &lt;tt class="docutils literal"&gt;exceptions/page_fault_kernel&lt;/tt&gt; 和 &lt;tt class="docutils literal"&gt;exceptions/page_fault_user&lt;/tt&gt; 感知到这个事件:&lt;/p&gt;
+&lt;ol class="arabic"&gt;
+&lt;li&gt;&lt;p class="first"&gt;为了方便验证，我们需要先修改一下示例代码，在执行 &lt;tt class="docutils literal"&gt;execv()&lt;/tt&gt; 函数前增加一行 &lt;tt class="docutils literal"&gt;sleep(15)&lt;/tt&gt; ，避免程序太快结束
+（&lt;a class="reference external" href="https://github.com/mozillazg/ebpf-tracepoint-execve-argv-issue/blob/master/reproduce_sleep.c"&gt;reproduce_sleep.c&lt;/a&gt; ）&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+if (!fork()) {
+     sleep(15);
+     execv(args[0], (char *const *) args);
+}
+&lt;/pre&gt;
+&lt;/li&gt;
+&lt;li&gt;&lt;p class="first"&gt;在一个终端中运行下面这个 bpftrace 脚本，观测 page fault:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+cat &amp;lt;&amp;lt;EOF | sudo bpftrace -
+tracepoint:exceptions:page_fault_kernel /comm == &amp;quot;reproduce_sleep&amp;quot;/ {
+    printf(&amp;quot;[%s] page_fault_kernel: %s[%d] addr=%llx ip=%llx err=%lld\n&amp;quot;,
+            strftime(&amp;quot;%M:%S&amp;quot;, nsecs), comm, pid, args-&amp;gt;address, args-&amp;gt;ip, args-&amp;gt;error_code);
+}
+
+tracepoint:exceptions:page_fault_user /comm == &amp;quot;reproduce_sleep&amp;quot;/ {
+    printf(&amp;quot;[%s] page_fault_user:   %s[%d] addr=%llx ip=%llx err=%lld\n&amp;quot;,
+            strftime(&amp;quot;%M:%S&amp;quot;, nsecs), comm, pid, args-&amp;gt;address, args-&amp;gt;ip, args-&amp;gt;error_code);
+}
+EOF
+&lt;/pre&gt;
+&lt;/li&gt;
+&lt;li&gt;&lt;p class="first"&gt;然后在另一个终端中运行 &lt;tt class="docutils literal"&gt;./reproduce_sleep&lt;/tt&gt;&lt;/p&gt;
+&lt;/li&gt;
+&lt;li&gt;&lt;p class="first"&gt;在第3个终端中查看运行中的 reproduce_sleep 进程的内存映射关系（memory mapping）:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+$ sudo cat /proc/41291/maps | grep reproduce_sleep
+55b4d9e31000-55b4d9e32000 r--p 00000000 08:01 1634479                    /XXX/reproduce_sleep
+55b4d9e32000-55b4d9e33000 r-xp 00001000 08:01 1634479                    /XXX/reproduce_sleep
+55b4d9e33000-55b4d9e34000 r--p 00002000 08:01 1634479                    /XXX/reproduce_sleep
+55b4d9e34000-55b4d9e35000 r--p 00002000 08:01 1634479                    /XXX/reproduce_sleep
+55b4d9e35000-55b4d9e36000 rw-p 00003000 08:01 1634479                    /XXX/reproduce_sleep
+&lt;/pre&gt;
+&lt;p&gt;由上面可知，该进程的内存映射起始地址是 &lt;tt class="docutils literal"&gt;55b4d9e31000&lt;/tt&gt; ，即 &lt;tt class="docutils literal"&gt;0x55b4d9e31000&lt;/tt&gt;&lt;/p&gt;
+&lt;/li&gt;
+&lt;li&gt;&lt;p class="first"&gt;待示例程序运行结束后，bpftrace 命令的输出中的最后两条数据将类似下面这样:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+[47:40] page_fault_user:   reproduce_sleep[41290] addr=7f669db86a50 ip=7f669d9f8940 err=7
+[47:55] page_fault_kernel: reproduce_sleep[41291] addr=55b4d9e33004 ip=ffffffff8e092a40 err=0
+&lt;/pre&gt;
+&lt;p&gt;这两个输出间隔了 15 秒，由此可以确定最后那个 page fault 事件是执行 &lt;tt class="docutils literal"&gt;execv()&lt;/tt&gt; 函数的时候触发的。
+下面来通过事件中的 &lt;tt class="docutils literal"&gt;addr&lt;/tt&gt; 结果定位对应的数据。&lt;/p&gt;
+&lt;/li&gt;
+&lt;li&gt;&lt;p class="first"&gt;上面最后那条 &lt;tt class="docutils literal"&gt;page_fault_kernel&lt;/tt&gt; 事件输出的 addr 的值是 &lt;tt class="docutils literal"&gt;55b4d9e33004&lt;/tt&gt; ，
+即触发这个 page fault 事件的虚拟内存地址是 &lt;tt class="docutils literal"&gt;0x55b4d9e33004&lt;/tt&gt; 。&lt;/p&gt;
+&lt;/li&gt;
+&lt;li&gt;&lt;p class="first"&gt;基于 &lt;a class="reference external" href="https://github.com/jschwinger233"&gt;&amp;#64;jschwinger233&lt;/a&gt;  分享的秘籍：
+&lt;tt class="docutils literal"&gt;real_addr = start_addr + (elf_address - section.Address + section.Offset)&lt;/tt&gt; 可知:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+0x55b4d9e33004 = 0x55b4d9e31000 + (elf_address - section.Address + section.Offset)
+(elf_address - section.Address + section.Offset) = 0x55b4d9e33004 - 0x55b4d9e31000 = 8196 = 0x2004
+&lt;/pre&gt;
+&lt;/li&gt;
+&lt;li&gt;&lt;p class="first"&gt;使用 readelf 命令读取二进制文件 reproduce_sleep 中 ELF .rodata section 的内存地址、偏移量以及数据大小:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+$ readelf -S -W reproduce_sleep  | egrep '.rodata|Address'
+  [Nr] Name              Type            Address          Off    Size   ES Flg Lk Inf Al
+  [18] .rodata           PROGBITS        0000000000002000 002000 000016 00   A  0   0  4
+&lt;/pre&gt;
+&lt;p&gt;由上面的输出可知，该 ELF 文件中 .rodata section 的虚拟地址是 &lt;tt class="docutils literal"&gt;0000000000002000&lt;/tt&gt; 即 &lt;tt class="docutils literal"&gt;0x2000&lt;/tt&gt; ，
+偏移量是 &lt;tt class="docutils literal"&gt;002000&lt;/tt&gt; 即 &lt;tt class="docutils literal"&gt;0x2000&lt;/tt&gt; ， 数据大小是 &lt;tt class="docutils literal"&gt;0x16&lt;/tt&gt; ，即地址范围是 &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;0x2000-0x2016&lt;/span&gt;&lt;/tt&gt; 。&lt;/p&gt;
+&lt;/li&gt;
+&lt;li&gt;&lt;p class="first"&gt;通过 7 和 8 可知，执行 &lt;tt class="docutils literal"&gt;execv()&lt;/tt&gt; 函数时触发的 page fault 事件的虚拟内存地址
+&lt;tt class="docutils literal"&gt;0x55b4d9e33004&lt;/tt&gt; 对应的 ELF 地址是 &lt;tt class="docutils literal"&gt;0x2004&lt;/tt&gt; ，这个地址在 ELF 文件的 .rodata 地址范围（0x2000-0x2016）内，
+对应的是 &lt;tt class="docutils literal"&gt;argv[0]&lt;/tt&gt; 中使用的静态字符串 &lt;tt class="docutils literal"&gt;/usr/bin/echo&lt;/tt&gt;:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+$ objdump -s -j .rodata ./reproduce_sleep
+
+./reproduce_sleep:     file format elf64-x86-64
+
+Contents of section .rodata:
+ 2000 01000200 2f757372 2f62696e 2f656368  ..../usr/bin/ech
+ 2010 6f006164 6400                        o.add.
+
+&amp;gt;&amp;gt;&amp;gt; elf = ELF('reproduce_sleep')
+&amp;gt;&amp;gt;&amp;gt; elf.read(0x2004, 14)
+b'/usr/bin/echo\x00'
+
+$ gdb -ex 'disas/m main' -ex q reproduce_sleep | grep 'args\[\]' -A 13
+9       const char *const args[] = {
+   0x00000000000011d6 &amp;lt;+45&amp;gt;:        lea    0xe27(%rip),%rax        # 0x2004
+   0x00000000000011dd &amp;lt;+52&amp;gt;:        mov    %rax,-0x30(%rbp)
+   0x00000000000011e1 &amp;lt;+56&amp;gt;:        lea    0xe2a(%rip),%rax        # 0x2012
+   0x00000000000011e8 &amp;lt;+63&amp;gt;:        mov    %rax,-0x28(%rbp)
+   0x00000000000011ec &amp;lt;+67&amp;gt;:        mov    -0x38(%rbp),%rax
+   0x00000000000011f0 &amp;lt;+71&amp;gt;:        mov    %rax,-0x20(%rbp)
+   0x00000000000011f4 &amp;lt;+75&amp;gt;:        movq   $0x0,-0x18(%rbp)
+
+10          PATHNAME,
+11          &amp;quot;add&amp;quot;,
+12          hostname,
+13          0
+14      };
+&lt;/pre&gt;
+&lt;/li&gt;
+&lt;li&gt;&lt;p class="first"&gt;也可以通过在 ebpf 程序或 bpftrace 脚本中打印 &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;args-&amp;gt;filename&lt;/span&gt;&lt;/tt&gt; 的指针地址来确认，
+这个地址的值会跟前面 page fault 事件中 addr 的值一致，都是 &lt;tt class="docutils literal"&gt;0x55b4d9e33004&lt;/tt&gt;&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+tracepoint:syscalls:sys_enter_execve {
+    printf(&amp;quot;%s[%d]: %p\n&amp;quot;, comm, pid, args-&amp;gt;filename);
+}
+&lt;/pre&gt;
+&lt;/li&gt;
+&lt;/ol&gt;
+&lt;p&gt;BTW，可以通过 &lt;tt class="docutils literal"&gt;perf trace &lt;span class="pre"&gt;-F&lt;/span&gt; all&lt;/tt&gt; 命令追踪触发 page fault 事件的函数信息。&lt;/p&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;div class="section" id="section-6"&gt;
+&lt;h2 id="hidsection-6"&gt;解决方法&lt;a class="headerlink" href="#hidsection-6" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;解决这个问题的方法有很多，其中一种解决方法是改为通过追踪 &lt;tt class="docutils literal"&gt;tracepoint/sched/sched_process_exec&lt;/tt&gt;
+事件来获取 &lt;tt class="docutils literal"&gt;execve()&lt;/tt&gt; 系统调用中 &lt;tt class="docutils literal"&gt;filename&lt;/tt&gt; 和 &lt;tt class="docutils literal"&gt;argv&lt;/tt&gt; 参数的值。下面是对应实现的示例程序：&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;p class="first"&gt;通过 bpftrace 追踪 &lt;tt class="docutils literal"&gt;tracepoint/sched/sched_process_exec&lt;/tt&gt; 事件的示例脚本（来自 &lt;a class="reference external" href="https://github.com/jschwinger233"&gt;&amp;#64;jschwinger233&lt;/a&gt; ）:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+tracepoint:sched:sched_process_exec {
+  $task=curtask;
+  $arg_start=$task-&amp;gt;mm-&amp;gt;arg_start;
+  $arg_end=$task-&amp;gt;mm-&amp;gt;arg_end;
+  printf(&amp;quot;%s[%d]: filename: %s, argv: %r\n&amp;quot;, comm, pid, str(args-&amp;gt;filename), buf(uptr($arg_start), $arg_end-$arg_start));
+}
+&lt;/pre&gt;
+&lt;/li&gt;
+&lt;li&gt;&lt;p class="first"&gt;通过 ebpf c 代码追踪 &lt;tt class="docutils literal"&gt;tracepoint/sched/sched_process_exec&lt;/tt&gt; 事件的示例程序：
+&lt;a class="reference external" href="https://github.com/mozillazg/hello-libbpfgo/blob/master/37-tracepoint-sched_process_exec/main.bpf.c"&gt;main.bpf.c&lt;/a&gt;&lt;/p&gt;
+&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/div&gt;
+&lt;div class="section" id="section-7"&gt;
+&lt;h2 id="hidsection-7"&gt;参考资料&lt;a class="headerlink" href="#hidsection-7" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;ul class="simple"&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://github.com/tmux/tmux/tree/master"&gt;tmux/tmux: tmux source code&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://github.com/bpftrace/bpftrace/issues/2523"&gt;Can't trace sys_execve inside a c program · Issue #2523 · bpftrace/bpftrace&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://wiki.osdev.org/ELF"&gt;ELF - OSDev Wiki&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://stackoverflow.com/questions/57761007/why-an-elf-executable-could-have-4-load-segments"&gt;unix - Why an ELF executable could have 4 LOAD segments? - Stack Overflow&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://www.cs.bham.ac.uk/~exr/lectures/opsys/13_14/docs/kernelAPI/r4206.html"&gt;strncpy_from_user&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://github.com/jschwinger233"&gt;&amp;#64;jschwinger233&lt;/a&gt; 的谆谆教诲&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/div&gt;
+</description><dc:creator xmlns:dc="http://purl.org/dc/elements/1.1/">mozillazg</dc:creator><pubDate>Sun, 31 Mar 2024 00:00:00 +0000</pubDate><guid isPermaLink="false">tag:mozillazg.com,2024-03-31:2024/03/ebpf-tracepoint-syscalls-sys-enter-execve-can-not-get-filename-argv-values-case.html</guid><category>tracepoint</category><category>bpftrace</category><category>ELF</category></item><item><title>使用 except 命令解决无法在无 tty 的环境里执行 kubectl exec -it 命令的问题</title><link>https://mozillazg.com/2024/03/fix-can-not-run-kubectl-exec-it-in-no-tty-env.html</link><description>&lt;div class="section" id="section-1"&gt;
+&lt;h2 id="hidsection-1"&gt;问题&lt;a class="headerlink" href="#hidsection-1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;当我们在无 tty 环境下执行 &lt;tt class="docutils literal"&gt;kubectl exec &lt;span class="pre"&gt;-it&lt;/span&gt;&lt;/tt&gt; 命令的时候，
+kubectl 会输出如下警告然后自动禁用 &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;-t&lt;/span&gt;&lt;/tt&gt; 选项:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+Unable to use a TTY - input is not a terminal or the right kind of file
+&lt;/pre&gt;
+&lt;p&gt;无 tty 的场景包括但不限于：&lt;/p&gt;
+&lt;ul class="simple"&gt;
+&lt;li&gt;在未启用 tty 的容器中执行 kubectl 命令&lt;/li&gt;
+&lt;li&gt;使用 nohup 执行包含 kubectl 命令的脚本（可以使用该方法在不修改原脚本的情况下复现上面的报错）&lt;/li&gt;
+&lt;li&gt;使用管道或 &lt;tt class="docutils literal"&gt;&amp;lt;&lt;/tt&gt; 作为 kubectl 命令的输入&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/div&gt;
+&lt;div class="section" id="section-2"&gt;
+&lt;h2 id="hidsection-2"&gt;解决方法&lt;a class="headerlink" href="#hidsection-2" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;对于无需进行交互式操作的场景，通常可以通过主动去除 &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;-t&lt;/span&gt;&lt;/tt&gt; 选项来去掉该告警。
+但是有时我们的场景确实需要进行交互式操作，
+或者我们的场景是即便不需要进行交互式操作也会需要依赖 &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;-t&lt;/span&gt;&lt;/tt&gt; 选项（比如，为了测试 &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;-t&lt;/span&gt;&lt;/tt&gt; 选项的功能）。&lt;/p&gt;
+&lt;p&gt;此时，我们可以通过 &lt;a class="reference external" href="https://linux.die.net/man/1/expect"&gt;except&lt;/a&gt; 这个工具来启用一个 tty，
+满足 &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;-t&lt;/span&gt;&lt;/tt&gt; 选项所依赖的环境:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+cat &amp;lt;&amp;lt;EOF &amp;gt; test.sh
+
+# 执行 kubectl exec -it 命令
+spawn kubectl exec -it xxxx yyy
+
+# 可以通过 send 和 expect 进行交互式操作
+# send &amp;quot;&amp;lt;CMD&amp;gt;\r&amp;quot;
+# expect &amp;quot;&amp;lt;STR&amp;gt;&amp;quot;
+
+# 发送 exit 命令，退出交互式终端
+# send &amp;quot;exit\r&amp;quot;
+# expect eof
+
+EOF
+
+except -f test.sh
+&lt;/pre&gt;
+&lt;p&gt;关于 &lt;tt class="docutils literal"&gt;except&lt;/tt&gt; 命令的详细使用方式大家可以在网络上自行搜索。&lt;/p&gt;
+&lt;/div&gt;
+</description><dc:creator xmlns:dc="http://purl.org/dc/elements/1.1/">mozillazg</dc:creator><pubDate>Sat, 23 Mar 2024 00:00:00 +0000</pubDate><guid isPermaLink="false">tag:mozillazg.com,2024-03-23:2024/03/fix-can-not-run-kubectl-exec-it-in-no-tty-env.html</guid><category>kubectl</category></item><item><title>如何在本地 checkout GitHub 上外部贡献者提交的 PR 所在 fork 仓库的分支代码</title><link>https://mozillazg.com/2024/03/git-checkout-github-pr-codes-to-local.html</link><description>&lt;p&gt;在日常处理 GitHub 上外部贡献者提交的 PR 时，可能会想将 PR 对应的代码 checkout 到本地，
 这里涉及到如何快速 checkout PR 所在 fork 仓库的分支代码。&lt;/p&gt;
 &lt;p&gt;通常我们可能会通过 git clone 对应的 fork 仓库来实现，但是其实还有一个更便捷、不需要切换目录进行 clone 的方法。&lt;/p&gt;
 &lt;p&gt;我们可以通过下面的方法实现快速 checkout PR 对应的 fork 仓库分支代码的需求:&lt;/p&gt;
@@ -701,304 +1129,4 @@ service account 关联使用的问题 （详见 &lt;a class="reference external"
 &lt;li&gt;&lt;a class="reference external" href="https://github.com/libbpf/libbpf/issues/354"&gt;Support static initialization of BPF_MAP_TYPE_PROG_ARRAY · Issue #354 · libbpf/libbpf&lt;/a&gt;&lt;/li&gt;
 &lt;/ul&gt;
 &lt;/div&gt;
-</description><dc:creator xmlns:dc="http://purl.org/dc/elements/1.1/">mozillazg</dc:creator><pubDate>Fri, 07 Oct 2022 00:00:00 +0000</pubDate><guid isPermaLink="false">tag:mozillazg.com,2022-10-07:2022/10/ebpf-libbpf-use-tail-calls.html</guid><category>libbpf</category><category>libbpfgo</category></item><item><title>解决 ebpf 验证器提示类型错误问题的一种方法</title><link>https://mozillazg.com/2022/10/ebpf-libbpf-verifier-fix-type-expected-issue.html</link><description>&lt;p&gt;有时当我们加载编译后的 eBPF 程序的时候，eBPF 验证器会提示程序中有类型错误的问题导致程序加载失败。 本文记录一下这种错误的一种解决方法。&lt;/p&gt;
-&lt;div class="section" id="section-1"&gt;
-&lt;h2 id="hidsection-1"&gt;错误示例&lt;a class="headerlink" href="#hidsection-1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
-&lt;p&gt;比如，当下面这段 eBPF 程序&lt;/p&gt;
-&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="n"&gt;SEC&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="s"&gt;&amp;quot;iter/bpf_sk_storage_map&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
-&lt;span class="kt"&gt;int&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;iter__bpf_sk_storage_map&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="k"&gt;struct&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nc"&gt;bpf_iter__bpf_sk_storage_map&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;*&lt;/span&gt;&lt;span class="n"&gt;ctx&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
-&lt;span class="p"&gt;{&lt;/span&gt;
-&lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="k"&gt;if&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;ctx&lt;/span&gt;&lt;span class="o"&gt;-&amp;gt;&lt;/span&gt;&lt;span class="n"&gt;sk&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
-&lt;span class="w"&gt;        &lt;/span&gt;&lt;span class="n"&gt;bpf_sk_storage_delete&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="o"&gt;&amp;amp;&lt;/span&gt;&lt;span class="n"&gt;sk_storage_map&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;ctx&lt;/span&gt;&lt;span class="o"&gt;-&amp;gt;&lt;/span&gt;&lt;span class="n"&gt;sk&lt;/span&gt;&lt;span class="p"&gt;);&lt;/span&gt;
-
-&lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="k"&gt;return&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="mi"&gt;0&lt;/span&gt;&lt;span class="p"&gt;;&lt;/span&gt;
-&lt;span class="p"&gt;}&lt;/span&gt;
-&lt;/pre&gt;&lt;/div&gt;
-&lt;p&gt;被加载到内核中时会提示如下类型错误:&lt;/p&gt;
-&lt;pre class="literal-block"&gt;
-libbpf: prog 'iter__bpf_sk_storage_map': BPF program load failed: Permission denied
-libbpf: prog 'iter__bpf_sk_storage_map': -- BEGIN PROG LOAD LOG --
-R1 type=ctx expected=fp
-; if (ctx-&amp;gt;sk)
-0: (79) r2 = *(u64 *)(r1 +16)
-; if (ctx-&amp;gt;sk)
-1: (15) if r2 == 0x0 goto pc+4
- R1=ctx(id=0,off=0,imm=0) R2_w=ptr_sock(id=0,off=0,imm=0) R10=fp0
-; bpf_sk_storage_delete(&amp;amp;sk_storage_map, ctx-&amp;gt;sk);
-2: (79) r2 = *(u64 *)(r1 +16)
-; bpf_sk_storage_delete(&amp;amp;sk_storage_map, ctx-&amp;gt;sk);
-3: (18) r1 = 0xffffa0658305aa00
-5: (85) call bpf_sk_storage_delete#108
-R2 type=ptr_or_null_ expected=ptr_
-processed 5 insns (limit 1000000) max_states_per_insn 0 total_states 0 peak_states 0 mark_read 0
--- END PROG LOAD LOG --
-libbpf: prog 'iter__bpf_sk_storage_map': failed to load: -13
-libbpf: failed to load object 'main.bpf.o'
-failed to load BPF object: permission denied
-&lt;/pre&gt;
-&lt;div class="section" id="section-2"&gt;
-&lt;h3 id="hidsection-2"&gt;解决办法&lt;a class="headerlink" href="#hidsection-2" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
-&lt;p&gt;这个错误信息有两个关键错误，一个错误是:&lt;/p&gt;
-&lt;pre class="literal-block"&gt;
-R1 type=ctx expected=fp
-; if (ctx-&amp;gt;sk)
-0: (79) r2 = *(u64 *)(r1 +16)
-; if (ctx-&amp;gt;sk)
-1: (15) if r2 == 0x0 goto pc+4
-&lt;/pre&gt;
-&lt;p&gt;其中 &lt;tt class="docutils literal"&gt;R1 type=ctx expected=fp&lt;/tt&gt; 说的是，验证器期望 &lt;tt class="docutils literal"&gt;R1&lt;/tt&gt; 的类型是 &lt;tt class="docutils literal"&gt;fp&lt;/tt&gt; 而不是 &lt;tt class="docutils literal"&gt;ctx&lt;/tt&gt; 。 所谓的 &lt;tt class="docutils literal"&gt;fp&lt;/tt&gt; 指的是栈上的指针类型，即期望 &lt;tt class="docutils literal"&gt;R1&lt;/tt&gt; 是栈上的数据而不是 &lt;tt class="docutils literal"&gt;ctx&lt;/tt&gt; 。&lt;/p&gt;
-&lt;p&gt;另一个错误是:&lt;/p&gt;
-&lt;pre class="literal-block"&gt;
- R1=ctx(id=0,off=0,imm=0) R2_w=ptr_sock(id=0,off=0,imm=0) R10=fp0
-; bpf_sk_storage_delete(&amp;amp;sk_storage_map, ctx-&amp;gt;sk);
-2: (79) r2 = *(u64 *)(r1 +16)
-; bpf_sk_storage_delete(&amp;amp;sk_storage_map, ctx-&amp;gt;sk);
-3: (18) r1 = 0xffffa0658305aa00
-5: (85) call bpf_sk_storage_delete#108
-R2 type=ptr_or_null_ expected=ptr_
-&lt;/pre&gt;
-&lt;p&gt;其中 &lt;tt class="docutils literal"&gt;R2 type=ptr_or_null_ expected=ptr_&lt;/tt&gt; 说的是，验证器期望 &lt;tt class="docutils literal"&gt;R2&lt;/tt&gt; 的类型是 &lt;tt class="docutils literal"&gt;ptr&lt;/tt&gt; 而不是 &lt;tt class="docutils literal"&gt;prt_or_null&lt;/tt&gt; ，即，期望 &lt;tt class="docutils literal"&gt;R2&lt;/tt&gt; 是一个指针而不是一个指针或 &lt;tt class="docutils literal"&gt;NULL&lt;/tt&gt; 。 这里可能会有点疑惑，前面的判断 &lt;tt class="docutils literal"&gt;if &lt;span class="pre"&gt;(ctx-&amp;gt;sk)&lt;/span&gt;&lt;/tt&gt; 已经确保了不会为 &lt;tt class="docutils literal"&gt;NULL&lt;/tt&gt; ， 为啥这里还会认为它有可能为 &lt;tt class="docutils literal"&gt;NULL&lt;/tt&gt; ，这是因为前面的 if 判断的不是栈变量， 存在 &lt;tt class="docutils literal"&gt;R1 type=ctx expected=fp&lt;/tt&gt; 的问题也就无法保证它一定不是 &lt;tt class="docutils literal"&gt;NULL&lt;/tt&gt; 了。&lt;/p&gt;
-&lt;p&gt;解决办法也很简单，就是用一个临时变量保存 ctx-&amp;gt;sk 的值， 然后用这个栈上的临时变量做后续的操作:&lt;/p&gt;
-&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;SEC(&amp;quot;iter/bpf_sk_storage_map&amp;quot;)
-&lt;span class="w"&gt; &lt;/span&gt;int iter__bpf_sk_storage_map(struct bpf_iter__bpf_sk_storage_map *ctx)
-&lt;span class="w"&gt; &lt;/span&gt;{
-&lt;span class="gd"&gt;-    if (ctx-&amp;gt;sk)&lt;/span&gt;
-&lt;span class="gd"&gt;-        bpf_sk_storage_delete(&amp;amp;sk_storage_map, ctx-&amp;gt;sk);&lt;/span&gt;
-&lt;span class="gi"&gt;+    struct sock *sk = ctx-&amp;gt;sk;&lt;/span&gt;
-&lt;span class="gi"&gt;+    if (sk)&lt;/span&gt;
-&lt;span class="gi"&gt;+        bpf_sk_storage_delete(&amp;amp;sk_storage_map, sk);&lt;/span&gt;
-
-&lt;span class="w"&gt; &lt;/span&gt;    return 0;
-&lt;span class="w"&gt; &lt;/span&gt;}
-&lt;/pre&gt;&lt;/div&gt;
-&lt;/div&gt;
-&lt;/div&gt;
-&lt;div class="section" id="section-3"&gt;
-&lt;h2 id="hidsection-3"&gt;常见类型关键字的含义&lt;a class="headerlink" href="#hidsection-3" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
-&lt;p&gt;这里记录一下类似前面 &lt;tt class="docutils literal"&gt;fp&lt;/tt&gt; 这样的常见类型关键字具体的含义：&lt;/p&gt;
-&lt;table border="1" class="docutils"&gt;
-&lt;colgroup&gt;
-&lt;col width="33%" /&gt;
-&lt;col width="67%" /&gt;
-&lt;/colgroup&gt;
-&lt;thead valign="bottom"&gt;
-&lt;tr&gt;&lt;th class="head"&gt;关键字&lt;/th&gt;
-&lt;th class="head"&gt;含义&lt;/th&gt;
-&lt;/tr&gt;
-&lt;/thead&gt;
-&lt;tbody valign="top"&gt;
-&lt;tr&gt;&lt;td&gt;&lt;tt class="docutils literal"&gt;scalar&lt;/tt&gt;&lt;/td&gt;
-&lt;td&gt;标量类型（scalar type），不是一个有效的指针类型&lt;/td&gt;
-&lt;/tr&gt;
-&lt;tr&gt;&lt;td&gt;&lt;tt class="docutils literal"&gt;ctx&lt;/tt&gt;&lt;/td&gt;
-&lt;td&gt;bpf_context 指针&lt;/td&gt;
-&lt;/tr&gt;
-&lt;tr&gt;&lt;td&gt;&lt;tt class="docutils literal"&gt;map_ptr&lt;/tt&gt;&lt;/td&gt;
-&lt;td&gt;bpf_map 类型的指针&lt;/td&gt;
-&lt;/tr&gt;
-&lt;tr&gt;&lt;td&gt;&lt;tt class="docutils literal"&gt;map_value&lt;/tt&gt;&lt;/td&gt;
-&lt;td&gt;指向 map 中的元素 value 的指针&lt;/td&gt;
-&lt;/tr&gt;
-&lt;tr&gt;&lt;td&gt;&lt;tt class="docutils literal"&gt;map_value_or_null&lt;/tt&gt;&lt;/td&gt;
-&lt;td&gt;指向 map 中的元素 value 的指针或 NULL&lt;/td&gt;
-&lt;/tr&gt;
-&lt;tr&gt;&lt;td&gt;&lt;tt class="docutils literal"&gt;map_key&lt;/tt&gt;&lt;/td&gt;
-&lt;td&gt;指向 map 中的元素 key 的指针&lt;/td&gt;
-&lt;/tr&gt;
-&lt;tr&gt;&lt;td&gt;&lt;tt class="docutils literal"&gt;fp&lt;/tt&gt;&lt;/td&gt;
-&lt;td&gt;栈上的指针（frame pointer）&lt;/td&gt;
-&lt;/tr&gt;
-&lt;tr&gt;&lt;td&gt;&lt;tt class="docutils literal"&gt;pkt&lt;/tt&gt;&lt;/td&gt;
-&lt;td&gt;skb-&amp;gt;data 指针&lt;/td&gt;
-&lt;/tr&gt;
-&lt;tr&gt;&lt;td&gt;&lt;tt class="docutils literal"&gt;pkt_meta&lt;/tt&gt;&lt;/td&gt;
-&lt;td&gt;skb-&amp;gt;data - meta_len 位置的指针&lt;/td&gt;
-&lt;/tr&gt;
-&lt;tr&gt;&lt;td&gt;&lt;tt class="docutils literal"&gt;pkt_end&lt;/tt&gt;&lt;/td&gt;
-&lt;td&gt;skb-&amp;gt;data + headlen 位置的指针&lt;/td&gt;
-&lt;/tr&gt;
-&lt;tr&gt;&lt;td&gt;&lt;tt class="docutils literal"&gt;sock&lt;/tt&gt;&lt;/td&gt;
-&lt;td&gt;bpf_sock 类型的指针&lt;/td&gt;
-&lt;/tr&gt;
-&lt;tr&gt;&lt;td&gt;&lt;tt class="docutils literal"&gt;sock_or_null&lt;/tt&gt;&lt;/td&gt;
-&lt;td&gt;bpf_sock 类型的指针或 NULL&lt;/td&gt;
-&lt;/tr&gt;
-&lt;tr&gt;&lt;td&gt;&lt;tt class="docutils literal"&gt;sock_common&lt;/tt&gt;&lt;/td&gt;
-&lt;td&gt;sock_common 类型指针&lt;/td&gt;
-&lt;/tr&gt;
-&lt;tr&gt;&lt;td&gt;&lt;tt class="docutils literal"&gt;sock_common_or_null&lt;/tt&gt;&lt;/td&gt;
-&lt;td&gt;sock_common 类型指针或 NULL&lt;/td&gt;
-&lt;/tr&gt;
-&lt;tr&gt;&lt;td&gt;&lt;tt class="docutils literal"&gt;tcp_sock&lt;/tt&gt;&lt;/td&gt;
-&lt;td&gt;tcp_sock 类型指针&lt;/td&gt;
-&lt;/tr&gt;
-&lt;tr&gt;&lt;td&gt;&lt;tt class="docutils literal"&gt;tcp_sock_or_null&lt;/tt&gt;&lt;/td&gt;
-&lt;td&gt;tcp_sock 类型指针或 NULL&lt;/td&gt;
-&lt;/tr&gt;
-&lt;tr&gt;&lt;td&gt;&lt;tt class="docutils literal"&gt;tp_buffer&lt;/tt&gt;&lt;/td&gt;
-&lt;td&gt;可写的 raw tracepoint buffer 指针&lt;/td&gt;
-&lt;/tr&gt;
-&lt;tr&gt;&lt;td&gt;&lt;tt class="docutils literal"&gt;xdp_sock&lt;/tt&gt;&lt;/td&gt;
-&lt;td&gt;xdp_sock 类型指针&lt;/td&gt;
-&lt;/tr&gt;
-&lt;tr&gt;&lt;td&gt;&lt;tt class="docutils literal"&gt;ptr_&lt;/tt&gt;&lt;/td&gt;
-&lt;td&gt;一个 BTF ID，非空指针&lt;/td&gt;
-&lt;/tr&gt;
-&lt;tr&gt;&lt;td&gt;&lt;tt class="docutils literal"&gt;ptr_or_null_&lt;/tt&gt;&lt;/td&gt;
-&lt;td&gt;一个 BTF ID 或 NULL，可能为空的指针&lt;/td&gt;
-&lt;/tr&gt;
-&lt;tr&gt;&lt;td&gt;&lt;tt class="docutils literal"&gt;dynptr_ptr&lt;/tt&gt;&lt;/td&gt;
-&lt;td&gt;动态指针（dynptr 指针）&lt;/td&gt;
-&lt;/tr&gt;
-&lt;tr&gt;&lt;td&gt;&lt;tt class="docutils literal"&gt;mem&lt;/tt&gt;&lt;/td&gt;
-&lt;td&gt;指向一块有效内存区域的指针&lt;/td&gt;
-&lt;/tr&gt;
-&lt;tr&gt;&lt;td&gt;&lt;tt class="docutils literal"&gt;mem_or_null&lt;/tt&gt;&lt;/td&gt;
-&lt;td&gt;指向一块有效内存区域的指针或 NULL&lt;/td&gt;
-&lt;/tr&gt;
-&lt;tr&gt;&lt;td&gt;&lt;tt class="docutils literal"&gt;buf&lt;/tt&gt;&lt;/td&gt;
-&lt;td&gt;指向一个读/写 buffer 的指针&lt;/td&gt;
-&lt;/tr&gt;
-&lt;tr&gt;&lt;td&gt;&lt;tt class="docutils literal"&gt;func&lt;/tt&gt;&lt;/td&gt;
-&lt;td&gt;BPF 程序函数指针&lt;/td&gt;
-&lt;/tr&gt;
-&lt;tr&gt;&lt;td&gt;&lt;tt class="docutils literal"&gt;inv&lt;/tt&gt;&lt;/td&gt;
-&lt;td&gt;无效类型（invalid type），不是一个有效的指针类型&lt;/td&gt;
-&lt;/tr&gt;
-&lt;tr&gt;&lt;td&gt;&lt;tt class="docutils literal"&gt;flow_keys&lt;/tt&gt;&lt;/td&gt;
-&lt;td&gt;bpf_flow_keys 类型的指针&lt;/td&gt;
-&lt;/tr&gt;
-&lt;tr&gt;&lt;td&gt;&lt;tt class="docutils literal"&gt;percpu_ptr_&lt;/tt&gt;&lt;/td&gt;
-&lt;td&gt;指向一个 percpu 内核变量的指针&lt;/td&gt;
-&lt;/tr&gt;
-&lt;tr&gt;&lt;td&gt;&lt;tt class="docutils literal"&gt;rdonly_buf&lt;/tt&gt;&lt;/td&gt;
-&lt;td&gt;指向一个只读 buffer 的指针&lt;/td&gt;
-&lt;/tr&gt;
-&lt;tr&gt;&lt;td&gt;&lt;tt class="docutils literal"&gt;rdonly_buf_or_null&lt;/tt&gt;&lt;/td&gt;
-&lt;td&gt;指向一个只读 buffer 的指针或 NULL&lt;/td&gt;
-&lt;/tr&gt;
-&lt;tr&gt;&lt;td&gt;&lt;tt class="docutils literal"&gt;rdwr_buf&lt;/tt&gt;&lt;/td&gt;
-&lt;td&gt;指向一个读/写 buffer 的指针&lt;/td&gt;
-&lt;/tr&gt;
-&lt;tr&gt;&lt;td&gt;&lt;tt class="docutils literal"&gt;rdwr_buf_or_null&lt;/tt&gt;&lt;/td&gt;
-&lt;td&gt;指向一个读/写 buffer 的指针或 NULL&lt;/td&gt;
-&lt;/tr&gt;
-&lt;/tbody&gt;
-&lt;/table&gt;
-&lt;/div&gt;
-&lt;div class="section" id="section-4"&gt;
-&lt;h2 id="hidsection-4"&gt;参考资料&lt;a class="headerlink" href="#hidsection-4" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
-&lt;ul class="simple"&gt;
-&lt;li&gt;&lt;a class="reference external" href="https://elixir.bootlin.com/linux/v5.19.14/source/kernel/bpf/verifier.c#L533"&gt;verifier.c - kernel/bpf/verifier.c - Linux source code (v5.19.14) - Bootlin&lt;/a&gt;&lt;/li&gt;
-&lt;li&gt;&lt;a class="reference external" href="https://elixir.bootlin.com/linux/v5.13/source/kernel/bpf/verifier.c#L548"&gt;verifier.c - kernel/bpf/verifier.c - Linux source code (v5.13) - Bootlin&lt;/a&gt;&lt;/li&gt;
-&lt;/ul&gt;
-&lt;/div&gt;
-</description><dc:creator xmlns:dc="http://purl.org/dc/elements/1.1/">mozillazg</dc:creator><pubDate>Thu, 06 Oct 2022 00:00:00 +0000</pubDate><guid isPermaLink="false">tag:mozillazg.com,2022-10-06:2022/10/ebpf-libbpf-verifier-fix-type-expected-issue.html</guid><category>libbpf</category></item><item><title>ebpf 程序中常用的 load_byte/load_half/load_word 功能介绍</title><link>https://mozillazg.com/2022/07/ebpf-libbpf-what-is-load_byte-load_half-load_word.html</link><description>&lt;div class="section" id="section-1"&gt;
-&lt;h2 id="hidsection-1"&gt;前言&lt;a class="headerlink" href="#hidsection-1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
-&lt;p&gt;大家在阅读一些网络相关的 ebpf 程序源码时可能会发现部分程序会使用
-&lt;tt class="docutils literal"&gt;load_byte&lt;/tt&gt;, &lt;tt class="docutils literal"&gt;load_half&lt;/tt&gt; 以及 &lt;tt class="docutils literal"&gt;load_word&lt;/tt&gt; 这几个函数来辅助解析网络数据包。&lt;/p&gt;
-&lt;p&gt;那么这几个函数的功能究竟是啥？以及它们各自的使用场景是啥，怎么知道究竟该用哪个函数？
-本文将记录这几个函数各种的功能以及使用场景。&lt;/p&gt;
-&lt;/div&gt;
-&lt;div class="section" id="load-byte"&gt;
-&lt;h2 id="hidload-byte"&gt;load_byte&lt;a class="headerlink" href="#hidload-byte" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
-&lt;div class="section" id="section-2"&gt;
-&lt;h3 id="hidsection-2"&gt;函数定义&lt;a class="headerlink" href="#hidsection-2" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
-&lt;p&gt;&lt;tt class="docutils literal"&gt;load_byte&lt;/tt&gt; 函数的定义如下:&lt;/p&gt;
-&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="kt"&gt;unsigned&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="kt"&gt;long&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="kt"&gt;long&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;load_byte&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="kt"&gt;void&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;*&lt;/span&gt;&lt;span class="n"&gt;skb&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;
-&lt;span class="w"&gt;                          &lt;/span&gt;&lt;span class="kt"&gt;unsigned&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="kt"&gt;long&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="kt"&gt;long&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;offset&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="k"&gt;asm&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="s"&gt;&amp;quot;llvm.bpf.load.byte&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;);&lt;/span&gt;
-&lt;/pre&gt;&lt;/div&gt;
-&lt;/div&gt;
-&lt;div class="section" id="section-3"&gt;
-&lt;h3 id="hidsection-3"&gt;函数功能&lt;a class="headerlink" href="#hidsection-3" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
-&lt;p&gt;它的功能是：从 &lt;tt class="docutils literal"&gt;skb&lt;/tt&gt; 指向的数据包指针中 offset 位置开始读取 &lt;strong&gt;8-bits&lt;/strong&gt; 的数据。
-跟 gcc 里的 &lt;tt class="docutils literal"&gt;__builtin_bpf_load_byte&lt;/tt&gt; 函数的功能是一样的。&lt;/p&gt;
-&lt;/div&gt;
-&lt;div class="section" id="section-4"&gt;
-&lt;h3 id="hidsection-4"&gt;使用场景&lt;a class="headerlink" href="#hidsection-4" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
-&lt;p&gt;当想要从 &lt;tt class="docutils literal"&gt;struct __sk_buff *skb&lt;/tt&gt; 中读取数据类型大小为 8-bits（1个字节） 的字段的值的时候，
-可以使用 &lt;tt class="docutils literal"&gt;load_byte&lt;/tt&gt; 直接从指针中读取对应的数据。&lt;/p&gt;
-&lt;p&gt;例子:&lt;/p&gt;
-&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="n"&gt;__u8&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;protocol&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;load_byte&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;skb&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;ETH_HLEN&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;+&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;offsetof&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="k"&gt;struct&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nc"&gt;iphdr&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;protocol&lt;/span&gt;&lt;span class="p"&gt;));&lt;/span&gt;
-&lt;/pre&gt;&lt;/div&gt;
-&lt;/div&gt;
-&lt;/div&gt;
-&lt;div class="section" id="load-half"&gt;
-&lt;h2 id="hidload-half"&gt;load_half&lt;a class="headerlink" href="#hidload-half" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
-&lt;div class="section" id="section-5"&gt;
-&lt;h3 id="hidsection-5"&gt;函数定义&lt;a class="headerlink" href="#hidsection-5" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
-&lt;p&gt;&lt;tt class="docutils literal"&gt;load_half&lt;/tt&gt; 函数的定义如下:&lt;/p&gt;
-&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="kt"&gt;unsigned&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="kt"&gt;long&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="kt"&gt;long&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;load_half&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="kt"&gt;void&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;*&lt;/span&gt;&lt;span class="n"&gt;skb&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;
-&lt;span class="w"&gt;                         &lt;/span&gt;&lt;span class="kt"&gt;unsigned&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="kt"&gt;long&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="kt"&gt;long&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;offset&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="k"&gt;asm&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="s"&gt;&amp;quot;llvm.bpf.load.half&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;);&lt;/span&gt;
-&lt;/pre&gt;&lt;/div&gt;
-&lt;/div&gt;
-&lt;div class="section" id="section-6"&gt;
-&lt;h3 id="hidsection-6"&gt;函数功能&lt;a class="headerlink" href="#hidsection-6" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
-&lt;p&gt;它的功能是：从 &lt;tt class="docutils literal"&gt;skb&lt;/tt&gt; 指向的数据包指针中 offset 位置开始读取 &lt;strong&gt;16-bits&lt;/strong&gt; 的数据。
-跟 gcc 里的 &lt;tt class="docutils literal"&gt;__builtin_bpf_load_half&lt;/tt&gt; 函数的功能是一样的。&lt;/p&gt;
-&lt;/div&gt;
-&lt;div class="section" id="section-7"&gt;
-&lt;h3 id="hidsection-7"&gt;使用场景&lt;a class="headerlink" href="#hidsection-7" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
-&lt;p&gt;当想要从 &lt;tt class="docutils literal"&gt;struct __sk_buff *skb&lt;/tt&gt; 中读取数据类型大小为 16-bits（2个字节）的字段的值的时候，
-可以使用 &lt;tt class="docutils literal"&gt;load_half&lt;/tt&gt; 直接从指针中读取对应的数据。&lt;/p&gt;
-&lt;p&gt;例子:&lt;/p&gt;
-&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="n"&gt;__u16&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;h_proto&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;load_half&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;skb&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;offsetof&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="k"&gt;struct&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nc"&gt;ethhdr&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;h_proto&lt;/span&gt;&lt;span class="p"&gt;));&lt;/span&gt;
-&lt;/pre&gt;&lt;/div&gt;
-&lt;/div&gt;
-&lt;/div&gt;
-&lt;div class="section" id="load-word"&gt;
-&lt;h2 id="hidload-word"&gt;load_word&lt;a class="headerlink" href="#hidload-word" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
-&lt;div class="section" id="section-8"&gt;
-&lt;h3 id="hidsection-8"&gt;函数定义&lt;a class="headerlink" href="#hidsection-8" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
-&lt;p&gt;&lt;tt class="docutils literal"&gt;load_word&lt;/tt&gt; 函数的定义如下:&lt;/p&gt;
-&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="kt"&gt;unsigned&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="kt"&gt;long&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="kt"&gt;long&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;load_word&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="kt"&gt;void&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;*&lt;/span&gt;&lt;span class="n"&gt;skb&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;
-&lt;span class="w"&gt;                         &lt;/span&gt;&lt;span class="kt"&gt;unsigned&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="kt"&gt;long&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="kt"&gt;long&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;offset&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="k"&gt;asm&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="s"&gt;&amp;quot;llvm.bpf.load.word&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;);&lt;/span&gt;
-&lt;/pre&gt;&lt;/div&gt;
-&lt;/div&gt;
-&lt;div class="section" id="section-9"&gt;
-&lt;h3 id="hidsection-9"&gt;函数功能&lt;a class="headerlink" href="#hidsection-9" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
-&lt;p&gt;它的功能是：从 &lt;tt class="docutils literal"&gt;skb&lt;/tt&gt; 指向的数据包指针中 offset 位置开始读取 &lt;strong&gt;32-bits&lt;/strong&gt; 的数据。
-跟 gcc 里的 &lt;tt class="docutils literal"&gt;__builtin_bpf_load_word&lt;/tt&gt; 函数的功能是一样的。&lt;/p&gt;
-&lt;/div&gt;
-&lt;div class="section" id="section-10"&gt;
-&lt;h3 id="hidsection-10"&gt;使用场景&lt;a class="headerlink" href="#hidsection-10" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
-&lt;p&gt;当想要从 &lt;tt class="docutils literal"&gt;struct __sk_buff *skb&lt;/tt&gt; 中读取数据类型大小为 32-bits（4个字节）的字段的值的时候，
-可以使用 &lt;tt class="docutils literal"&gt;load_word&lt;/tt&gt; 直接从指针中读取对应的数据。&lt;/p&gt;
-&lt;p&gt;例子:&lt;/p&gt;
-&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="n"&gt;__u32&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;saddr&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;load_word&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;skb&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;ETH_HLEN&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;+&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;offsetof&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="k"&gt;struct&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nc"&gt;iphdr&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;saddr&lt;/span&gt;&lt;span class="p"&gt;));&lt;/span&gt;
-&lt;/pre&gt;&lt;/div&gt;
-&lt;/div&gt;
-&lt;/div&gt;
-&lt;div class="section" id="section-11"&gt;
-&lt;h2 id="hidsection-11"&gt;替代函数&lt;a class="headerlink" href="#hidsection-11" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
-&lt;p&gt;如果不想依赖 llvm 实现这几个函数所提供的功能的话，可以使用 bpf-helpers 中提供的
-&lt;tt class="docutils literal"&gt;bpf_skb_load_bytes&lt;/tt&gt; 函数实现类似的功能。&lt;/p&gt;
-&lt;p&gt;比如前面的那几个例子可以改写为:&lt;/p&gt;
-&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="c1"&gt;// __u8 protocol = load_byte(skb, ETH_HLEN + offsetof(struct iphdr, protocol));&lt;/span&gt;
-&lt;span class="n"&gt;__u8&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;protocol&lt;/span&gt;&lt;span class="p"&gt;;&lt;/span&gt;
-&lt;span class="k"&gt;if&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;bpf_skb_load_bytes&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;skb&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;ETH_HLEN&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;+&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;offsetof&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="k"&gt;struct&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nc"&gt;iphdr&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;protocol&lt;/span&gt;&lt;span class="p"&gt;),&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;&amp;amp;&lt;/span&gt;&lt;span class="n"&gt;protocol&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="k"&gt;sizeof&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;protocol&lt;/span&gt;&lt;span class="p"&gt;))&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;&amp;lt;&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="mi"&gt;0&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
-&lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="k"&gt;return&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="mi"&gt;0&lt;/span&gt;&lt;span class="p"&gt;;&lt;/span&gt;
-
-
-&lt;span class="c1"&gt;// __u16 h_proto = load_half(skb, offsetof(struct ethhdr, h_proto));&lt;/span&gt;
-&lt;span class="n"&gt;__u16&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;raw_h_proto&lt;/span&gt;&lt;span class="p"&gt;;&lt;/span&gt;
-&lt;span class="k"&gt;if&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;bpf_skb_load_bytes&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;skb&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;offsetof&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="k"&gt;struct&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nc"&gt;ethhdr&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;h_proto&lt;/span&gt;&lt;span class="p"&gt;),&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;&amp;amp;&lt;/span&gt;&lt;span class="n"&gt;raw_h_proto&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="k"&gt;sizeof&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;raw_h_proto&lt;/span&gt;&lt;span class="p"&gt;))&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;&amp;lt;&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="mi"&gt;0&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
-&lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="k"&gt;return&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="mi"&gt;0&lt;/span&gt;&lt;span class="p"&gt;;&lt;/span&gt;
-&lt;span class="n"&gt;__u16&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;h_proto&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;bpf_ntohs&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;raw_h_proto&lt;/span&gt;&lt;span class="p"&gt;);&lt;/span&gt;
-
-
-&lt;span class="c1"&gt;// __u32 saddr = load_word(skb, ETH_HLEN + offsetof(struct iphdr, saddr));&lt;/span&gt;
-&lt;span class="n"&gt;__u32&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;saddr&lt;/span&gt;&lt;span class="p"&gt;;&lt;/span&gt;
-&lt;span class="k"&gt;if&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;bpf_skb_load_bytes&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;skb&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;ETH_HLEN&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;+&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;offsetof&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="k"&gt;struct&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nc"&gt;iphdr&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;saddr&lt;/span&gt;&lt;span class="p"&gt;),&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;&amp;amp;&lt;/span&gt;&lt;span class="n"&gt;saddr&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="k"&gt;sizeof&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;saddr&lt;/span&gt;&lt;span class="p"&gt;))&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;&amp;lt;&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="mi"&gt;0&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
-&lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="k"&gt;return&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="mi"&gt;0&lt;/span&gt;&lt;span class="p"&gt;;&lt;/span&gt;
-&lt;/pre&gt;&lt;/div&gt;
-&lt;/div&gt;
-&lt;div class="section" id="section-12"&gt;
-&lt;h2 id="hidsection-12"&gt;参考资料&lt;a class="headerlink" href="#hidsection-12" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
-&lt;ul class="simple"&gt;
-&lt;li&gt;&lt;a class="reference external" href="https://reviews.llvm.org/D6494?id=17480"&gt;⚙ D6494 BPF backend&lt;/a&gt;&lt;/li&gt;
-&lt;li&gt;&lt;a class="reference external" href="https://gcc.gnu.org/onlinedocs/gcc/BPF-Built-in-Functions.html"&gt;BPF Built-in Functions (Using the GNU Compiler Collection (GCC))&lt;/a&gt;&lt;/li&gt;
-&lt;li&gt;&lt;a class="reference external" href="https://man7.org/linux/man-pages/man7/bpf-helpers.7.html"&gt;bpf-helpers(7) - Linux manual page&lt;/a&gt;&lt;/li&gt;
-&lt;/ul&gt;
-&lt;/div&gt;
-</description><dc:creator xmlns:dc="http://purl.org/dc/elements/1.1/">mozillazg</dc:creator><pubDate>Sun, 31 Jul 2022 00:00:00 +0000</pubDate><guid isPermaLink="false">tag:mozillazg.com,2022-07-31:2022/07/ebpf-libbpf-what-is-load_byte-load_half-load_word.html</guid><category>ebpf</category><category>libbpf</category></item></channel></rss>
+</description><dc:creator xmlns:dc="http://purl.org/dc/elements/1.1/">mozillazg</dc:creator><pubDate>Fri, 07 Oct 2022 00:00:00 +0000</pubDate><guid isPermaLink="false">tag:mozillazg.com,2022-10-07:2022/10/ebpf-libbpf-use-tail-calls.html</guid><category>libbpf</category><category>libbpfgo</category></item></channel></rss>

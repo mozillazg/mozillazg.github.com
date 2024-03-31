@@ -1,5 +1,433 @@
 <?xml version="1.0" encoding="utf-8"?>
-<feed xmlns="http://www.w3.org/2005/Atom"><title>mozillazg's Blog</title><link href="https://mozillazg.com/" rel="alternate"></link><link href="https://mozillazg.com/feeds/all-zh.atom.xml" rel="self"></link><id>https://mozillazg.com/</id><updated>2024-03-10T00:00:00+00:00</updated><entry><title>如何在本地 checkout GitHub 上外部贡献者提交的 PR 所在 fork 仓库的分支代码</title><link href="https://mozillazg.com/2024/03/git-checkout-github-pr-codes-to-local.html" rel="alternate"></link><published>2024-03-10T00:00:00+00:00</published><updated>2024-03-10T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2024-03-10:2024/03/git-checkout-github-pr-codes-to-local.html</id><summary type="html">&lt;p&gt;在日常处理 GitHub 上外部贡献者提交的 PR 时，可能会想将 PR 对应的代码 checkout 到本地，
+<feed xmlns="http://www.w3.org/2005/Atom"><title>mozillazg's Blog</title><link href="https://mozillazg.com/" rel="alternate"></link><link href="https://mozillazg.com/feeds/all-zh.atom.xml" rel="self"></link><id>https://mozillazg.com/</id><updated>2024-03-31T00:00:00+00:00</updated><entry><title>一个使用 tracepoint 追踪 execve 系统调用时无法正确获取系统调用参数的场景</title><link href="https://mozillazg.com/2024/03/ebpf-tracepoint-syscalls-sys-enter-execve-can-not-get-filename-argv-values-case.html" rel="alternate"></link><published>2024-03-31T00:00:00+00:00</published><updated>2024-03-31T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2024-03-31:2024/03/ebpf-tracepoint-syscalls-sys-enter-execve-can-not-get-filename-argv-values-case.html</id><summary type="html">&lt;div class="section" id="section-1"&gt;
+&lt;h2 id="hidsection-1"&gt;背景&lt;a class="headerlink" href="#hidsection-1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;前段时间有网友在 slack 上的 &lt;a class="reference external" href="https://ebpf.io/slack"&gt;ebpf 频道&lt;/a&gt;
+中咨询一个他遇到的问题：&lt;/p&gt;
+&lt;!-- `问题 &lt;https://cilium.slack.com/archives/C4XCTGYEM/p1710380136906129?thread_ts=1710284853.310149&amp;cid=C4XCTGYEM&gt;`__ ： --&gt;
+&lt;p&gt;在编写使用 &lt;tt class="docutils literal"&gt;tracepoint/syscalls/sys_enter_execve&lt;/tt&gt; 追踪 execve 系统调用的 ebpf 程序时，
+遇到了记录的部分事件中存在使用 &lt;tt class="docutils literal"&gt;bpf_probe_read_user_str&lt;/tt&gt; 读取
+&lt;tt class="docutils literal"&gt;execve&lt;/tt&gt; 的 &lt;tt class="docutils literal"&gt;filename&lt;/tt&gt; 参数失败的现象，错误码为 -14/EFAULT。
+尤其是在执行 tmux 命令的时候，必定会伴随一个读取失败的事件:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+ret = bpf_probe_read_user_str(event-&amp;gt;args, ARGSIZE, (const char*)ctx-&amp;gt;args[0]);
+if (ret &amp;lt; 0) {
+        bpf_printk(&amp;quot;comm=%s XXX cannot read file name&amp;quot;, tgid, pid, event-&amp;gt;comm);
+        return 0;
+}
+
+utempter-4031732 [027] d...1 3878624.643948: bpf_trace_printk: comm=tmux: server XXX cannot read file name
+   &amp;lt;...&amp;gt;-4035723 [077] d...1 3878668.047954: bpf_trace_printk: comm=tmux: server XXX cannot read file name
+&lt;/pre&gt;
+&lt;p&gt;本文将探讨一下该问题出现的原因以及针对该场景的一种解决方法。&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class="section" id="section-2"&gt;
+&lt;h2 id="hidsection-2"&gt;复现问题的代码&lt;a class="headerlink" href="#hidsection-2" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;因为问题中提到只要执行 tmux 命令就必定会复现该问题，并且我们在 &lt;tt class="docutils literal"&gt;bpf_printk&lt;/tt&gt; 的输出中看到对应事件的进程名称为 &lt;tt class="docutils literal"&gt;utempter&lt;/tt&gt; ，
+因此，我们可以基于这两点信息来尝试编写一个简单的复现问题的程序。&lt;/p&gt;
+&lt;p&gt;通过在网络上查找 tmux 与 utempter 的关联关系，以及阅读了相关的 tmux 源代码后，我了解到了如下信息：&lt;/p&gt;
+&lt;ol class="arabic"&gt;
+&lt;li&gt;&lt;p class="first"&gt;tmux 会调用 &lt;tt class="docutils literal"&gt;utempter.h&lt;/tt&gt; 提供的
+&lt;a class="reference external" href="https://github.com/tmux/tmux/blob/b79e28b2c30e7ef9b1f7ec6233eeb70a1a177231/spawn.c#L473"&gt;utempter_add_record&lt;/a&gt;
+函数创建所需的伪终端（pseudo-terminal）:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+xasprintf(&amp;amp;cp, &amp;quot;tmux(%lu).%%%u&amp;quot;, (long)getpid(), new_wp-&amp;gt;id);
+utempter_add_record(new_wp-&amp;gt;fd, cp);
+&lt;/pre&gt;
+&lt;/li&gt;
+&lt;li&gt;&lt;p class="first"&gt;&lt;tt class="docutils literal"&gt;utempter_add_record&lt;/tt&gt; 函数中会首先使用传入的参数构造一个 &lt;tt class="docutils literal"&gt;args&lt;/tt&gt; 然后调用
+&lt;a class="reference external" href="https://github.com/altlinux/libutempter/blob/9f291816a746292547ac8aaea0c88e16fc2fb29a/libutempter/iface.c#L121"&gt;execute_helper&lt;/a&gt;
+函数:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+#define UTEMPTER_DEFAULT_PATHNAME     LIBEXECDIR &amp;quot;/utempter/utempter&amp;quot;
+static const char *utempter_pathname;
+
+int utempter_add_record(int master_fd, const char *hostname)
+  {
+      const char *const args[] = {
+          utempter_pathname ? : UTEMPTER_DEFAULT_PATHNAME,
+          &amp;quot;add&amp;quot;,
+          hostname,
+          0
+      };
+      int status = execute_helper(master_fd, args);
+      // ...
+  }
+&lt;/pre&gt;
+&lt;/li&gt;
+&lt;li&gt;&lt;p class="first"&gt;&lt;tt class="docutils literal"&gt;execute_helper&lt;/tt&gt; 函数中最终会使用传入的 &lt;tt class="docutils literal"&gt;args&lt;/tt&gt; 调用 &lt;tt class="docutils literal"&gt;fork()&lt;/tt&gt; 和 &lt;tt class="docutils literal"&gt;execv()&lt;/tt&gt; 函数启动一个新的进程
+（ &lt;a class="reference external" href="https://github.com/altlinux/libutempter/blob/9f291816a746292547ac8aaea0c88e16fc2fb29a/libutempter/iface.c#L84"&gt;源代码&lt;/a&gt; ）:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+static int execute_helper(int master_fd, const char *const argv[])
+{
+    // ...
+    child = fork();
+    if (!child) {
+        do_child(master_fd, argv[0], (char *const *) argv);
+    } else if (child &amp;lt; 0) {
+    // ...
+}
+static void __attribute__((__noreturn__))
+do_child(int master_fd, const char *path, char *const *argv)
+{
+    // ...
+    execv(path, argv);
+    print_dbg(&amp;quot;execv: %s&amp;quot;, strerror(errno));
+    //...
+}
+&lt;/pre&gt;
+&lt;/li&gt;
+&lt;/ol&gt;
+&lt;p&gt;根据上面这些信息，我们可以编写如下这个可复现该问题的程序
+&lt;a class="reference external" href="https://github.com/mozillazg/ebpf-tracepoint-execve-argv-issue/blob/master/reproduce.c"&gt;reproduce.c&lt;/a&gt;:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+#define PATHNAME &amp;quot;/usr/bin/echo&amp;quot;
+
+int main(int argc, char **argv) {
+    const char *hostname = argv[0];
+    const char *const args[] = {
+        PATHNAME,
+        &amp;quot;add&amp;quot;,
+        hostname,
+        0
+    };
+    if (!fork()) {
+        execv(args[0], (char *const *) args);
+    }
+}
+&lt;/pre&gt;
+&lt;p&gt;下面测试一下这个程序的效果:&lt;/p&gt;
+&lt;ol class="arabic"&gt;
+&lt;li&gt;&lt;p class="first"&gt;使用 gcc 编译:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+gcc -o reproduce reproduce.c
+&lt;/pre&gt;
+&lt;/li&gt;
+&lt;li&gt;&lt;p class="first"&gt;在另一个终端使用 &lt;a class="reference external" href="https://github.com/bpftrace/bpftrace"&gt;bpftrace&lt;/a&gt; 追踪 tracepoint/syscalls/sys_enter_execve 事件:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+sudo bpftrace -e 'tracepoint:syscalls:sys_enter_execve{printf(&amp;quot;%s[%d]: %s\n&amp;quot;, comm, pid, str(args-&amp;gt;filename));}'
+&lt;/pre&gt;
+&lt;/li&gt;
+&lt;li&gt;&lt;p class="first"&gt;运行示例程序:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+./reproduce
+&lt;/pre&gt;
+&lt;/li&gt;
+&lt;/ol&gt;
+&lt;p&gt;此时，运行 bpftrace 的终端将输出类似下面这样的结果:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+bash[34882]: ./reproduce
+reproduce[34883]:
+&lt;/pre&gt;
+&lt;p&gt;在上面结果中，我们没有获取到 reproduce 进程执行 &lt;tt class="docutils literal"&gt;execve()&lt;/tt&gt; 系统调用时使用的 &lt;tt class="docutils literal"&gt;filename&lt;/tt&gt; 参数的值。
+由此可见，我们的这个程序复现了最初的问题。&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class="section" id="section-3"&gt;
+&lt;h2 id="hidsection-3"&gt;原因&lt;a class="headerlink" href="#hidsection-3" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;经 &lt;a class="reference external" href="https://github.com/ssfdust"&gt;&amp;#64;ssfdust&lt;/a&gt; 提醒，bpftrace 社区之前已经有人提过类似的问题：
+&lt;a class="reference external" href="https://github.com/bpftrace/bpftrace/issues/2523"&gt;#2523&lt;/a&gt; 。
+在这个 issue 中 &lt;a class="reference external" href="https://github.com/fbs"&gt;&amp;#64;fbs&lt;/a&gt;
+给出的 &lt;a class="reference external" href="https://github.com/bpftrace/bpftrace/issues/2523#issuecomment-1466936511"&gt;解释&lt;/a&gt; 是：&lt;/p&gt;
+&lt;blockquote&gt;
+&lt;p&gt;Like I said earlier, the data you're using isn't in memory yet. These static strings are compiled in and are not actually faulted into memory until they're accessed. The access won't happen until its read, which is after your bpftrace probe ran. BPF won't pull the data in so you get an EFAULT/-14.&lt;/p&gt;
+&lt;p&gt;By printing the values or just a random print of a constant string you pull the small amount of data into memory (as it goes by page, not by var) and then it works&lt;/p&gt;
+&lt;/blockquote&gt;
+&lt;p&gt;即：&lt;/p&gt;
+&lt;ol class="arabic simple"&gt;
+&lt;li&gt;示例程序中，执行 &lt;tt class="docutils literal"&gt;execve()&lt;/tt&gt; 时传入的 &lt;tt class="docutils literal"&gt;argv[0]&lt;/tt&gt; 指向的文件名称字符串是一个静态字符串
+（这些静态字符串在程序被编译后存储在 ELF（Executable and Linkable Format） 文件的 &lt;tt class="docutils literal"&gt;.rodata&lt;/tt&gt; section），
+这些字符串只会在程序真正去访问他们的时候（访问 &lt;tt class="docutils literal"&gt;.rodata&lt;/tt&gt; section 存储的数据时）才会被加载到内存中。&lt;/li&gt;
+&lt;li&gt;由1可知，示例程序中 &lt;tt class="docutils literal"&gt;argv[0]&lt;/tt&gt; 指向的静态字符串只会在执行 &lt;tt class="docutils literal"&gt;execve()&lt;/tt&gt; 系统调用的时候被读取到内存中，
+但是我们的 ebpf 程序其实是在执行 &lt;tt class="docutils literal"&gt;execve()&lt;/tt&gt; 系统调用之前被执行的，因此 ebpf 程序里使用 &lt;tt class="docutils literal"&gt;bpf_probe_read_user_str&lt;/tt&gt;
+读取 &lt;tt class="docutils literal"&gt;argv[0]&lt;/tt&gt; 会失败并返回 &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;EFAULT/-14&lt;/span&gt;&lt;/tt&gt; 。&lt;/li&gt;
+&lt;li&gt;通过 &lt;tt class="docutils literal"&gt;printf&lt;/tt&gt; 等方式主动将字符串加载到内存中可以让该问题消失。&lt;/li&gt;
+&lt;/ol&gt;
+&lt;p&gt;来自 &lt;a class="reference external" href="https://github.com/jschwinger233"&gt;&amp;#64;jschwinger233&lt;/a&gt; 的总结：&lt;/p&gt;
+&lt;blockquote&gt;
+bpf_probe_read_user 只能读到已经载入内存 (page-faulted into memory) 的数据，
+而上面代码直到 execve(2) 之时都还未读过 .rodata，未曾触发 page fault。
+这可以用 tracepoint:exceptions:page_fault* 来验证。&lt;/blockquote&gt;
+&lt;/div&gt;
+&lt;div class="section" id="section-4"&gt;
+&lt;h2 id="hidsection-4"&gt;验证&lt;a class="headerlink" href="#hidsection-4" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;div class="section" id="printf"&gt;
+&lt;h3 id="hidprintf"&gt;增加 printf&lt;a class="headerlink" href="#hidprintf" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
+&lt;p&gt;由上面可知，其实我们只需要修改程序在执行 &lt;tt class="docutils literal"&gt;execve()&lt;/tt&gt; 之前主动将 &lt;tt class="docutils literal"&gt;.rodata&lt;/tt&gt; 中的数据加载到内存中即可避免该问题，
+比如使用 &lt;tt class="docutils literal"&gt;printf&lt;/tt&gt; 函数。&lt;/p&gt;
+&lt;p&gt;即，可以使用 &lt;tt class="docutils literal"&gt;printf&lt;/tt&gt; 函数打印 &lt;tt class="docutils literal"&gt;argv[0]&lt;/tt&gt; ，也可以直接打印一个静态字符串:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+if (!fork()) {
+    printf(&amp;quot;test\n&amp;quot;);
+    // or
+    // printf(&amp;quot;argv[0]: %s\n&amp;quot;, args[0]);
+    execv(args[0], (char *const *) args);
+}
+&lt;/pre&gt;
+&lt;p&gt;经验证，修改后的程序
+&lt;a class="reference external" href="https://github.com/mozillazg/ebpf-tracepoint-execve-argv-issue/blob/master/reproduce_printf1.c"&gt;reproduce_printf1.c&lt;/a&gt;
+确实可以让 ebpf 程序正确读取到 filename 的值。&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class="section" id="section-5"&gt;
+&lt;h3 id="hidsection-5"&gt;不使用静态字符串&lt;a class="headerlink" href="#hidsection-5" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
+&lt;p&gt;既然是因为 &lt;tt class="docutils literal"&gt;argv[0]&lt;/tt&gt; 是静态字符串导致的问题，那么可以尝试将 &lt;tt class="docutils literal"&gt;argv[0]&lt;/tt&gt; 改为使用非静态字符串，看看问题是否还存在。
+修改的内容如下:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+const char *const args[] = {
+    argv[1],
+    &amp;quot;add&amp;quot;,
+    hostname,
+    0
+};
+&lt;/pre&gt;
+&lt;p&gt;经验证，修改后的程序
+&lt;a class="reference external" href="https://github.com/mozillazg/ebpf-tracepoint-execve-argv-issue/blob/master/reproduce_non_static.c"&gt;reproduce_non_static.c&lt;/a&gt;
+也可以让 ebpf 程序正确读取到 filename 的值。&lt;/p&gt;
+&lt;p&gt;不知道大家有没有注意到，我们的复现问题的程序里 &lt;tt class="docutils literal"&gt;argv[2]&lt;/tt&gt; 的值其实是一个非静态字符串，
+所以也可以通过在 ebpf 程序中读取这个数据的内容来验证，
+预期是不做任何修改就可以读取到 &lt;tt class="docutils literal"&gt;argv[2]&lt;/tt&gt; 这个非静态字符串的内容：&lt;/p&gt;
+&lt;ol class="arabic"&gt;
+&lt;li&gt;&lt;p class="first"&gt;执行新的 bpftrace 命令:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+sudo bpftrace -e 'tracepoint:syscalls:sys_enter_execve{
+    printf(&amp;quot;%s[%d]: filename: %s, argv[1]: %s, argv[2]: %s\n&amp;quot;, comm, pid, str(args-&amp;gt;filename), str(args-&amp;gt;argv[1]), str(args-&amp;gt;argv[2]));
+}'
+&lt;/pre&gt;
+&lt;/li&gt;
+&lt;li&gt;&lt;p class="first"&gt;执行 &lt;tt class="docutils literal"&gt;./reproduce&lt;/tt&gt;&lt;/p&gt;
+&lt;/li&gt;
+&lt;li&gt;&lt;p class="first"&gt;bpftrace 命令的输出示例如下:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+bash[36523]: filename: ./reproduce, argv[1]: , argv[2]:
+reproduce[36524]: filename: , argv[1]: , argv[2]: ./reproduce
+&lt;/pre&gt;
+&lt;/li&gt;
+&lt;/ol&gt;
+&lt;/div&gt;
+&lt;div class="section" id="page-fault"&gt;
+&lt;h3 id="hidpage-fault"&gt;page fault&lt;a class="headerlink" href="#hidpage-fault" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
+&lt;p&gt;在现代 Linux 系统中，当我们运行二进制可执行文件的时候，程序加载器（ELF executable loader）
+会根据 ELF 文件中定义的信息使用 &lt;tt class="docutils literal"&gt;mmap&lt;/tt&gt; 进行懒加载（lazy loading），延迟加载一些数据。
+当程序真正去读取这些数据的时候，如果被读取的数据还没有被加载到内存里，就会触发 page fault。&lt;/p&gt;
+&lt;!-- CPU 就会生成一个缺页异常（page fault exception）。此时，内核中的缺页处理程序（page fault handler） --&gt;
+&lt;!-- 会负责处理该异常，将缺失的页面加载到内存中，然后 CPU 重新执行引起缺页异常的指令。 --&gt;
+&lt;p&gt;ELF 文件的 .rodata section 中存储的数据恰好就是会被延迟加载的数据。&lt;/p&gt;
+&lt;div class="section" id="rodata"&gt;
+&lt;h4 id="hidrodata"&gt;.rodata&lt;a class="headerlink" href="#hidrodata" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h4&gt;
+&lt;p&gt;ELF 文件中的 .rodata section 存储了一些只读数据，比如静态字符串。
+我们首先来看一下编译后的示例程序二进制 ELF 文件中的 .rodata section 的数据。&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;p class="first"&gt;可以使用 &lt;tt class="docutils literal"&gt;objdump&lt;/tt&gt; 命令进行查看:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+$ objdump -s -j .rodata ./reproduce
+
+./reproduce:     file format elf64-x86-64
+
+Contents of section .rodata:
+2000 01000200 2f757372 2f62696e 2f656368  ..../usr/bin/ech
+2010 6f006164 6400                        o.add.
+&lt;/pre&gt;
+&lt;/li&gt;
+&lt;li&gt;&lt;p class="first"&gt;也可以使用 python 社区的 &lt;a class="reference external" href="https://docs.pwntools.com/en/stable/"&gt;pwntools&lt;/a&gt; 库进行读取:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+&amp;gt;&amp;gt;&amp;gt; from pwn import ELF
+&amp;gt;&amp;gt;&amp;gt; elf = ELF('reproduce')
+&amp;gt;&amp;gt;&amp;gt; elf.section('.rodata')
+b'\x01\x00\x02\x00/usr/bin/echo\x00add\x00'
+&lt;/pre&gt;
+&lt;/li&gt;
+&lt;/ul&gt;
+&lt;p&gt;从上面的输出中可以看到其中包含了源码中使用的两个静态字符串。&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class="section" id="page-fault-1"&gt;
+&lt;h4 id="hidpage-fault-1"&gt;观测 page fault&lt;a class="headerlink" href="#hidpage-fault-1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h4&gt;
+&lt;p&gt;在 Linux 系统中，当内核执行 &lt;tt class="docutils literal"&gt;execve()&lt;/tt&gt; 系统调用时，
+会使用内核函数 &lt;tt class="docutils literal"&gt;strncpy_from_user&lt;/tt&gt; 将 &lt;tt class="docutils literal"&gt;argv&lt;/tt&gt; 中包含的字符串数据从用户态复制到内核态，
+这个过程涉及读取用户态数据的操作。
+如果被读取的用户态数据还未被加载到内存中，就会触发 page fault。&lt;/p&gt;
+&lt;p&gt;我们可以通过观测 &lt;tt class="docutils literal"&gt;exceptions/page_fault_kernel&lt;/tt&gt; 和 &lt;tt class="docutils literal"&gt;exceptions/page_fault_user&lt;/tt&gt; 感知到这个事件:&lt;/p&gt;
+&lt;ol class="arabic"&gt;
+&lt;li&gt;&lt;p class="first"&gt;为了方便验证，我们需要先修改一下示例代码，在执行 &lt;tt class="docutils literal"&gt;execv()&lt;/tt&gt; 函数前增加一行 &lt;tt class="docutils literal"&gt;sleep(15)&lt;/tt&gt; ，避免程序太快结束
+（&lt;a class="reference external" href="https://github.com/mozillazg/ebpf-tracepoint-execve-argv-issue/blob/master/reproduce_sleep.c"&gt;reproduce_sleep.c&lt;/a&gt; ）&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+if (!fork()) {
+     sleep(15);
+     execv(args[0], (char *const *) args);
+}
+&lt;/pre&gt;
+&lt;/li&gt;
+&lt;li&gt;&lt;p class="first"&gt;在一个终端中运行下面这个 bpftrace 脚本，观测 page fault:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+cat &amp;lt;&amp;lt;EOF | sudo bpftrace -
+tracepoint:exceptions:page_fault_kernel /comm == &amp;quot;reproduce_sleep&amp;quot;/ {
+    printf(&amp;quot;[%s] page_fault_kernel: %s[%d] addr=%llx ip=%llx err=%lld\n&amp;quot;,
+            strftime(&amp;quot;%M:%S&amp;quot;, nsecs), comm, pid, args-&amp;gt;address, args-&amp;gt;ip, args-&amp;gt;error_code);
+}
+
+tracepoint:exceptions:page_fault_user /comm == &amp;quot;reproduce_sleep&amp;quot;/ {
+    printf(&amp;quot;[%s] page_fault_user:   %s[%d] addr=%llx ip=%llx err=%lld\n&amp;quot;,
+            strftime(&amp;quot;%M:%S&amp;quot;, nsecs), comm, pid, args-&amp;gt;address, args-&amp;gt;ip, args-&amp;gt;error_code);
+}
+EOF
+&lt;/pre&gt;
+&lt;/li&gt;
+&lt;li&gt;&lt;p class="first"&gt;然后在另一个终端中运行 &lt;tt class="docutils literal"&gt;./reproduce_sleep&lt;/tt&gt;&lt;/p&gt;
+&lt;/li&gt;
+&lt;li&gt;&lt;p class="first"&gt;在第3个终端中查看运行中的 reproduce_sleep 进程的内存映射关系（memory mapping）:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+$ sudo cat /proc/41291/maps | grep reproduce_sleep
+55b4d9e31000-55b4d9e32000 r--p 00000000 08:01 1634479                    /XXX/reproduce_sleep
+55b4d9e32000-55b4d9e33000 r-xp 00001000 08:01 1634479                    /XXX/reproduce_sleep
+55b4d9e33000-55b4d9e34000 r--p 00002000 08:01 1634479                    /XXX/reproduce_sleep
+55b4d9e34000-55b4d9e35000 r--p 00002000 08:01 1634479                    /XXX/reproduce_sleep
+55b4d9e35000-55b4d9e36000 rw-p 00003000 08:01 1634479                    /XXX/reproduce_sleep
+&lt;/pre&gt;
+&lt;p&gt;由上面可知，该进程的内存映射起始地址是 &lt;tt class="docutils literal"&gt;55b4d9e31000&lt;/tt&gt; ，即 &lt;tt class="docutils literal"&gt;0x55b4d9e31000&lt;/tt&gt;&lt;/p&gt;
+&lt;/li&gt;
+&lt;li&gt;&lt;p class="first"&gt;待示例程序运行结束后，bpftrace 命令的输出中的最后两条数据将类似下面这样:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+[47:40] page_fault_user:   reproduce_sleep[41290] addr=7f669db86a50 ip=7f669d9f8940 err=7
+[47:55] page_fault_kernel: reproduce_sleep[41291] addr=55b4d9e33004 ip=ffffffff8e092a40 err=0
+&lt;/pre&gt;
+&lt;p&gt;这两个输出间隔了 15 秒，由此可以确定最后那个 page fault 事件是执行 &lt;tt class="docutils literal"&gt;execv()&lt;/tt&gt; 函数的时候触发的。
+下面来通过事件中的 &lt;tt class="docutils literal"&gt;addr&lt;/tt&gt; 结果定位对应的数据。&lt;/p&gt;
+&lt;/li&gt;
+&lt;li&gt;&lt;p class="first"&gt;上面最后那条 &lt;tt class="docutils literal"&gt;page_fault_kernel&lt;/tt&gt; 事件输出的 addr 的值是 &lt;tt class="docutils literal"&gt;55b4d9e33004&lt;/tt&gt; ，
+即触发这个 page fault 事件的虚拟内存地址是 &lt;tt class="docutils literal"&gt;0x55b4d9e33004&lt;/tt&gt; 。&lt;/p&gt;
+&lt;/li&gt;
+&lt;li&gt;&lt;p class="first"&gt;基于 &lt;a class="reference external" href="https://github.com/jschwinger233"&gt;&amp;#64;jschwinger233&lt;/a&gt;  分享的秘籍：
+&lt;tt class="docutils literal"&gt;real_addr = start_addr + (elf_address - section.Address + section.Offset)&lt;/tt&gt; 可知:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+0x55b4d9e33004 = 0x55b4d9e31000 + (elf_address - section.Address + section.Offset)
+(elf_address - section.Address + section.Offset) = 0x55b4d9e33004 - 0x55b4d9e31000 = 8196 = 0x2004
+&lt;/pre&gt;
+&lt;/li&gt;
+&lt;li&gt;&lt;p class="first"&gt;使用 readelf 命令读取二进制文件 reproduce_sleep 中 ELF .rodata section 的内存地址、偏移量以及数据大小:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+$ readelf -S -W reproduce_sleep  | egrep '.rodata|Address'
+  [Nr] Name              Type            Address          Off    Size   ES Flg Lk Inf Al
+  [18] .rodata           PROGBITS        0000000000002000 002000 000016 00   A  0   0  4
+&lt;/pre&gt;
+&lt;p&gt;由上面的输出可知，该 ELF 文件中 .rodata section 的虚拟地址是 &lt;tt class="docutils literal"&gt;0000000000002000&lt;/tt&gt; 即 &lt;tt class="docutils literal"&gt;0x2000&lt;/tt&gt; ，
+偏移量是 &lt;tt class="docutils literal"&gt;002000&lt;/tt&gt; 即 &lt;tt class="docutils literal"&gt;0x2000&lt;/tt&gt; ， 数据大小是 &lt;tt class="docutils literal"&gt;0x16&lt;/tt&gt; ，即地址范围是 &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;0x2000-0x2016&lt;/span&gt;&lt;/tt&gt; 。&lt;/p&gt;
+&lt;/li&gt;
+&lt;li&gt;&lt;p class="first"&gt;通过 7 和 8 可知，执行 &lt;tt class="docutils literal"&gt;execv()&lt;/tt&gt; 函数时触发的 page fault 事件的虚拟内存地址
+&lt;tt class="docutils literal"&gt;0x55b4d9e33004&lt;/tt&gt; 对应的 ELF 地址是 &lt;tt class="docutils literal"&gt;0x2004&lt;/tt&gt; ，这个地址在 ELF 文件的 .rodata 地址范围（0x2000-0x2016）内，
+对应的是 &lt;tt class="docutils literal"&gt;argv[0]&lt;/tt&gt; 中使用的静态字符串 &lt;tt class="docutils literal"&gt;/usr/bin/echo&lt;/tt&gt;:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+$ objdump -s -j .rodata ./reproduce_sleep
+
+./reproduce_sleep:     file format elf64-x86-64
+
+Contents of section .rodata:
+ 2000 01000200 2f757372 2f62696e 2f656368  ..../usr/bin/ech
+ 2010 6f006164 6400                        o.add.
+
+&amp;gt;&amp;gt;&amp;gt; elf = ELF('reproduce_sleep')
+&amp;gt;&amp;gt;&amp;gt; elf.read(0x2004, 14)
+b'/usr/bin/echo\x00'
+
+$ gdb -ex 'disas/m main' -ex q reproduce_sleep | grep 'args\[\]' -A 13
+9       const char *const args[] = {
+   0x00000000000011d6 &amp;lt;+45&amp;gt;:        lea    0xe27(%rip),%rax        # 0x2004
+   0x00000000000011dd &amp;lt;+52&amp;gt;:        mov    %rax,-0x30(%rbp)
+   0x00000000000011e1 &amp;lt;+56&amp;gt;:        lea    0xe2a(%rip),%rax        # 0x2012
+   0x00000000000011e8 &amp;lt;+63&amp;gt;:        mov    %rax,-0x28(%rbp)
+   0x00000000000011ec &amp;lt;+67&amp;gt;:        mov    -0x38(%rbp),%rax
+   0x00000000000011f0 &amp;lt;+71&amp;gt;:        mov    %rax,-0x20(%rbp)
+   0x00000000000011f4 &amp;lt;+75&amp;gt;:        movq   $0x0,-0x18(%rbp)
+
+10          PATHNAME,
+11          &amp;quot;add&amp;quot;,
+12          hostname,
+13          0
+14      };
+&lt;/pre&gt;
+&lt;/li&gt;
+&lt;li&gt;&lt;p class="first"&gt;也可以通过在 ebpf 程序或 bpftrace 脚本中打印 &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;args-&amp;gt;filename&lt;/span&gt;&lt;/tt&gt; 的指针地址来确认，
+这个地址的值会跟前面 page fault 事件中 addr 的值一致，都是 &lt;tt class="docutils literal"&gt;0x55b4d9e33004&lt;/tt&gt;&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+tracepoint:syscalls:sys_enter_execve {
+    printf(&amp;quot;%s[%d]: %p\n&amp;quot;, comm, pid, args-&amp;gt;filename);
+}
+&lt;/pre&gt;
+&lt;/li&gt;
+&lt;/ol&gt;
+&lt;p&gt;BTW，可以通过 &lt;tt class="docutils literal"&gt;perf trace &lt;span class="pre"&gt;-F&lt;/span&gt; all&lt;/tt&gt; 命令追踪触发 page fault 事件的函数信息。&lt;/p&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;div class="section" id="section-6"&gt;
+&lt;h2 id="hidsection-6"&gt;解决方法&lt;a class="headerlink" href="#hidsection-6" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;解决这个问题的方法有很多，其中一种解决方法是改为通过追踪 &lt;tt class="docutils literal"&gt;tracepoint/sched/sched_process_exec&lt;/tt&gt;
+事件来获取 &lt;tt class="docutils literal"&gt;execve()&lt;/tt&gt; 系统调用中 &lt;tt class="docutils literal"&gt;filename&lt;/tt&gt; 和 &lt;tt class="docutils literal"&gt;argv&lt;/tt&gt; 参数的值。下面是对应实现的示例程序：&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;p class="first"&gt;通过 bpftrace 追踪 &lt;tt class="docutils literal"&gt;tracepoint/sched/sched_process_exec&lt;/tt&gt; 事件的示例脚本（来自 &lt;a class="reference external" href="https://github.com/jschwinger233"&gt;&amp;#64;jschwinger233&lt;/a&gt; ）:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+tracepoint:sched:sched_process_exec {
+  $task=curtask;
+  $arg_start=$task-&amp;gt;mm-&amp;gt;arg_start;
+  $arg_end=$task-&amp;gt;mm-&amp;gt;arg_end;
+  printf(&amp;quot;%s[%d]: filename: %s, argv: %r\n&amp;quot;, comm, pid, str(args-&amp;gt;filename), buf(uptr($arg_start), $arg_end-$arg_start));
+}
+&lt;/pre&gt;
+&lt;/li&gt;
+&lt;li&gt;&lt;p class="first"&gt;通过 ebpf c 代码追踪 &lt;tt class="docutils literal"&gt;tracepoint/sched/sched_process_exec&lt;/tt&gt; 事件的示例程序：
+&lt;a class="reference external" href="https://github.com/mozillazg/hello-libbpfgo/blob/master/37-tracepoint-sched_process_exec/main.bpf.c"&gt;main.bpf.c&lt;/a&gt;&lt;/p&gt;
+&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/div&gt;
+&lt;div class="section" id="section-7"&gt;
+&lt;h2 id="hidsection-7"&gt;参考资料&lt;a class="headerlink" href="#hidsection-7" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;ul class="simple"&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://github.com/tmux/tmux/tree/master"&gt;tmux/tmux: tmux source code&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://github.com/bpftrace/bpftrace/issues/2523"&gt;Can't trace sys_execve inside a c program · Issue #2523 · bpftrace/bpftrace&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://wiki.osdev.org/ELF"&gt;ELF - OSDev Wiki&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://stackoverflow.com/questions/57761007/why-an-elf-executable-could-have-4-load-segments"&gt;unix - Why an ELF executable could have 4 LOAD segments? - Stack Overflow&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://www.cs.bham.ac.uk/~exr/lectures/opsys/13_14/docs/kernelAPI/r4206.html"&gt;strncpy_from_user&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://github.com/jschwinger233"&gt;&amp;#64;jschwinger233&lt;/a&gt; 的谆谆教诲&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/div&gt;
+</summary><category term="tracepoint"></category><category term="bpftrace"></category><category term="ELF"></category></entry><entry><title>使用 except 命令解决无法在无 tty 的环境里执行 kubectl exec -it 命令的问题</title><link href="https://mozillazg.com/2024/03/fix-can-not-run-kubectl-exec-it-in-no-tty-env.html" rel="alternate"></link><published>2024-03-23T00:00:00+00:00</published><updated>2024-03-23T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2024-03-23:2024/03/fix-can-not-run-kubectl-exec-it-in-no-tty-env.html</id><summary type="html">&lt;div class="section" id="section-1"&gt;
+&lt;h2 id="hidsection-1"&gt;问题&lt;a class="headerlink" href="#hidsection-1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;当我们在无 tty 环境下执行 &lt;tt class="docutils literal"&gt;kubectl exec &lt;span class="pre"&gt;-it&lt;/span&gt;&lt;/tt&gt; 命令的时候，
+kubectl 会输出如下警告然后自动禁用 &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;-t&lt;/span&gt;&lt;/tt&gt; 选项:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+Unable to use a TTY - input is not a terminal or the right kind of file
+&lt;/pre&gt;
+&lt;p&gt;无 tty 的场景包括但不限于：&lt;/p&gt;
+&lt;ul class="simple"&gt;
+&lt;li&gt;在未启用 tty 的容器中执行 kubectl 命令&lt;/li&gt;
+&lt;li&gt;使用 nohup 执行包含 kubectl 命令的脚本（可以使用该方法在不修改原脚本的情况下复现上面的报错）&lt;/li&gt;
+&lt;li&gt;使用管道或 &lt;tt class="docutils literal"&gt;&amp;lt;&lt;/tt&gt; 作为 kubectl 命令的输入&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/div&gt;
+&lt;div class="section" id="section-2"&gt;
+&lt;h2 id="hidsection-2"&gt;解决方法&lt;a class="headerlink" href="#hidsection-2" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;对于无需进行交互式操作的场景，通常可以通过主动去除 &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;-t&lt;/span&gt;&lt;/tt&gt; 选项来去掉该告警。
+但是有时我们的场景确实需要进行交互式操作，
+或者我们的场景是即便不需要进行交互式操作也会需要依赖 &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;-t&lt;/span&gt;&lt;/tt&gt; 选项（比如，为了测试 &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;-t&lt;/span&gt;&lt;/tt&gt; 选项的功能）。&lt;/p&gt;
+&lt;p&gt;此时，我们可以通过 &lt;a class="reference external" href="https://linux.die.net/man/1/expect"&gt;except&lt;/a&gt; 这个工具来启用一个 tty，
+满足 &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;-t&lt;/span&gt;&lt;/tt&gt; 选项所依赖的环境:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+cat &amp;lt;&amp;lt;EOF &amp;gt; test.sh
+
+# 执行 kubectl exec -it 命令
+spawn kubectl exec -it xxxx yyy
+
+# 可以通过 send 和 expect 进行交互式操作
+# send &amp;quot;&amp;lt;CMD&amp;gt;\r&amp;quot;
+# expect &amp;quot;&amp;lt;STR&amp;gt;&amp;quot;
+
+# 发送 exit 命令，退出交互式终端
+# send &amp;quot;exit\r&amp;quot;
+# expect eof
+
+EOF
+
+except -f test.sh
+&lt;/pre&gt;
+&lt;p&gt;关于 &lt;tt class="docutils literal"&gt;except&lt;/tt&gt; 命令的详细使用方式大家可以在网络上自行搜索。&lt;/p&gt;
+&lt;/div&gt;
+</summary><category term="kubectl"></category></entry><entry><title>如何在本地 checkout GitHub 上外部贡献者提交的 PR 所在 fork 仓库的分支代码</title><link href="https://mozillazg.com/2024/03/git-checkout-github-pr-codes-to-local.html" rel="alternate"></link><published>2024-03-10T00:00:00+00:00</published><updated>2024-03-10T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2024-03-10:2024/03/git-checkout-github-pr-codes-to-local.html</id><summary type="html">&lt;p&gt;在日常处理 GitHub 上外部贡献者提交的 PR 时，可能会想将 PR 对应的代码 checkout 到本地，
 这里涉及到如何快速 checkout PR 所在 fork 仓库的分支代码。&lt;/p&gt;
 &lt;p&gt;通常我们可能会通过 git clone 对应的 fork 仓库来实现，但是其实还有一个更便捷、不需要切换目录进行 clone 的方法。&lt;/p&gt;
 &lt;p&gt;我们可以通过下面的方法实现快速 checkout PR 对应的 fork 仓库分支代码的需求:&lt;/p&gt;
@@ -1001,223 +1429,4 @@ R2 type=ptr_or_null_ expected=ptr_
 &lt;li&gt;&lt;a class="reference external" href="https://man7.org/linux/man-pages/man7/bpf-helpers.7.html"&gt;bpf-helpers(7) - Linux manual page&lt;/a&gt;&lt;/li&gt;
 &lt;/ul&gt;
 &lt;/div&gt;
-</summary><category term="ebpf"></category><category term="libbpf"></category></entry><entry><title>docker-credential-acr-helper: 一个辅助 docker 获取阿里云 ACR 镜像仓库访问凭证的项目</title><link href="https://mozillazg.com/2022/06/use-docker-credential-acr-helper-help-auth-alibaba-cloud-container-registry-with-temporary-password-without-docker-login.html" rel="alternate"></link><published>2022-06-19T00:00:00+00:00</published><updated>2022-06-19T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2022-06-19:2022/06/use-docker-credential-acr-helper-help-auth-alibaba-cloud-container-registry-with-temporary-password-without-docker-login.html</id><summary type="html">&lt;div class="section" id="section-1"&gt;
-&lt;h2 id="hidsection-1"&gt;前言&lt;a class="headerlink" href="#hidsection-1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
-&lt;p&gt;通常情况下，如果我们想对阿里云容器镜像服务 ACR 上的私有镜像进行 &lt;tt class="docutils literal"&gt;docker pull&lt;/tt&gt;
-或 &lt;tt class="docutils literal"&gt;docker push&lt;/tt&gt; 的话， 需要提前通过 &lt;tt class="docutils literal"&gt;docker login&lt;/tt&gt; 命令配置相应的访问凭证。&lt;/p&gt;
-&lt;p&gt;通过 &lt;tt class="docutils literal"&gt;docker login&lt;/tt&gt; 命令配置用户名和密码的方法存在如下几个问题：&lt;/p&gt;
-&lt;ul class="simple"&gt;
-&lt;li&gt;需要用户多记录和维护一组 docker 专用的密码，密码的管理是一个比较麻烦的事情。&lt;/li&gt;
-&lt;li&gt;ACR 只支持配置一个无过期时间的固定密码，密码的更换和吊销的成本很高，用户轻易不敢操作。&lt;/li&gt;
-&lt;li&gt;无法精细化配置固定密码的权限，无法实现类似只允许进行 pull 操作不允许进行 push 操作的权限控制需求。&lt;/li&gt;
-&lt;li&gt;虽然可以通过 Open API 获取不限量的临时密码，但是 &lt;tt class="docutils literal"&gt;docker login&lt;/tt&gt; 不支持自动刷新临时密码。
-如果使用临时密码进行 &lt;tt class="docutils literal"&gt;docker login&lt;/tt&gt; 操作的话，
-需要用户频繁进行获取临时密码然后再通过 &lt;tt class="docutils literal"&gt;docker login&lt;/tt&gt; 更新密码的操作，同样是一个很麻烦的事情。&lt;/li&gt;
-&lt;/ul&gt;
-&lt;p&gt;幸好，docker 提供提供了一个叫 &lt;a class="reference external" href="https://docs.docker.com/engine/reference/commandline/login/#credential-helpers"&gt;Credential helper&lt;/a&gt; 的机制，
-通过 Credential helper 可以以插件化的方式
-扩展 docker 获取访问凭证的方式，不再局限于只能通过 &lt;tt class="docutils literal"&gt;docker login&lt;/tt&gt; 的方式配置访问凭证。&lt;/p&gt;
-&lt;p&gt;本文将介绍的 &lt;a class="reference external" href="https://github.com/mozillazg/docker-credential-acr-helper"&gt;docker-credential-acr-helper&lt;/a&gt; 就是一个专为 ACR 开发的辅助 docker 获取 ACR 镜像仓库访问凭证的项目。&lt;/p&gt;
-&lt;/div&gt;
-&lt;div class="section" id="section-2"&gt;
-&lt;h2 id="hidsection-2"&gt;介绍&lt;a class="headerlink" href="#hidsection-2" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
-&lt;p&gt;如前面所说， &lt;a class="reference external" href="https://github.com/mozillazg/docker-credential-acr-helper"&gt;docker-credential-acr-helper&lt;/a&gt; 是一个专为 ACR 开发的辅助 docker 获取 ACR 镜像仓库访问凭证的项目。&lt;/p&gt;
-&lt;p&gt;docker-credential-acr-helper 解决了前面所说的那几个问题：&lt;/p&gt;
-&lt;ul class="simple"&gt;
-&lt;li&gt;基于阿里云已有的认证体系，可以直接使用用户熟悉的阿里云访问凭证，无需额外记录和维护 docker 专用的用户名和密码。&lt;/li&gt;
-&lt;li&gt;自动获取用于进行 docker 操作的临时密码，不依赖固定密码, 也无需手动频繁刷新临时密码。&lt;/li&gt;
-&lt;li&gt;用户可以通过配置阿里云 RAM 访问控制策略的方式，实现临时密码精细化权限控制的需求，详见 &lt;a class="reference external" href="https://help.aliyun.com/document_detail/72334.html#section-xzq-5zj-lr6"&gt;ACR 文档&lt;/a&gt; 。&lt;/li&gt;
-&lt;/ul&gt;
-&lt;/div&gt;
-&lt;div class="section" id="section-3"&gt;
-&lt;h2 id="hidsection-3"&gt;使用示例&lt;a class="headerlink" href="#hidsection-3" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
-&lt;p&gt;可以通过如下步骤体验这个项目提供的功能：&lt;/p&gt;
-&lt;ol class="arabic"&gt;
-&lt;li&gt;&lt;p class="first"&gt;前往 &lt;a class="reference external" href="https://github.com/mozillazg/docker-credential-acr-helper/releases"&gt;github releases&lt;/a&gt; 页面下载最新版本的编译好的二进制文件压缩包&lt;/p&gt;
-&lt;/li&gt;
-&lt;li&gt;&lt;p class="first"&gt;使用页面上的那个 checksums.txt 文件验证压缩包，解压压缩包得到对应的二进制文件 &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;docker-credential-acr-helper&lt;/span&gt;&lt;/tt&gt;&lt;/p&gt;
-&lt;/li&gt;
-&lt;li&gt;&lt;p class="first"&gt;&lt;tt class="docutils literal"&gt;chmod +x &lt;span class="pre"&gt;docker-credential-acr-helper&lt;/span&gt;&lt;/tt&gt;&lt;/p&gt;
-&lt;/li&gt;
-&lt;li&gt;&lt;p class="first"&gt;&lt;tt class="docutils literal"&gt;cp &lt;span class="pre"&gt;docker-credential-acr-helper&lt;/span&gt; /usr/local/bin&lt;/tt&gt;&lt;/p&gt;
-&lt;/li&gt;
-&lt;li&gt;&lt;p class="first"&gt;配置阿里云访问凭证，比如使用配置文件指定访问凭证:&lt;/p&gt;
-&lt;pre class="literal-block"&gt;
-$ cat ~/.alibabacloud/credentials
-[default]                          # 默认客户端
-type = access_key                  # 认证方式为 access_key
-access_key_id = foo                # Key
-access_key_secret = bar            # Secret
-&lt;/pre&gt;
-&lt;/li&gt;
-&lt;li&gt;&lt;p class="first"&gt;通过 &lt;tt class="docutils literal"&gt;docker logout &amp;lt;acr_registry_domain&amp;gt;&lt;/tt&gt; 退出要测试的 ACR registry 域名，清理对应已保存的 docker 凭证。&lt;/p&gt;
-&lt;/li&gt;
-&lt;li&gt;&lt;p class="first"&gt;通过 &lt;tt class="docutils literal"&gt;docker pull &amp;lt;acr_image&amp;gt;&lt;/tt&gt; 确认当前已无权限访问对应的 ACR 私有镜像。&lt;/p&gt;
-&lt;/li&gt;
-&lt;li&gt;&lt;p class="first"&gt;修改 docker 配置文件 &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;~/.docker/config.json&lt;/span&gt;&lt;/tt&gt; 中 &lt;tt class="docutils literal"&gt;credHelpers&lt;/tt&gt; 配置项，
-指定访问某个 ACR registry 域名时，使用 docker-credential-acr-helper 获取访问凭证
-（关于这个配置的更多说明详见 &lt;a class="reference external" href="https://docs.docker.com/engine/reference/commandline/login/#configure-credential-helpers"&gt;Docker 官方文档&lt;/a&gt; 或者本项目 README）。
-配置示例:&lt;/p&gt;
-&lt;pre class="literal-block"&gt;
-{
-  &amp;quot;credHelpers&amp;quot; : {
-    &amp;quot;registry.cn-beijing.aliyuncs.com&amp;quot; : &amp;quot;acr-helper&amp;quot;
-  }
-}
-&lt;/pre&gt;
-&lt;/li&gt;
-&lt;li&gt;&lt;p class="first"&gt;通过 &lt;tt class="docutils literal"&gt;docker pull &amp;lt;acr_image&amp;gt;&lt;/tt&gt; 验证配置完成后又可以访问对应的 ACR 私有镜像了。&lt;/p&gt;
-&lt;/li&gt;
-&lt;/ol&gt;
-&lt;/div&gt;
-&lt;div class="section" id="golang-package"&gt;
-&lt;h2 id="hidgolang-package"&gt;作为 golang package 被集成到第三方项目中&lt;a class="headerlink" href="#hidgolang-package" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
-&lt;p&gt;同时，也可以把这个项目当成一个 golang package 来使用，将这个项目的能力集成到第三方项目中。&lt;/p&gt;
-&lt;p&gt;比如，在使用 &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;github.com/google/go-containerregistry/pkg/crane&lt;/span&gt;&lt;/tt&gt; 操作
-docker registry 时，可以使用下面的方法在项目中集成 docker-credential-acr-helper
-提供的辅助认证能力:&lt;/p&gt;
-&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="kn"&gt;import&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;
-&lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="s"&gt;&amp;quot;github.com/google/go-containerregistry/pkg/authn&amp;quot;&lt;/span&gt;
-&lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="s"&gt;&amp;quot;github.com/google/go-containerregistry/pkg/crane&amp;quot;&lt;/span&gt;
-&lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="s"&gt;&amp;quot;github.com/mozillazg/docker-credential-acr-helper/pkg/credhelper&amp;quot;&lt;/span&gt;
-&lt;span class="p"&gt;)&lt;/span&gt;
-
-&lt;span class="kd"&gt;func&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nx"&gt;main&lt;/span&gt;&lt;span class="p"&gt;()&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="p"&gt;{&lt;/span&gt;
-&lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="nx"&gt;kc&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;:=&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nx"&gt;authn&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;NewMultiKeychain&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;
-&lt;span class="w"&gt;            &lt;/span&gt;&lt;span class="nx"&gt;authn&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;DefaultKeychain&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;
-&lt;span class="w"&gt;            &lt;/span&gt;&lt;span class="nx"&gt;authn&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;NewKeychainFromHelper&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="nx"&gt;credhelper&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;NewACRHelper&lt;/span&gt;&lt;span class="p"&gt;()),&lt;/span&gt;&lt;span class="w"&gt;  &lt;/span&gt;&lt;span class="c1"&gt;// &amp;lt;- here&lt;/span&gt;
-&lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
-&lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="nx"&gt;ref&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;:=&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nx"&gt;os&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Getenv&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="s"&gt;&amp;quot;REPO_URL&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
-&lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="nx"&gt;digest&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nx"&gt;err&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;:=&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nx"&gt;crane&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Digest&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="nx"&gt;ref&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nx"&gt;crane&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;WithAuthFromKeychain&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="nx"&gt;kc&lt;/span&gt;&lt;span class="p"&gt;))&lt;/span&gt;
-&lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="k"&gt;if&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nx"&gt;err&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;!=&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="kc"&gt;nil&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="p"&gt;{&lt;/span&gt;
-&lt;span class="w"&gt;            &lt;/span&gt;&lt;span class="nb"&gt;panic&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="nx"&gt;err&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
-&lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="p"&gt;}&lt;/span&gt;
-&lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="nx"&gt;fmt&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Printf&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="s"&gt;&amp;quot;got digest for %q:\n%s\n&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nx"&gt;ref&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nx"&gt;digest&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
-&lt;span class="p"&gt;}&lt;/span&gt;
-&lt;/pre&gt;&lt;/div&gt;
-&lt;p&gt;完整示例代码详见： &lt;a class="reference external" href="https://github.com/mozillazg/docker-credential-acr-helper/blob/master/examples/go-containerregistry-auth/main.go"&gt;examples/go-containerregistry-auth&lt;/a&gt;&lt;/p&gt;
-&lt;/div&gt;
-&lt;div class="section" id="faq"&gt;
-&lt;h2 id="hidfaq"&gt;FAQ&lt;a class="headerlink" href="#hidfaq" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
-&lt;div class="section" id="acr"&gt;
-&lt;h3 id="hidacr"&gt;是否支持 ACR 企业版？&lt;a class="headerlink" href="#hidacr" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
-&lt;p&gt;支持。&lt;/p&gt;
-&lt;/div&gt;
-&lt;div class="section" id="acr-1"&gt;
-&lt;h3 id="hidacr-1"&gt;如何实现不同 ACR 域名使用不同的阿里云访问凭证？&lt;a class="headerlink" href="#hidacr-1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
-&lt;p&gt;可以通过为不同的访问凭证编写独立的 shell 脚本的方式实现。&lt;/p&gt;
-&lt;p&gt;比如:&lt;/p&gt;
-&lt;pre class="literal-block"&gt;
-$ cat /usr/local/bin/docker-credential-acr-helper-user-1
-#!/usr/bin/env bash
-
-# export ALIBABA_CLOUD_ACCESS_KEY_ID=foo
-# export ALIBABA_CLOUD_ACCESS_KEY_SECRET=bar
-export ALIBABA_CLOUD_CREDENTIALS_FILE=/path/to/user-1-credentials
-
-exec /usr/local/bin/docker-credential-acr-helper &amp;quot;$&amp;#64;&amp;quot;
-
-$ chmod +x /usr/local/bin/docker-credential-acr-helper-user-1
-&lt;/pre&gt;
-&lt;p&gt;然后配置 &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;~/.docker/config.json&lt;/span&gt;&lt;/tt&gt; 实现不同的 ACR 域名使用配置了不同访问凭证的 shell 脚本即可:&lt;/p&gt;
-&lt;pre class="literal-block"&gt;
-{
-  &amp;quot;credHelpers&amp;quot; : {
-    &amp;quot;registry.cn-beijing.aliyuncs.com&amp;quot; : &amp;quot;acr-helper&amp;quot;,
-    &amp;quot;registry.cn-hangzhou.aliyuncs.com&amp;quot; : &amp;quot;acr-helper-user-1&amp;quot;,
-    &amp;quot;registry.cn-shenzhen.aliyuncs.com&amp;quot; : &amp;quot;acr-helper-user-2&amp;quot;
-  }
-}
-&lt;/pre&gt;
-&lt;/div&gt;
-&lt;/div&gt;
-&lt;div class="section" id="section-4"&gt;
-&lt;h2 id="hidsection-4"&gt;参考资料&lt;a class="headerlink" href="#hidsection-4" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
-&lt;ul class="simple"&gt;
-&lt;li&gt;&lt;a class="reference external" href="https://docs.docker.com/engine/reference/commandline/login/"&gt;docker login | Docker Documentation&lt;/a&gt;&lt;/li&gt;
-&lt;li&gt;&lt;a class="reference external" href="https://github.com/docker/docker-credential-helpers"&gt;docker/docker-credential-helpers: Programs to keep Docker login credentials safe by storing in platform keystores&lt;/a&gt;&lt;/li&gt;
-&lt;li&gt;&lt;a class="reference external" href="https://github.com/mozillazg/docker-credential-acr-helper"&gt;mozillazg/docker-credential-acr-helper: A credential helper for the Docker daemon that makes it easier to use Alibaba Cloud Container Registry(ACR).&lt;/a&gt;&lt;/li&gt;
-&lt;li&gt;&lt;a class="reference external" href="https://help.aliyun.com/document_detail/72334.html"&gt;GetAuthorizationToken - ACR Documentation&lt;/a&gt;&lt;/li&gt;
-&lt;/ul&gt;
-&lt;/div&gt;
-</summary><category term="ACR"></category></entry><entry><title>ebpf/libbpf 程序使用 btf raw tracepoint 的常见问题</title><link href="https://mozillazg.com/2022/06/ebpf-libbpf-btf-powered-enabled-raw-tracepoint-common-questions.html" rel="alternate"></link><published>2022-06-14T00:00:00+00:00</published><updated>2022-06-14T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2022-06-14:2022/06/ebpf-libbpf-btf-powered-enabled-raw-tracepoint-common-questions.html</id><summary type="html">&lt;div class="section" id="section-1"&gt;
-&lt;h2 id="hidsection-1"&gt;前言&lt;a class="headerlink" href="#hidsection-1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
-&lt;p&gt;本文记录一些编写 ebpf/libbpf 程序(比如编写类型为 &lt;tt class="docutils literal"&gt;BPF_TRACE_RAW_TP&lt;/tt&gt; 的 ebpf 程序) 时
-涉及到的 btf raw tracepoint 相关的常见问题。&lt;/p&gt;
-&lt;/div&gt;
-&lt;div class="section" id="btf-raw-tracepoint-raw-tracepoint"&gt;
-&lt;h2 id="hidbtf-raw-tracepoint-raw-tracepoint"&gt;btf raw tracepoint 跟常规 raw tracepoint 的区别&lt;a class="headerlink" href="#hidbtf-raw-tracepoint-raw-tracepoint" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
-&lt;p&gt;所谓的 btf raw tracepoint 指的是 &lt;a class="reference external" href="https://lore.kernel.org/netdev/20201203204634.1325171-1-andrii&amp;#64;kernel.org/t/"&gt;BTF-powered raw tracepoint (tp_btf) 或者说是 BTF-enabled raw tracepoint&lt;/a&gt; 。&lt;/p&gt;
-&lt;p&gt;btf raw tracepoint 跟常规 raw tracepoint 有一个 &lt;a class="reference external" href="https://nakryiko.com/posts/bpf-core-reference-guide/#btf-enabled-bpf-program-types-with-direct-memory-reads"&gt;最主要的区别&lt;/a&gt; 是：
-btf 版本可以直接在 ebpf 程序中访问内核内存，
-不需要像常规 raw tracepoint 一样需要借助类似 &lt;tt class="docutils literal"&gt;bpf_core_read&lt;/tt&gt; 或 &lt;tt class="docutils literal"&gt;bpf_probe_read_kernel&lt;/tt&gt; 这样 的辅助函数才能访问内核内存:&lt;/p&gt;
-&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="k"&gt;struct&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nc"&gt;task_struct&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;*&lt;/span&gt;&lt;span class="n"&gt;task&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="k"&gt;struct&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nc"&gt;task_struct&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;*&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;bpf_get_current_task&lt;/span&gt;&lt;span class="p"&gt;();&lt;/span&gt;
-&lt;span class="n"&gt;u32&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;ppid&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;BPF_CORE_READ&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;task&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;real_parent&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;tgid&lt;/span&gt;&lt;span class="p"&gt;);&lt;/span&gt;
-
-&lt;span class="c1"&gt;// btf enabled&lt;/span&gt;
-&lt;span class="k"&gt;struct&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nc"&gt;task_struct&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;*&lt;/span&gt;&lt;span class="n"&gt;task&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="k"&gt;struct&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nc"&gt;task_struct&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;*&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;bpf_get_current_task_btf&lt;/span&gt;&lt;span class="p"&gt;();&lt;/span&gt;
-&lt;span class="n"&gt;u32&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;ppid&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;task&lt;/span&gt;&lt;span class="o"&gt;-&amp;gt;&lt;/span&gt;&lt;span class="n"&gt;real_parent&lt;/span&gt;&lt;span class="o"&gt;-&amp;gt;&lt;/span&gt;&lt;span class="n"&gt;tgid&lt;/span&gt;&lt;span class="p"&gt;;&lt;/span&gt;
-&lt;/pre&gt;&lt;/div&gt;
-&lt;/div&gt;
-&lt;div class="section" id="btf-raw-tracepoint"&gt;
-&lt;h2 id="hidbtf-raw-tracepoint"&gt;btf raw tracepoint 可以监控哪些事件&lt;a class="headerlink" href="#hidbtf-raw-tracepoint" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
-&lt;p&gt;btf raw tracepoint 跟 &lt;a class="reference external" href="https://mozillazg.com/2022/05/ebpf-libbpf-raw-tracepoint-common-questions.html"&gt;raw tracepoint&lt;/a&gt; 所能监控的事件是一样的，这里不再赘述。&lt;/p&gt;
-&lt;/div&gt;
-&lt;div class="section" id="sec"&gt;
-&lt;h2 id="hidsec"&gt;SEC 内容的格式&lt;a class="headerlink" href="#hidsec" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
-&lt;p&gt;btf raw tracepoint 事件对应的 SEC 格式为:&lt;/p&gt;
-&lt;pre class="literal-block"&gt;
-SEC(&amp;quot;tp_btf/&amp;lt;name&amp;gt;&amp;quot;)
-
-// 比如:
-// SEC(&amp;quot;tp_btf/sched_switch&amp;quot;)
-// SEC(&amp;quot;tp_btf/sys_enter&amp;quot;)
-// SEC(&amp;quot;tp_btf/sys_exit&amp;quot;)
-&lt;/pre&gt;
-&lt;p&gt;&lt;tt class="docutils literal"&gt;&amp;lt;name&amp;gt;&lt;/tt&gt; 的值跟 &lt;a class="reference external" href="https://mozillazg.com/2022/05/ebpf-libbpf-raw-tracepoint-common-questions.html"&gt;raw tracepoint&lt;/a&gt; SEC 中使用的 &lt;tt class="docutils literal"&gt;&amp;lt;name&amp;gt;&lt;/tt&gt; 是一样的。&lt;/p&gt;
-&lt;/div&gt;
-&lt;div class="section" id="btf-raw-tracepoint-1"&gt;
-&lt;h2 id="hidbtf-raw-tracepoint-1"&gt;如何确定 btf raw tracepoint 事件处理函数的参数类型，获取对应的内核调用参数&lt;a class="headerlink" href="#hidbtf-raw-tracepoint-1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
-&lt;p&gt;所有事件都是在 vmlinux.h 中存在一个名为 &lt;tt class="docutils literal"&gt;btf_trace_&amp;lt;name&amp;gt;&lt;/tt&gt; 的定义。&lt;/p&gt;
-&lt;p&gt;比如 &lt;tt class="docutils literal"&gt;sys_enter&lt;/tt&gt; 这个事件对应的定义如下：&lt;/p&gt;
-&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="k"&gt;typedef&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="kt"&gt;void&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="o"&gt;*&lt;/span&gt;&lt;span class="n"&gt;btf_trace_sys_enter&lt;/span&gt;&lt;span class="p"&gt;)(&lt;/span&gt;&lt;span class="kt"&gt;void&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;*&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="k"&gt;struct&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nc"&gt;pt_regs&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;*&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="kt"&gt;long&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="kt"&gt;int&lt;/span&gt;&lt;span class="p"&gt;);&lt;/span&gt;
-&lt;/pre&gt;&lt;/div&gt;
-&lt;p&gt;对应的 ebpf 函数可以定义成下面这样：&lt;/p&gt;
-&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="n"&gt;SEC&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="s"&gt;&amp;quot;tp_btf/sys_enter&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
-&lt;span class="kt"&gt;int&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;btf_raw_tracepoint__sys_enter&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;u64&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;*&lt;/span&gt;&lt;span class="n"&gt;ctx&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
-&lt;span class="p"&gt;{&lt;/span&gt;
-&lt;span class="w"&gt;  &lt;/span&gt;&lt;span class="c1"&gt;// ...&lt;/span&gt;
-&lt;span class="p"&gt;}&lt;/span&gt;
-&lt;/pre&gt;&lt;/div&gt;
-&lt;p&gt;其中 &lt;tt class="docutils literal"&gt;ctx[0]&lt;/tt&gt; 对应上面 &lt;tt class="docutils literal"&gt;btf_trace_sys_enter&lt;/tt&gt; 中 &lt;tt class="docutils literal"&gt;void *&lt;/tt&gt; 后面的第一个参数 &lt;tt class="docutils literal"&gt;struct pt_regs *&lt;/tt&gt;,
-&lt;tt class="docutils literal"&gt;ctx[1]&lt;/tt&gt; 是第二个参数 &lt;tt class="docutils literal"&gt;long int&lt;/tt&gt; 。这两个参数的含义跟前面 &lt;a class="reference external" href="https://mozillazg.com/2022/05/ebpf-libbpf-raw-tracepoint-common-questions.html"&gt;raw tracepoint&lt;/a&gt; 中所说的 &lt;tt class="docutils literal"&gt;TP_PROTO(struct pt_regs *regs, long id)&lt;/tt&gt; 中的含义是一样的。&lt;/p&gt;
-&lt;p&gt;对应的，使用 btf raw tracepoint 获取 &lt;tt class="docutils literal"&gt;fchmodat&lt;/tt&gt; 系统调用事件的示例程序如下：&lt;/p&gt;
-&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="n"&gt;SEC&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="s"&gt;&amp;quot;tp_btf/sys_enter&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
-&lt;span class="kt"&gt;int&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;btf_raw_tracepoint__sys_enter&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;u64&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;*&lt;/span&gt;&lt;span class="n"&gt;ctx&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
-&lt;span class="p"&gt;{&lt;/span&gt;
-&lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="kt"&gt;long&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="kt"&gt;int&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;syscall_id&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="kt"&gt;long&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="kt"&gt;int&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;&lt;span class="n"&gt;ctx&lt;/span&gt;&lt;span class="p"&gt;[&lt;/span&gt;&lt;span class="mi"&gt;1&lt;/span&gt;&lt;span class="p"&gt;];&lt;/span&gt;
-&lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="k"&gt;if&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;syscall_id&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;!=&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="mi"&gt;268&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;&lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="c1"&gt;// fchmodat&lt;/span&gt;
-&lt;span class="w"&gt;        &lt;/span&gt;&lt;span class="k"&gt;return&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="mi"&gt;0&lt;/span&gt;&lt;span class="p"&gt;;&lt;/span&gt;
-
-&lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="k"&gt;struct&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nc"&gt;pt_regs&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;*&lt;/span&gt;&lt;span class="n"&gt;regs&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="k"&gt;struct&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nc"&gt;pt_regs&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;*&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;&lt;span class="n"&gt;ctx&lt;/span&gt;&lt;span class="p"&gt;[&lt;/span&gt;&lt;span class="mi"&gt;0&lt;/span&gt;&lt;span class="p"&gt;];&lt;/span&gt;
-&lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="c1"&gt;// 后面的逻辑跟前面 raw tracepoint 示例程序中是一样的&lt;/span&gt;
-&lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="c1"&gt;// ...&lt;/span&gt;
-&lt;span class="p"&gt;}&lt;/span&gt;
-&lt;/pre&gt;&lt;/div&gt;
-&lt;p&gt;BTW, 在 btf raw tracepoint 程序中可以通过 &lt;tt class="docutils literal"&gt;bpf_get_current_task_btf()&lt;/tt&gt; 获取 btf 版本的 task 信息。&lt;/p&gt;
-&lt;p&gt;完整的示例程序如下：&lt;/p&gt;
-&lt;ul class="simple"&gt;
-&lt;li&gt;&lt;a class="reference external" href="https://github.com/mozillazg/hello-libbpfgo/tree/master/16-btf-raw-tracepoint-args"&gt;https://github.com/mozillazg/hello-libbpfgo/tree/master/16-btf-raw-tracepoint-args&lt;/a&gt;&lt;/li&gt;
-&lt;li&gt;&lt;a class="reference external" href="https://github.com/mozillazg/hello-libbpfgo/tree/master/17-btf-raw-tracepoint-args-sched_switch"&gt;https://github.com/mozillazg/hello-libbpfgo/tree/master/17-btf-raw-tracepoint-args-sched_switch&lt;/a&gt;&lt;/li&gt;
-&lt;/ul&gt;
-&lt;/div&gt;
-&lt;div class="section" id="section-2"&gt;
-&lt;h2 id="hidsection-2"&gt;参考资料&lt;a class="headerlink" href="#hidsection-2" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
-&lt;ul class="simple"&gt;
-&lt;li&gt;&lt;a class="reference external" href="https://lore.kernel.org/netdev/20201203204634.1325171-1-andrii&amp;#64;kernel.org/t/"&gt;[PATCH v6 bpf-next 00/14] Support BTF-powered BPF tracing programs for kernel modules&lt;/a&gt;&lt;/li&gt;
-&lt;li&gt;&lt;a class="reference external" href="https://nakryiko.com/posts/bpf-core-reference-guide/#btf-enabled-bpf-program-types-with-direct-memory-reads"&gt;BPF CO-RE reference guide&lt;/a&gt;&lt;/li&gt;
-&lt;li&gt;&lt;a class="reference external" href="https://github.com/libbpf/libbpf/blob/12e932ac0e18546dd7247e66ea1b4aa236d2ef38/src/libbpf.c#L9002-L9081"&gt;libbpf/libbpf.c at 12e932ac0e18546dd7247e66ea1b4aa236d2ef38 · libbpf/libbpf&lt;/a&gt;&lt;/li&gt;
-&lt;/ul&gt;
-&lt;!-- * https://github.com/aya-rs/aya/pull/85 --&gt;
-&lt;/div&gt;
-</summary><category term="btf"></category><category term="raw-tracepoint"></category><category term="libbpf"></category><category term="libbpfgo"></category></entry></feed>
+</summary><category term="ebpf"></category><category term="libbpf"></category></entry></feed>
