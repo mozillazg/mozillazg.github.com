@@ -1,5 +1,145 @@
 <?xml version="1.0" encoding="utf-8"?>
-<feed xmlns="http://www.w3.org/2005/Atom"><title>mozillazg's Blog</title><link href="https://mozillazg.com/" rel="alternate"></link><link href="https://mozillazg.com/feeds/docker.atom.xml" rel="self"></link><id>https://mozillazg.com/</id><updated>2022-06-19T00:00:00+00:00</updated><entry><title>docker-credential-acr-helper: 一个辅助 docker 获取阿里云 ACR 镜像仓库访问凭证的项目</title><link href="https://mozillazg.com/2022/06/use-docker-credential-acr-helper-help-auth-alibaba-cloud-container-registry-with-temporary-password-without-docker-login.html" rel="alternate"></link><published>2022-06-19T00:00:00+00:00</published><updated>2022-06-19T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2022-06-19:2022/06/use-docker-credential-acr-helper-help-auth-alibaba-cloud-container-registry-with-temporary-password-without-docker-login.html</id><summary type="html">&lt;div class="section" id="section-1"&gt;
+<feed xmlns="http://www.w3.org/2005/Atom"><title>mozillazg's Blog</title><link href="https://mozillazg.com/" rel="alternate"></link><link href="https://mozillazg.com/feeds/docker.atom.xml" rel="self"></link><id>https://mozillazg.com/</id><updated>2022-06-20T00:00:00+00:00</updated><entry><title>docker-credential-acr-helper: A docker credential helper for Alibaba Cloud Container Registry (ACR)</title><link href="https://mozillazg.com/2022/06/use-docker-credential-acr-helper-help-auth-alibaba-cloud-container-registry-with-temporary-password-without-docker-login-en.html" rel="alternate"></link><published>2022-06-20T00:00:00+00:00</published><updated>2022-06-20T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2022-06-20:2022/06/use-docker-credential-acr-helper-help-auth-alibaba-cloud-container-registry-with-temporary-password-without-docker-login-en.html</id><summary type="html">&lt;div class="section" id="preface"&gt;
+&lt;h2 id="hidpreface"&gt;Preface&lt;a class="headerlink" href="#hidpreface" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;Normally, if we want to do &lt;tt class="docutils literal"&gt;docker pull&lt;/tt&gt; or &lt;tt class="docutils literal"&gt;docker push&lt;/tt&gt; on private images on
+Alibaba Cloud Container Registry (ACR),
+we need to configure the corresponding access credentials via
+&lt;tt class="docutils literal"&gt;docker login&lt;/tt&gt; command in advance.&lt;/p&gt;
+&lt;p&gt;The method of configuring a username and password via the &lt;tt class="docutils literal"&gt;docker login&lt;/tt&gt;
+command has several problems, as follows:&lt;/p&gt;
+&lt;ul class="simple"&gt;
+&lt;li&gt;Requires users to record and maintain an additional set of docker-specific passwords,
+and password management is a bit of a pain.&lt;/li&gt;
+&lt;li&gt;ACR only supports the configuration of a fixed password with no expiration time.
+The cost of password change and revocation is high, and users are easily afraid to operate.&lt;/li&gt;
+&lt;li&gt;It is not possible to finely configure the permissions for fixed passwords,
+and it is not possible to achieve the permission control requirements like only
+allowing pull operations but not push operations.&lt;/li&gt;
+&lt;li&gt;Although it is possible to obtain an unlimited number of temporary passwords through the Open API,
+&lt;tt class="docutils literal"&gt;docker login&lt;/tt&gt; does not support the automatic refresh of temporary passwords.
+If you use a temporary password for &lt;tt class="docutils literal"&gt;docker login&lt;/tt&gt;, you will need to get
+the temporary password frequently and then update it with &lt;tt class="docutils literal"&gt;docker login&lt;/tt&gt;, which is also a hassle.&lt;/li&gt;
+&lt;/ul&gt;
+&lt;p&gt;Fortunately, Docker provides a mechanism called &lt;a class="reference external" href="https://docs.docker.com/engine/reference/commandline/login/#credential-helpers"&gt;Credential helper&lt;/a&gt;, through which Credential helper can be plugged in in a way that The Credential helper extends the way docker can get access credentials, and is no longer limited to configuring access credentials via &lt;tt class="docutils literal"&gt;docker login&lt;/tt&gt;.&lt;/p&gt;
+&lt;p&gt;The &lt;a class="reference external" href="https://github.com/mozillazg/docker-credential-acr-helper"&gt;docker-credential-acr-helper&lt;/a&gt;
+developed for ACR is a project to help docker get access credentials to ACR image repositories project.&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class="section" id="introduction"&gt;
+&lt;h2 id="hidintroduction"&gt;Introduction&lt;a class="headerlink" href="#hidintroduction" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;As mentioned earlier, &lt;a class="reference external" href="https://github.com/mozillazg/docker-credential-acr-helper"&gt;docker-credential-acr-helper&lt;/a&gt; is a project developed specifically for ACR to help docker get access credentials to ACR image repositories.&lt;/p&gt;
+&lt;p&gt;docker-credential-acr-helper solves the aforementioned problems.&lt;/p&gt;
+&lt;ul class="simple"&gt;
+&lt;li&gt;Based on Aliyun's existing authentication system, you can directly use the user's familiar Aliyun access credentials, no need to record and maintain additional docker-specific username and password.&lt;/li&gt;
+&lt;li&gt;Automatically obtain temporary passwords for docker operations, not relying on fixed passwords, and no need to manually refresh temporary passwords frequently.&lt;/li&gt;
+&lt;li&gt;Users can configure AliCloud RAM access control policies to achieve the need for granular permission control for temporary passwords, as described in the &lt;a class="reference external" href="https://www.alibabacloud.com/help/doc-detail/72334.html"&gt;ACR documentation&lt;/a&gt;.&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/div&gt;
+&lt;div class="section" id="usage"&gt;
+&lt;h2 id="hidusage"&gt;Usage&lt;a class="headerlink" href="#hidusage" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;You can experience the features provided by this project by following these steps.&lt;/p&gt;
+&lt;ol class="arabic"&gt;
+&lt;li&gt;&lt;p class="first"&gt;Go to the &lt;a class="reference external" href="https://github.com/mozillazg/docker-credential-acr-helper/releases"&gt;github releases&lt;/a&gt; page and download the latest version of the compiled binary archive&lt;/p&gt;
+&lt;/li&gt;
+&lt;li&gt;&lt;p class="first"&gt;Use the checksums.txt file on the page to verify the archive, and extract the archive to get the corresponding binaries &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;docker-credential-acr-helper&lt;/span&gt;&lt;/tt&gt;.&lt;/p&gt;
+&lt;/li&gt;
+&lt;li&gt;&lt;p class="first"&gt;&lt;tt class="docutils literal"&gt;chmod +x &lt;span class="pre"&gt;docker-credential-acr-helper&lt;/span&gt;&lt;/tt&gt;&lt;/p&gt;
+&lt;/li&gt;
+&lt;li&gt;&lt;p class="first"&gt;&lt;tt class="docutils literal"&gt;cp &lt;span class="pre"&gt;docker-credential-acr-helper&lt;/span&gt; /usr/local/bin&lt;/tt&gt;&lt;/p&gt;
+&lt;/li&gt;
+&lt;li&gt;&lt;p class="first"&gt;Configure alibaba cloud access credentials, for example, use the configuration file to specify the access credentials:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+$ cat ~/.alibabacloud/credentials
+[default] # Default client
+type = access_key # The authentication method is access_key
+access_key_id = foo # Key
+access_key_secret = bar # Secret
+&lt;/pre&gt;
+&lt;/li&gt;
+&lt;/ol&gt;
+&lt;p&gt;6. Exit the ACR registry domain you want to test with &lt;tt class="docutils literal"&gt;docker logout &amp;lt;acr_registry_domain&amp;gt;&lt;/tt&gt; and clean up the corresponding saved docker credentials.
+Confirm that you do not have access to the corresponding ACR private image by &lt;tt class="docutils literal"&gt;docker pull &amp;lt;acr_image&amp;gt;&lt;/tt&gt;.
+8. Modify the &lt;tt class="docutils literal"&gt;credHelpers&lt;/tt&gt; configuration item in the docker configuration file &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;~/.docker/config.json&lt;/span&gt;&lt;/tt&gt; to specify to use docker-credential-acr-helper to get access credentials when accessing an ACR registry domain (See the &lt;a class="reference external" href="https://docs.docker.com/engine/reference/commandline/login/#configure-credential-helpers"&gt;Official Docker Documentation&lt;/a&gt; or the project README for more details on this configuration) . Example configuration:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+{
+  &amp;quot;credHelpers&amp;quot; : {
+    &amp;quot;registry.cn-beijing.aliyuncs.com&amp;quot; : &amp;quot;acr-helper&amp;quot;
+  }
+}
+&lt;/pre&gt;
+&lt;ol class="arabic simple" start="9"&gt;
+&lt;li&gt;Verify that the configuration is complete with &lt;tt class="docutils literal"&gt;docker pull &amp;lt;acr_image&amp;gt;&lt;/tt&gt; and you can access the corresponding ACR private image again.&lt;/li&gt;
+&lt;/ol&gt;
+&lt;/div&gt;
+&lt;div class="section" id="integrated-into-third-party-projects-as-a-golang-package"&gt;
+&lt;h2 id="hidintegrated-into-third-party-projects-as-a-golang-package"&gt;Integrated into third-party projects as a golang package&lt;a class="headerlink" href="#hidintegrated-into-third-party-projects-as-a-golang-package" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;It is also possible to use this project as a golang package, integrating the project's capabilities into third-party projects.&lt;/p&gt;
+&lt;p&gt;For example, when using &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;github.com/google/go-containerregistry/pkg/crane&lt;/span&gt;&lt;/tt&gt; to operate the
+docker registry, you can integrate docker-credential-acr-helper in your project using the following method:&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="kn"&gt;import&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;
+&lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="s"&gt;&amp;quot;github.com/google/go-containerregistry/pkg/authn&amp;quot;&lt;/span&gt;
+&lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="s"&gt;&amp;quot;github.com/google/go-containerregistry/pkg/crane&amp;quot;&lt;/span&gt;
+&lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="s"&gt;&amp;quot;github.com/mozillazg/docker-credential-acr-helper/pkg/credhelper&amp;quot;&lt;/span&gt;
+&lt;span class="p"&gt;)&lt;/span&gt;
+
+&lt;span class="kd"&gt;func&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nx"&gt;main&lt;/span&gt;&lt;span class="p"&gt;()&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="p"&gt;{&lt;/span&gt;
+&lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="nx"&gt;kc&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;:=&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nx"&gt;authn&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;NewMultiKeychain&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;
+&lt;span class="w"&gt;            &lt;/span&gt;&lt;span class="nx"&gt;authn&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;DefaultKeychain&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;
+&lt;span class="w"&gt;            &lt;/span&gt;&lt;span class="nx"&gt;authn&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;NewKeychainFromHelper&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="nx"&gt;credhelper&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;NewACRHelper&lt;/span&gt;&lt;span class="p"&gt;()),&lt;/span&gt;&lt;span class="w"&gt;  &lt;/span&gt;&lt;span class="c1"&gt;// &amp;lt;- here&lt;/span&gt;
+&lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+&lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="nx"&gt;ref&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;:=&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nx"&gt;os&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Getenv&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="s"&gt;&amp;quot;REPO_URL&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+&lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="nx"&gt;digest&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nx"&gt;err&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;:=&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nx"&gt;crane&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Digest&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="nx"&gt;ref&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nx"&gt;crane&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;WithAuthFromKeychain&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="nx"&gt;kc&lt;/span&gt;&lt;span class="p"&gt;))&lt;/span&gt;
+&lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="k"&gt;if&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nx"&gt;err&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;!=&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="kc"&gt;nil&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="p"&gt;{&lt;/span&gt;
+&lt;span class="w"&gt;            &lt;/span&gt;&lt;span class="nb"&gt;panic&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="nx"&gt;err&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+&lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="p"&gt;}&lt;/span&gt;
+&lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="nx"&gt;fmt&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="nx"&gt;Printf&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="s"&gt;&amp;quot;got digest for %q:\n%s\n&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nx"&gt;ref&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nx"&gt;digest&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+&lt;span class="p"&gt;}&lt;/span&gt;
+&lt;/pre&gt;&lt;/div&gt;
+&lt;p&gt;The full sample code is here： &lt;a class="reference external" href="https://github.com/mozillazg/docker-credential-acr-helper/blob/master/examples/go-containerregistry-auth/main.go"&gt;examples/go-containerregistry-auth&lt;/a&gt;&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class="section" id="faq"&gt;
+&lt;h2 id="hidfaq"&gt;FAQ&lt;a class="headerlink" href="#hidfaq" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;div class="section" id="whether-to-support-acr-enterprise-edition"&gt;
+&lt;h3 id="hidwhether-to-support-acr-enterprise-edition"&gt;Whether to support ACR Enterprise Edition?&lt;a class="headerlink" href="#hidwhether-to-support-acr-enterprise-edition" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
+&lt;p&gt;Yes.&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class="section" id="how-to-implement-different-alibaba-cloud-access-credentials-for-different-acr-domains"&gt;
+&lt;h3 id="hidhow-to-implement-different-alibaba-cloud-access-credentials-for-different-acr-domains"&gt;How to implement different Alibaba Cloud access credentials for different ACR domains?&lt;a class="headerlink" href="#hidhow-to-implement-different-alibaba-cloud-access-credentials-for-different-acr-domains" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
+&lt;p&gt;this can be achieved by writing separate shell scripts for different access credentials.&lt;/p&gt;
+&lt;p&gt;For example:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+$ cat /usr/local/bin/docker-credential-acr-helper-user-1
+#!/usr/bin/env bash
+
+# export ALIBABA_CLOUD_ACCESS_KEY_ID=foo
+# export ALIBABA_CLOUD_ACCESS_KEY_SECRET=bar
+export ALIBABA_CLOUD_CREDENTIALS_FILE=/path/to/user-1-credentials
+
+exec /usr/local/bin/docker-credential-acr-helper &amp;quot;$&amp;#64;&amp;quot;
+
+$ chmod +x /usr/local/bin/docker-credential-acr-helper-user-1
+&lt;/pre&gt;
+&lt;p&gt;Then configure &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;~/.docker/config.json&lt;/span&gt;&lt;/tt&gt; to implement different ACR domains using shell scripts configured with different access credentials:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+{
+  &amp;quot;credHelpers&amp;quot; : {
+    &amp;quot;registry.cn-beijing.aliyuncs.com&amp;quot; : &amp;quot;acr-helper&amp;quot;,
+    &amp;quot;registry.cn-hangzhou.aliyuncs.com&amp;quot; : &amp;quot;acr-helper-user-1&amp;quot;,
+    &amp;quot;registry.cn-shenzhen.aliyuncs.com&amp;quot; : &amp;quot;acr-helper-user-2&amp;quot;
+  }
+}
+&lt;/pre&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;div class="section" id="references"&gt;
+&lt;h2 id="hidreferences"&gt;References&lt;a class="headerlink" href="#hidreferences" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;ul class="simple"&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://docs.docker.com/engine/reference/commandline/login/"&gt;docker login | Docker Documentation&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://github.com/docker/docker-credential-helpers"&gt;docker/docker-credential-helpers: Programs to keep Docker login credentials safe by storing in platform keystores&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://github.com/mozillazg/docker-credential-acr-helper"&gt;mozillazg/docker-credential-acr-helper: A credential helper for the Docker daemon that makes it easier to use Alibaba Cloud Container Registry(ACR).&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://help.aliyun.com/document_detail/72334.html"&gt;GetAuthorizationToken - ACR Documentation&lt;/a&gt;&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/div&gt;
+</summary><category term="ACR"></category><category term="en-version"></category></entry><entry><title>docker-credential-acr-helper: 一个辅助 docker 获取阿里云 ACR 镜像仓库访问凭证的项目</title><link href="https://mozillazg.com/2022/06/use-docker-credential-acr-helper-help-auth-alibaba-cloud-container-registry-with-temporary-password-without-docker-login.html" rel="alternate"></link><published>2022-06-19T00:00:00+00:00</published><updated>2022-06-19T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2022-06-19:2022/06/use-docker-credential-acr-helper-help-auth-alibaba-cloud-container-registry-with-temporary-password-without-docker-login.html</id><summary type="html">&lt;div class="section" id="section-1"&gt;
 &lt;h2 id="hidsection-1"&gt;前言&lt;a class="headerlink" href="#hidsection-1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;p&gt;通常情况下，如果我们想对阿里云容器镜像服务 ACR 上的私有镜像进行 &lt;tt class="docutils literal"&gt;docker pull&lt;/tt&gt;
 或 &lt;tt class="docutils literal"&gt;docker push&lt;/tt&gt; 的话， 需要提前通过 &lt;tt class="docutils literal"&gt;docker login&lt;/tt&gt; 命令配置相应的访问凭证。&lt;/p&gt;

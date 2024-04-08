@@ -1,5 +1,413 @@
 <?xml version="1.0" encoding="utf-8"?>
-<rss version="2.0"><channel><title>mozillazg's Blog</title><link>https://mozillazg.com/</link><description></description><lastBuildDate>Sun, 31 Mar 2024 00:00:00 +0000</lastBuildDate><item><title>一个使用 tracepoint 追踪 execve 系统调用时无法正确获取系统调用参数的场景</title><link>https://mozillazg.com/2024/03/ebpf-tracepoint-syscalls-sys-enter-execve-can-not-get-filename-argv-values-case.html</link><description>&lt;div class="section" id="section-1"&gt;
+<rss version="2.0"><channel><title>mozillazg's Blog</title><link>https://mozillazg.com/</link><description></description><lastBuildDate>Sun, 31 Mar 2024 00:00:00 +0000</lastBuildDate><item><title>A case in which tracing the execve system call with tracepoints does not accurately capture the system call parameters</title><link>https://mozillazg.com/2024/03/ebpf-tracepoint-syscalls-sys-enter-execve-can-not-get-filename-argv-values-case-en.html</link><description>&lt;div class="section" id="background"&gt;
+&lt;h2 id="hidbackground"&gt;Background&lt;a class="headerlink" href="#hidbackground" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;Some time ago, a netizen consulted a problem he encountered in the &lt;a class="reference external" href="https://ebpf.io/slack"&gt;ebpf channel on slack&lt;/a&gt; :&lt;/p&gt;
+&lt;!-- `question &lt;https://cilium.slack.com/archives/C4XCTGYEM/p1710380136906129?thread_ts=1710284853.310149&amp;cid=C4XCTGYEM&gt;`__ ： --&gt;
+&lt;p&gt;When writing an eBPF program that uses &lt;tt class="docutils literal"&gt;tracepoint/syscalls/sys_enter_execve&lt;/tt&gt; to trace the execve system call,
+encountered a situation where there is a failure in reading the &lt;tt class="docutils literal"&gt;filename&lt;/tt&gt;
+parameter of &lt;tt class="docutils literal"&gt;execve&lt;/tt&gt; using &lt;tt class="docutils literal"&gt;bpf_probe_read_user_str&lt;/tt&gt; in the recorded events,
+with an error code of -14/EFAULT. Especially when executing the &lt;tt class="docutils literal"&gt;tmux&lt;/tt&gt; command,
+there will always be an event of a failed read:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+ret = bpf_probe_read_user_str(event-&amp;gt;args, ARGSIZE, (const char*)ctx-&amp;gt;args[0]);
+if (ret &amp;lt; 0) {
+        bpf_printk(&amp;quot;comm=%s XXX cannot read file name&amp;quot;, tgid, pid, event-&amp;gt;comm);
+        return 0;
+}
+
+utempter-4031732 [027] d...1 3878624.643948: bpf_trace_printk: comm=tmux: server XXX cannot read file name
+   &amp;lt;...&amp;gt;-4035723 [077] d...1 3878668.047954: bpf_trace_printk: comm=tmux: server XXX cannot read file name
+&lt;/pre&gt;
+&lt;p&gt;This article will delve into the causes of this problem and propose a solution specifically designed for this situation.&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class="section" id="reproduce-the-problem-code"&gt;
+&lt;h2 id="hidreproduce-the-problem-code"&gt;Reproduce the Problem Code&lt;a class="headerlink" href="#hidreproduce-the-problem-code" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;Since the problem mentioned that the issue always occurs when executing the &lt;tt class="docutils literal"&gt;tmux&lt;/tt&gt; command,
+and we can see in the output of &lt;tt class="docutils literal"&gt;bpf_printk&lt;/tt&gt; that the process name
+for the corresponding event is &lt;tt class="docutils literal"&gt;utempter&lt;/tt&gt;, we can try to write
+a simple program to reproduce the problem based on these two pieces of information.&lt;/p&gt;
+&lt;p&gt;After searching online for the relationship between tmux and utempter,
+and reading the relevant tmux source code, I learned the following information:&lt;/p&gt;
+&lt;ol class="arabic"&gt;
+&lt;li&gt;&lt;p class="first"&gt;tmux uses the &lt;a class="reference external" href="https://github.com/tmux/tmux/blob/b79e28b2c30e7ef9b1f7ec6233eeb70a1a177231/spawn.c#L473"&gt;utempter_add_record&lt;/a&gt;
+function provided by &lt;tt class="docutils literal"&gt;utempter.h&lt;/tt&gt; to create the required pseudo-terminal:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+xasprintf(&amp;amp;cp, &amp;quot;tmux(%lu).%%%u&amp;quot;, (long)getpid(), new_wp-&amp;gt;id);
+utempter_add_record(new_wp-&amp;gt;fd, cp);
+&lt;/pre&gt;
+&lt;/li&gt;
+&lt;li&gt;&lt;p class="first"&gt;In the &lt;cite&gt;utempter_add_record&lt;/cite&gt; function, it will first construct an &lt;cite&gt;args&lt;/cite&gt; from the passed parameters and then invoke the
+&lt;a class="reference external" href="https://github.com/altlinux/libutempter/blob/9f291816a746292547ac8aaea0c88e16fc2fb29a/libutempter/iface.c#L121"&gt;execute_helper&lt;/a&gt;
+function:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+#define UTEMPTER_DEFAULT_PATHNAME     LIBEXECDIR &amp;quot;/utempter/utempter&amp;quot;
+static const char *utempter_pathname;
+
+int utempter_add_record(int master_fd, const char *hostname)
+  {
+      const char *const args[] = {
+          utempter_pathname ? : UTEMPTER_DEFAULT_PATHNAME,
+          &amp;quot;add&amp;quot;,
+          hostname,
+          0
+      };
+      int status = execute_helper(master_fd, args);
+      // ...
+  }
+&lt;/pre&gt;
+&lt;/li&gt;
+&lt;li&gt;&lt;p class="first"&gt;In the &lt;tt class="docutils literal"&gt;execute_helper&lt;/tt&gt; function, the passed &lt;tt class="docutils literal"&gt;args&lt;/tt&gt; will eventually be used to call the
+&lt;tt class="docutils literal"&gt;fork()&lt;/tt&gt; and &lt;tt class="docutils literal"&gt;execv()&lt;/tt&gt; functions to start a new process
+( &lt;a class="reference external" href="https://github.com/altlinux/libutempter/blob/9f291816a746292547ac8aaea0c88e16fc2fb29a/libutempter/iface.c#L84"&gt;source code&lt;/a&gt; ):&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+static int execute_helper(int master_fd, const char *const argv[])
+{
+    // ...
+    child = fork();
+    if (!child) {
+        do_child(master_fd, argv[0], (char *const *) argv);
+    } else if (child &amp;lt; 0) {
+    // ...
+}
+static void __attribute__((__noreturn__))
+do_child(int master_fd, const char *path, char *const *argv)
+{
+    // ...
+    execv(path, argv);
+    print_dbg(&amp;quot;execv: %s&amp;quot;, strerror(errno));
+    //...
+}
+&lt;/pre&gt;
+&lt;/li&gt;
+&lt;/ol&gt;
+&lt;p&gt;Based on the above information, we can write the following program to reproduce this issue
+&lt;a class="reference external" href="https://github.com/mozillazg/ebpf-tracepoint-execve-argv-issue/blob/master/reproduce.c"&gt;reproduce.c&lt;/a&gt;:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+#define PATHNAME &amp;quot;/usr/bin/echo&amp;quot;
+
+int main(int argc, char **argv) {
+    const char *hostname = argv[0];
+    const char *const args[] = {
+        PATHNAME,
+        &amp;quot;add&amp;quot;,
+        hostname,
+        0
+    };
+    if (!fork()) {
+        execv(args[0], (char *const *) args);
+    }
+}
+&lt;/pre&gt;
+&lt;p&gt;Let's test the effectiveness of this program below:&lt;/p&gt;
+&lt;ol class="arabic"&gt;
+&lt;li&gt;&lt;p class="first"&gt;Compile using GCC:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+gcc -o reproduce reproduce.c
+&lt;/pre&gt;
+&lt;/li&gt;
+&lt;li&gt;&lt;p class="first"&gt;Trace the &lt;tt class="docutils literal"&gt;tracepoint/syscalls/sys_enter_execve&lt;/tt&gt; event using &lt;a class="reference external" href="https://github.com/bpftrace/bpftrace"&gt;bpftrace&lt;/a&gt;
+in another terminal:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+sudo bpftrace -e 'tracepoint:syscalls:sys_enter_execve{printf(&amp;quot;%s[%d]: %s\n&amp;quot;, comm, pid, str(args-&amp;gt;filename));}'
+&lt;/pre&gt;
+&lt;/li&gt;
+&lt;li&gt;&lt;p class="first"&gt;Run the example program:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+./reproduce
+&lt;/pre&gt;
+&lt;/li&gt;
+&lt;/ol&gt;
+&lt;p&gt;At this time, the terminal running bpftrace will output results similar to the following:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+bash[34882]: ./reproduce
+reproduce[34883]:
+&lt;/pre&gt;
+&lt;p&gt;In the previous results, we did not capture the value of the &lt;cite&gt;filename&lt;/cite&gt; parameter used during
+the execution of the &lt;cite&gt;execve()&lt;/cite&gt; system call by the reproducing program.
+From this, it can be seen that our program has reproduced the original issue.&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class="section" id="reason"&gt;
+&lt;h2 id="hidreason"&gt;Reason&lt;a class="headerlink" href="#hidreason" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;Reminded by &lt;a class="reference external" href="https://github.com/ssfdust"&gt;&amp;#64;ssfdust&lt;/a&gt;, someone in the bpftrace community
+has previously raised a similar issue: &lt;a class="reference external" href="https://github.com/bpftrace/bpftrace/issues/2523"&gt;#2523&lt;/a&gt; .
+In this issue, &lt;a class="reference external" href="https://github.com/fbs"&gt;&amp;#64;fbs&lt;/a&gt; provided an
+&lt;a class="reference external" href="https://github.com/bpftrace/bpftrace/issues/2523#issuecomment-1466936511"&gt;explanation&lt;/a&gt; :&lt;/p&gt;
+&lt;blockquote&gt;
+&lt;p&gt;Like I said earlier, the data you're using isn't in memory yet. These static strings are compiled in and are not actually faulted into memory until they're accessed. The access won't happen until its read, which is after your bpftrace probe ran. BPF won't pull the data in so you get an EFAULT/-14.&lt;/p&gt;
+&lt;p&gt;By printing the values or just a random print of a constant string you pull the small amount of data into memory (as it goes by page, not by var) and then it works&lt;/p&gt;
+&lt;/blockquote&gt;
+&lt;p&gt;That is:&lt;/p&gt;
+&lt;ol class="arabic simple"&gt;
+&lt;li&gt;In the sample program, when executing &lt;tt class="docutils literal"&gt;execve()&lt;/tt&gt;, the file name string referred to by &lt;tt class="docutils literal"&gt;argv[0]&lt;/tt&gt; is a static string.
+These static strings are stored in the &lt;tt class="docutils literal"&gt;.rodata&lt;/tt&gt; section of the ELF (Executable and Linkable Format) file
+after compilation. They are loaded into memory only when the program accesses them,
+specifically when accessing the data stored in the &lt;tt class="docutils literal"&gt;.rodata&lt;/tt&gt; section.&lt;/li&gt;
+&lt;li&gt;Based on point 1, the static string referenced by &lt;tt class="docutils literal"&gt;argv[0]&lt;/tt&gt; in the sample program is only
+loaded into memory during the execution of the &lt;tt class="docutils literal"&gt;execve()&lt;/tt&gt; system call. However,
+since our eBPF program runs before the &lt;tt class="docutils literal"&gt;execve()&lt;/tt&gt; system call, attempting to read &lt;tt class="docutils literal"&gt;argv[0]&lt;/tt&gt; using
+bpf_probe_read_user_str will fail and result in an &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;EFAULT/-14&lt;/span&gt;&lt;/tt&gt; error code.&lt;/li&gt;
+&lt;li&gt;By actively loading strings into memory through &lt;tt class="docutils literal"&gt;printf&lt;/tt&gt; and other methods, this problem can be resolved.&lt;/li&gt;
+&lt;/ol&gt;
+&lt;p&gt;Summary from &lt;a class="reference external" href="https://github.com/jschwinger233"&gt;&amp;#64;jschwinger233&lt;/a&gt; :&lt;/p&gt;
+&lt;blockquote&gt;
+bpf_probe_read_user can only read data that has been loaded into memory (page-faulted into memory),
+and the above code has not read .rodata until the execve(2) time, thus not triggering a page fault.
+This can be verified using tracepoint:exceptions:page_fault*.&lt;/blockquote&gt;
+&lt;/div&gt;
+&lt;div class="section" id="verification"&gt;
+&lt;h2 id="hidverification"&gt;Verification&lt;a class="headerlink" href="#hidverification" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;div class="section" id="add-a-printf-statement"&gt;
+&lt;h3 id="hidadd-a-printf-statement"&gt;Add a printf statement&lt;a class="headerlink" href="#hidadd-a-printf-statement" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
+&lt;p&gt;From the above, it can be seen that actually we only need to modify the program to proactively
+load the data in &lt;tt class="docutils literal"&gt;.rodata&lt;/tt&gt; into memory before executing &lt;tt class="docutils literal"&gt;execve()&lt;/tt&gt;, for example, using the &lt;tt class="docutils literal"&gt;printf&lt;/tt&gt; function.&lt;/p&gt;
+&lt;p&gt;You can use the &lt;tt class="docutils literal"&gt;printf&lt;/tt&gt; function to print &lt;tt class="docutils literal"&gt;argv[0]&lt;/tt&gt;, or you can directly print a static string:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+if (!fork()) {
+    printf(&amp;quot;test\n&amp;quot;);
+    // or
+    // printf(&amp;quot;argv[0]: %s\n&amp;quot;, args[0]);
+    execv(args[0], (char *const *) args);
+}
+&lt;/pre&gt;
+&lt;p&gt;After verification, the modified program
+&lt;a class="reference external" href="https://github.com/mozillazg/ebpf-tracepoint-execve-argv-issue/blob/master/reproduce_printf1.c"&gt;reproduce_printf1.c&lt;/a&gt;
+does allow the ebpf program to correctly read the value of filename.&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class="section" id="not-using-static-strings"&gt;
+&lt;h3 id="hidnot-using-static-strings"&gt;Not using static strings&lt;a class="headerlink" href="#hidnot-using-static-strings" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
+&lt;p&gt;Since the issue is caused by the fact that &lt;tt class="docutils literal"&gt;argv[0]&lt;/tt&gt; is a static string, you can try changing
+&lt;tt class="docutils literal"&gt;argv[0]&lt;/tt&gt; to use a non-static string to see if the problem still exists.
+The modified content is as follows:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+const char *const args[] = {
+    argv[1],
+    &amp;quot;add&amp;quot;,
+    hostname,
+    0
+};
+&lt;/pre&gt;
+&lt;p&gt;After verification, the modified program
+&lt;a class="reference external" href="https://github.com/mozillazg/ebpf-tracepoint-execve-argv-issue/blob/master/reproduce_non_static.c"&gt;reproduce_non_static.c&lt;/a&gt;
+can also allow the ebpf program to correctly read the value of filename.&lt;/p&gt;
+&lt;p&gt;I wonder if anyone has noticed that the value of &lt;tt class="docutils literal"&gt;argv[2]&lt;/tt&gt; in
+our program reproducing the issue is actually a non-static string,
+so it can also be verified by reading the content of this data in the eBPF program.
+The expectation is to be able to read the content of this non-static string &lt;tt class="docutils literal"&gt;argv[2]&lt;/tt&gt;
+without making any modifications:&lt;/p&gt;
+&lt;ol class="arabic"&gt;
+&lt;li&gt;&lt;p class="first"&gt;Run the new bpftrace command:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+sudo bpftrace -e 'tracepoint:syscalls:sys_enter_execve{
+    printf(&amp;quot;%s[%d]: filename: %s, argv[1]: %s, argv[2]: %s\n&amp;quot;, comm, pid, str(args-&amp;gt;filename), str(args-&amp;gt;argv[1]), str(args-&amp;gt;argv[2]));
+}'
+&lt;/pre&gt;
+&lt;/li&gt;
+&lt;li&gt;&lt;p class="first"&gt;Run &lt;tt class="docutils literal"&gt;./reproduce&lt;/tt&gt;&lt;/p&gt;
+&lt;/li&gt;
+&lt;li&gt;&lt;p class="first"&gt;The output example of the bpftrace command is as follows:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+bash[36523]: filename: ./reproduce, argv[1]: , argv[2]:
+reproduce[36524]: filename: , argv[1]: , argv[2]: ./reproduce
+&lt;/pre&gt;
+&lt;/li&gt;
+&lt;/ol&gt;
+&lt;/div&gt;
+&lt;div class="section" id="page-fault"&gt;
+&lt;h3 id="hidpage-fault"&gt;page fault&lt;a class="headerlink" href="#hidpage-fault" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
+&lt;p&gt;In modern Linux systems, when we run a binary executable file,
+the program loader (ELF executable loader) will use &lt;tt class="docutils literal"&gt;mmap&lt;/tt&gt; for lazy loading based on
+the information defined in the ELF file, delaying the loading of some data.
+When the program actually tries to read these data, if the data being read has
+not been loaded into memory yet, it will trigger a page fault.&lt;/p&gt;
+&lt;!-- CPU 就会生成一个缺页异常（page fault exception）。此时，内核中的缺页处理程序（page fault handler） --&gt;
+&lt;!-- 会负责处理该异常，将缺失的页面加载到内存中，然后 CPU 重新执行引起缺页异常的指令。 --&gt;
+&lt;p&gt;The data stored in the &lt;tt class="docutils literal"&gt;.rodata&lt;/tt&gt; section of ELF files is exactly the data that will be lazily loaded.&lt;/p&gt;
+&lt;div class="section" id="rodata"&gt;
+&lt;h4 id="hidrodata"&gt;.rodata&lt;a class="headerlink" href="#hidrodata" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h4&gt;
+&lt;p&gt;The &lt;tt class="docutils literal"&gt;.rodata&lt;/tt&gt; section in an ELF file stores some read-only data, such as static strings.
+Let's first take a look at the data in the &lt;tt class="docutils literal"&gt;.rodata&lt;/tt&gt; section of the compiled example program binary ELF file.&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;p class="first"&gt;You can use the &lt;tt class="docutils literal"&gt;objdump&lt;/tt&gt; command to view the contents:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+$ objdump -s -j .rodata ./reproduce
+
+./reproduce:     file format elf64-x86-64
+
+Contents of section .rodata:
+2000 01000200 2f757372 2f62696e 2f656368  ..../usr/bin/ech
+2010 6f006164 6400                        o.add.
+&lt;/pre&gt;
+&lt;/li&gt;
+&lt;li&gt;&lt;p class="first"&gt;You can also use the &lt;a class="reference external" href="https://docs.pwntools.com/en/stable/"&gt;pwntools&lt;/a&gt; library from the Python community for reading:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+&amp;gt;&amp;gt;&amp;gt; from pwn import ELF
+&amp;gt;&amp;gt;&amp;gt; elf = ELF('reproduce')
+&amp;gt;&amp;gt;&amp;gt; elf.section('.rodata')
+b'\x01\x00\x02\x00/usr/bin/echo\x00add\x00'
+&lt;/pre&gt;
+&lt;/li&gt;
+&lt;/ul&gt;
+&lt;p&gt;From the above output, it can be seen that it contains two static strings used in the source code.&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class="section" id="observing-page-fault"&gt;
+&lt;h4 id="hidobserving-page-fault"&gt;Observing page fault&lt;a class="headerlink" href="#hidobserving-page-fault" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h4&gt;
+&lt;p&gt;In the Linux system, when the kernel executes the &lt;tt class="docutils literal"&gt;execve()&lt;/tt&gt; system call, it calls the kernel function
+&lt;tt class="docutils literal"&gt;strncpy_from_user&lt;/tt&gt; (&lt;tt class="docutils literal"&gt;execve() &lt;span class="pre"&gt;-&amp;gt;&lt;/span&gt; getname() &lt;span class="pre"&gt;-&amp;gt;&lt;/span&gt; &lt;span class="pre"&gt;getname_flags(),&lt;/span&gt; strncpy_from_user()&lt;/tt&gt;) to copy the string data
+contained in &lt;tt class="docutils literal"&gt;argv&lt;/tt&gt; from user space to kernel space. This process involves reading user space data.
+If the user space data being read has not yet been loaded into memory, it will trigger a page fault.&lt;/p&gt;
+&lt;p&gt;We can perceive this event by observing &lt;tt class="docutils literal"&gt;exceptions/page_fault_kernel&lt;/tt&gt; and &lt;tt class="docutils literal"&gt;exceptions/page_fault_user&lt;/tt&gt;:&lt;/p&gt;
+&lt;ol class="arabic"&gt;
+&lt;li&gt;&lt;p class="first"&gt;To simplify the verification process, we need to make a modification to the example code. Add a line of &lt;tt class="docutils literal"&gt;sleep(15)&lt;/tt&gt;
+before executing the &lt;tt class="docutils literal"&gt;execv()&lt;/tt&gt; function to ensure the program does not terminate too quickly
+(&lt;a class="reference external" href="https://github.com/mozillazg/ebpf-tracepoint-execve-argv-issue/blob/master/reproduce_sleep.c"&gt;reproduce_sleep.c&lt;/a&gt; ):&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+if (!fork()) {
+     sleep(15);
+     execv(args[0], (char *const *) args);
+}
+&lt;/pre&gt;
+&lt;/li&gt;
+&lt;li&gt;&lt;p class="first"&gt;Run the following bpftrace script in a terminal to observe page faults:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+cat &amp;lt;&amp;lt;EOF | sudo bpftrace -
+tracepoint:exceptions:page_fault_kernel /comm == &amp;quot;reproduce_sleep&amp;quot;/ {
+    printf(&amp;quot;[%s] page_fault_kernel: %s[%d] addr=%llx ip=%llx err=%lld\n&amp;quot;,
+            strftime(&amp;quot;%M:%S&amp;quot;, nsecs), comm, pid, args-&amp;gt;address, args-&amp;gt;ip, args-&amp;gt;error_code);
+}
+
+tracepoint:exceptions:page_fault_user /comm == &amp;quot;reproduce_sleep&amp;quot;/ {
+    printf(&amp;quot;[%s] page_fault_user:   %s[%d] addr=%llx ip=%llx err=%lld\n&amp;quot;,
+            strftime(&amp;quot;%M:%S&amp;quot;, nsecs), comm, pid, args-&amp;gt;address, args-&amp;gt;ip, args-&amp;gt;error_code);
+}
+EOF
+&lt;/pre&gt;
+&lt;/li&gt;
+&lt;li&gt;&lt;p class="first"&gt;Then run ./reproduce_sleep in another terminal.&lt;/p&gt;
+&lt;/li&gt;
+&lt;li&gt;&lt;p class="first"&gt;View the memory mapping of the running reproduce_sleep process in the third terminal:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+$ sudo cat /proc/41291/maps | grep reproduce_sleep
+55b4d9e31000-55b4d9e32000 r--p 00000000 08:01 1634479                    /XXX/reproduce_sleep
+55b4d9e32000-55b4d9e33000 r-xp 00001000 08:01 1634479                    /XXX/reproduce_sleep
+55b4d9e33000-55b4d9e34000 r--p 00002000 08:01 1634479                    /XXX/reproduce_sleep
+55b4d9e34000-55b4d9e35000 r--p 00002000 08:01 1634479                    /XXX/reproduce_sleep
+55b4d9e35000-55b4d9e36000 rw-p 00003000 08:01 1634479                    /XXX/reproduce_sleep
+&lt;/pre&gt;
+&lt;p&gt;From the above, it can be seen that the memory mapping starting address of this process is &lt;tt class="docutils literal"&gt;55b4d9e31000&lt;/tt&gt;,
+that is, &lt;tt class="docutils literal"&gt;0x55b4d9e&lt;/tt&gt;.&lt;/p&gt;
+&lt;/li&gt;
+&lt;li&gt;&lt;p class="first"&gt;After the example program finishes running, the last two lines of the output of the bpftrace command
+will be similar to the following:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+[47:40] page_fault_user:   reproduce_sleep[41290] addr=7f669db86a50 ip=7f669d9f8940 err=7
+[47:55] page_fault_kernel: reproduce_sleep[41291] addr=55b4d9e33004 ip=ffffffff8e092a40 err=0
+&lt;/pre&gt;
+&lt;p&gt;The 15-second gap between these two outputs confirms that the last page fault event was triggered
+when the &lt;tt class="docutils literal"&gt;execv()&lt;/tt&gt; function was executed. Now let's locate the corresponding data based on
+the &lt;tt class="docutils literal"&gt;addr&lt;/tt&gt; result in the event.&lt;/p&gt;
+&lt;/li&gt;
+&lt;li&gt;&lt;p class="first"&gt;The value of the &lt;cite&gt;addr&lt;/cite&gt; output of the last &lt;tt class="docutils literal"&gt;page_fault_kernel&lt;/tt&gt; event above is &lt;tt class="docutils literal"&gt;55b4d9e33004&lt;/tt&gt;,
+which means the virtual memory address that triggered this page fault event is &lt;tt class="docutils literal"&gt;0x55b4d9e33004&lt;/tt&gt;.&lt;/p&gt;
+&lt;/li&gt;
+&lt;li&gt;&lt;p class="first"&gt;Based on the recipe shared by &lt;a class="reference external" href="https://github.com/jschwinger233"&gt;&amp;#64;jschwinger233&lt;/a&gt;:
+&lt;tt class="docutils literal"&gt;real_addr = start_addr + (elf_address - section.Address + section.Offset)&lt;/tt&gt; can be known:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+0x55b4d9e33004 = 0x55b4d9e31000 + (elf_address - section.Address + section.Offset)
+(elf_address - section.Address + section.Offset) = 0x55b4d9e33004 - 0x55b4d9e31000 = 8196 = 0x2004
+&lt;/pre&gt;
+&lt;/li&gt;
+&lt;li&gt;&lt;p class="first"&gt;Use the &lt;tt class="docutils literal"&gt;readelf&lt;/tt&gt; command to read the virtual address, offset, and data size of the ELF &lt;tt class="docutils literal"&gt;.rodata&lt;/tt&gt; section
+in the binary file &lt;tt class="docutils literal"&gt;reproduce_sleep&lt;/tt&gt;:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+$ readelf -S -W reproduce_sleep  | egrep '.rodata|Address'
+  [Nr] Name              Type            Address          Off    Size   ES Flg Lk Inf Al
+  [18] .rodata           PROGBITS        0000000000002000 002000 000016 00   A  0   0  4
+&lt;/pre&gt;
+&lt;p&gt;From the above output, it can be seen that the virtual address of the &lt;tt class="docutils literal"&gt;.rodata&lt;/tt&gt; section in this ELF file
+is &lt;tt class="docutils literal"&gt;0000000000002000&lt;/tt&gt; or &lt;tt class="docutils literal"&gt;0x2000&lt;/tt&gt;, the offset is &lt;tt class="docutils literal"&gt;002000&lt;/tt&gt; or &lt;tt class="docutils literal"&gt;0x2000&lt;/tt&gt;, the data size is &lt;tt class="docutils literal"&gt;0x16&lt;/tt&gt;, that is,
+the address range is &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;0x2000-0x2016&lt;/span&gt;&lt;/tt&gt;.&lt;/p&gt;
+&lt;/li&gt;
+&lt;li&gt;&lt;p class="first"&gt;Through 7 and 8, it can be known that the virtual memory address of the page fault event triggered when
+executing the &lt;tt class="docutils literal"&gt;execv()&lt;/tt&gt; function is &lt;tt class="docutils literal"&gt;0x55b4d9e33004&lt;/tt&gt;, corresponding to the ELF address &lt;tt class="docutils literal"&gt;0x2004&lt;/tt&gt;.
+This address is within the range of the &lt;tt class="docutils literal"&gt;.rodata&lt;/tt&gt; address in the ELF file (&lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;0x2000-0x2016&lt;/span&gt;&lt;/tt&gt;),
+corresponding to the static string &lt;tt class="docutils literal"&gt;/usr/bin/echo&lt;/tt&gt; used in &lt;tt class="docutils literal"&gt;argv[0]&lt;/tt&gt;:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+$ objdump -s -j .rodata ./reproduce_sleep
+
+./reproduce_sleep:     file format elf64-x86-64
+
+Contents of section .rodata:
+ 2000 01000200 2f757372 2f62696e 2f656368  ..../usr/bin/ech
+ 2010 6f006164 6400                        o.add.
+
+&amp;gt;&amp;gt;&amp;gt; elf = ELF('reproduce_sleep')
+&amp;gt;&amp;gt;&amp;gt; elf.read(0x2004, 14)
+b'/usr/bin/echo\x00'
+
+$ gdb -ex 'disas/m main' -ex q reproduce_sleep | grep 'args\[\]' -A 13
+9       const char *const args[] = {
+   0x00000000000011d6 &amp;lt;+45&amp;gt;:        lea    0xe27(%rip),%rax        # 0x2004
+   0x00000000000011dd &amp;lt;+52&amp;gt;:        mov    %rax,-0x30(%rbp)
+   0x00000000000011e1 &amp;lt;+56&amp;gt;:        lea    0xe2a(%rip),%rax        # 0x2012
+   0x00000000000011e8 &amp;lt;+63&amp;gt;:        mov    %rax,-0x28(%rbp)
+   0x00000000000011ec &amp;lt;+67&amp;gt;:        mov    -0x38(%rbp),%rax
+   0x00000000000011f0 &amp;lt;+71&amp;gt;:        mov    %rax,-0x20(%rbp)
+   0x00000000000011f4 &amp;lt;+75&amp;gt;:        movq   $0x0,-0x18(%rbp)
+
+10          PATHNAME,
+11          &amp;quot;add&amp;quot;,
+12          hostname,
+13          0
+14      };
+&lt;/pre&gt;
+&lt;/li&gt;
+&lt;li&gt;&lt;p class="first"&gt;You can also confirm by printing the pointer address of &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;args-&amp;gt;filename&lt;/span&gt;&lt;/tt&gt; in the eBPF program or
+bpftrace script. The value at this address will be consistent with the value of &lt;tt class="docutils literal"&gt;addr&lt;/tt&gt;
+in the previous page fault event, both being &lt;tt class="docutils literal"&gt;0x55b4d9e33004&lt;/tt&gt;:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+tracepoint:syscalls:sys_enter_execve {
+    printf(&amp;quot;%s[%d]: %p\n&amp;quot;, comm, pid, args-&amp;gt;filename);
+}
+&lt;/pre&gt;
+&lt;/li&gt;
+&lt;/ol&gt;
+&lt;p&gt;BTW, you can trace the function information that triggers page fault events by using the &lt;tt class="docutils literal"&gt;perf trace &lt;span class="pre"&gt;-F&lt;/span&gt;&lt;/tt&gt; all command.&lt;/p&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;div class="section" id="solution"&gt;
+&lt;h2 id="hidsolution"&gt;Solution&lt;a class="headerlink" href="#hidsolution" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;There are many methods to solve this problem, one of which is to change to tracking the
+&lt;tt class="docutils literal"&gt;tracepoint/sched/sched_process_exec&lt;/tt&gt; event to obtain the values of the filename and
+argv parameters in the &lt;tt class="docutils literal"&gt;execve()&lt;/tt&gt; system call. Below is an example program corresponding to the implementation:&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;p class="first"&gt;Example script for tracing the &lt;tt class="docutils literal"&gt;tracepoint/sched/sched_process_exec&lt;/tt&gt; event using bpftrace(from &lt;a class="reference external" href="https://github.com/jschwinger233"&gt;&amp;#64;jschwinger233&lt;/a&gt; ):&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+tracepoint:sched:sched_process_exec {
+  $task=curtask;
+  $arg_start=$task-&amp;gt;mm-&amp;gt;arg_start;
+  $arg_end=$task-&amp;gt;mm-&amp;gt;arg_end;
+  printf(&amp;quot;%s[%d]: filename: %s, argv: %r\n&amp;quot;, comm, pid, str(args-&amp;gt;filename), buf(uptr($arg_start), $arg_end-$arg_start));
+}
+&lt;/pre&gt;
+&lt;/li&gt;
+&lt;li&gt;&lt;p class="first"&gt;An example program that traces the &lt;tt class="docutils literal"&gt;tracepoint/sched/sched_process_exec&lt;/tt&gt; event through eBPF C code:
+&lt;a class="reference external" href="https://github.com/mozillazg/hello-libbpfgo/blob/master/37-tracepoint-sched_process_exec/main.bpf.c"&gt;main.bpf.c&lt;/a&gt;&lt;/p&gt;
+&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/div&gt;
+&lt;div class="section" id="references"&gt;
+&lt;h2 id="hidreferences"&gt;References&lt;a class="headerlink" href="#hidreferences" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;ul class="simple"&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://github.com/tmux/tmux/tree/master"&gt;tmux/tmux: tmux source code&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://github.com/bpftrace/bpftrace/issues/2523"&gt;Can't trace sys_execve inside a c program · Issue #2523 · bpftrace/bpftrace&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://wiki.osdev.org/ELF"&gt;ELF - OSDev Wiki&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://stackoverflow.com/questions/57761007/why-an-elf-executable-could-have-4-load-segments"&gt;unix - Why an ELF executable could have 4 LOAD segments? - Stack Overflow&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://www.cs.bham.ac.uk/~exr/lectures/opsys/13_14/docs/kernelAPI/r4206.html"&gt;strncpy_from_user&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;Guidance from &lt;a class="reference external" href="https://github.com/jschwinger233"&gt;&amp;#64;jschwinger233&lt;/a&gt;&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/div&gt;
+</description><dc:creator xmlns:dc="http://purl.org/dc/elements/1.1/">mozillazg</dc:creator><pubDate>Sun, 31 Mar 2024 00:00:00 +0000</pubDate><guid isPermaLink="false">tag:mozillazg.com,2024-03-31:2024/03/ebpf-tracepoint-syscalls-sys-enter-execve-can-not-get-filename-argv-values-case-en.html</guid><category>tracepoint</category><category>libbpf</category><category>bpftrace</category><category>ELF</category><category>en-version</category></item><item><title>一个使用 tracepoint 追踪 execve 系统调用时无法正确获取系统调用参数的场景</title><link>https://mozillazg.com/2024/03/ebpf-tracepoint-syscalls-sys-enter-execve-can-not-get-filename-argv-values-case.html</link><description>&lt;div class="section" id="section-1"&gt;
 &lt;h2 id="hidsection-1"&gt;背景&lt;a class="headerlink" href="#hidsection-1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;p&gt;前段时间有网友在 slack 上的 &lt;a class="reference external" href="https://ebpf.io/slack"&gt;ebpf 频道&lt;/a&gt;
 中咨询一个他遇到的问题：&lt;/p&gt;
@@ -153,7 +561,7 @@ bpf_probe_read_user 只能读到已经载入内存 (page-faulted into memory) �
 &lt;h3 id="hidprintf"&gt;增加 printf&lt;a class="headerlink" href="#hidprintf" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
 &lt;p&gt;由上面可知，其实我们只需要修改程序在执行 &lt;tt class="docutils literal"&gt;execve()&lt;/tt&gt; 之前主动将 &lt;tt class="docutils literal"&gt;.rodata&lt;/tt&gt; 中的数据加载到内存中即可避免该问题，
 比如使用 &lt;tt class="docutils literal"&gt;printf&lt;/tt&gt; 函数。&lt;/p&gt;
-&lt;p&gt;即，可以使用 &lt;tt class="docutils literal"&gt;printf&lt;/tt&gt; 函数打印 &lt;tt class="docutils literal"&gt;argv[0]&lt;/tt&gt; ，也可以直接打印一个静态字符串:&lt;/p&gt;
+&lt;p&gt;既可以使用 &lt;tt class="docutils literal"&gt;printf&lt;/tt&gt; 函数打印 &lt;tt class="docutils literal"&gt;argv[0]&lt;/tt&gt; ，也可以直接打印一个静态字符串:&lt;/p&gt;
 &lt;pre class="literal-block"&gt;
 if (!fork()) {
     printf(&amp;quot;test\n&amp;quot;);
@@ -240,7 +648,11 @@ b'\x01\x00\x02\x00/usr/bin/echo\x00add\x00'
 &lt;div class="section" id="page-fault-1"&gt;
 &lt;h4 id="hidpage-fault-1"&gt;观测 page fault&lt;a class="headerlink" href="#hidpage-fault-1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h4&gt;
 &lt;p&gt;在 Linux 系统中，当内核执行 &lt;tt class="docutils literal"&gt;execve()&lt;/tt&gt; 系统调用时，
-会使用内核函数 &lt;tt class="docutils literal"&gt;strncpy_from_user&lt;/tt&gt; 将 &lt;tt class="docutils literal"&gt;argv&lt;/tt&gt; 中包含的字符串数据从用户态复制到内核态，
+会调用内核函数 &lt;tt class="docutils literal"&gt;strncpy_from_user&lt;/tt&gt; （
+&lt;a class="reference external" href="https://elixir.bootlin.com/linux/v5.13/source/fs/exec.c#L2063"&gt;execve()&lt;/a&gt; -&amp;gt;
+&lt;a class="reference external" href="https://elixir.bootlin.com/linux/v5.13/source/fs/namei.c#L207"&gt;getname()&lt;/a&gt; -&amp;gt;
+&lt;a class="reference external" href="https://elixir.bootlin.com/linux/v5.15/source/fs/namei.c#L149"&gt;getname_flags(),strncpy_from_user()&lt;/a&gt; ）
+将 &lt;tt class="docutils literal"&gt;argv&lt;/tt&gt; 中包含的字符串数据从用户态复制到内核态，
 这个过程涉及读取用户态数据的操作。
 如果被读取的用户态数据还未被加载到内存中，就会触发 page fault。&lt;/p&gt;
 &lt;p&gt;我们可以通过观测 &lt;tt class="docutils literal"&gt;exceptions/page_fault_kernel&lt;/tt&gt; 和 &lt;tt class="docutils literal"&gt;exceptions/page_fault_user&lt;/tt&gt; 感知到这个事件:&lt;/p&gt;
@@ -300,7 +712,7 @@ $ sudo cat /proc/41291/maps | grep reproduce_sleep
 (elf_address - section.Address + section.Offset) = 0x55b4d9e33004 - 0x55b4d9e31000 = 8196 = 0x2004
 &lt;/pre&gt;
 &lt;/li&gt;
-&lt;li&gt;&lt;p class="first"&gt;使用 readelf 命令读取二进制文件 reproduce_sleep 中 ELF .rodata section 的内存地址、偏移量以及数据大小:&lt;/p&gt;
+&lt;li&gt;&lt;p class="first"&gt;使用 readelf 命令读取二进制文件 reproduce_sleep 中 ELF .rodata section 的虚拟地址、偏移量以及数据大小:&lt;/p&gt;
 &lt;pre class="literal-block"&gt;
 $ readelf -S -W reproduce_sleep  | egrep '.rodata|Address'
   [Nr] Name              Type            Address          Off    Size   ES Flg Lk Inf Al
@@ -310,7 +722,7 @@ $ readelf -S -W reproduce_sleep  | egrep '.rodata|Address'
 偏移量是 &lt;tt class="docutils literal"&gt;002000&lt;/tt&gt; 即 &lt;tt class="docutils literal"&gt;0x2000&lt;/tt&gt; ， 数据大小是 &lt;tt class="docutils literal"&gt;0x16&lt;/tt&gt; ，即地址范围是 &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;0x2000-0x2016&lt;/span&gt;&lt;/tt&gt; 。&lt;/p&gt;
 &lt;/li&gt;
 &lt;li&gt;&lt;p class="first"&gt;通过 7 和 8 可知，执行 &lt;tt class="docutils literal"&gt;execv()&lt;/tt&gt; 函数时触发的 page fault 事件的虚拟内存地址
-&lt;tt class="docutils literal"&gt;0x55b4d9e33004&lt;/tt&gt; 对应的 ELF 地址是 &lt;tt class="docutils literal"&gt;0x2004&lt;/tt&gt; ，这个地址在 ELF 文件的 .rodata 地址范围（0x2000-0x2016）内，
+&lt;tt class="docutils literal"&gt;0x55b4d9e33004&lt;/tt&gt; 对应的 ELF 地址是 &lt;tt class="docutils literal"&gt;0x2004&lt;/tt&gt; ，这个地址在 ELF 文件的 .rodata 地址范围（ &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;0x2000-0x2016&lt;/span&gt;&lt;/tt&gt; ）内，
 对应的是 &lt;tt class="docutils literal"&gt;argv[0]&lt;/tt&gt; 中使用的静态字符串 &lt;tt class="docutils literal"&gt;/usr/bin/echo&lt;/tt&gt;:&lt;/p&gt;
 &lt;pre class="literal-block"&gt;
 $ objdump -s -j .rodata ./reproduce_sleep
@@ -386,7 +798,7 @@ tracepoint:sched:sched_process_exec {
 &lt;li&gt;&lt;a class="reference external" href="https://github.com/jschwinger233"&gt;&amp;#64;jschwinger233&lt;/a&gt; 的谆谆教诲&lt;/li&gt;
 &lt;/ul&gt;
 &lt;/div&gt;
-</description><dc:creator xmlns:dc="http://purl.org/dc/elements/1.1/">mozillazg</dc:creator><pubDate>Sun, 31 Mar 2024 00:00:00 +0000</pubDate><guid isPermaLink="false">tag:mozillazg.com,2024-03-31:2024/03/ebpf-tracepoint-syscalls-sys-enter-execve-can-not-get-filename-argv-values-case.html</guid><category>tracepoint</category><category>bpftrace</category><category>ELF</category></item><item><title>使用 except 命令解决无法在无 tty 的环境里执行 kubectl exec -it 命令的问题</title><link>https://mozillazg.com/2024/03/fix-can-not-run-kubectl-exec-it-in-no-tty-env.html</link><description>&lt;div class="section" id="section-1"&gt;
+</description><dc:creator xmlns:dc="http://purl.org/dc/elements/1.1/">mozillazg</dc:creator><pubDate>Sun, 31 Mar 2024 00:00:00 +0000</pubDate><guid isPermaLink="false">tag:mozillazg.com,2024-03-31:2024/03/ebpf-tracepoint-syscalls-sys-enter-execve-can-not-get-filename-argv-values-case.html</guid><category>tracepoint</category><category>libbpf</category><category>bpftrace</category><category>ELF</category></item><item><title>使用 except 命令解决无法在无 tty 的环境里执行 kubectl exec -it 命令的问题</title><link>https://mozillazg.com/2024/03/fix-can-not-run-kubectl-exec-it-in-no-tty-env.html</link><description>&lt;div class="section" id="section-1"&gt;
 &lt;h2 id="hidsection-1"&gt;问题&lt;a class="headerlink" href="#hidsection-1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;p&gt;当我们在无 tty 环境下执行 &lt;tt class="docutils literal"&gt;kubectl exec &lt;span class="pre"&gt;-it&lt;/span&gt;&lt;/tt&gt; 命令的时候，
 kubectl 会输出如下警告然后自动禁用 &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;-t&lt;/span&gt;&lt;/tt&gt; 选项:&lt;/p&gt;
@@ -427,7 +839,32 @@ except -f test.sh
 &lt;/pre&gt;
 &lt;p&gt;关于 &lt;tt class="docutils literal"&gt;except&lt;/tt&gt; 命令的详细使用方式大家可以在网络上自行搜索。&lt;/p&gt;
 &lt;/div&gt;
-</description><dc:creator xmlns:dc="http://purl.org/dc/elements/1.1/">mozillazg</dc:creator><pubDate>Sat, 23 Mar 2024 00:00:00 +0000</pubDate><guid isPermaLink="false">tag:mozillazg.com,2024-03-23:2024/03/fix-can-not-run-kubectl-exec-it-in-no-tty-env.html</guid><category>kubectl</category></item><item><title>如何在本地 checkout GitHub 上外部贡献者提交的 PR 所在 fork 仓库的分支代码</title><link>https://mozillazg.com/2024/03/git-checkout-github-pr-codes-to-local.html</link><description>&lt;p&gt;在日常处理 GitHub 上外部贡献者提交的 PR 时，可能会想将 PR 对应的代码 checkout 到本地，
+</description><dc:creator xmlns:dc="http://purl.org/dc/elements/1.1/">mozillazg</dc:creator><pubDate>Sat, 23 Mar 2024 00:00:00 +0000</pubDate><guid isPermaLink="false">tag:mozillazg.com,2024-03-23:2024/03/fix-can-not-run-kubectl-exec-it-in-no-tty-env.html</guid><category>kubectl</category></item><item><title>How to Checkout Codes from a Fork's Branch for PRs Submitted by External Contributors on GitHub Locally</title><link>https://mozillazg.com/2024/03/git-checkout-github-pr-codes-to-local-en.html</link><description>&lt;p&gt;When handling PRs (Pull Requests) from external contributors on GitHub, you might want to checkout those PR codes to your local machine.
+This guide covers how to quickly checkout the branch code from the fork repository associated with a PR.&lt;/p&gt;
+&lt;p&gt;Typically, you might clone the fork repository directly, but there's a more efficient way that doesn't require cloning in a new directory.&lt;/p&gt;
+&lt;p&gt;To quickly checkout the branch code from a fork repository for a PR, use the following commands:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+git fetch origin pull/&amp;lt;ID&amp;gt;/head:&amp;lt;BRANCHNAME&amp;gt;
+git checkout &amp;lt;BRANCHNAME&amp;gt;
+&lt;/pre&gt;
+&lt;p&gt;For practical use, replace &lt;tt class="docutils literal"&gt;&amp;lt;ID&amp;gt;&lt;/tt&gt; in the command with the actual PR ID, and &lt;tt class="docutils literal"&gt;&amp;lt;BRANCHNAME&amp;gt;&lt;/tt&gt; with the name you want to assign to the new local branch.
+Here's an example of how to checkout the code for a PR with ID 47 into a local branch named pr47:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+$ git fetch origin pull/47/head:pr47
+remote: Enumerating objects: 10, done.
+remote: Counting objects: 100% (10/10), done.
+remote: Compressing objects: 100% (10/10), done.
+remote: Total 10 (delta 4), reused 3 (delta 0), pack-reused 0
+Unpacking objects: 100% (10/10), 3.25 MiB | 862.00 KiB/s, done.
+From github.com:mozillazg/XXXX
+ * [new ref]         refs/pull/47/head -&amp;gt; pr47
+
+$ git log pr47
+
+$ git checkout pr47
+Switched to branch 'pr47'
+&lt;/pre&gt;
+</description><dc:creator xmlns:dc="http://purl.org/dc/elements/1.1/">mozillazg</dc:creator><pubDate>Sun, 10 Mar 2024 00:00:00 +0000</pubDate><guid isPermaLink="false">tag:mozillazg.com,2024-03-10:2024/03/git-checkout-github-pr-codes-to-local-en.html</guid><category>en-version</category></item><item><title>如何在本地 checkout GitHub 上外部贡献者提交的 PR 所在 fork 仓库的分支代码</title><link>https://mozillazg.com/2024/03/git-checkout-github-pr-codes-to-local.html</link><description>&lt;p&gt;在日常处理 GitHub 上外部贡献者提交的 PR 时，可能会想将 PR 对应的代码 checkout 到本地，
 这里涉及到如何快速 checkout PR 所在 fork 仓库的分支代码。&lt;/p&gt;
 &lt;p&gt;通常我们可能会通过 git clone 对应的 fork 仓库来实现，但是其实还有一个更便捷、不需要切换目录进行 clone 的方法。&lt;/p&gt;
 &lt;p&gt;我们可以通过下面的方法实现快速 checkout PR 对应的 fork 仓库分支代码的需求:&lt;/p&gt;
@@ -452,17 +889,17 @@ $ git log pr47
 $ git checkout pr47
 Switched to branch 'pr47'
 &lt;/pre&gt;
-</description><dc:creator xmlns:dc="http://purl.org/dc/elements/1.1/">mozillazg</dc:creator><pubDate>Sun, 10 Mar 2024 00:00:00 +0000</pubDate><guid isPermaLink="false">tag:mozillazg.com,2024-03-10:2024/03/git-checkout-github-pr-codes-to-local.html</guid></item><item><title>Amazon EKS Pod Identity 新特性探索</title><link>https://mozillazg.com/2023/12/security-deep-dive-into-aws-eks-pod-identity-feature.html</link><description>&lt;p&gt;本文将简单探索一下 AWS 本周新发布的名为 &lt;a class="reference external" href="https://aws.amazon.com/blogs/aws/amazon-eks-pod-identity-simplifies-iam-permissions-for-applications-on-amazon-eks-clusters/"&gt;Amazon EKS Pod Identity&lt;/a&gt; 的 EKS 安全特性。&lt;/p&gt;
-&lt;div class="section" id="section-1"&gt;
-&lt;h2 id="hidsection-1"&gt;功能介绍&lt;a class="headerlink" href="#hidsection-1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
-&lt;p&gt;Amazon EKS Pod Identity 是 AWS 对 EKS 原有的 &lt;a class="reference external" href="https://aws.amazon.com/blogs/opensource/introducing-fine-grained-iam-roles-service-accounts/"&gt;IAM roles for service accounts (IRSA)&lt;/a&gt;  功能的补充，通过新增的 EKS Pod Identity 功能，用户可以用更简便的方式实现为 Pod 安全的授予 AWS API 访问权限，
-并且所有的配置管理操作都可以通过 AWS API 或者控制台完成。&lt;/p&gt;
+</description><dc:creator xmlns:dc="http://purl.org/dc/elements/1.1/">mozillazg</dc:creator><pubDate>Sun, 10 Mar 2024 00:00:00 +0000</pubDate><guid isPermaLink="false">tag:mozillazg.com,2024-03-10:2024/03/git-checkout-github-pr-codes-to-local.html</guid></item><item><title>Exploring the New Features of Amazon EKS Pod Identity</title><link>https://mozillazg.com/2023/12/security-deep-dive-into-aws-eks-pod-identity-feature-en.html</link><description>&lt;p&gt;In this piece, we're taking a quick dive into a fresh security feature for EKS introduced this week by AWS,
+aptly called &lt;a class="reference external" href="https://aws.amazon.com/blogs/aws/amazon-eks-pod-identity-simplifies-iam-permissions-for-applications-on-amazon-eks-clusters/"&gt;Amazon EKS Pod Identity&lt;/a&gt;.&lt;/p&gt;
+&lt;div class="section" id="introducing-the-features"&gt;
+&lt;h2 id="hidintroducing-the-features"&gt;Introducing the Features&lt;a class="headerlink" href="#hidintroducing-the-features" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;Amazon EKS Pod Identity enhances AWS's existing &lt;a class="reference external" href="https://aws.amazon.com/blogs/opensource/introducing-fine-grained-iam-roles-service-accounts/"&gt;IAM roles for service accounts (IRSA)&lt;/a&gt; feature. This new addition allows users to more easily assign secure AWS API access permissions to Pods. Moreover, all related configuration and management tasks can be handled directly via the AWS API or its console interface.&lt;/p&gt;
 &lt;/div&gt;
-&lt;div class="section" id="section-2"&gt;
-&lt;h2 id="hidsection-2"&gt;使用方法&lt;a class="headerlink" href="#hidsection-2" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
-&lt;p&gt;用户只需执行如下操作, 即可基于 EKS Pod Identity 特性实现为 Pod 内应用安全的授予 AWS API 访问权限。&lt;/p&gt;
+&lt;div class="section" id="how-to-use"&gt;
+&lt;h2 id="hidhow-to-use"&gt;How to Use&lt;a class="headerlink" href="#hidhow-to-use" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;To securely provide AWS API access to applications inside Pods using the EKS Pod Identity feature, users simply need to follow these steps:&lt;/p&gt;
 &lt;ol class="arabic simple"&gt;
-&lt;li&gt;首先，需要创建一个 IAM 角色，确保该角色信任 &lt;tt class="docutils literal"&gt;pods.eks.amazonaws.com&lt;/tt&gt; 。角色信任策略示例如下。&lt;/li&gt;
+&lt;li&gt;Start by creating an IAM role, making sure it trusts &lt;tt class="docutils literal"&gt;pods.eks.amazonaws.com&lt;/tt&gt;. Here's an example of what the role trust policy might look like:&lt;/li&gt;
 &lt;/ol&gt;
 &lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="p"&gt;{&lt;/span&gt;
 &lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="nt"&gt;&amp;quot;Version&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="s2"&gt;&amp;quot;2012-10-17&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;
@@ -481,8 +918,7 @@ Switched to branch 'pr47'
 &lt;span class="p"&gt;}&lt;/span&gt;
 &lt;/pre&gt;&lt;/div&gt;
 &lt;ol class="arabic simple" start="2"&gt;
-&lt;li&gt;其次，需要在 EKS 集群内安装 &lt;a class="reference external" href="https://docs.aws.amazon.com/eks/latest/userguide/pod-id-agent-setup.html"&gt;eks-pod-identity-agent&lt;/a&gt;
-组件（支持通过控制台安装）。&lt;/li&gt;
+&lt;li&gt;The next step is to install the &lt;a class="reference external" href="https://docs.aws.amazon.com/eks/latest/userguide/pod-id-agent-setup.html"&gt;eks-pod-identity-agent&lt;/a&gt; within your EKS cluster, which can be done via the console.&lt;/li&gt;
 &lt;/ol&gt;
 &lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;aws&lt;span class="w"&gt; &lt;/span&gt;eks&lt;span class="w"&gt; &lt;/span&gt;create-addon&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="se"&gt;\&lt;/span&gt;
 --cluster-name&lt;span class="w"&gt; &lt;/span&gt;&amp;lt;CLUSTER_NAME&amp;gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="se"&gt;\&lt;/span&gt;
@@ -490,8 +926,7 @@ Switched to branch 'pr47'
 --addon-version&lt;span class="w"&gt; &lt;/span&gt;v1.0.0-eksbuild.1
 &lt;/pre&gt;&lt;/div&gt;
 &lt;ol class="arabic simple" start="3"&gt;
-&lt;li&gt;然后，需要配置应用 Pod 所使用的 Service Account 与 AWS IAM 角色之间的关联关系，
-允许使用该 Service Account 的应用扮演特定的 IAM 角色（支持通过控制台配置）。&lt;/li&gt;
+&lt;li&gt;Following that, set up the link between the Service Account utilized by your application Pod and the AWS IAM role. This configuration allows apps using this Service Account to assume a designated IAM role, and it can be managed via the console.&lt;/li&gt;
 &lt;/ol&gt;
 &lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;aws&lt;span class="w"&gt; &lt;/span&gt;eks&lt;span class="w"&gt; &lt;/span&gt;create-pod-identity-association&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="se"&gt;\&lt;/span&gt;
 &lt;span class="w"&gt;  &lt;/span&gt;--cluster-name&lt;span class="w"&gt; &lt;/span&gt;&amp;lt;CLUSTER_NAME&amp;gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="se"&gt;\&lt;/span&gt;
@@ -500,19 +935,16 @@ Switched to branch 'pr47'
 &lt;span class="w"&gt;  &lt;/span&gt;--role-arn&lt;span class="w"&gt; &lt;/span&gt;&amp;lt;IAM_ROLE_ARN&amp;gt;
 &lt;/pre&gt;&lt;/div&gt;
 &lt;ol class="arabic simple" start="4"&gt;
-&lt;li&gt;最后，应用程序需要更新使用最新的支持 EKS Pod Identity 特性的 &lt;a class="reference external" href="https://docs.aws.amazon.com/eks/latest/userguide/pod-id-minimum-sdk.html"&gt;AWS SDK&lt;/a&gt; ，
-并且代码里需要使用 SDK 提供的 &lt;a class="reference external" href="https://docs.aws.amazon.com/sdkref/latest/guide/standardized-credentials.html#credentialProviderChain"&gt;默认凭证搜索逻辑&lt;/a&gt;
-或者显式调用 EKS Pod Identity 依赖的 &lt;a class="reference external" href="https://docs.aws.amazon.com/sdkref/latest/guide/feature-container-credentials.html"&gt;Container credential provider&lt;/a&gt; 。&lt;/li&gt;
+&lt;li&gt;Lastly, update your applications to incorporate the most recent &lt;a class="reference external" href="https://docs.aws.amazon.com/eks/latest/userguide/pod-id-minimum-sdk.html"&gt;AWS SDK&lt;/a&gt; version that's compatible with EKS Pod Identity. In your code, either use the SDK's built-in &lt;a class="reference external" href="https://docs.aws.amazon.com/sdkref/latest/guide/standardized-credentials.html#credentialProviderChain"&gt;default credential search logic&lt;/a&gt; or make explicit calls to the &lt;a class="reference external" href="https://docs.aws.amazon.com/sdkref/latest/guide/feature-container-credentials.html"&gt;Container credential provider&lt;/a&gt; which is a dependency of EKS Pod Identity.&lt;/li&gt;
 &lt;/ol&gt;
 &lt;/div&gt;
-&lt;div class="section" id="section-3"&gt;
-&lt;h2 id="hidsection-3"&gt;工作流程&lt;a class="headerlink" href="#hidsection-3" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
-&lt;p&gt;EKS Pod Identity 特性的工作流程如下。&lt;/p&gt;
-&lt;p&gt;&lt;img alt="image" src="/static/images/security/eks-pod-identity.png" /&gt;&lt;/p&gt;
+&lt;div class="section" id="workflow-explained"&gt;
+&lt;h2 id="hidworkflow-explained"&gt;Workflow Explained&lt;a class="headerlink" href="#hidworkflow-explained" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;The workflow for the EKS Pod Identity feature operates in the following manner:&lt;/p&gt;
+&lt;p&gt;&lt;img alt="image" src="/static/images/security/eks-pod-identity-en.png" /&gt;&lt;/p&gt;
 &lt;ol class="arabic simple"&gt;
-&lt;li&gt;当用户/Controller 向 apiserver 提交 Pod 时，会触发 &lt;a class="reference external" href="https://github.com/aws/amazon-eks-pod-identity-webhook"&gt;eks-pod-identity-webhook&lt;/a&gt; 的 mutating webhook 流程。&lt;/li&gt;
-&lt;li&gt;eks-pod-identity-webhook 的 mutating webhook 流程会为 Pod 挂载 service account oidc token 文件以及配置环境变量
-(&lt;tt class="docutils literal"&gt;AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE&lt;/tt&gt;, &lt;tt class="docutils literal"&gt;AWS_CONTAINER_CREDENTIALS_FULL_URI&lt;/tt&gt; ）。&lt;/li&gt;
+&lt;li&gt;When a user or Controller submits a Pod to the apiserver, this action initiates the mutating webhook process of &lt;a class="reference external" href="https://github.com/aws/amazon-eks-pod-identity-webhook"&gt;eks-pod-identity-webhook&lt;/a&gt;.&lt;/li&gt;
+&lt;li&gt;The mutating webhook process of eks-pod-identity-webhook is responsible for mounting the service account OIDC token file to the Pod and setting up the necessary environment variables, namely &lt;tt class="docutils literal"&gt;AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE&lt;/tt&gt; and &lt;tt class="docutils literal"&gt;AWS_CONTAINER_CREDENTIALS_FULL_URI&lt;/tt&gt;.&lt;/li&gt;
 &lt;/ol&gt;
 &lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="p p-Indicator"&gt;-&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nt"&gt;env&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;
 &lt;span class="w"&gt; &lt;/span&gt;&lt;span class="w w-Error"&gt; &lt;/span&gt;&lt;span class="p p-Indicator"&gt;-&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nt"&gt;name&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l l-Scalar l-Scalar-Plain"&gt;AWS_STS_REGIONAL_ENDPOINTS&lt;/span&gt;
@@ -540,9 +972,7 @@ Switched to branch 'pr47'
 &lt;span class="w"&gt;        &lt;/span&gt;&lt;span class="nt"&gt;path&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l l-Scalar l-Scalar-Plain"&gt;eks-pod-identity-token&lt;/span&gt;
 &lt;/pre&gt;&lt;/div&gt;
 &lt;ol class="arabic simple" start="3"&gt;
-&lt;li&gt;Pod 容器内的应用使用的 AWS SDK 将使用通过环境变量 &lt;tt class="docutils literal"&gt;AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE&lt;/tt&gt; 获取的
-service account oidc token 访问环境变量 &lt;tt class="docutils literal"&gt;AWS_CONTAINER_CREDENTIALS_FULL_URI&lt;/tt&gt; 指向的地址
-（&lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;http://169.254.170.23/v1/credentials&lt;/span&gt;&lt;/tt&gt;）获取 AWS sts token。&lt;/li&gt;
+&lt;li&gt;Applications inside the Pod container, utilizing AWS SDK, will employ the service account OIDC token, sourced from the &lt;tt class="docutils literal"&gt;AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE&lt;/tt&gt; environment variable. This token is used to access the URL specified by &lt;tt class="docutils literal"&gt;AWS_CONTAINER_CREDENTIALS_FULL_URI&lt;/tt&gt; (&lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;http://169.254.170.23/v1/credentials&lt;/span&gt;&lt;/tt&gt;) to acquire the AWS STS token.&lt;/li&gt;
 &lt;/ol&gt;
 &lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="l l-Scalar l-Scalar-Plain"&gt;$ curl $AWS_CONTAINER_CREDENTIALS_FULL_URI -H &amp;quot;Authorization&lt;/span&gt;&lt;span class="p p-Indicator"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l l-Scalar l-Scalar-Plain"&gt;$(cat $AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE)&amp;quot; 2&amp;gt;/dev/null |jq&lt;/span&gt;
 &lt;span class="p p-Indicator"&gt;{&lt;/span&gt;
@@ -554,8 +984,7 @@ service account oidc token 访问环境变量 &lt;tt class="docutils literal"&gt
 &lt;span class="p p-Indicator"&gt;}&lt;/span&gt;
 &lt;/pre&gt;&lt;/div&gt;
 &lt;ol class="arabic simple" start="4"&gt;
-&lt;li&gt;&lt;tt class="docutils literal"&gt;AWS_CONTAINER_CREDENTIALS_FULL_URI&lt;/tt&gt; 指向的其实是 Pod 所在节点上部署的 eks-pod-identity-agent 组件 Pod 所暴露的服务。
-eks-pod-identity-agent 收到请求后，将使用传递过来的 oidc token 访问 EKS 新增的 &lt;a class="reference external" href="https://docs.aws.amazon.com/eks/latest/APIReference/API_auth_AssumeRoleForPodIdentity.html"&gt;AssumeRoleForPodIdentity&lt;/a&gt; API 获取所需的 AWS sts token，然后将获取到的 sts token 返回给客户端。&lt;/li&gt;
+&lt;li&gt;The URL referred to by &lt;tt class="docutils literal"&gt;AWS_CONTAINER_CREDENTIALS_FULL_URI&lt;/tt&gt; actually connects to the service exposed by the eks-pod-identity-agent component's Pod, deployed on the same node as the requesting Pod. Upon receiving a request, the eks-pod-identity-agent uses the provided OIDC token to interact with EKS's recently introduced &lt;a class="reference external" href="https://docs.aws.amazon.com/eks/latest/APIReference/API_auth_AssumeRoleForPodIdentity.html"&gt;AssumeRoleForPodIdentity&lt;/a&gt; API. This process is to acquire the needed AWS STS token, which is then relayed back to the client.&lt;/li&gt;
 &lt;/ol&gt;
 &lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="l l-Scalar l-Scalar-Plain"&gt;$ aws eks-auth assume-role-for-pod-identity --cluster-name test --token $(cat $AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE) |jq&lt;/span&gt;
 &lt;span class="l l-Scalar l-Scalar-Plain"&gt;{&lt;/span&gt;
@@ -581,25 +1010,18 @@ eks-pod-identity-agent 收到请求后，将使用传递过来的 oidc token 访
 &lt;span class="err"&gt;}&lt;/span&gt;
 &lt;/pre&gt;&lt;/div&gt;
 &lt;ol class="arabic simple" start="5"&gt;
-&lt;li&gt;应用调用的 AWS SDK 使用获取到的 sts token 访问应用所需的 AWS 云产品 API。&lt;/li&gt;
+&lt;li&gt;The AWS SDK utilized by the application leverages the acquired STS token to access the specific AWS cloud product APIs it needs.&lt;/li&gt;
 &lt;/ol&gt;
-&lt;p&gt;这个流程中有几个关键的组件和信息需要重点关注，下面将逐个说明。&lt;/p&gt;
+&lt;p&gt;In this process, there are a few crucial components and pieces of information that merit particular emphasis. Let's break them down one by one.&lt;/p&gt;
 &lt;/div&gt;
 &lt;div class="section" id="eks-pod-identity-webhook"&gt;
 &lt;h2 id="hideks-pod-identity-webhook"&gt;eks-pod-identity-webhook&lt;a class="headerlink" href="#hideks-pod-identity-webhook" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
-&lt;p&gt;EKS Pod Identity 功能直接复用 IRSA 功能所依赖的 &lt;a class="reference external" href="https://github.com/aws/amazon-eks-pod-identity-webhook"&gt;eks-pod-identity-webhook&lt;/a&gt; 组件，
-使用这个组件实现为 Pod 自动注入所需的 oidc token 配置以及环境变量配置。并且，
-EKS 集群控制面中部署的 eks-pod-identity-webhook 为 EKS Pod Identity 做了特殊优化，
-只有当对应的 service account 未包含 IRSA 相关配置，并且存在与之关联
-的 IAM 角色信息（通过前面的使用方法中介绍的方法关联角色）时，才会为 Pod 注入 EKS Pod Identity 相关配置。&lt;/p&gt;
-&lt;p&gt;eks-pod-identity-webhook 为了支持 EKS Pod Identity 所作的修改可以参考开源实现（开源实现缺少判断存在关联角色的逻辑）
-对应的 PR &lt;a class="reference external" href="https://github.com/aws/amazon-eks-pod-identity-webhook/pull/189"&gt;#189&lt;/a&gt; 以及
-&lt;a class="reference external" href="https://github.com/aws/amazon-eks-pod-identity-webhook/pull/196"&gt;#196&lt;/a&gt; 。&lt;/p&gt;
+&lt;p&gt;The EKS Pod Identity functionality seamlessly integrates with the &lt;a class="reference external" href="https://github.com/aws/amazon-eks-pod-identity-webhook"&gt;eks-pod-identity-webhook&lt;/a&gt; component, originally part of the IRSA feature. This component is responsible for automatically adding the necessary OIDC token and environment variable settings to the Pods. Moreover, the eks-pod-identity-webhook deployed in the EKS cluster control plane has been specially tailored for EKS Pod Identity. It only adds EKS Pod Identity configurations to Pods when the corresponding service account lacks IRSA-specific settings and is linked to IAM role information, as outlined in the previously mentioned usage instructions.&lt;/p&gt;
+&lt;p&gt;The changes implemented in eks-pod-identity-webhook to facilitate EKS Pod Identity can be reviewed in its open-source version, though it's important to note that this version does not include the logic for identifying associated roles. The pertinent Pull Requests (PRs) that detail these modifications are &lt;a class="reference external" href="https://github.com/aws/amazon-eks-pod-identity-webhook/pull/189"&gt;#189&lt;/a&gt; and &lt;a class="reference external" href="https://github.com/aws/amazon-eks-pod-identity-webhook/pull/196"&gt;#196&lt;/a&gt;.&lt;/p&gt;
 &lt;/div&gt;
 &lt;div class="section" id="eks-pod-identity-agent"&gt;
 &lt;h2 id="hideks-pod-identity-agent"&gt;eks-pod-identity-agent&lt;a class="headerlink" href="#hideks-pod-identity-agent" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
-&lt;p&gt;官方推荐的 EKS Pod Identity 实现方案依赖在集群里安装名为 &lt;a class="reference external" href="https://docs.aws.amazon.com/eks/latest/userguide/pod-id-agent-setup.html"&gt;eks-pod-identity-agent&lt;/a&gt;
-的组件。该组件的工作负载 YAML 如下。&lt;/p&gt;
+&lt;p&gt;The EKS Pod Identity implementation suggested by the official documentation involves deploying a component called &lt;a class="reference external" href="https://docs.aws.amazon.com/eks/latest/userguide/pod-id-agent-setup.html"&gt;eks-pod-identity-agent&lt;/a&gt; within the cluster. The YAML configuration for this component's workload is outlined below.&lt;/p&gt;
 &lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="nt"&gt;apiVersion&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l l-Scalar l-Scalar-Plain"&gt;apps/v1&lt;/span&gt;
 &lt;span class="nt"&gt;kind&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l l-Scalar l-Scalar-Plain"&gt;DaemonSet&lt;/span&gt;
 &lt;span class="nt"&gt;metadata&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;
@@ -735,9 +1157,9 @@ EKS 集群控制面中部署的 eks-pod-identity-webhook 为 EKS Pod Identity �
 &lt;span class="w"&gt;  &lt;/span&gt;&lt;span class="nt"&gt;numberReady&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l l-Scalar l-Scalar-Plain"&gt;1&lt;/span&gt;
 &lt;span class="w"&gt;  &lt;/span&gt;&lt;span class="nt"&gt;observedGeneration&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l l-Scalar l-Scalar-Plain"&gt;1&lt;/span&gt;
 &lt;/pre&gt;&lt;/div&gt;
-&lt;p&gt;eks-pod-identity-agent 组件具有如下特点：&lt;/p&gt;
+&lt;p&gt;The eks-pod-identity-agent component is characterized by the following features:&lt;/p&gt;
 &lt;ul class="simple"&gt;
-&lt;li&gt;依赖节点 IAM 角色被授予如下 IAM 权限策略。&lt;/li&gt;
+&lt;li&gt;It depends on the node IAM role having been assigned specific IAM permission policies as follows.&lt;/li&gt;
 &lt;/ul&gt;
 &lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="p"&gt;{&lt;/span&gt;
 &lt;span class="w"&gt;   &lt;/span&gt;&lt;span class="nt"&gt;&amp;quot;Version&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="s2"&gt;&amp;quot;2012-10-17&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;
@@ -753,9 +1175,9 @@ EKS 集群控制面中部署的 eks-pod-identity-webhook 为 EKS Pod Identity �
 &lt;span class="p"&gt;}&lt;/span&gt;
 &lt;/pre&gt;&lt;/div&gt;
 &lt;ul class="simple"&gt;
-&lt;li&gt;组件 Pod 使用 &lt;tt class="docutils literal"&gt;hostNetwork&lt;/tt&gt; 。&lt;/li&gt;
-&lt;li&gt;组件内的服务将监听 80 和 2703 端口。&lt;/li&gt;
-&lt;li&gt;其中 80 端口监听的 IPv4 地址为 &lt;tt class="docutils literal"&gt;169.254.170.23&lt;/tt&gt;, IPv6 地址为 &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;[fd00:ec2::23]&lt;/span&gt;&lt;/tt&gt; 。&lt;/li&gt;
+&lt;li&gt;The component's Pod is configured to use &lt;tt class="docutils literal"&gt;hostNetwork&lt;/tt&gt;.&lt;/li&gt;
+&lt;li&gt;The service inside the component is set up to listen on ports 80 and 2703.&lt;/li&gt;
+&lt;li&gt;For port 80, it listens on the IPv4 address &lt;tt class="docutils literal"&gt;169.254.170.23&lt;/tt&gt; and the IPv6 address &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;[fd00:ec2::23]&lt;/span&gt;&lt;/tt&gt;.&lt;/li&gt;
 &lt;/ul&gt;
 &lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;$&lt;span class="w"&gt; &lt;/span&gt;ss&lt;span class="w"&gt; &lt;/span&gt;-anltp&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="p"&gt;|&lt;/span&gt;grep&lt;span class="w"&gt; &lt;/span&gt;eks-pod
 LISTEN&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="m"&gt;0&lt;/span&gt;&lt;span class="w"&gt;      &lt;/span&gt;&lt;span class="m"&gt;4096&lt;/span&gt;&lt;span class="w"&gt;        &lt;/span&gt;&lt;span class="m"&gt;127&lt;/span&gt;.0.0.1:2703&lt;span class="w"&gt;       &lt;/span&gt;&lt;span class="m"&gt;0&lt;/span&gt;.0.0.0:*&lt;span class="w"&gt;    &lt;/span&gt;users:&lt;span class="o"&gt;((&lt;/span&gt;&lt;span class="s2"&gt;&amp;quot;eks-pod-identit&amp;quot;&lt;/span&gt;,pid&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="m"&gt;3798&lt;/span&gt;,fd&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="m"&gt;5&lt;/span&gt;&lt;span class="o"&gt;))&lt;/span&gt;
@@ -763,7 +1185,7 @@ LISTEN&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="m"&gt;0&lt;/span&gt;&l
 LISTEN&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="m"&gt;0&lt;/span&gt;&lt;span class="w"&gt;      &lt;/span&gt;&lt;span class="m"&gt;4096&lt;/span&gt;&lt;span class="w"&gt;   &lt;/span&gt;&lt;span class="o"&gt;[&lt;/span&gt;fd00:ec2::23&lt;span class="o"&gt;]&lt;/span&gt;:80&lt;span class="w"&gt;            &lt;/span&gt;&lt;span class="o"&gt;[&lt;/span&gt;::&lt;span class="o"&gt;]&lt;/span&gt;:*&lt;span class="w"&gt;    &lt;/span&gt;users:&lt;span class="o"&gt;((&lt;/span&gt;&lt;span class="s2"&gt;&amp;quot;eks-pod-identit&amp;quot;&lt;/span&gt;,pid&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="m"&gt;3798&lt;/span&gt;,fd&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="m"&gt;3&lt;/span&gt;&lt;span class="o"&gt;))&lt;/span&gt;
 &lt;/pre&gt;&lt;/div&gt;
 &lt;ul class="simple"&gt;
-&lt;li&gt;组件将通过 init 容器在节点上创建一个 IPv4 地址为 &lt;tt class="docutils literal"&gt;169.254.170.23&lt;/tt&gt;, IPv6 地址为 &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;[fd00:ec2::23]&lt;/span&gt;&lt;/tt&gt; 的网络接口 &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;pod-id-link0&lt;/span&gt;&lt;/tt&gt; 。&lt;/li&gt;
+&lt;li&gt;The component employs an init container to establish a network interface named &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;pod-id-link0&lt;/span&gt;&lt;/tt&gt; on the node. This interface is configured with the IPv4 address &lt;tt class="docutils literal"&gt;169.254.170.23&lt;/tt&gt; and the IPv6 address &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;[fd00:ec2::23]&lt;/span&gt;&lt;/tt&gt;.&lt;/li&gt;
 &lt;/ul&gt;
 &lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;pod-id-link0:&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nv"&gt;flags&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="m"&gt;195&lt;/span&gt;&amp;lt;UP,BROADCAST,RUNNING,NOARP&amp;gt;&lt;span class="w"&gt;  &lt;/span&gt;mtu&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="m"&gt;1500&lt;/span&gt;
 &lt;span class="w"&gt;        &lt;/span&gt;inet&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="m"&gt;169&lt;/span&gt;.254.170.23&lt;span class="w"&gt;  &lt;/span&gt;netmask&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="m"&gt;255&lt;/span&gt;.255.255.255&lt;span class="w"&gt;  &lt;/span&gt;broadcast&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="m"&gt;0&lt;/span&gt;.0.0.0
@@ -776,15 +1198,14 @@ LISTEN&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="m"&gt;0&lt;/span&gt;&l
 &lt;span class="w"&gt;        &lt;/span&gt;TX&lt;span class="w"&gt; &lt;/span&gt;errors&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="m"&gt;0&lt;/span&gt;&lt;span class="w"&gt;  &lt;/span&gt;dropped&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="m"&gt;0&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;overruns&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="m"&gt;0&lt;/span&gt;&lt;span class="w"&gt;  &lt;/span&gt;carrier&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="m"&gt;0&lt;/span&gt;&lt;span class="w"&gt;  &lt;/span&gt;collisions&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="m"&gt;0&lt;/span&gt;
 &lt;/pre&gt;&lt;/div&gt;
 &lt;ul class="simple"&gt;
-&lt;li&gt;init 容器还会设置下面这样的的路由规则，确保在本机处理发往 &lt;tt class="docutils literal"&gt;169.254.170.23&lt;/tt&gt; 的流量。&lt;/li&gt;
+&lt;li&gt;Additionally, the init container configures specific routing rules to guarantee that traffic directed to &lt;tt class="docutils literal"&gt;169.254.170.23&lt;/tt&gt; is handled on the local machine.&lt;/li&gt;
 &lt;/ul&gt;
 &lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="m"&gt;169&lt;/span&gt;.254.170.23&lt;span class="w"&gt; &lt;/span&gt;dev&lt;span class="w"&gt; &lt;/span&gt;pod-id-link0
 &lt;/pre&gt;&lt;/div&gt;
 &lt;/div&gt;
 &lt;div class="section" id="assumeroleforpodidentity"&gt;
 &lt;h2 id="hidassumeroleforpodidentity"&gt;AssumeRoleForPodIdentity&lt;a class="headerlink" href="#hidassumeroleforpodidentity" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
-&lt;p&gt;EKS 提供了一个新的 API  &lt;a class="reference external" href="https://docs.aws.amazon.com/eks/latest/APIReference/API_auth_AssumeRoleForPodIdentity.html"&gt;AssumeRoleForPodIdentity&lt;/a&gt; ，
-用于使用 service account oidc token 获取扮演 service account 关联 IAM 角色的 sts token。&lt;/p&gt;
+&lt;p&gt;EKS has introduced a new API, &lt;a class="reference external" href="https://docs.aws.amazon.com/eks/latest/APIReference/API_auth_AssumeRoleForPodIdentity.html"&gt;AssumeRoleForPodIdentity&lt;/a&gt;. This API is utilized to acquire an STS token that enables the assuming of the IAM role linked to a service account, through the use of the service account's OIDC token.&lt;/p&gt;
 &lt;p&gt;service account oidc token 中的 payload 的内容示例如下。&lt;/p&gt;
 &lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="p"&gt;{&lt;/span&gt;
 &lt;span class="w"&gt;  &lt;/span&gt;&lt;span class="nt"&gt;&amp;quot;aud&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="p"&gt;[&lt;/span&gt;
@@ -808,49 +1229,40 @@ LISTEN&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="m"&gt;0&lt;/span&gt;&l
 &lt;span class="w"&gt;  &lt;/span&gt;&lt;span class="nt"&gt;&amp;quot;sub&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="s2"&gt;&amp;quot;system:serviceaccount:default:default&amp;quot;&lt;/span&gt;
 &lt;span class="p"&gt;}&lt;/span&gt;
 &lt;/pre&gt;&lt;/div&gt;
-&lt;p&gt;可以看到这个 oidc token 跟 IRSA 方案中的 oidc token 相比，除了 aud 不一样外（IRSA 中是 &lt;tt class="docutils literal"&gt;sts.amazonaws.com&lt;/tt&gt; ），
-其他内容都是一样的。&lt;/p&gt;
-&lt;p&gt;因此，据我猜测，AssumeRoleForPodIdentity 的后端逻辑可能类似下面这样：&lt;/p&gt;
+&lt;p&gt;This OIDC token, when compared to the one used in the IRSA solution, differs only in its audience (aud) field, which is &lt;tt class="docutils literal"&gt;sts.amazonaws.com&lt;/tt&gt; in IRSA's case. Otherwise, they are identical.&lt;/p&gt;
+&lt;p&gt;From this, I infer that the backend process of AssumeRoleForPodIdentity likely follows these steps:&lt;/p&gt;
 &lt;ol class="arabic simple"&gt;
-&lt;li&gt;首先，基于 oidc 协议解析和校验客户端传递过来的 oidc token 的有效性和合法性。&lt;/li&gt;
-&lt;li&gt;然后，基于用户配置的 service account 与 IAM 角色关联关系，获取需要扮演的角色信息。&lt;/li&gt;
-&lt;li&gt;最后，调用 sts API 扮演对应角色，获取客户端所需的 sts token。&lt;/li&gt;
+&lt;li&gt;Initially, the client's OIDC token is parsed and its validity and legitimacy are verified based on the OIDC protocol.&lt;/li&gt;
+&lt;li&gt;Next, the role that needs to be assumed is identified, using the service account's configured association with an IAM role.&lt;/li&gt;
+&lt;li&gt;Finally, the STS API is invoked to assume the identified role, thereby generating the STS token required by the client.&lt;/li&gt;
 &lt;/ol&gt;
 &lt;/div&gt;
-&lt;div class="section" id="service-account-iam"&gt;
-&lt;h2 id="hidservice-account-iam"&gt;service account 关联 IAM 角色&lt;a class="headerlink" href="#hidservice-account-iam" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
-&lt;p&gt;为了简化用户为 service account 关联 IAM 角色的操作，EKS 新增了一组用于管理 service account 与 IAM 角色关联关系的 API。
-同时还增加了对应的 EKS 控制台操作页面，并且关联关系都存储在 EKS 侧，并没有去修改角色的信任策略。&lt;/p&gt;
+&lt;div class="section" id="association-of-service-account-with-iam-role"&gt;
+&lt;h2 id="hidassociation-of-service-account-with-iam-role"&gt;Association of Service Account with IAM Role&lt;a class="headerlink" href="#hidassociation-of-service-account-with-iam-role" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;EKS has introduced a suite of APIs to streamline the process for users to link service accounts with IAM roles. This enhancement is complemented by new interfaces on the EKS console for managing these associations. Notably, these associations are maintained within EKS and do not alter the trust policy of the roles.&lt;/p&gt;
 &lt;ul class="simple"&gt;
-&lt;li&gt;&lt;a class="reference external" href="https://docs.aws.amazon.com/eks/latest/APIReference/API_CreatePodIdentityAssociation.html"&gt;CreatePodIdentityAssociation&lt;/a&gt; ：为 service account 关联角色。&lt;/li&gt;
-&lt;li&gt;&lt;a class="reference external" href="https://docs.aws.amazon.com/eks/latest/APIReference/API_DescribePodIdentityAssociation.html"&gt;DescribePodIdentityAssociation&lt;/a&gt; : 查看单条角色关联记录的详情。&lt;/li&gt;
-&lt;li&gt;&lt;a class="reference external" href="https://docs.aws.amazon.com/eks/latest/APIReference/API_UpdatePodIdentityAssociation.html"&gt;UpdatePodIdentityAssociation&lt;/a&gt; ：修改 service account 关联的角色信息。&lt;/li&gt;
-&lt;li&gt;&lt;a class="reference external" href="https://docs.aws.amazon.com/eks/latest/APIReference/API_DeletePodIdentityAssociation.html"&gt;DeletePodIdentityAssociation&lt;/a&gt; ：删除一条角色关联记录。&lt;/li&gt;
-&lt;li&gt;&lt;a class="reference external" href="https://docs.aws.amazon.com/eks/latest/APIReference/API_ListPodIdentityAssociations.html"&gt;ListPodIdentityAssociations&lt;/a&gt; ：获取当前存在的角色关联记录。&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://docs.aws.amazon.com/eks/latest/APIReference/API_CreatePodIdentityAssociation.html"&gt;CreatePodIdentityAssociation&lt;/a&gt;: To link a role with a service account.&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://docs.aws.amazon.com/eks/latest/APIReference/API_DescribePodIdentityAssociation.html"&gt;DescribePodIdentityAssociation&lt;/a&gt;: To view detailed information about a specific role association.&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://docs.aws.amazon.com/eks/latest/APIReference/API_UpdatePodIdentityAssociation.html"&gt;UpdatePodIdentityAssociation&lt;/a&gt;: To alter the role information linked to a service account.&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://docs.aws.amazon.com/eks/latest/APIReference/API_DeletePodIdentityAssociation.html"&gt;DeletePodIdentityAssociation&lt;/a&gt;: To remove a particular role association record.&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://docs.aws.amazon.com/eks/latest/APIReference/API_ListPodIdentityAssociations.html"&gt;ListPodIdentityAssociations&lt;/a&gt;: To access a list of all current role association records.&lt;/li&gt;
 &lt;/ul&gt;
 &lt;/div&gt;
-&lt;div class="section" id="section-4"&gt;
-&lt;h2 id="hidsection-4"&gt;权限控制&lt;a class="headerlink" href="#hidsection-4" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
-&lt;p&gt;在 IRSA 方案中，我们需要在 IAM 角色的信任策略中配置允许的集群 oidc provider 以及 service account 信息。
-但是，在 EKS Pod Identity 方案中，我们不再需要修改角色的信任策略，只需要使用前面介绍的方法使用 EKS 控制台或者 EKS API
-即可完成控制角色能被哪些集群的哪些 service account 使用，这些关联关系存储在 EKS 侧，不再需要频繁的更新角色的信任策略。&lt;/p&gt;
-&lt;p&gt;通过这种方式， EKS Pod Identity 解决了 IRSA 中因为角色信任策略的内容大小限制导致一个角色只能被有限的几个
-service account 关联使用的问题 （详见 &lt;a class="reference external" href="https://github.com/aws/containers-roadmap/issues/1408"&gt;#148&lt;/a&gt; ），
-在 EKS Pod Identity 方案中，一个角色可以与不限数量的 service account 进行关联。&lt;/p&gt;
+&lt;div class="section" id="access-and-permission-management"&gt;
+&lt;h2 id="hidaccess-and-permission-management"&gt;Access and Permission Management&lt;a class="headerlink" href="#hidaccess-and-permission-management" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;Under the IRSA approach, it's necessary to include the permissible cluster OIDC provider and service account details in the IAM role's trust policy. However, with EKS Pod Identity, altering the role's trust policy is no longer required. Instead, you can specify which roles are accessible to which service accounts in specific clusters using the EKS console or the EKS API, as explained earlier. These associations are maintained within EKS, reducing the need for regular updates to the trust policy of roles.&lt;/p&gt;
+&lt;p&gt;This method allows EKS Pod Identity to address a limitation encountered in IRSA, where a role's trust policy size constraints meant it could only be linked to a few service accounts (details available in &lt;a class="reference external" href="https://github.com/aws/containers-roadmap/issues/1408"&gt;#148&lt;/a&gt;). With EKS Pod Identity, there's no limit to the number of service accounts that can be associated with a single role.&lt;/p&gt;
 &lt;div class="section" id="attribute-based-access-control-abac"&gt;
 &lt;h3 id="hidattribute-based-access-control-abac"&gt;attribute-based access control (ABAC)&lt;a class="headerlink" href="#hidattribute-based-access-control-abac" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
-&lt;p&gt;EKS Pod Identity 方案还引入了新的基于属性的访问控制能力（attribute-based access control (ABAC)）：
-通过 EKS Pod Identity 方案获取到的 sts token 默认都携带了集群信息、命名空间以及 service account 等 tag 属性，
-用户可以基于 IAM 提供的 &lt;a class="reference external" href="https://docs.aws.amazon.com/IAM/latest/UserGuide/access_iam-tags.html"&gt;tag 鉴权&lt;/a&gt; 特性，
-在为角色配置权限策略时，实现基于属性的访问控制能力。&lt;/p&gt;
-&lt;p&gt;通过 EKS Pod Identity 获取的 sts token 默认携带了如下 tag ：&lt;/p&gt;
+&lt;p&gt;EKS Pod Identity also ushers in an advanced attribute-based access control (ABAC) feature. STS tokens acquired via EKS Pod Identity inherently include tags like cluster details, namespace, and service account. Utilizing IAM's &lt;a class="reference external" href="https://docs.aws.amazon.com/IAM/latest/UserGuide/access_iam-tags.html"&gt;tag-based authorization&lt;/a&gt; functionality, users can now employ these attributes for more granular access control when setting up permission policies for roles.&lt;/p&gt;
+&lt;p&gt;STS tokens acquired via EKS Pod Identity automatically include these tags:&lt;/p&gt;
 &lt;ul class="simple"&gt;
-&lt;li&gt;&lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;eks-cluster-arn&lt;/span&gt;&lt;/tt&gt; ：当前集群的 ARN。&lt;/li&gt;
-&lt;li&gt;&lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;eks-cluster-name&lt;/span&gt;&lt;/tt&gt; ：当前集群的名称。&lt;/li&gt;
-&lt;li&gt;&lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;kubernetes-namespace&lt;/span&gt;&lt;/tt&gt;: service account 所在的命名空间名称。&lt;/li&gt;
-&lt;li&gt;&lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;kubernetes-service-account&lt;/span&gt;&lt;/tt&gt; ：service account 的名称。&lt;/li&gt;
-&lt;li&gt;&lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;kubernetes-pod-name&lt;/span&gt;&lt;/tt&gt; ：使用 service account 的 pod 的名称。&lt;/li&gt;
-&lt;li&gt;&lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;kubernetes-pod-uid&lt;/span&gt;&lt;/tt&gt; ：使用 service account 的 pod 的 uid。&lt;/li&gt;
+&lt;li&gt;&lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;eks-cluster-arn&lt;/span&gt;&lt;/tt&gt;: ARN of the current cluster.&lt;/li&gt;
+&lt;li&gt;&lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;eks-cluster-name&lt;/span&gt;&lt;/tt&gt;: Name of the current cluster.&lt;/li&gt;
+&lt;li&gt;&lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;kubernetes-namespace&lt;/span&gt;&lt;/tt&gt;: Name of the namespace containing the service account.&lt;/li&gt;
+&lt;li&gt;&lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;kubernetes-service-account&lt;/span&gt;&lt;/tt&gt;: Name of the service account.&lt;/li&gt;
+&lt;li&gt;&lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;kubernetes-pod-name&lt;/span&gt;&lt;/tt&gt;: Name of the pod utilizing the service account.&lt;/li&gt;
+&lt;li&gt;&lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;kubernetes-pod-uid&lt;/span&gt;&lt;/tt&gt;: UID of the pod that is using the service account.&lt;/li&gt;
 &lt;/ul&gt;
 &lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="nt"&gt;&amp;quot;tags&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="p"&gt;[&lt;/span&gt;
 &lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="p"&gt;{&lt;/span&gt;
@@ -879,8 +1291,7 @@ service account 关联使用的问题 （详见 &lt;a class="reference external"
 &lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="p"&gt;}&lt;/span&gt;
 &lt;span class="p"&gt;]&lt;/span&gt;
 &lt;/pre&gt;&lt;/div&gt;
-&lt;p&gt;我们在定义角色权限策略的时候，可以通过 &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;${aws:PrincipalTag/&amp;lt;tag-key&amp;gt;}&lt;/span&gt;&lt;/tt&gt; 的方式
-在权限策略的 &lt;tt class="docutils literal"&gt;Condition&lt;/tt&gt; 配置中表示凭证属性中包含的特定 tag 的值。&lt;/p&gt;
+&lt;p&gt;In the process of crafting role permission policies, the format &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;${aws:PrincipalTag/&amp;lt;tag-key&amp;gt;}&lt;/span&gt;&lt;/tt&gt; can be employed. This approach is used within the &lt;tt class="docutils literal"&gt;Condition&lt;/tt&gt; section of the permission policy to denote the value of a particular tag present in the attributes of the credentials.&lt;/p&gt;
 &lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="p"&gt;{&lt;/span&gt;
 &lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="nt"&gt;&amp;quot;Version&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="s2"&gt;&amp;quot;2012-10-17&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;
 &lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="nt"&gt;&amp;quot;Statement&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="p"&gt;[&lt;/span&gt;
@@ -904,82 +1315,81 @@ service account 关联使用的问题 （详见 &lt;a class="reference external"
 &lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="p"&gt;]&lt;/span&gt;
 &lt;span class="p"&gt;}&lt;/span&gt;
 &lt;/pre&gt;&lt;/div&gt;
-&lt;p&gt;通过上面这个示例权限策略，我们可以对通过 EKS Pod Identity 特性扮演角色获取的 sts token 的权限做如下限制：&lt;/p&gt;
+&lt;p&gt;With the example permission policy provided earlier, we can tailor the permissions of STS tokens acquired via the EKS Pod Identity feature in the following ways:&lt;/p&gt;
 &lt;ul class="simple"&gt;
-&lt;li&gt;只允许访问存在名为 &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;eks-cluster-name&lt;/span&gt;&lt;/tt&gt; 的 tag 的 s3 object ，并且 tag 的值必须是当前 sts token 关联集群的名称。&lt;/li&gt;
-&lt;li&gt;如果 s3 object 存在名为 &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;kubernetes-namespace&lt;/span&gt;&lt;/tt&gt; 的 tag，只允许访问这个 tag 的值是 &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;s3-demo&lt;/span&gt;&lt;/tt&gt; 的 object。&lt;/li&gt;
-&lt;li&gt;如果 s3 object 存在名为 &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;kubernetes-service-account&lt;/span&gt;&lt;/tt&gt; 的 tag，只允许访问这个 tag 的值是当前 sts token 关联的 service account 名称的 object。&lt;/li&gt;
+&lt;li&gt;Allow access only to S3 objects tagged with &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;eks-cluster-name&lt;/span&gt;&lt;/tt&gt;, where the tag's value aligns with the name of the cluster tied to the current STS token.&lt;/li&gt;
+&lt;li&gt;Permit access to an S3 object only if it carries a &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;kubernetes-namespace&lt;/span&gt;&lt;/tt&gt; tag, and only if this tag's value is &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;s3-demo&lt;/span&gt;&lt;/tt&gt;.&lt;/li&gt;
+&lt;li&gt;Authorize access to an S3 object only if it bears a &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;kubernetes-service-account&lt;/span&gt;&lt;/tt&gt; tag, and solely if the tag's value corresponds to the name of the service account associated with the current STS token.&lt;/li&gt;
 &lt;/ul&gt;
 &lt;/div&gt;
 &lt;/div&gt;
-&lt;div class="section" id="irsa"&gt;
-&lt;h2 id="hidirsa"&gt;与 IRSA 的区别&lt;a class="headerlink" href="#hidirsa" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
-&lt;p&gt;根据上面介绍的信息，我们可以比较一下 EKS Pod Identity 与 IRSA 特性的区别，它们主要的区别如下：&lt;/p&gt;
+&lt;div class="section" id="distinguishing-from-irsa"&gt;
+&lt;h2 id="hiddistinguishing-from-irsa"&gt;Distinguishing from IRSA&lt;a class="headerlink" href="#hiddistinguishing-from-irsa" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;Considering the details shared earlier, a comparison between EKS Pod Identity and IRSA highlights several key differences, which are as follows:&lt;/p&gt;
 &lt;table border="1" class="docutils"&gt;
 &lt;colgroup&gt;
-&lt;col width="29%" /&gt;
+&lt;col width="28%" /&gt;
 &lt;col width="36%" /&gt;
-&lt;col width="35%" /&gt;
+&lt;col width="36%" /&gt;
 &lt;/colgroup&gt;
 &lt;thead valign="bottom"&gt;
-&lt;tr&gt;&lt;th class="head"&gt;比较项&lt;/th&gt;
+&lt;tr&gt;&lt;th class="head"&gt;Comparison Item&lt;/th&gt;
 &lt;th class="head"&gt;EKS Pod Identity&lt;/th&gt;
 &lt;th class="head"&gt;IRSA&lt;/th&gt;
 &lt;/tr&gt;
 &lt;/thead&gt;
 &lt;tbody valign="top"&gt;
-&lt;tr&gt;&lt;td&gt;节点 IAM 角色增加额外权限&lt;/td&gt;
-&lt;td&gt;需要增加 &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;eks-auth:AssumeRoleForPodIdentity&lt;/span&gt;&lt;/tt&gt; 权限&lt;/td&gt;
-&lt;td&gt;&lt;strong&gt;不需要&lt;/strong&gt;&lt;/td&gt;
+&lt;tr&gt;&lt;td&gt;Additional Permissions for Node IAM Role&lt;/td&gt;
+&lt;td&gt;Requires &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;eks-auth:AssumeRoleForPodIdentity&lt;/span&gt;&lt;/tt&gt;&lt;/td&gt;
+&lt;td&gt;&lt;strong&gt;Not Required&lt;/strong&gt;&lt;/td&gt;
 &lt;/tr&gt;
-&lt;tr&gt;&lt;td&gt;创建 IAM oidc provider&lt;/td&gt;
-&lt;td&gt;&lt;strong&gt;不需要&lt;/strong&gt;&lt;/td&gt;
-&lt;td&gt;需要为每个集群创建一个 oidc provider&lt;/td&gt;
+&lt;tr&gt;&lt;td&gt;Creation of IAM OIDC Provider&lt;/td&gt;
+&lt;td&gt;&lt;strong&gt;Not Required&lt;/strong&gt;&lt;/td&gt;
+&lt;td&gt;Necessary for Each Cluster&lt;/td&gt;
 &lt;/tr&gt;
-&lt;tr&gt;&lt;td&gt;service account 关联角色&lt;/td&gt;
-&lt;td&gt;&lt;strong&gt;通过 EKS API/控制台&lt;/strong&gt;&lt;/td&gt;
-&lt;td&gt;配置 service account annotation + 修改角色信任策略&lt;/td&gt;
+&lt;tr&gt;&lt;td&gt;Associating Roles with Service Account&lt;/td&gt;
+&lt;td&gt;&lt;strong&gt;Via EKS API/Console&lt;/strong&gt;&lt;/td&gt;
+&lt;td&gt;Service Account Annotation + Role Trust Policy Modification&lt;/td&gt;
 &lt;/tr&gt;
-&lt;tr&gt;&lt;td rowspan="2"&gt;一个角色可以关联的 service account 数量&lt;/td&gt;
-&lt;td rowspan="2"&gt;&lt;strong&gt;无限制&lt;/strong&gt;&lt;/td&gt;
-&lt;td rowspan="2"&gt;角色信任策略有 4096 个字符限制，
-最多关联 10 个左右 service account 或 集群&lt;/td&gt;
+&lt;tr&gt;&lt;td rowspan="2"&gt;No. of Service Accounts Per Role&lt;/td&gt;
+&lt;td rowspan="2"&gt;&lt;strong&gt;Unlimited&lt;/strong&gt;&lt;/td&gt;
+&lt;td rowspan="2"&gt;Limited by 4096-Character Trust Policy,
+Typically Around 10 Service Accounts or Clusters&lt;/td&gt;
 &lt;/tr&gt;
 &lt;tr&gt;&lt;/tr&gt;
-&lt;tr&gt;&lt;td&gt;一个 service account 可以关联的角色数量&lt;/td&gt;
-&lt;td&gt;一个&lt;/td&gt;
-&lt;td&gt;无限制&lt;/td&gt;
+&lt;tr&gt;&lt;td&gt;No. of Roles Per Service Account&lt;/td&gt;
+&lt;td&gt;One&lt;/td&gt;
+&lt;td&gt;Unlimited&lt;/td&gt;
 &lt;/tr&gt;
-&lt;tr&gt;&lt;td rowspan="2"&gt;角色信任策略修改次数&lt;/td&gt;
-&lt;td rowspan="2"&gt;&lt;strong&gt;只需修改一次&lt;/strong&gt; 确保信任
+&lt;tr&gt;&lt;td rowspan="2"&gt;Role Trust Policy Modification Frequency&lt;/td&gt;
+&lt;td rowspan="2"&gt;&lt;strong&gt;Once Only&lt;/strong&gt; for Trust with
 &lt;tt class="docutils literal"&gt;pods.eks.amazonaws.com&lt;/tt&gt;
-以及包含所需的 action&lt;/td&gt;
-&lt;td rowspan="2"&gt;需要为每个关联的集群修改至少一次&lt;/td&gt;
+and Necessary Actions&lt;/td&gt;
+&lt;td rowspan="2"&gt;At Least Once for Each Cluster&lt;/td&gt;
 &lt;/tr&gt;
 &lt;tr&gt;&lt;/tr&gt;
-&lt;tr&gt;&lt;td&gt;基于 service account 相关属性进行访问控制&lt;/td&gt;
-&lt;td&gt;&lt;strong&gt;通过 ABAC 进行支持&lt;/strong&gt;&lt;/td&gt;
-&lt;td&gt;不支持&lt;/td&gt;
+&lt;tr&gt;&lt;td&gt;Access Control Based on Service Account Attributes&lt;/td&gt;
+&lt;td&gt;&lt;strong&gt;Supported via ABAC&lt;/strong&gt;&lt;/td&gt;
+&lt;td&gt;Not Supported&lt;/td&gt;
 &lt;/tr&gt;
-&lt;tr&gt;&lt;td rowspan="2"&gt;集群类型&lt;/td&gt;
-&lt;td rowspan="2"&gt;只支持 EKS 集群，不支持 AWS Outposts、
-不支持 EKS Anywhere、AWS Fargate (Fargate)、自建集群&lt;/td&gt;
-&lt;td rowspan="2"&gt;&lt;strong&gt;仅不支持 AWS Outposts&lt;/strong&gt;&lt;/td&gt;
+&lt;tr&gt;&lt;td rowspan="2"&gt;Supported Cluster Types&lt;/td&gt;
+&lt;td rowspan="2"&gt;Only EKS, Not AWS Outposts, EKS Anywhere,
+AWS Fargate, or Self-Built Clusters&lt;/td&gt;
+&lt;td rowspan="2"&gt;&lt;strong&gt;All Except AWS Outposts&lt;/strong&gt;&lt;/td&gt;
 &lt;/tr&gt;
 &lt;tr&gt;&lt;/tr&gt;
-&lt;tr&gt;&lt;td&gt;数据面依赖&lt;/td&gt;
+&lt;tr&gt;&lt;td&gt;Data Plane Dependencies&lt;/td&gt;
 &lt;td&gt;kubelet + eks-pod-identity-agent&lt;/td&gt;
 &lt;td&gt;&lt;strong&gt;kublet&lt;/strong&gt;&lt;/td&gt;
 &lt;/tr&gt;
-&lt;tr&gt;&lt;td rowspan="5"&gt;稳定性风险&lt;/td&gt;
-&lt;td rowspan="5"&gt;依赖集群控制面和数据面的稳定性 + EKS API；
-同时还依赖 eks-pod-identity-agent 的稳定性；
-应用 pod 如果先于 eks-pod-identity-agent pod
-启动/就绪会出现短暂的无法获取到 sts token 的问题
-（比如，同样配置了 &lt;tt class="docutils literal"&gt;hostNetwork&lt;/tt&gt; 的 pod 在
-自动伸缩场景可能会遇到这种情况，以及不建议 CNI、CSI
-这些常常会先于 agent pod 启动的组件使用）；&lt;/td&gt;
-&lt;td rowspan="5"&gt;&lt;strong&gt;依赖集群控制面和数据面的稳定性 + STS API&lt;/strong&gt;&lt;/td&gt;
+&lt;tr&gt;&lt;td rowspan="5"&gt;Stability Risks&lt;/td&gt;
+&lt;td rowspan="5"&gt;Relies on Stability of Cluster Control/Data Plane + EKS API;
+Dependency on eks-pod-identity-agent Stability;
+Risks of STS Token Access Issues if Application Pods
+Launch Before eks-pod-identity-agent Pod
+(like in Auto-Scaling Scenarios with Same
+&lt;tt class="docutils literal"&gt;hostNetwork&lt;/tt&gt; Config, Not Recommended for CNI, CSI, etc).&lt;/td&gt;
+&lt;td rowspan="5"&gt;&lt;strong&gt;Depends on Stability of Cluster Control/Data Plane + STS API&lt;/strong&gt;&lt;/td&gt;
 &lt;/tr&gt;
 &lt;tr&gt;&lt;/tr&gt;
 &lt;tr&gt;&lt;/tr&gt;
@@ -987,12 +1397,10 @@ service account 关联使用的问题 （详见 &lt;a class="reference external"
 &lt;tr&gt;&lt;/tr&gt;
 &lt;/tbody&gt;
 &lt;/table&gt;
-&lt;p&gt;BTW, 虽然 EKS Pod Identity 方案的官方教程和文档中都是说的需要依赖 eks-pod-identity-agent 这个组件，
-但是从前面的内容中我们也可以看到：我们其实也可以在不安装 eks-pod-identity-agent 组件的情况下，使用该方案。
-具体来说就是，我们可以通过在应用程序内直接访问 EKS 提供的 AssumeRoleForPodIdentity API 的方式来解除对该组件的依赖。&lt;/p&gt;
+&lt;p&gt;By the way, although the official tutorials and documentation of the EKS Pod Identity solution mention the need to rely on the eks-pod-identity-agent component, we can also implement this solution without installing the eks-pod-identity-agent component. Specifically, we can remove the dependency on this component by directly accessing the AssumeRoleForPodIdentity API provided by EKS within the application.&lt;/p&gt;
 &lt;/div&gt;
-&lt;div class="section" id="section-5"&gt;
-&lt;h2 id="hidsection-5"&gt;参考资料&lt;a class="headerlink" href="#hidsection-5" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;div class="section" id="references"&gt;
+&lt;h2 id="hidreferences"&gt;References&lt;a class="headerlink" href="#hidreferences" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;ul class="simple"&gt;
 &lt;li&gt;&lt;a class="reference external" href="https://aws.amazon.com/blogs/aws/amazon-eks-pod-identity-simplifies-iam-permissions-for-applications-on-amazon-eks-clusters/"&gt;Amazon EKS Pod Identity simplifies IAM permissions for applications on Amazon EKS clusters | AWS News Blog&lt;/a&gt;&lt;/li&gt;
 &lt;li&gt;&lt;a class="reference external" href="https://aws.amazon.com/blogs/opensource/introducing-fine-grained-iam-roles-service-accounts/"&gt;Introducing fine-grained IAM roles for service accounts | AWS Open Source Blog&lt;/a&gt;&lt;/li&gt;
@@ -1004,129 +1412,4 @@ service account 关联使用的问题 （详见 &lt;a class="reference external"
 &lt;li&gt;&lt;a class="reference external" href="https://securitylabs.datadoghq.com/articles/eks-pod-identity-deep-dive/"&gt;Deep dive into the new Amazon EKS Pod Identity feature | Datadog Security Labs&lt;/a&gt;&lt;/li&gt;
 &lt;/ul&gt;
 &lt;/div&gt;
-</description><dc:creator xmlns:dc="http://purl.org/dc/elements/1.1/">mozillazg</dc:creator><pubDate>Sun, 03 Dec 2023 00:00:00 +0000</pubDate><guid isPermaLink="false">tag:mozillazg.com,2023-12-03:2023/12/security-deep-dive-into-aws-eks-pod-identity-feature.html</guid><category>kubernetes</category><category>k8s</category><category>aws</category><category>eks</category><category>pod-identity</category><category>irsa</category><category>cloud-security</category></item><item><title>使用 libbpfgo 重写 BCC libbpf-tools 中各个工具的用户态程序</title><link>https://mozillazg.com/2022/11/ebpf-libbpfgo-tools-port-rewriting-the-control-plane-of-bcc-libbpf-tools-in-golang-with-libbpfgo.html</link><description>&lt;p&gt;最近新开源了一个 eBPF 相关的项目：
-&lt;a class="reference external" href="https://github.com/mozillazg/libbpfgo-tools"&gt;mozillazg/libbpfgo-tools&lt;/a&gt; 。
-这个项目的目标是使用 &lt;a class="reference external" href="https://github.com/aquasecurity/libbpfgo"&gt;libbpfgo&lt;/a&gt; 重写/移植 &lt;a class="reference external" href="https://github.com/iovisor/bcc/tree/master/libbpf-tools"&gt;bcc/libbpf-tools&lt;/a&gt; 中各个工具的前端程序（即，用户态程序）。
-希望能在如何使用 golang 编写 eBPF 程序, 尤其是如何使用 libbpfgo 这个 eBPF 库方面对大家有些许帮助。&lt;/p&gt;
-&lt;div class="section" id="section-1"&gt;
-&lt;h2 id="hidsection-1"&gt;目标&lt;a class="headerlink" href="#hidsection-1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
-&lt;p&gt;这个项目的目标和原则如下：&lt;/p&gt;
-&lt;ul class="simple"&gt;
-&lt;li&gt;所有的 eBPF C 代码全部重用 BCC 仓库中 libbpf-tools 目录下的代码。
-我们不会对 BCC 的代码做任何额外的修改，如果有需要修改的地方会提 PR 给上游 BCC 仓库。&lt;/li&gt;
-&lt;li&gt;所有的用户态程序都使用 libbpfgo 进行实现。&lt;/li&gt;
-&lt;/ul&gt;
-&lt;/div&gt;
-&lt;div class="section" id="section-2"&gt;
-&lt;h2 id="hidsection-2"&gt;状态&lt;a class="headerlink" href="#hidsection-2" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
-&lt;p&gt;当前，我们已经完成了最新 v0.25.0 版本 BCC libbpf-tools 全部 46 个工具中 28 个工具的移植工作，
-更多工具的移植持续进行中：&lt;/p&gt;
-&lt;ul class="simple"&gt;
-&lt;li&gt;&lt;a class="reference external" href="https://github.com/mozillazg/libbpfgo-tools/blob/master/tools/bashreadline"&gt;bashreadline&lt;/a&gt;&lt;/li&gt;
-&lt;li&gt;&lt;a class="reference external" href="https://github.com/mozillazg/libbpfgo-tools/blob/master/tools/bindsnoop"&gt;bindsnoop&lt;/a&gt;&lt;/li&gt;
-&lt;li&gt;&lt;a class="reference external" href="https://github.com/mozillazg/libbpfgo-tools/blob/master/tools/biolatency"&gt;biolatency&lt;/a&gt;&lt;/li&gt;
-&lt;li&gt;&lt;a class="reference external" href="https://github.com/mozillazg/libbpfgo-tools/blob/master/tools/biopattern"&gt;biopattern&lt;/a&gt;&lt;/li&gt;
-&lt;li&gt;&lt;a class="reference external" href="https://github.com/mozillazg/libbpfgo-tools/blob/master/tools/biosnoop"&gt;biosnoop&lt;/a&gt;&lt;/li&gt;
-&lt;li&gt;&lt;a class="reference external" href="https://github.com/mozillazg/libbpfgo-tools/blob/master/tools/biostacks"&gt;biostacks&lt;/a&gt;&lt;/li&gt;
-&lt;li&gt;&lt;a class="reference external" href="https://github.com/mozillazg/libbpfgo-tools/blob/master/tools/bitesize"&gt;bitesize&lt;/a&gt;&lt;/li&gt;
-&lt;li&gt;&lt;a class="reference external" href="https://github.com/mozillazg/libbpfgo-tools/blob/master/tools/cpudist"&gt;cpudist&lt;/a&gt;&lt;/li&gt;
-&lt;li&gt;&lt;a class="reference external" href="https://github.com/mozillazg/libbpfgo-tools/blob/master/tools/drsnoop"&gt;drsnoop&lt;/a&gt;&lt;/li&gt;
-&lt;li&gt;&lt;a class="reference external" href="https://github.com/mozillazg/libbpfgo-tools/blob/master/tools/execsnoop"&gt;execsnoop&lt;/a&gt;&lt;/li&gt;
-&lt;li&gt;&lt;a class="reference external" href="https://github.com/mozillazg/libbpfgo-tools/blob/master/tools/filelife"&gt;filelife&lt;/a&gt;&lt;/li&gt;
-&lt;li&gt;&lt;a class="reference external" href="https://github.com/mozillazg/libbpfgo-tools/blob/master/tools/filetop"&gt;filetop&lt;/a&gt;&lt;/li&gt;
-&lt;li&gt;&lt;a class="reference external" href="https://github.com/mozillazg/libbpfgo-tools/blob/master/tools/mdflush"&gt;mdflush&lt;/a&gt;&lt;/li&gt;
-&lt;li&gt;&lt;a class="reference external" href="https://github.com/mozillazg/libbpfgo-tools/blob/master/tools/mountsnoop"&gt;mountsnoop&lt;/a&gt;&lt;/li&gt;
-&lt;li&gt;&lt;a class="reference external" href="https://github.com/mozillazg/libbpfgo-tools/blob/master/tools/oomkill"&gt;oomkill&lt;/a&gt;&lt;/li&gt;
-&lt;li&gt;&lt;a class="reference external" href="https://github.com/mozillazg/libbpfgo-tools/blob/master/tools/opensnoop"&gt;opensnoop&lt;/a&gt;&lt;/li&gt;
-&lt;li&gt;&lt;a class="reference external" href="https://github.com/mozillazg/libbpfgo-tools/blob/master/tools/readahead"&gt;readahead&lt;/a&gt;&lt;/li&gt;
-&lt;li&gt;&lt;a class="reference external" href="https://github.com/mozillazg/libbpfgo-tools/blob/master/tools/sigsnoop"&gt;sigsnoop&lt;/a&gt;&lt;/li&gt;
-&lt;li&gt;&lt;a class="reference external" href="https://github.com/mozillazg/libbpfgo-tools/blob/master/tools/solisten"&gt;solisten&lt;/a&gt;&lt;/li&gt;
-&lt;li&gt;&lt;a class="reference external" href="https://github.com/mozillazg/libbpfgo-tools/blob/master/tools/statsnoop"&gt;statsnoop&lt;/a&gt;&lt;/li&gt;
-&lt;li&gt;&lt;a class="reference external" href="https://github.com/mozillazg/libbpfgo-tools/blob/master/tools/syscount"&gt;syscount&lt;/a&gt;&lt;/li&gt;
-&lt;li&gt;&lt;a class="reference external" href="https://github.com/mozillazg/libbpfgo-tools/blob/master/tools/tcpconnect"&gt;tcpconnect&lt;/a&gt;&lt;/li&gt;
-&lt;li&gt;&lt;a class="reference external" href="https://github.com/mozillazg/libbpfgo-tools/blob/master/tools/tcpconnlat"&gt;tcpconnlat&lt;/a&gt;&lt;/li&gt;
-&lt;li&gt;&lt;a class="reference external" href="https://github.com/mozillazg/libbpfgo-tools/blob/master/tools/tcplife"&gt;tcplife&lt;/a&gt;&lt;/li&gt;
-&lt;li&gt;&lt;a class="reference external" href="https://github.com/mozillazg/libbpfgo-tools/blob/master/tools/tcprtt"&gt;tcprtt&lt;/a&gt;&lt;/li&gt;
-&lt;li&gt;&lt;a class="reference external" href="https://github.com/mozillazg/libbpfgo-tools/blob/master/tools/tcpsynbl"&gt;tcpsynbl&lt;/a&gt;&lt;/li&gt;
-&lt;li&gt;&lt;a class="reference external" href="https://github.com/mozillazg/libbpfgo-tools/blob/master/tools/tcptracer"&gt;tcptracer&lt;/a&gt;&lt;/li&gt;
-&lt;/ul&gt;
-&lt;/div&gt;
-</description><dc:creator xmlns:dc="http://purl.org/dc/elements/1.1/">mozillazg</dc:creator><pubDate>Sat, 26 Nov 2022 00:00:00 +0000</pubDate><guid isPermaLink="false">tag:mozillazg.com,2022-11-26:2022/11/ebpf-libbpfgo-tools-port-rewriting-the-control-plane-of-bcc-libbpf-tools-in-golang-with-libbpfgo.html</guid><category>libbpf</category><category>libbpfgo</category></item><item><title>在 ebpf/libbpf 程序中使用尾调用（tail calls）</title><link>https://mozillazg.com/2022/10/ebpf-libbpf-use-tail-calls.html</link><description>&lt;p&gt;本文将介绍如何在 ebpf/libbpf 程序中使用 eBPF 的尾调用（tail calls）特性。&lt;/p&gt;
-&lt;div class="section" id="tail-calls"&gt;
-&lt;h2 id="hidtail-calls"&gt;尾调用（tail calls）&lt;a class="headerlink" href="#hidtail-calls" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
-&lt;p&gt;eBPF 的尾调用（tail calls）特性允许一个 eBPF 程序可以调用另一个 eBPF 程序， 并且调用完成后不会返回原来的程序。
-因为尾调用在调用函数的时候会重用调用方函数的 stack frame，所以它的开销比普通的函数
-调用会更低。&lt;/p&gt;
-&lt;p&gt;&lt;img alt="image" src="/static/images/bpf/bpf_tailcall.png" /&gt;&lt;/p&gt;
-&lt;blockquote&gt;
-&lt;/blockquote&gt;
-&lt;p&gt;图片来源：&lt;a class="reference external" href="https://docs.cilium.io/en/v1.12/bpf/#tail-calls"&gt;https://docs.cilium.io/en/v1.12/bpf/#tail-calls&lt;/a&gt;&lt;/p&gt;
-&lt;p&gt;尾调用涉及两个步骤：&lt;/p&gt;
-&lt;ul class="simple"&gt;
-&lt;li&gt;定义一个类型为 &lt;tt class="docutils literal"&gt;BPF_MAP_TYPE_PROG_ARRAY&lt;/tt&gt; 的 map ， map 的 value 是在尾调用中被调用的 eBPF 程序的文件描述符。 我们可以在用户态程序中更新这个 map 的 key/value。&lt;/li&gt;
-&lt;li&gt;在 eBPF 程序中，我们可以通过 &lt;tt class="docutils literal"&gt;bpf_tail_call()&lt;/tt&gt; 这个辅助函数 从第1步的 map 中获取 eBPF 程序然后执行该程序进行尾调用。&lt;/li&gt;
-&lt;/ul&gt;
-&lt;/div&gt;
-&lt;div class="section" id="section-1"&gt;
-&lt;h2 id="hidsection-1"&gt;使用示例&lt;a class="headerlink" href="#hidsection-1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
-&lt;p&gt;如前面所说，要使用尾调用特性我们需要定义一个 map 以及在 eBPF 程序中使用辅助函数执行尾调用。下面将以示例的代码的方式讲述每个步骤的关键代码。&lt;/p&gt;
-&lt;div class="section" id="bpf-map-type-prog-array-map"&gt;
-&lt;h3 id="hidbpf-map-type-prog-array-map"&gt;定义 BPF_MAP_TYPE_PROG_ARRAY 类型的 map&lt;a class="headerlink" href="#hidbpf-map-type-prog-array-map" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
-&lt;p&gt;可以通过下面的方法定义一个 &lt;tt class="docutils literal"&gt;BPF_MAP_TYPE_PROG_ARRAY&lt;/tt&gt; 类型的 map:&lt;/p&gt;
-&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="k"&gt;struct&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="p"&gt;{&lt;/span&gt;
-&lt;span class="w"&gt;        &lt;/span&gt;&lt;span class="n"&gt;__uint&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;type&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;BPF_MAP_TYPE_PROG_ARRAY&lt;/span&gt;&lt;span class="p"&gt;);&lt;/span&gt;
-&lt;span class="w"&gt;        &lt;/span&gt;&lt;span class="n"&gt;__uint&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;key_size&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="k"&gt;sizeof&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;u32&lt;/span&gt;&lt;span class="p"&gt;));&lt;/span&gt;
-&lt;span class="w"&gt;        &lt;/span&gt;&lt;span class="n"&gt;__uint&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;value_size&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="k"&gt;sizeof&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;u32&lt;/span&gt;&lt;span class="p"&gt;));&lt;/span&gt;
-&lt;span class="w"&gt;        &lt;/span&gt;&lt;span class="n"&gt;__uint&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;max_entries&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="mi"&gt;1024&lt;/span&gt;&lt;span class="p"&gt;);&lt;/span&gt;
-&lt;span class="p"&gt;}&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;tail_jmp_map&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;SEC&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="s"&gt;&amp;quot;.maps&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;);&lt;/span&gt;
-&lt;/pre&gt;&lt;/div&gt;
-&lt;p&gt;如果想要在定义这个 map 的时候初始化一些值的话，可以用下面的方法：&lt;/p&gt;
-&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="k"&gt;struct&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="p"&gt;{&lt;/span&gt;
-&lt;span class="w"&gt;        &lt;/span&gt;&lt;span class="n"&gt;__uint&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;type&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;BPF_MAP_TYPE_PROG_ARRAY&lt;/span&gt;&lt;span class="p"&gt;);&lt;/span&gt;
-&lt;span class="w"&gt;        &lt;/span&gt;&lt;span class="n"&gt;__uint&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;key_size&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="k"&gt;sizeof&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;u32&lt;/span&gt;&lt;span class="p"&gt;));&lt;/span&gt;
-&lt;span class="w"&gt;        &lt;/span&gt;&lt;span class="n"&gt;__uint&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;value_size&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="k"&gt;sizeof&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;u32&lt;/span&gt;&lt;span class="p"&gt;));&lt;/span&gt;
-&lt;span class="w"&gt;        &lt;/span&gt;&lt;span class="n"&gt;__uint&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;max_entries&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="mi"&gt;1024&lt;/span&gt;&lt;span class="p"&gt;);&lt;/span&gt;
-&lt;span class="w"&gt;        &lt;/span&gt;&lt;span class="n"&gt;__array&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;values&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="kt"&gt;int&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="kt"&gt;void&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;*&lt;/span&gt;&lt;span class="p"&gt;));&lt;/span&gt;&lt;span class="w"&gt;   &lt;/span&gt;&lt;span class="c1"&gt;// 这个 values 必须有&lt;/span&gt;
-&lt;span class="p"&gt;}&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;tail_jmp_map&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;SEC&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="s"&gt;&amp;quot;.maps&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="p"&gt;{&lt;/span&gt;
-&lt;span class="w"&gt;        &lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="n"&gt;values&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="p"&gt;{&lt;/span&gt;&lt;span class="w"&gt;                      &lt;/span&gt;&lt;span class="c1"&gt;// 初始化一些值&lt;/span&gt;
-&lt;span class="w"&gt;                &lt;/span&gt;&lt;span class="p"&gt;[&lt;/span&gt;&lt;span class="mi"&gt;268&lt;/span&gt;&lt;span class="p"&gt;]&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="kt"&gt;void&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;*&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;&lt;span class="o"&gt;&amp;amp;&lt;/span&gt;&lt;span class="n"&gt;enter_fchmodat&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;
-&lt;span class="w"&gt;        &lt;/span&gt;&lt;span class="p"&gt;},&lt;/span&gt;
-&lt;span class="p"&gt;};&lt;/span&gt;
-&lt;/pre&gt;&lt;/div&gt;
-&lt;/div&gt;
-&lt;div class="section" id="map"&gt;
-&lt;h3 id="hidmap"&gt;用户态更新 map&lt;a class="headerlink" href="#hidmap" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
-&lt;p&gt;在用户态程序中可以通过 &lt;tt class="docutils literal"&gt;bpf_map_update_elem&lt;/tt&gt; 函数更新这个 map:&lt;/p&gt;
-&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="n"&gt;tail_jump_map_fd&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;bpf_object__find_map_fd_by_name&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;bpf_obj&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="s"&gt;&amp;quot;tail_jmp_map&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;);&lt;/span&gt;
-&lt;span class="n"&gt;bpf_map_update_elem&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;tail_jump_map_fd&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;&amp;amp;&lt;/span&gt;&lt;span class="n"&gt;key&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;&amp;amp;&lt;/span&gt;&lt;span class="n"&gt;bpf_program_fd&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;BPF_ANY&lt;/span&gt;&lt;span class="p"&gt;);&lt;/span&gt;
-&lt;/pre&gt;&lt;/div&gt;
-&lt;/div&gt;
-&lt;div class="section" id="section-2"&gt;
-&lt;h3 id="hidsection-2"&gt;尾调用&lt;a class="headerlink" href="#hidsection-2" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
-&lt;p&gt;eBPF 程序中可以通过 &lt;tt class="docutils literal"&gt;bpf_tail_call&lt;/tt&gt; 辅助函数执行尾调用：&lt;/p&gt;
-&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="n"&gt;SEC&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="s"&gt;&amp;quot;raw_tracepoint/sys_enter&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
-&lt;span class="kt"&gt;int&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;raw_tracepoint__sys_enter&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="k"&gt;struct&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nc"&gt;bpf_raw_tracepoint_args&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;*&lt;/span&gt;&lt;span class="n"&gt;ctx&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="p"&gt;{&lt;/span&gt;
-&lt;span class="w"&gt;        &lt;/span&gt;&lt;span class="n"&gt;u32&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;syscall_id&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;ctx&lt;/span&gt;&lt;span class="o"&gt;-&amp;gt;&lt;/span&gt;&lt;span class="n"&gt;args&lt;/span&gt;&lt;span class="p"&gt;[&lt;/span&gt;&lt;span class="mi"&gt;1&lt;/span&gt;&lt;span class="p"&gt;];&lt;/span&gt;
-
-&lt;span class="w"&gt;        &lt;/span&gt;&lt;span class="c1"&gt;// 执行尾调用&lt;/span&gt;
-&lt;span class="w"&gt;        &lt;/span&gt;&lt;span class="n"&gt;bpf_tail_call&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;ctx&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;&amp;amp;&lt;/span&gt;&lt;span class="n"&gt;tail_jmp_map&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;syscall_id&lt;/span&gt;&lt;span class="p"&gt;);&lt;/span&gt;
-
-&lt;span class="w"&gt;        &lt;/span&gt;&lt;span class="c1"&gt;// 如果在 map 中找不到对应的 ebpf 程序的话，会继续走到后面的代码&lt;/span&gt;
-&lt;span class="w"&gt;        &lt;/span&gt;&lt;span class="kt"&gt;char&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;fmt&lt;/span&gt;&lt;span class="p"&gt;[]&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="s"&gt;&amp;quot;no bpf program for syscall %d&lt;/span&gt;&lt;span class="se"&gt;\n&lt;/span&gt;&lt;span class="s"&gt;&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;;&lt;/span&gt;
-&lt;span class="w"&gt;        &lt;/span&gt;&lt;span class="n"&gt;bpf_trace_printk&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;fmt&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="k"&gt;sizeof&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;fmt&lt;/span&gt;&lt;span class="p"&gt;),&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;syscall_id&lt;/span&gt;&lt;span class="p"&gt;);&lt;/span&gt;
-&lt;span class="w"&gt;        &lt;/span&gt;&lt;span class="k"&gt;return&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="mi"&gt;0&lt;/span&gt;&lt;span class="p"&gt;;&lt;/span&gt;
-&lt;span class="p"&gt;}&lt;/span&gt;
-&lt;/pre&gt;&lt;/div&gt;
-&lt;p&gt;完整的示例程序，详见： &lt;a class="reference external" href="https://github.com/mozillazg/hello-libbpfgo/tree/master/22-tail-calls"&gt;https://github.com/mozillazg/hello-libbpfgo/tree/master/22-tail-calls&lt;/a&gt;&lt;/p&gt;
-&lt;/div&gt;
-&lt;/div&gt;
-&lt;div class="section" id="section-3"&gt;
-&lt;h2 id="hidsection-3"&gt;参考资料&lt;a class="headerlink" href="#hidsection-3" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
-&lt;ul class="simple"&gt;
-&lt;li&gt;&lt;a class="reference external" href="https://docs.cilium.io/en/v1.12/bpf/"&gt;BPF and XDP Reference Guide — Cilium 1.12.2 documentation&lt;/a&gt;&lt;/li&gt;
-&lt;li&gt;&lt;a class="reference external" href="https://man7.org/linux/man-pages/man2/bpf.2.html"&gt;bpf(2) - Linux manual page&lt;/a&gt;&lt;/li&gt;
-&lt;li&gt;&lt;a class="reference external" href="https://man7.org/linux/man-pages/man7/bpf-helpers.7.html"&gt;bpf-helpers(7) - Linux manual page&lt;/a&gt;&lt;/li&gt;
-&lt;li&gt;&lt;a class="reference external" href="https://github.com/libbpf/libbpf/issues/354"&gt;Support static initialization of BPF_MAP_TYPE_PROG_ARRAY · Issue #354 · libbpf/libbpf&lt;/a&gt;&lt;/li&gt;
-&lt;/ul&gt;
-&lt;/div&gt;
-</description><dc:creator xmlns:dc="http://purl.org/dc/elements/1.1/">mozillazg</dc:creator><pubDate>Fri, 07 Oct 2022 00:00:00 +0000</pubDate><guid isPermaLink="false">tag:mozillazg.com,2022-10-07:2022/10/ebpf-libbpf-use-tail-calls.html</guid><category>libbpf</category><category>libbpfgo</category></item></channel></rss>
+</description><dc:creator xmlns:dc="http://purl.org/dc/elements/1.1/">mozillazg</dc:creator><pubDate>Sun, 03 Dec 2023 00:00:00 +0000</pubDate><guid isPermaLink="false">tag:mozillazg.com,2023-12-03:2023/12/security-deep-dive-into-aws-eks-pod-identity-feature-en.html</guid><category>kubernetes</category><category>k8s</category><category>aws</category><category>eks</category><category>pod-identity</category><category>irsa</category><category>cloud-security</category><category>en-version</category></item></channel></rss>
