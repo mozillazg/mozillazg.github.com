@@ -1,5 +1,592 @@
 <?xml version="1.0" encoding="utf-8"?>
-<feed xmlns="http://www.w3.org/2005/Atom"><title>mozillazg's Blog</title><link href="https://mozillazg.com/" rel="alternate"></link><link href="https://mozillazg.com/feeds/all.atom.xml" rel="self"></link><id>https://mozillazg.com/</id><updated>2024-03-31T00:00:00+00:00</updated><entry><title>一个使用 tracepoint 追踪 execve 系统调用时无法正确获取系统调用参数的场景</title><link href="https://mozillazg.com/2024/03/ebpf-tracepoint-syscalls-sys-enter-execve-can-not-get-filename-argv-values-case.html" rel="alternate"></link><published>2024-03-31T00:00:00+00:00</published><updated>2024-03-31T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2024-03-31:2024/03/ebpf-tracepoint-syscalls-sys-enter-execve-can-not-get-filename-argv-values-case.html</id><summary type="html">&lt;div class="section" id="section-1"&gt;
+<feed xmlns="http://www.w3.org/2005/Atom"><title>mozillazg's Blog</title><link href="https://mozillazg.com/" rel="alternate"></link><link href="https://mozillazg.com/feeds/all.atom.xml" rel="self"></link><id>https://mozillazg.com/</id><updated>2024-07-06T00:00:00+00:00</updated><entry><title>ptcpdump: 抓包时显示进程信息以及对任意进程、容器或 Pod 进行抓包</title><link href="https://mozillazg.com/2024/07/ebpf-ptcpdump-capturing-the-network-traffic-of-a-process-or-container-or-pod.html" rel="alternate"></link><published>2024-07-06T00:00:00+00:00</published><updated>2024-07-06T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2024-07-06:2024/07/ebpf-ptcpdump-capturing-the-network-traffic-of-a-process-or-container-or-pod.html</id><summary type="html">&lt;div class="section" id="section-1"&gt;
+&lt;h2 id="hidsection-1"&gt;前言&lt;a class="headerlink" href="#hidsection-1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;tcpdump 是我们常用的一个网络抓包工具，它的功能非常的强大。但是它还缺少一个大家反馈很久却一直没实现的一个特性，
+那就是：在结果中包含/显示发送网络请求/流量的进程信息，以及支持抓取指定进程的网络流量。&lt;/p&gt;
+&lt;p&gt;当前针对 tcpdump 抓取的流量信息，如果要获取对应的进程信息的话，常见的方法是：
+基于请求的连接信息，通过 &lt;tt class="docutils literal"&gt;ss&lt;/tt&gt; 或 &lt;tt class="docutils literal"&gt;netstat&lt;/tt&gt; 之内的工具反查进程信息。
+这个方法的缺点是：操作起来比较繁琐以及无法查找匹配短生命周期的进程所发送的网络流量。&lt;/p&gt;
+&lt;p&gt;至于基于 tcpdump 实现抓取指定进程的网络流量，常见的方法是：在知晓进程要访问的目标服务地址信息的前提下，
+在使用 tcpdump 时按目的地址信息过滤流量；
+或者是在特定的网络命名空间中运行目标进程，然后再在该网络命名空间下使用 tcpdump 抓包。
+这两个方法的缺点是：需要提前知晓目标进程访问的目的地址或者需要改变目标进程的执行方式，适用场景有限。&lt;/p&gt;
+&lt;p&gt;本文将介绍一个新的工具 ptcpdump，基于这个工具，我们既可以在抓包时直接感知发送流量的进程信息，
+也可以直接对运行中或待运行的任意进程进行网络抓包。如果流量是从容器内的进程发出的话，
+它还支持显示流量的容器或 Pod 信息以及对特定容器或 Pod 进行抓包。&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class="section" id="ptcpdump"&gt;
+&lt;h2 id="hidptcpdump"&gt;ptcpdump 介绍&lt;a class="headerlink" href="#hidptcpdump" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;ptcpdump 是一个使用 eBPF 技术开发的、类 tcpdump 的网络抓包工具。
+它除了兼容 tcpdump 的常用命令行参数以及包过滤语法外，
+还额外提供了如下核心特性：&lt;/p&gt;
+&lt;ul class="simple"&gt;
+&lt;li&gt;在输出中记录和显示发送网络流量的进程、容器、Pod 信息。&lt;/li&gt;
+&lt;li&gt;支持对指定进程、容器以及 Pod 进行抓包。&lt;/li&gt;
+&lt;li&gt;支持将抓取的数据包保存为 pcapng 格式，可以使用 tcpdump 或者 Wireshark 做进一步分析。&lt;/li&gt;
+&lt;li&gt;当在 Wireshark 中打开保存的 pcapng 文件时，将能够看到每个数据包对应的进程、容器、Pod 信息。&lt;/li&gt;
+&lt;li&gt;使用静态链接的方式编译该工具，系统中不需要安装额外的系统链接库。&lt;/li&gt;
+&lt;/ul&gt;
+&lt;p&gt;更多信息请参考项目的源代码仓库： &lt;a class="reference external" href="https://github.com/mozillazg/ptcpdump"&gt;https://github.com/mozillazg/ptcpdump&lt;/a&gt;&lt;/p&gt;
+&lt;p&gt;下面将以示例的形式介绍 ptcpdump 的核心功能。&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class="section" id="tcpdump"&gt;
+&lt;h2 id="hidtcpdump"&gt;兼容 tcpdump 的常用命令行参数和包过滤语法&lt;a class="headerlink" href="#hidtcpdump" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;pre class="literal-block"&gt;
+sudo tcpdump -i eth0 tcp
+sudo tcpdump -i eth0 tcp and port 80 and host 10.10.1.1
+sudo tcpdump -i eth0 'tcp[tcpflags] &amp;amp; (tcp-syn|tcp-fin) != 0'
+sudo tcpdump -i any
+sudo tcpdump -i any -s 0 -n -c 100 -w demo.pcapng port 80
+&lt;/pre&gt;
+&lt;p&gt;上面这些常见的 tcpdump 命令可以直接无缝替换为对应的 ptcpdump 命令，只需要将 tcpdump 改为 ptcpdump 即可:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+sudo ptcpdump -i eth0 tcp
+sudo ptcpdump -i eth0 tcp and port 80 and host 10.10.1.1
+sudo ptcpdump -i eth0 'tcp[tcpflags] &amp;amp; (tcp-syn|tcp-fin) != 0'
+sudo ptcpdump -i any
+sudo ptcpdump -i any -s 0 -n -c 100 -w demo.pcapng port 80
+&lt;/pre&gt;
+&lt;/div&gt;
+&lt;div class="section" id="pod"&gt;
+&lt;h2 id="hidpod"&gt;在输出中记录和显示发送网络流量的进程、容器和 Pod 信息&lt;a class="headerlink" href="#hidpod" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;默认情况下，ptcpdump 将在输出中显示简单的进程、容器以及 Pod 信息:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+$ sudo ptcpdump -i any -c 4 port 80 or port 443
+2024-07-07 12:56:56 WARN ptcpdump: verbose output suppressed, use -v[v]... for verbose output
+2024-07-07 12:56:56 WARN capturing on any, link-type EN10MB (Ethernet), snapshot length 262144 bytes
+12:56:59.517657 veth18618a4a wget.13626 In IP 10.244.0.4.46834 &amp;gt; 13.251.96.10.443: Flags [S], seq 2743105662, win 64240, length 0, Container [test], Pod [test.default]
+12:56:59.517836 eth0 wget.13626 Out IP 172.19.0.2.46834 &amp;gt; 13.251.96.10.443: Flags [S], seq 2743105662, win 64240, length 0, Container [test], Pod [test.default]
+12:56:59.692593 eth0 wget.13626 In IP 13.251.96.10.443 &amp;gt; 172.19.0.2.46834: Flags [S.], seq 1966397178, ack 2743105663, win 65084, length 0, Container [test], Pod [test.default]
+12:56:59.692754 veth18618a4a wget.13626 Out IP 13.251.96.10.443 &amp;gt; 10.244.0.4.46834: Flags [S.], seq 1966397178, ack 2743105663, win 65084, length 0, Container [test], Pod [test.default]
+4 packets captured
+6 packets received by filter
+0 packets dropped by kernel
+&lt;/pre&gt;
+&lt;p&gt;可以通过指定 &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;-v&lt;/span&gt;&lt;/tt&gt; 参数，查看更详细的进程、容器以及 Pod 信息:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+$ ptcpdump -i any -c 4 -v port 80 or port 443
+2024-07-07 12:58:59 WARN ptcpdump: capturing on any, link-type EN10MB (Ethernet), snapshot length 262144 bytes
+12:59:02.265356 veth18618a4a In IP (tos 0x0, ttl 64, id 35996, offset 0, flags [DF], proto TCP (6), length 60)
+    10.244.0.4.41666 &amp;gt; 13.215.144.61.443: Flags [S], cksum 0xa93a, seq 40651020, win 64240, options [mss 1460,sackOK,TS val 2665081987 ecr 0,nop,wscale 7], length 0
+    Process (pid 14565, cmd /usr/bin/wget, args wget https://mozillazg.com -O /dev/null)
+    Container (name test, id 78116e60ff73d3dc41c795288fbf955ed543c964e56cada0c3fa466bc939a339, image docker.io/library/alpine:3.18, labels {&amp;quot;io.cri-containerd.kind&amp;quot;:&amp;quot;container&amp;quot;,&amp;quot;io.kubernetes.container.name&amp;quot;:&amp;quot;test&amp;quot;,&amp;quot;io.kubernetes.pod.name&amp;quot;:&amp;quot;test&amp;quot;,&amp;quot;io.kubernetes.pod.namespace&amp;quot;:&amp;quot;default&amp;quot;,&amp;quot;io.kubernetes.pod.uid&amp;quot;:&amp;quot;9e4bc54b-de48-4b1c-8b9e-54709f67ed0c&amp;quot;})
+    Pod (name test, namespace default, UID 9e4bc54b-de48-4b1c-8b9e-54709f67ed0c, labels {&amp;quot;run&amp;quot;:&amp;quot;test&amp;quot;}, annotations {&amp;quot;kubernetes.io/config.seen&amp;quot;:&amp;quot;2024-07-07T12:43:29.121307922Z&amp;quot;,&amp;quot;kubernetes.io/config.source&amp;quot;:&amp;quot;api&amp;quot;})
+12:59:02.265606 eth0 Out IP (tos 0x0, ttl 63, id 35996, offset 0, flags [DF], proto TCP (6), length 60)
+    172.19.0.2.41666 &amp;gt; 13.215.144.61.443: Flags [S], cksum 0x4a58, seq 40651020, win 64240, options [mss 1460,sackOK,TS val 2665081987 ecr 0,nop,wscale 7], length 0
+    Process (pid 14565, cmd /usr/bin/wget, args wget https://mozillazg.com -O /dev/null)
+    Container (name test, id 78116e60ff73d3dc41c795288fbf955ed543c964e56cada0c3fa466bc939a339, image docker.io/library/alpine:3.18, labels {&amp;quot;io.cri-containerd.kind&amp;quot;:&amp;quot;container&amp;quot;,&amp;quot;io.kubernetes.container.name&amp;quot;:&amp;quot;test&amp;quot;,&amp;quot;io.kubernetes.pod.name&amp;quot;:&amp;quot;test&amp;quot;,&amp;quot;io.kubernetes.pod.namespace&amp;quot;:&amp;quot;default&amp;quot;,&amp;quot;io.kubernetes.pod.uid&amp;quot;:&amp;quot;9e4bc54b-de48-4b1c-8b9e-54709f67ed0c&amp;quot;})
+    Pod (name test, namespace default, UID 9e4bc54b-de48-4b1c-8b9e-54709f67ed0c, labels {&amp;quot;run&amp;quot;:&amp;quot;test&amp;quot;}, annotations {&amp;quot;kubernetes.io/config.seen&amp;quot;:&amp;quot;2024-07-07T12:43:29.121307922Z&amp;quot;,&amp;quot;kubernetes.io/config.source&amp;quot;:&amp;quot;api&amp;quot;})
+12:59:02.462586 eth0 In IP (tos 0x4, ttl 47, id 0, offset 0, flags [DF], proto TCP (6), length 60)
+    13.215.144.61.443 &amp;gt; 172.19.0.2.41666: Flags [S.], cksum 0x9772, seq 3160052321, ack 40651021, win 65084, options [mss 1240,sackOK,TS val 3710435767 ecr 2665081987,nop,wscale 9], length 0
+    Process (pid 14565, cmd /usr/bin/wget, args wget https://mozillazg.com -O /dev/null)
+    Container (name test, id 78116e60ff73d3dc41c795288fbf955ed543c964e56cada0c3fa466bc939a339, image docker.io/library/alpine:3.18, labels {&amp;quot;io.cri-containerd.kind&amp;quot;:&amp;quot;container&amp;quot;,&amp;quot;io.kubernetes.container.name&amp;quot;:&amp;quot;test&amp;quot;,&amp;quot;io.kubernetes.pod.name&amp;quot;:&amp;quot;test&amp;quot;,&amp;quot;io.kubernetes.pod.namespace&amp;quot;:&amp;quot;default&amp;quot;,&amp;quot;io.kubernetes.pod.uid&amp;quot;:&amp;quot;9e4bc54b-de48-4b1c-8b9e-54709f67ed0c&amp;quot;})
+    Pod (name test, namespace default, UID 9e4bc54b-de48-4b1c-8b9e-54709f67ed0c, labels {&amp;quot;run&amp;quot;:&amp;quot;test&amp;quot;}, annotations {&amp;quot;kubernetes.io/config.seen&amp;quot;:&amp;quot;2024-07-07T12:43:29.121307922Z&amp;quot;,&amp;quot;kubernetes.io/config.source&amp;quot;:&amp;quot;api&amp;quot;})
+12:59:02.462782 veth18618a4a Out IP (tos 0x4, ttl 46, id 0, offset 0, flags [DF], proto TCP (6), length 60)
+    13.215.144.61.443 &amp;gt; 10.244.0.4.41666: Flags [S.], cksum 0x3890, seq 3160052321, ack 40651021, win 65084, options [mss 1240,sackOK,TS val 3710435767 ecr 2665081987,nop,wscale 9], length 0
+    Process (pid 14565, cmd /usr/bin/wget, args wget https://mozillazg.com -O /dev/null)
+    Container (name test, id 78116e60ff73d3dc41c795288fbf955ed543c964e56cada0c3fa466bc939a339, image docker.io/library/alpine:3.18, labels {&amp;quot;io.cri-containerd.kind&amp;quot;:&amp;quot;container&amp;quot;,&amp;quot;io.kubernetes.container.name&amp;quot;:&amp;quot;test&amp;quot;,&amp;quot;io.kubernetes.pod.name&amp;quot;:&amp;quot;test&amp;quot;,&amp;quot;io.kubernetes.pod.namespace&amp;quot;:&amp;quot;default&amp;quot;,&amp;quot;io.kubernetes.pod.uid&amp;quot;:&amp;quot;9e4bc54b-de48-4b1c-8b9e-54709f67ed0c&amp;quot;})
+    Pod (name test, namespace default, UID 9e4bc54b-de48-4b1c-8b9e-54709f67ed0c, labels {&amp;quot;run&amp;quot;:&amp;quot;test&amp;quot;}, annotations {&amp;quot;kubernetes.io/config.seen&amp;quot;:&amp;quot;2024-07-07T12:43:29.121307922Z&amp;quot;,&amp;quot;kubernetes.io/config.source&amp;quot;:&amp;quot;api&amp;quot;})
+4 packets captured
+6 packets received by filter
+0 packets dropped by kernel
+&lt;/pre&gt;
+&lt;/div&gt;
+&lt;div class="section" id="pod-1"&gt;
+&lt;h2 id="hidpod-1"&gt;支持对指定进程、容器或 Pod 进行抓包&lt;a class="headerlink" href="#hidpod-1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;div class="section" id="pid"&gt;
+&lt;h3 id="hidpid"&gt;指定进程 pid 抓包&lt;a class="headerlink" href="#hidpid" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
+&lt;p&gt;可以通过 &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;--pid&lt;/span&gt;&lt;/tt&gt; 参数指定要抓包的进程 pid，实现对指定进程进行抓包:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+$ sudo ptcpdump -i any -c 4 --pid 82106
+2024-07-07 13:11:40 WARN ptcpdump: verbose output suppressed, use -v[v]... for verbose output
+2024-07-07 13:11:40 WARN capturing on any, link-type EN10MB (Ethernet), snapshot length 262144 bytes
+13:11:50.170538 ens33 python3.10.82106 Out IP 10.0.2.15.36648 &amp;gt; 13.251.96.10.443: Flags [S], seq 1633417447, win 64240, length 0
+13:11:50.369972 ens33 python3.10.82106 In IP 13.251.96.10.443 &amp;gt; 10.0.2.15.36648: Flags [S.], seq 1793291274, ack 1633417448, win 64240, length 0
+2 packets captured
+3 packets received by filter
+0 packets dropped by kernel
+&lt;/pre&gt;
+&lt;p&gt;同时还可以通过指定 &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;-f&lt;/span&gt;&lt;/tt&gt; 参数对该进程创建的子进程也进行抓包:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+$ sudo ptcpdump -i any -c 4 --pid 82106 -f 'tcp[tcpflags] &amp;amp; tcp-fin != 0'
+2024-07-07 13:17:31 WARN ptcpdump: verbose output suppressed, use -v[v]... for verbose output
+2024-07-07 13:17:31 WARN capturing on any, link-type EN10MB (Ethernet), snapshot length 262144 bytes
+13:17:37.800903 ens33 python3.10.82106 Out IP 10.0.2.15.38576 &amp;gt; 52.74.166.77.443: Flags [F.], seq 2442149577, ack 367271121, win 62780, length 0
+13:17:37.977316 ens33 python3.10.82106 In IP 52.74.166.77.443 &amp;gt; 10.0.2.15.38576: Flags [FP.], seq 367271145, ack 2442149578, win 64239, length 0
+13:17:44.390627 ens33 curl.95920 Out IP 10.0.2.15.38590 &amp;gt; 52.74.166.77.443: Flags [F.], seq 3726932781, ack 1510095004, win 63045, length 0
+13:17:44.564990 ens33 curl.95920 In IP 52.74.166.77.443 &amp;gt; 10.0.2.15.38590: Flags [FP.], seq 1510095028, ack 3726932782, win 64239, length 0
+4 packets captured
+4 packets received by filter
+0 packets dropped by kernel
+&lt;/pre&gt;
+&lt;/div&gt;
+&lt;div class="section" id="section-2"&gt;
+&lt;h3 id="hidsection-2"&gt;指定进程名称抓包&lt;a class="headerlink" href="#hidsection-2" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
+&lt;p&gt;可以通过 &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;--pname&lt;/span&gt;&lt;/tt&gt; 参数指定进程名称（comm），实现指定进程名称抓包:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+$ sudo ptcpdump -i any -c 2 --pname curl
+2024-07-07 13:23:18 WARN ptcpdump: verbose output suppressed, use -v[v]... for verbose output
+2024-07-07 13:23:18 WARN capturing on any, link-type EN10MB (Ethernet), snapshot length 262144 bytes
+13:23:24.881499 lo curl.26511 Out IP 127.0.0.1.43332 &amp;gt; 127.0.0.53.53: 44133+ [1au] A? mozillazg.com. (42)
+13:23:24.881663 lo curl.26511 Out IP 127.0.0.1.43332 &amp;gt; 127.0.0.53.53: 14694+ [1au] AAAA? mozillazg.com. (42)
+2 packets captured
+2 packets received by filter
+0 packets dropped by kernel
+&lt;/pre&gt;
+&lt;/div&gt;
+&lt;div class="section" id="section-3"&gt;
+&lt;h3 id="hidsection-3"&gt;通过运行目标程序来抓包&lt;a class="headerlink" href="#hidsection-3" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
+&lt;p&gt;有需要的话，也可以通过使用 &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;--&lt;/span&gt;&lt;/tt&gt; 参数运行目标程序的方式来实现对特定程序进行抓包:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+$ sudo ptcpdump -i any -- curl -I https://mozillazg.com
+2024-07-07 13:26:44 WARN ptcpdump: verbose output suppressed, use -v[v]... for verbose output
+2024-07-07 13:26:44 WARN capturing on any, link-type EN10MB (Ethernet), snapshot length 262144 bytes
+13:26:44.055757 lo curl.28094 Out IP 127.0.0.1.48826 &amp;gt; 127.0.0.53.53: 8942+ [1au] A? mozillazg.com. (42)
+13:26:44.055914 lo curl.28094 Out IP 127.0.0.1.48826 &amp;gt; 127.0.0.53.53: 34274+ [1au] AAAA? mozillazg.com. (42)
+13:26:44.775840 lo curl.28094 In IP 127.0.0.53.53 &amp;gt; 127.0.0.1.48826: 8942 3/0/1 CNAME mozillazg.netlify.com., A 13.251.96.10, A 46.137.195.11 (106)
+13:26:45.135988 lo curl.28094 In IP 127.0.0.53.53 &amp;gt; 127.0.0.1.48826: 34274 3/0/1 CNAME mozillazg.netlify.com., AAAA 2406:da18:880:3802::c8, AAAA 2406:da18:b3d:e202::64 (130)
+13:26:45.136819 wlp4s0 curl.28094 Out IP6 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744 &amp;gt; 2406:da18:880:3802::c8.443: Flags [S], seq 3460683104, win 64800, length 0
+13:26:45.310505 wlp4s0 curl.28094 In IP6 2406:da18:880:3802::c8.443 &amp;gt; 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744: Flags [S.], seq 630810442, ack 3460683105, win 65232, length 0
+13:26:45.310821 wlp4s0 curl.28094 Out IP6 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744 &amp;gt; 2406:da18:880:3802::c8.443: Flags [.], seq 3460683105, ack 630810443, win 507, length 0
+13:26:45.414551 wlp4s0 curl.28094 Out IP6 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744 &amp;gt; 2406:da18:880:3802::c8.443: Flags [P.], seq 3460683105:3460683622, ack 630810443, win 507, length 517
+13:26:45.595214 wlp4s0 curl.28094 In IP6 2406:da18:880:3802::c8.443 &amp;gt; 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744: Flags [.], seq 630810443, ack 3460683622, win 127, length 0
+13:26:45.595413 wlp4s0 curl.28094 In IP6 2406:da18:880:3802::c8.443 &amp;gt; 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744: Flags [.], seq 630810443:630811651, ack 3460683622, win 127, length 1208
+13:26:45.595595 wlp4s0 curl.28094 Out IP6 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744 &amp;gt; 2406:da18:880:3802::c8.443: Flags [.], seq 3460683622, ack 630811651, win 501, length 0
+13:26:45.595702 wlp4s0 curl.28094 In IP6 2406:da18:880:3802::c8.443 &amp;gt; 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744: Flags [P.], seq 630811651:630812859, ack 3460683622, win 127, length 1208
+13:26:45.595797 wlp4s0 curl.28094 Out IP6 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744 &amp;gt; 2406:da18:880:3802::c8.443: Flags [.], seq 3460683622, ack 630812859, win 492, length 0
+13:26:45.595862 wlp4s0 curl.28094 In IP6 2406:da18:880:3802::c8.443 &amp;gt; 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744: Flags [P.], seq 630812859:630813338, ack 3460683622, win 127, length 479
+13:26:45.595934 wlp4s0 curl.28094 Out IP6 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744 &amp;gt; 2406:da18:880:3802::c8.443: Flags [.], seq 3460683622, ack 630813338, win 489, length 0
+13:26:45.600998 wlp4s0 curl.28094 Out IP6 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744 &amp;gt; 2406:da18:880:3802::c8.443: Flags [P.], seq 3460683622:3460683686, ack 630813338, win 489, length 64
+13:26:45.601344 wlp4s0 curl.28094 Out IP6 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744 &amp;gt; 2406:da18:880:3802::c8.443: Flags [P.], seq 3460683686:3460683781, ack 630813338, win 489, length 95
+13:26:45.616759 wlp4s0 curl.28094 Out IP6 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744 &amp;gt; 2406:da18:880:3802::c8.443: Flags [P.], seq 3460683781:3460683882, ack 630813338, win 501, length 101
+13:26:45.779516 wlp4s0 curl.28094 In IP6 2406:da18:880:3802::c8.443 &amp;gt; 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744: Flags [.], seq 630813338, ack 3460683781, win 127, length 0
+13:26:45.779792 wlp4s0 curl.28094 In IP6 2406:da18:880:3802::c8.443 &amp;gt; 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744: Flags [P.], seq 630813338:630813399, ack 3460683781, win 127, length 61
+13:26:45.779996 wlp4s0 curl.28094 In IP6 2406:da18:880:3802::c8.443 &amp;gt; 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744: Flags [P.], seq 630813399:630813443, ack 3460683781, win 127, length 44
+13:26:45.780318 wlp4s0 curl.28094 Out IP6 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744 &amp;gt; 2406:da18:880:3802::c8.443: Flags [P.], seq 3460683882:3460683913, ack 630813443, win 501, length 31
+HTTP/2 200
+13:26:45.788787 wlp4s0 curl.28094 In IP6 2406:da18:880:3802::c8.443 &amp;gt; 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744: Flags [P.], seq 630813443:630813677, ack 3460683882, win 127, length 234
+accept-ranges: bytes
+age: 79059
+cache-control: public,max-age=0,must-revalidate
+cache-status: &amp;quot;Netlify Edge&amp;quot;; hit
+content-type: text/html; charset=UTF-8
+date: Sun, 07 Jul 2024 05:26:44 GMT
+etag: &amp;quot;80cf37f5974e2232d976c6f622121dee-ssl&amp;quot;
+server: Netlify
+strict-transport-security: max-age=31536000
+x-nf-request-id: 01J25THACQSN9364YHSR2C0X5F
+content-length: 11727
+
+13:26:45.789558 wlp4s0 curl.28094 Out IP6 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744 &amp;gt; 2406:da18:880:3802::c8.443: Flags [P.], seq 3460683913:3460683937, ack 630813677, win 501, length 24
+13:26:45.791514 wlp4s0 curl.28094 Out IP6 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744 &amp;gt; 2406:da18:880:3802::c8.443: Flags [F.], seq 3460683937, ack 630813677, win 501, length 0
+13:26:45.963642 wlp4s0 curl.28094 In IP6 2406:da18:880:3802::c8.443 &amp;gt; 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744: Flags [.], seq 630813677, ack 3460683937, win 127, length 0
+13:26:45.963956 wlp4s0 curl.28094 In IP6 2406:da18:880:3802::c8.443 &amp;gt; 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744: Flags [P.], seq 630813677:630813701, ack 3460683937, win 127, length 24
+13:26:45.964172 wlp4s0 curl.28094 Out IP6 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744 &amp;gt; 2406:da18:880:3802::c8.443: Flags [R], seq 3460683937, win 0, length 0
+13:26:45.964415 wlp4s0 curl.28094 In IP6 2406:da18:880:3802::c8.443 &amp;gt; 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744: Flags [F.], seq 630813701, ack 3460683937, win 127, length 0
+13:26:45.964506 wlp4s0 curl.28094 Out IP6 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744 &amp;gt; 2406:da18:880:3802::c8.443: Flags [R], seq 3460683937, win 0, length 0
+13:26:45.966158 wlp4s0 curl.28094 In IP6 2406:da18:880:3802::c8.443 &amp;gt; 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744: Flags [.], seq 630813702, ack 3460683938, win 127, length 0
+13:26:45.966299 wlp4s0 curl.28094 Out IP6 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744 &amp;gt; 2406:da18:880:3802::c8.443: Flags [R], seq 3460683938, win 0, length 0
+32 packets captured
+32 packets received by filter
+0 packets dropped by kernel
+&lt;/pre&gt;
+&lt;/div&gt;
+&lt;div class="section" id="section-4"&gt;
+&lt;h3 id="hidsection-4"&gt;指定容器抓包&lt;a class="headerlink" href="#hidsection-4" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
+&lt;p&gt;可以通过 &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;--container-id&lt;/span&gt;&lt;/tt&gt; 参数指定容器 id 进行抓包:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+$ sudo ptcpdump -i any -c 2 --container-id 36f0310403b1
+2024-07-07 13:36:19 WARN ptcpdump: verbose output suppressed, use -v[v]... for verbose output
+2024-07-07 13:36:19 WARN capturing on any, link-type EN10MB (Ethernet), snapshot length 262144 bytes
+13:36:24.191242 veth09dec8f curl.32636 In IP 172.19.0.2.48960 &amp;gt; 18.139.194.139.443: Flags [S], seq 3213779351, win 64240, length 0, Container [kind-control-plane]
+13:36:24.191369 wlp4s0 curl.32636 Out IP 192.168.1.50.48960 &amp;gt; 18.139.194.139.443: Flags [S], seq 3213779351, win 64240, length 0, Container [kind-control-plane]
+2 packets captured
+2 packets received by filter
+0 packets dropped by kernel
+&lt;/pre&gt;
+&lt;p&gt;也可以通过 &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;--container-name&lt;/span&gt;&lt;/tt&gt; 参数指定容器名称进行抓包:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+$ sudo ptcpdump -i any -c 2 --container-name kind-control-plane
+2024-07-07 13:37:16 WARN ptcpdump: verbose output suppressed, use -v[v]... for verbose output
+2024-07-07 13:37:16 WARN capturing on any, link-type EN10MB (Ethernet), snapshot length 262144 bytes
+13:37:22.560764 veth09dec8f curl.33093 In IP 172.19.0.2.39084 &amp;gt; 18.139.194.139.443: Flags [S], seq 3645727033, win 64240, length 0, Container [kind-control-plane]
+13:37:22.561010 wlp4s0 curl.33093 Out IP 192.168.1.50.39084 &amp;gt; 18.139.194.139.443: Flags [S], seq 3645727033, win 64240, length 0, Container [kind-control-plane]
+2 packets captured
+2 packets received by filter
+0 packets dropped by kernel
+&lt;/pre&gt;
+&lt;/div&gt;
+&lt;div class="section" id="pod-2"&gt;
+&lt;h3 id="hidpod-2"&gt;指定 Pod 抓包&lt;a class="headerlink" href="#hidpod-2" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
+&lt;p&gt;可以通过 &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;--pod-name&lt;/span&gt;&lt;/tt&gt; 参数指定 Pod 名称进行抓包, 参数值的格式为 &lt;tt class="docutils literal"&gt;&amp;lt;pod &lt;span class="pre"&gt;名称&amp;gt;.&amp;lt;pod&lt;/span&gt; 命名空间&amp;gt;&lt;/tt&gt;:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+$ sudo ptcpdump -i any -c 2 --pod-name test.default
+2024-07-07 13:38:29 WARN ptcpdump: verbose output suppressed, use -v[v]... for verbose output
+2024-07-07 13:38:29 WARN capturing on any, link-type EN10MB (Ethernet), snapshot length 262144 bytes
+13:38:34.175752 eth0 wget.33660 Out IP 172.19.0.2.51564 &amp;gt; 13.215.144.61.443: Flags [S], seq 567383917, win 64240, length 0, Container [test], Pod [test.default]
+13:38:34.372894 eth0 wget.33660 In IP 13.215.144.61.443 &amp;gt; 172.19.0.2.51564: Flags [S.], seq 2654865684, ack 567383918, win 65084, length 0, Container [test], Pod [test.default]
+2 packets captured
+3 packets received by filter
+0 packets dropped by kernel
+&lt;/pre&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;div class="section" id="pcapng-tcpdump-wireshark"&gt;
+&lt;h2 id="hidpcapng-tcpdump-wireshark"&gt;将数据保存为 pcapng 格式使用 tcpdump 或 Wireshark 进行分析&lt;a class="headerlink" href="#hidpcapng-tcpdump-wireshark" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;div class="section" id="pcapng"&gt;
+&lt;h3 id="hidpcapng"&gt;保存为 pcapng 格式&lt;a class="headerlink" href="#hidpcapng" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
+&lt;p&gt;可以通过 &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;-w&lt;/span&gt;&lt;/tt&gt; 参数将抓包数据保存为 pcapng 格式:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+$ sudo ptcpdump -i any -c 5 -w demo.pcapng
+2024-07-07 13:41:32 WARN ptcpdump: verbose output suppressed, use -v[v]... for verbose output
+2024-07-07 13:41:32 WARN capturing on any, link-type EN10MB (Ethernet), snapshot length 262144 bytes
+5 packets captured
+22 packets received by filter
+0 packets dropped by kernel
+&lt;/pre&gt;
+&lt;/div&gt;
+&lt;div class="section" id="tcpdump-1"&gt;
+&lt;h3 id="hidtcpdump-1"&gt;使用 tcpdump 进行分析&lt;a class="headerlink" href="#hidtcpdump-1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
+&lt;p&gt;可以直接通过管道的方式通过 tcpdump 对抓取的数据进行分析:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+$ sudo ptcpdump -i any -c 5 -w - port 80 | tcpdump -n -r -
+reading from file -, link-type EN10MB (Ethernet), snapshot length 65535
+2024-07-07 13:44:33 WARN ptcpdump: verbose output suppressed, use -v[v]... for verbose output
+2024-07-07 13:44:33 WARN capturing on any, link-type EN10MB (Ethernet), snapshot length 262144 bytes
+13:44:44.530637 IP6 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.50858 &amp;gt; 2406:da18:880:3801::c8.80: Flags [S], seq 495824072, win 64800, options [mss 1440,sackOK,TS val 2411675580 ecr 0,nop,wscale 7], length 0
+13:44:44.708902 IP6 2406:da18:880:3801::c8.80 &amp;gt; 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.50858: Flags [S.], seq 640438481, ack 495824073, win 65232, options [mss 1220,sackOK,TS val 1591525382 ecr 2411675580,nop,wscale 9], length 0
+13:44:44.709261 IP6 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.50858 &amp;gt; 2406:da18:880:3801::c8.80: Flags [.], ack 1, win 507, options [nop,nop,TS val 2411675670 ecr 1591525382], length 0
+13:44:44.709475 IP6 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.50858 &amp;gt; 2406:da18:880:3801::c8.80: Flags [P.], seq 1:78, ack 1, win 507, options [nop,nop,TS val 2411675670 ecr 1591525382], length 77: HTTP: GET / HTTP/1.1
+5 packets captured
+6 packets received by filter
+0 packets dropped by kernel
+13:44:44.877110 IP6 2406:da18:880:3801::c8.80 &amp;gt; 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.50858: Flags [P.], seq 1:266, ack 78, win 128, options [nop,nop,TS val 1591525469 ecr 2411675670], length 265: HTTP: HTTP/1.1 301 Moved Permanently
+&lt;/pre&gt;
+&lt;p&gt;也可以通过读取文件的方式通过 tcpdump 对抓取的数据进行分析:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+$ tcpdump -n -r demo.pcapng
+reading from file demo.pcapng, link-type EN10MB (Ethernet), snapshot length 65535
+13:47:41.169584 IP6 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.43038 &amp;gt; 2406:da18:b3d:e201::64.80: Flags [S], seq 3876639697, win 64800, options [mss 1440,sackOK,TS val 2072195434 ecr 0,nop,wscale 7], length 0
+13:47:41.571055 IP 192.168.1.50.60580 &amp;gt; 18.139.194.139.80: Flags [S], seq 481256927, win 64240, options [mss 1460,sackOK,TS val 2707199178 ecr 0,nop,wscale 7], length 0
+13:47:41.956270 IP6 2406:da18:b3d:e201::64.80 &amp;gt; 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.43038: Flags [S.], seq 2283576526, ack 3876639698, win 65232, options [mss 1220,sackOK,TS val 4276006323 ecr 2072195434,nop,wscale 9], length 0
+13:47:41.956437 IP6 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.43038 &amp;gt; 2406:da18:b3d:e201::64.80: Flags [.], ack 1, win 507, options [nop,nop,TS val 2072195828 ecr 4276006323], length 0
+13:47:41.956733 IP6 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.43038 &amp;gt; 2406:da18:b3d:e201::64.80: Flags [P.], seq 1:78, ack 1, win 507, options [nop,nop,TS val 2072195828 ecr 4276006323], length 77: HTTP: GET / HTTP/1.1
+&lt;/pre&gt;
+&lt;/div&gt;
+&lt;div class="section" id="wireshark"&gt;
+&lt;h3 id="hidwireshark"&gt;使用 Wireshark 进行分析&lt;a class="headerlink" href="#hidwireshark" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
+&lt;p&gt;当使用 Wireshark 打开保存的 pcapng 格式的文件时，将在 Wireshark 的界面中显示相关的进程、容器以及 Pod 信息：&lt;/p&gt;
+&lt;img alt="" src="/static/images/bpf/ptcpdump-wireshark.png" /&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;div class="section" id="section-5"&gt;
+&lt;h2 id="hidsection-5"&gt;参考资料&lt;a class="headerlink" href="#hidsection-5" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;ul class="simple"&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://github.com/mozillazg/ptcpdump"&gt;mozillazg/ptcpdump: Process-aware, eBPF-based tcpdump&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://www.tcpdump.org/manpages/tcpdump.1-4.99.4.html"&gt;tcpdump(1) man page | TCPDUMP &amp;amp; LIBPCAP&lt;/a&gt;&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/div&gt;
+</summary><category term="ebpf"></category><category term="ptcpdump"></category><category term="tcpdump"></category><category term="pcapng"></category><category term="wireshark"></category><category term="container"></category><category term="pod"></category></entry><entry><title>ptcpdump: Capturing the Network Traffic of any Process, Container, or Pod</title><link href="https://mozillazg.com/2024/07/ebpf-ptcpdump-capturing-the-network-traffic-of-a-process-or-container-or-pod-en.html" rel="alternate"></link><published>2024-07-06T00:00:00+00:00</published><updated>2024-07-06T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2024-07-06:2024/07/ebpf-ptcpdump-capturing-the-network-traffic-of-a-process-or-container-or-pod-en.html</id><summary type="html">&lt;div class="section" id="preface"&gt;
+&lt;h2 id="hidpreface"&gt;Preface&lt;a class="headerlink" href="#hidpreface" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;tcpdump is a widely used network packet capture tool known for its powerful functionality.
+Despite its strengths, it still lacks a long-requested feature:
+displaying process information associated with network requests/traffic
+in the output and enabling the capture of network traffic for specific processes.&lt;/p&gt;
+&lt;p&gt;To retrieve process information corresponding to the traffic captured by tcpdump,
+a common approach involves associating process details with connection information using tools
+such as &lt;tt class="docutils literal"&gt;ss&lt;/tt&gt; or &lt;tt class="docutils literal"&gt;netstat&lt;/tt&gt;.
+However, this method has drawbacks—it can be cumbersome to execute and may not effectively
+identify network traffic from processes with short lifecycles.&lt;/p&gt;
+&lt;p&gt;When capturing network traffic of a specific process using tcpdump, common methods include:
+filtering traffic by destination address when knowing the target service address the
+process will access; or running the target process in a specific network namespace
+and then using tcpdump to capture packets within that namespace.
+These methods have limitations as they require prior knowledge of the
+target process's destination address or altering the target process's execution, restricting their practicality.&lt;/p&gt;
+&lt;p&gt;This article will introduce a new tool called ptcpdump. With this tool, we can directly detect the
+process information of the sending traffic while capturing packets.
+We can also capture network packets directly for any running or pending process.
+If the traffic is generated by a process inside a container, it also supports displaying
+the container or Pod information of the traffic and capturing packets for specific containers or Pods.&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class="section" id="ptcpdump-introduction"&gt;
+&lt;h2 id="hidptcpdump-introduction"&gt;ptcpdump Introduction&lt;a class="headerlink" href="#hidptcpdump-introduction" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;ptcpdump is a network packet capture tool developed using eBPF technology,
+designed in a tcpdump-like style.
+In addition to supporting tcpdump's common command-line parameters
+and packet filtering syntax, it also offers the following core features:&lt;/p&gt;
+&lt;ul class="simple"&gt;
+&lt;li&gt;Capture and display information about the processes, containers, and Pods responsible for sending network traffic in the output.&lt;/li&gt;
+&lt;li&gt;Support packet capture for specific processes, containers, and Pods.&lt;/li&gt;
+&lt;li&gt;Save captured packets in pcapng format for further analysis using tcpdump or Wireshark.&lt;/li&gt;
+&lt;li&gt;When opening the saved pcapng file in Wireshark, you can view the details of the process, container, and Pod associated with each data packet.&lt;/li&gt;
+&lt;li&gt;Compile this tool using static linking to eliminate the need for additional system libraries installation.&lt;/li&gt;
+&lt;/ul&gt;
+&lt;p&gt;For additional information, please refer to the project's source code repository: &lt;a class="reference external" href="https://github.com/mozillazg/tcpdump"&gt;https://github.com/mozillazg/tcpdump&lt;/a&gt;&lt;/p&gt;
+&lt;p&gt;The following will showcase the core functions of ptcpdump through examples.&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class="section" id="common-command-line-parameters-and-packet-filtering-syntax-compatible-with-tcpdump"&gt;
+&lt;h2 id="hidcommon-command-line-parameters-and-packet-filtering-syntax-compatible-with-tcpdump"&gt;Common command-line parameters and packet filtering syntax compatible with tcpdump&lt;a class="headerlink" href="#hidcommon-command-line-parameters-and-packet-filtering-syntax-compatible-with-tcpdump" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;pre class="literal-block"&gt;
+sudo tcpdump -i eth0 tcp
+sudo tcpdump -i eth0 tcp and port 80 and host 10.10.1.1
+sudo tcpdump -i eth0 'tcp[tcpflags] &amp;amp; (tcp-syn|tcp-fin) != 0'
+sudo tcpdump -i any
+sudo tcpdump -i any -s 0 -n -c 100 -w demo.pcapng port 80
+&lt;/pre&gt;
+&lt;p&gt;The common tcpdump commands mentioned above can be easily replaced with the corresponding
+ptcpdump commands by simply changing &lt;tt class="docutils literal"&gt;tcpdump&lt;/tt&gt; to &lt;tt class="docutils literal"&gt;ptcpdump&lt;/tt&gt;.&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+sudo ptcpdump -i eth0 tcp
+sudo ptcpdump -i eth0 tcp and port 80 and host 10.10.1.1
+sudo ptcpdump -i eth0 'tcp[tcpflags] &amp;amp; (tcp-syn|tcp-fin) != 0'
+sudo ptcpdump -i any
+sudo ptcpdump -i any -s 0 -n -c 100 -w demo.pcapng port 80
+&lt;/pre&gt;
+&lt;/div&gt;
+&lt;div class="section" id="capture-and-showcase-the-processes-containers-and-pod-details-involved-in-transmitting-network-traffic-within-the-output"&gt;
+&lt;h2 id="hidcapture-and-showcase-the-processes-containers-and-pod-details-involved-in-transmitting-network-traffic-within-the-output"&gt;Capture and showcase the processes, containers, and Pod details involved in transmitting network traffic within the output&lt;a class="headerlink" href="#hidcapture-and-showcase-the-processes-containers-and-pod-details-involved-in-transmitting-network-traffic-within-the-output" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;By default, ptcpdump will show basic information about processes, containers, and Pods in the output.&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+$ sudo ptcpdump -i any -c 4 port 80 or port 443
+2024-07-07 12:56:56 WARN ptcpdump: verbose output suppressed, use -v[v]... for verbose output
+2024-07-07 12:56:56 WARN capturing on any, link-type EN10MB (Ethernet), snapshot length 262144 bytes
+12:56:59.517657 veth18618a4a wget.13626 In IP 10.244.0.4.46834 &amp;gt; 13.251.96.10.443: Flags [S], seq 2743105662, win 64240, length 0, Container [test], Pod [test.default]
+12:56:59.517836 eth0 wget.13626 Out IP 172.19.0.2.46834 &amp;gt; 13.251.96.10.443: Flags [S], seq 2743105662, win 64240, length 0, Container [test], Pod [test.default]
+12:56:59.692593 eth0 wget.13626 In IP 13.251.96.10.443 &amp;gt; 172.19.0.2.46834: Flags [S.], seq 1966397178, ack 2743105663, win 65084, length 0, Container [test], Pod [test.default]
+12:56:59.692754 veth18618a4a wget.13626 Out IP 13.251.96.10.443 &amp;gt; 10.244.0.4.46834: Flags [S.], seq 1966397178, ack 2743105663, win 65084, length 0, Container [test], Pod [test.default]
+4 packets captured
+6 packets received by filter
+0 packets dropped by kernel
+&lt;/pre&gt;
+&lt;p&gt;By specifying the &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;-v&lt;/span&gt;&lt;/tt&gt; parameter, you can access detailed information about processes, containers, and pods.&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+$ ptcpdump -i any -c 4 -v port 80 or port 443
+2024-07-07 12:58:59 WARN ptcpdump: capturing on any, link-type EN10MB (Ethernet), snapshot length 262144 bytes
+12:59:02.265356 veth18618a4a In IP (tos 0x0, ttl 64, id 35996, offset 0, flags [DF], proto TCP (6), length 60)
+    10.244.0.4.41666 &amp;gt; 13.215.144.61.443: Flags [S], cksum 0xa93a, seq 40651020, win 64240, options [mss 1460,sackOK,TS val 2665081987 ecr 0,nop,wscale 7], length 0
+    Process (pid 14565, cmd /usr/bin/wget, args wget https://mozillazg.com -O /dev/null)
+    Container (name test, id 78116e60ff73d3dc41c795288fbf955ed543c964e56cada0c3fa466bc939a339, image docker.io/library/alpine:3.18, labels {&amp;quot;io.cri-containerd.kind&amp;quot;:&amp;quot;container&amp;quot;,&amp;quot;io.kubernetes.container.name&amp;quot;:&amp;quot;test&amp;quot;,&amp;quot;io.kubernetes.pod.name&amp;quot;:&amp;quot;test&amp;quot;,&amp;quot;io.kubernetes.pod.namespace&amp;quot;:&amp;quot;default&amp;quot;,&amp;quot;io.kubernetes.pod.uid&amp;quot;:&amp;quot;9e4bc54b-de48-4b1c-8b9e-54709f67ed0c&amp;quot;})
+    Pod (name test, namespace default, UID 9e4bc54b-de48-4b1c-8b9e-54709f67ed0c, labels {&amp;quot;run&amp;quot;:&amp;quot;test&amp;quot;}, annotations {&amp;quot;kubernetes.io/config.seen&amp;quot;:&amp;quot;2024-07-07T12:43:29.121307922Z&amp;quot;,&amp;quot;kubernetes.io/config.source&amp;quot;:&amp;quot;api&amp;quot;})
+12:59:02.265606 eth0 Out IP (tos 0x0, ttl 63, id 35996, offset 0, flags [DF], proto TCP (6), length 60)
+    172.19.0.2.41666 &amp;gt; 13.215.144.61.443: Flags [S], cksum 0x4a58, seq 40651020, win 64240, options [mss 1460,sackOK,TS val 2665081987 ecr 0,nop,wscale 7], length 0
+    Process (pid 14565, cmd /usr/bin/wget, args wget https://mozillazg.com -O /dev/null)
+    Container (name test, id 78116e60ff73d3dc41c795288fbf955ed543c964e56cada0c3fa466bc939a339, image docker.io/library/alpine:3.18, labels {&amp;quot;io.cri-containerd.kind&amp;quot;:&amp;quot;container&amp;quot;,&amp;quot;io.kubernetes.container.name&amp;quot;:&amp;quot;test&amp;quot;,&amp;quot;io.kubernetes.pod.name&amp;quot;:&amp;quot;test&amp;quot;,&amp;quot;io.kubernetes.pod.namespace&amp;quot;:&amp;quot;default&amp;quot;,&amp;quot;io.kubernetes.pod.uid&amp;quot;:&amp;quot;9e4bc54b-de48-4b1c-8b9e-54709f67ed0c&amp;quot;})
+    Pod (name test, namespace default, UID 9e4bc54b-de48-4b1c-8b9e-54709f67ed0c, labels {&amp;quot;run&amp;quot;:&amp;quot;test&amp;quot;}, annotations {&amp;quot;kubernetes.io/config.seen&amp;quot;:&amp;quot;2024-07-07T12:43:29.121307922Z&amp;quot;,&amp;quot;kubernetes.io/config.source&amp;quot;:&amp;quot;api&amp;quot;})
+12:59:02.462586 eth0 In IP (tos 0x4, ttl 47, id 0, offset 0, flags [DF], proto TCP (6), length 60)
+    13.215.144.61.443 &amp;gt; 172.19.0.2.41666: Flags [S.], cksum 0x9772, seq 3160052321, ack 40651021, win 65084, options [mss 1240,sackOK,TS val 3710435767 ecr 2665081987,nop,wscale 9], length 0
+    Process (pid 14565, cmd /usr/bin/wget, args wget https://mozillazg.com -O /dev/null)
+    Container (name test, id 78116e60ff73d3dc41c795288fbf955ed543c964e56cada0c3fa466bc939a339, image docker.io/library/alpine:3.18, labels {&amp;quot;io.cri-containerd.kind&amp;quot;:&amp;quot;container&amp;quot;,&amp;quot;io.kubernetes.container.name&amp;quot;:&amp;quot;test&amp;quot;,&amp;quot;io.kubernetes.pod.name&amp;quot;:&amp;quot;test&amp;quot;,&amp;quot;io.kubernetes.pod.namespace&amp;quot;:&amp;quot;default&amp;quot;,&amp;quot;io.kubernetes.pod.uid&amp;quot;:&amp;quot;9e4bc54b-de48-4b1c-8b9e-54709f67ed0c&amp;quot;})
+    Pod (name test, namespace default, UID 9e4bc54b-de48-4b1c-8b9e-54709f67ed0c, labels {&amp;quot;run&amp;quot;:&amp;quot;test&amp;quot;}, annotations {&amp;quot;kubernetes.io/config.seen&amp;quot;:&amp;quot;2024-07-07T12:43:29.121307922Z&amp;quot;,&amp;quot;kubernetes.io/config.source&amp;quot;:&amp;quot;api&amp;quot;})
+12:59:02.462782 veth18618a4a Out IP (tos 0x4, ttl 46, id 0, offset 0, flags [DF], proto TCP (6), length 60)
+    13.215.144.61.443 &amp;gt; 10.244.0.4.41666: Flags [S.], cksum 0x3890, seq 3160052321, ack 40651021, win 65084, options [mss 1240,sackOK,TS val 3710435767 ecr 2665081987,nop,wscale 9], length 0
+    Process (pid 14565, cmd /usr/bin/wget, args wget https://mozillazg.com -O /dev/null)
+    Container (name test, id 78116e60ff73d3dc41c795288fbf955ed543c964e56cada0c3fa466bc939a339, image docker.io/library/alpine:3.18, labels {&amp;quot;io.cri-containerd.kind&amp;quot;:&amp;quot;container&amp;quot;,&amp;quot;io.kubernetes.container.name&amp;quot;:&amp;quot;test&amp;quot;,&amp;quot;io.kubernetes.pod.name&amp;quot;:&amp;quot;test&amp;quot;,&amp;quot;io.kubernetes.pod.namespace&amp;quot;:&amp;quot;default&amp;quot;,&amp;quot;io.kubernetes.pod.uid&amp;quot;:&amp;quot;9e4bc54b-de48-4b1c-8b9e-54709f67ed0c&amp;quot;})
+    Pod (name test, namespace default, UID 9e4bc54b-de48-4b1c-8b9e-54709f67ed0c, labels {&amp;quot;run&amp;quot;:&amp;quot;test&amp;quot;}, annotations {&amp;quot;kubernetes.io/config.seen&amp;quot;:&amp;quot;2024-07-07T12:43:29.121307922Z&amp;quot;,&amp;quot;kubernetes.io/config.source&amp;quot;:&amp;quot;api&amp;quot;})
+4 packets captured
+6 packets received by filter
+0 packets dropped by kernel
+&lt;/pre&gt;
+&lt;/div&gt;
+&lt;div class="section" id="support-capturing-packets-for-specified-processes-containers-or-pods"&gt;
+&lt;h2 id="hidsupport-capturing-packets-for-specified-processes-containers-or-pods"&gt;Support capturing packets for specified processes, containers, or Pods&lt;a class="headerlink" href="#hidsupport-capturing-packets-for-specified-processes-containers-or-pods" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;div class="section" id="capture-packets-for-a-specific-process-identified-by-its-pid"&gt;
+&lt;h3 id="hidcapture-packets-for-a-specific-process-identified-by-its-pid"&gt;Capture packets for a specific process identified by its PID&lt;a class="headerlink" href="#hidcapture-packets-for-a-specific-process-identified-by-its-pid" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
+&lt;p&gt;You can use the &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;--pid&lt;/span&gt;&lt;/tt&gt; parameter to specify the process ID for capturing packets,
+allowing you to capture packets specifically for the designated process.&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+$ sudo ptcpdump -i any -c 4 --pid 82106
+2024-07-07 13:11:40 WARN ptcpdump: verbose output suppressed, use -v[v]... for verbose output
+2024-07-07 13:11:40 WARN capturing on any, link-type EN10MB (Ethernet), snapshot length 262144 bytes
+13:11:50.170538 ens33 python3.10.82106 Out IP 10.0.2.15.36648 &amp;gt; 13.251.96.10.443: Flags [S], seq 1633417447, win 64240, length 0
+13:11:50.369972 ens33 python3.10.82106 In IP 13.251.96.10.443 &amp;gt; 10.0.2.15.36648: Flags [S.], seq 1793291274, ack 1633417448, win 64240, length 0
+2 packets captured
+3 packets received by filter
+0 packets dropped by kernel
+&lt;/pre&gt;
+&lt;p&gt;You can also capture packets from the subprocesses created by this process by specifying the &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;-f&lt;/span&gt;&lt;/tt&gt; parameter.&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+$ sudo ptcpdump -i any -c 4 --pid 82106 -f 'tcp[tcpflags] &amp;amp; tcp-fin != 0'
+2024-07-07 13:17:31 WARN ptcpdump: verbose output suppressed, use -v[v]... for verbose output
+2024-07-07 13:17:31 WARN capturing on any, link-type EN10MB (Ethernet), snapshot length 262144 bytes
+13:17:37.800903 ens33 python3.10.82106 Out IP 10.0.2.15.38576 &amp;gt; 52.74.166.77.443: Flags [F.], seq 2442149577, ack 367271121, win 62780, length 0
+13:17:37.977316 ens33 python3.10.82106 In IP 52.74.166.77.443 &amp;gt; 10.0.2.15.38576: Flags [FP.], seq 367271145, ack 2442149578, win 64239, length 0
+13:17:44.390627 ens33 curl.95920 Out IP 10.0.2.15.38590 &amp;gt; 52.74.166.77.443: Flags [F.], seq 3726932781, ack 1510095004, win 63045, length 0
+13:17:44.564990 ens33 curl.95920 In IP 52.74.166.77.443 &amp;gt; 10.0.2.15.38590: Flags [FP.], seq 1510095028, ack 3726932782, win 64239, length 0
+4 packets captured
+4 packets received by filter
+0 packets dropped by kernel
+&lt;/pre&gt;
+&lt;/div&gt;
+&lt;div class="section" id="capture-packets-based-on-a-specified-process-name"&gt;
+&lt;h3 id="hidcapture-packets-based-on-a-specified-process-name"&gt;Capture packets based on a specified process name&lt;a class="headerlink" href="#hidcapture-packets-based-on-a-specified-process-name" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
+&lt;p&gt;You can capture packets for a specified process name by using the &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;--pname&lt;/span&gt;&lt;/tt&gt; parameter to specify the process name (comm).&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+$ sudo ptcpdump -i any -c 2 --pname curl
+2024-07-07 13:23:18 WARN ptcpdump: verbose output suppressed, use -v[v]... for verbose output
+2024-07-07 13:23:18 WARN capturing on any, link-type EN10MB (Ethernet), snapshot length 262144 bytes
+13:23:24.881499 lo curl.26511 Out IP 127.0.0.1.43332 &amp;gt; 127.0.0.53.53: 44133+ [1au] A? mozillazg.com. (42)
+13:23:24.881663 lo curl.26511 Out IP 127.0.0.1.43332 &amp;gt; 127.0.0.53.53: 14694+ [1au] AAAA? mozillazg.com. (42)
+2 packets captured
+2 packets received by filter
+0 packets dropped by kernel
+&lt;/pre&gt;
+&lt;/div&gt;
+&lt;div class="section" id="capture-packets-by-executing-the-target-program"&gt;
+&lt;h3 id="hidcapture-packets-by-executing-the-target-program"&gt;Capture packets by executing the target program&lt;a class="headerlink" href="#hidcapture-packets-by-executing-the-target-program" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
+&lt;p&gt;If needed, you can capture packets for specific programs by running the target program with the &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;--&lt;/span&gt;&lt;/tt&gt; parameter.&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+$ sudo ptcpdump -i any -- curl -I https://mozillazg.com
+2024-07-07 13:26:44 WARN ptcpdump: verbose output suppressed, use -v[v]... for verbose output
+2024-07-07 13:26:44 WARN capturing on any, link-type EN10MB (Ethernet), snapshot length 262144 bytes
+13:26:44.055757 lo curl.28094 Out IP 127.0.0.1.48826 &amp;gt; 127.0.0.53.53: 8942+ [1au] A? mozillazg.com. (42)
+13:26:44.055914 lo curl.28094 Out IP 127.0.0.1.48826 &amp;gt; 127.0.0.53.53: 34274+ [1au] AAAA? mozillazg.com. (42)
+13:26:44.775840 lo curl.28094 In IP 127.0.0.53.53 &amp;gt; 127.0.0.1.48826: 8942 3/0/1 CNAME mozillazg.netlify.com., A 13.251.96.10, A 46.137.195.11 (106)
+13:26:45.135988 lo curl.28094 In IP 127.0.0.53.53 &amp;gt; 127.0.0.1.48826: 34274 3/0/1 CNAME mozillazg.netlify.com., AAAA 2406:da18:880:3802::c8, AAAA 2406:da18:b3d:e202::64 (130)
+13:26:45.136819 wlp4s0 curl.28094 Out IP6 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744 &amp;gt; 2406:da18:880:3802::c8.443: Flags [S], seq 3460683104, win 64800, length 0
+13:26:45.310505 wlp4s0 curl.28094 In IP6 2406:da18:880:3802::c8.443 &amp;gt; 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744: Flags [S.], seq 630810442, ack 3460683105, win 65232, length 0
+13:26:45.310821 wlp4s0 curl.28094 Out IP6 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744 &amp;gt; 2406:da18:880:3802::c8.443: Flags [.], seq 3460683105, ack 630810443, win 507, length 0
+13:26:45.414551 wlp4s0 curl.28094 Out IP6 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744 &amp;gt; 2406:da18:880:3802::c8.443: Flags [P.], seq 3460683105:3460683622, ack 630810443, win 507, length 517
+13:26:45.595214 wlp4s0 curl.28094 In IP6 2406:da18:880:3802::c8.443 &amp;gt; 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744: Flags [.], seq 630810443, ack 3460683622, win 127, length 0
+13:26:45.595413 wlp4s0 curl.28094 In IP6 2406:da18:880:3802::c8.443 &amp;gt; 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744: Flags [.], seq 630810443:630811651, ack 3460683622, win 127, length 1208
+13:26:45.595595 wlp4s0 curl.28094 Out IP6 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744 &amp;gt; 2406:da18:880:3802::c8.443: Flags [.], seq 3460683622, ack 630811651, win 501, length 0
+13:26:45.595702 wlp4s0 curl.28094 In IP6 2406:da18:880:3802::c8.443 &amp;gt; 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744: Flags [P.], seq 630811651:630812859, ack 3460683622, win 127, length 1208
+13:26:45.595797 wlp4s0 curl.28094 Out IP6 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744 &amp;gt; 2406:da18:880:3802::c8.443: Flags [.], seq 3460683622, ack 630812859, win 492, length 0
+13:26:45.595862 wlp4s0 curl.28094 In IP6 2406:da18:880:3802::c8.443 &amp;gt; 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744: Flags [P.], seq 630812859:630813338, ack 3460683622, win 127, length 479
+13:26:45.595934 wlp4s0 curl.28094 Out IP6 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744 &amp;gt; 2406:da18:880:3802::c8.443: Flags [.], seq 3460683622, ack 630813338, win 489, length 0
+13:26:45.600998 wlp4s0 curl.28094 Out IP6 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744 &amp;gt; 2406:da18:880:3802::c8.443: Flags [P.], seq 3460683622:3460683686, ack 630813338, win 489, length 64
+13:26:45.601344 wlp4s0 curl.28094 Out IP6 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744 &amp;gt; 2406:da18:880:3802::c8.443: Flags [P.], seq 3460683686:3460683781, ack 630813338, win 489, length 95
+13:26:45.616759 wlp4s0 curl.28094 Out IP6 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744 &amp;gt; 2406:da18:880:3802::c8.443: Flags [P.], seq 3460683781:3460683882, ack 630813338, win 501, length 101
+13:26:45.779516 wlp4s0 curl.28094 In IP6 2406:da18:880:3802::c8.443 &amp;gt; 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744: Flags [.], seq 630813338, ack 3460683781, win 127, length 0
+13:26:45.779792 wlp4s0 curl.28094 In IP6 2406:da18:880:3802::c8.443 &amp;gt; 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744: Flags [P.], seq 630813338:630813399, ack 3460683781, win 127, length 61
+13:26:45.779996 wlp4s0 curl.28094 In IP6 2406:da18:880:3802::c8.443 &amp;gt; 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744: Flags [P.], seq 630813399:630813443, ack 3460683781, win 127, length 44
+13:26:45.780318 wlp4s0 curl.28094 Out IP6 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744 &amp;gt; 2406:da18:880:3802::c8.443: Flags [P.], seq 3460683882:3460683913, ack 630813443, win 501, length 31
+HTTP/2 200
+13:26:45.788787 wlp4s0 curl.28094 In IP6 2406:da18:880:3802::c8.443 &amp;gt; 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744: Flags [P.], seq 630813443:630813677, ack 3460683882, win 127, length 234
+accept-ranges: bytes
+age: 79059
+cache-control: public,max-age=0,must-revalidate
+cache-status: &amp;quot;Netlify Edge&amp;quot;; hit
+content-type: text/html; charset=UTF-8
+date: Sun, 07 Jul 2024 05:26:44 GMT
+etag: &amp;quot;80cf37f5974e2232d976c6f622121dee-ssl&amp;quot;
+server: Netlify
+strict-transport-security: max-age=31536000
+x-nf-request-id: 01J25THACQSN9364YHSR2C0X5F
+content-length: 11727
+
+13:26:45.789558 wlp4s0 curl.28094 Out IP6 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744 &amp;gt; 2406:da18:880:3802::c8.443: Flags [P.], seq 3460683913:3460683937, ack 630813677, win 501, length 24
+13:26:45.791514 wlp4s0 curl.28094 Out IP6 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744 &amp;gt; 2406:da18:880:3802::c8.443: Flags [F.], seq 3460683937, ack 630813677, win 501, length 0
+13:26:45.963642 wlp4s0 curl.28094 In IP6 2406:da18:880:3802::c8.443 &amp;gt; 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744: Flags [.], seq 630813677, ack 3460683937, win 127, length 0
+13:26:45.963956 wlp4s0 curl.28094 In IP6 2406:da18:880:3802::c8.443 &amp;gt; 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744: Flags [P.], seq 630813677:630813701, ack 3460683937, win 127, length 24
+13:26:45.964172 wlp4s0 curl.28094 Out IP6 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744 &amp;gt; 2406:da18:880:3802::c8.443: Flags [R], seq 3460683937, win 0, length 0
+13:26:45.964415 wlp4s0 curl.28094 In IP6 2406:da18:880:3802::c8.443 &amp;gt; 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744: Flags [F.], seq 630813701, ack 3460683937, win 127, length 0
+13:26:45.964506 wlp4s0 curl.28094 Out IP6 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744 &amp;gt; 2406:da18:880:3802::c8.443: Flags [R], seq 3460683937, win 0, length 0
+13:26:45.966158 wlp4s0 curl.28094 In IP6 2406:da18:880:3802::c8.443 &amp;gt; 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744: Flags [.], seq 630813702, ack 3460683938, win 127, length 0
+13:26:45.966299 wlp4s0 curl.28094 Out IP6 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744 &amp;gt; 2406:da18:880:3802::c8.443: Flags [R], seq 3460683938, win 0, length 0
+32 packets captured
+32 packets received by filter
+0 packets dropped by kernel
+&lt;/pre&gt;
+&lt;/div&gt;
+&lt;div class="section" id="capturing-packets-for-a-specific-container"&gt;
+&lt;h3 id="hidcapturing-packets-for-a-specific-container"&gt;Capturing Packets for a Specific Container&lt;a class="headerlink" href="#hidcapturing-packets-for-a-specific-container" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
+&lt;p&gt;You can capture network packets by specifying the container ID using the &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;--container-id&lt;/span&gt;&lt;/tt&gt; parameter.&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+$ sudo ptcpdump -i any -c 2 --container-id 36f0310403b1
+2024-07-07 13:36:19 WARN ptcpdump: verbose output suppressed, use -v[v]... for verbose output
+2024-07-07 13:36:19 WARN capturing on any, link-type EN10MB (Ethernet), snapshot length 262144 bytes
+13:36:24.191242 veth09dec8f curl.32636 In IP 172.19.0.2.48960 &amp;gt; 18.139.194.139.443: Flags [S], seq 3213779351, win 64240, length 0, Container [kind-control-plane]
+13:36:24.191369 wlp4s0 curl.32636 Out IP 192.168.1.50.48960 &amp;gt; 18.139.194.139.443: Flags [S], seq 3213779351, win 64240, length 0, Container [kind-control-plane]
+2 packets captured
+2 packets received by filter
+0 packets dropped by kernel
+&lt;/pre&gt;
+&lt;p&gt;You can also capture packets by specifying the container name using the &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;--container-name&lt;/span&gt;&lt;/tt&gt; parameter.&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+$ sudo ptcpdump -i any -c 2 --container-name kind-control-plane
+2024-07-07 13:37:16 WARN ptcpdump: verbose output suppressed, use -v[v]... for verbose output
+2024-07-07 13:37:16 WARN capturing on any, link-type EN10MB (Ethernet), snapshot length 262144 bytes
+13:37:22.560764 veth09dec8f curl.33093 In IP 172.19.0.2.39084 &amp;gt; 18.139.194.139.443: Flags [S], seq 3645727033, win 64240, length 0, Container [kind-control-plane]
+13:37:22.561010 wlp4s0 curl.33093 Out IP 192.168.1.50.39084 &amp;gt; 18.139.194.139.443: Flags [S], seq 3645727033, win 64240, length 0, Container [kind-control-plane]
+2 packets captured
+2 packets received by filter
+0 packets dropped by kernel
+&lt;/pre&gt;
+&lt;/div&gt;
+&lt;div class="section" id="capture-packets-for-a-specific-pod"&gt;
+&lt;h3 id="hidcapture-packets-for-a-specific-pod"&gt;Capture packets for a specific Pod&lt;a class="headerlink" href="#hidcapture-packets-for-a-specific-pod" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
+&lt;p&gt;You can capture packets by specifying the Pod name using the &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;--pod-name&lt;/span&gt;&lt;/tt&gt; parameter.
+The format for the parameter value should be &lt;tt class="docutils literal"&gt;&amp;lt;pod &lt;span class="pre"&gt;name&amp;gt;.&amp;lt;pod&lt;/span&gt; namespace&amp;gt;&lt;/tt&gt;.&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+$ sudo ptcpdump -i any -c 2 --pod-name test.default
+2024-07-07 13:38:29 WARN ptcpdump: verbose output suppressed, use -v[v]... for verbose output
+2024-07-07 13:38:29 WARN capturing on any, link-type EN10MB (Ethernet), snapshot length 262144 bytes
+13:38:34.175752 eth0 wget.33660 Out IP 172.19.0.2.51564 &amp;gt; 13.215.144.61.443: Flags [S], seq 567383917, win 64240, length 0, Container [test], Pod [test.default]
+13:38:34.372894 eth0 wget.33660 In IP 13.215.144.61.443 &amp;gt; 172.19.0.2.51564: Flags [S.], seq 2654865684, ack 567383918, win 65084, length 0, Container [test], Pod [test.default]
+2 packets captured
+3 packets received by filter
+0 packets dropped by kernel
+&lt;/pre&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;div class="section" id="save-the-data-in-pcapng-format-and-analyze-it-using-tcpdump-or-wireshark"&gt;
+&lt;h2 id="hidsave-the-data-in-pcapng-format-and-analyze-it-using-tcpdump-or-wireshark"&gt;Save the data in pcapng format and analyze it using tcpdump or Wireshark&lt;a class="headerlink" href="#hidsave-the-data-in-pcapng-format-and-analyze-it-using-tcpdump-or-wireshark" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;div class="section" id="save-as-pcapng-format"&gt;
+&lt;h3 id="hidsave-as-pcapng-format"&gt;Save as pcapng format&lt;a class="headerlink" href="#hidsave-as-pcapng-format" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
+&lt;p&gt;You can save captured data in pcapng format by using the &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;-w&lt;/span&gt;&lt;/tt&gt; parameter.&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+$ sudo ptcpdump -i any -c 5 -w demo.pcapng
+2024-07-07 13:41:32 WARN ptcpdump: verbose output suppressed, use -v[v]... for verbose output
+2024-07-07 13:41:32 WARN capturing on any, link-type EN10MB (Ethernet), snapshot length 262144 bytes
+5 packets captured
+22 packets received by filter
+0 packets dropped by kernel
+&lt;/pre&gt;
+&lt;/div&gt;
+&lt;div class="section" id="analyzing-with-tcpdump"&gt;
+&lt;h3 id="hidanalyzing-with-tcpdump"&gt;Analyzing with tcpdump&lt;a class="headerlink" href="#hidanalyzing-with-tcpdump" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
+&lt;p&gt;You can analyze the captured data using tcpdump through a pipeline method.&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+$ sudo ptcpdump -i any -c 5 -w - port 80 | tcpdump -n -r -
+reading from file -, link-type EN10MB (Ethernet), snapshot length 65535
+2024-07-07 13:44:33 WARN ptcpdump: verbose output suppressed, use -v[v]... for verbose output
+2024-07-07 13:44:33 WARN capturing on any, link-type EN10MB (Ethernet), snapshot length 262144 bytes
+13:44:44.530637 IP6 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.50858 &amp;gt; 2406:da18:880:3801::c8.80: Flags [S], seq 495824072, win 64800, options [mss 1440,sackOK,TS val 2411675580 ecr 0,nop,wscale 7], length 0
+13:44:44.708902 IP6 2406:da18:880:3801::c8.80 &amp;gt; 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.50858: Flags [S.], seq 640438481, ack 495824073, win 65232, options [mss 1220,sackOK,TS val 1591525382 ecr 2411675580,nop,wscale 9], length 0
+13:44:44.709261 IP6 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.50858 &amp;gt; 2406:da18:880:3801::c8.80: Flags [.], ack 1, win 507, options [nop,nop,TS val 2411675670 ecr 1591525382], length 0
+13:44:44.709475 IP6 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.50858 &amp;gt; 2406:da18:880:3801::c8.80: Flags [P.], seq 1:78, ack 1, win 507, options [nop,nop,TS val 2411675670 ecr 1591525382], length 77: HTTP: GET / HTTP/1.1
+5 packets captured
+6 packets received by filter
+0 packets dropped by kernel
+13:44:44.877110 IP6 2406:da18:880:3801::c8.80 &amp;gt; 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.50858: Flags [P.], seq 1:266, ack 78, win 128, options [nop,nop,TS val 1591525469 ecr 2411675670], length 265: HTTP: HTTP/1.1 301 Moved Permanently
+&lt;/pre&gt;
+&lt;p&gt;You can also analyze the captured data by reading files using tcpdump.&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+$ tcpdump -n -r demo.pcapng
+reading from file demo.pcapng, link-type EN10MB (Ethernet), snapshot length 65535
+13:47:41.169584 IP6 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.43038 &amp;gt; 2406:da18:b3d:e201::64.80: Flags [S], seq 3876639697, win 64800, options [mss 1440,sackOK,TS val 2072195434 ecr 0,nop,wscale 7], length 0
+13:47:41.571055 IP 192.168.1.50.60580 &amp;gt; 18.139.194.139.80: Flags [S], seq 481256927, win 64240, options [mss 1460,sackOK,TS val 2707199178 ecr 0,nop,wscale 7], length 0
+13:47:41.956270 IP6 2406:da18:b3d:e201::64.80 &amp;gt; 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.43038: Flags [S.], seq 2283576526, ack 3876639698, win 65232, options [mss 1220,sackOK,TS val 4276006323 ecr 2072195434,nop,wscale 9], length 0
+13:47:41.956437 IP6 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.43038 &amp;gt; 2406:da18:b3d:e201::64.80: Flags [.], ack 1, win 507, options [nop,nop,TS val 2072195828 ecr 4276006323], length 0
+13:47:41.956733 IP6 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.43038 &amp;gt; 2406:da18:b3d:e201::64.80: Flags [P.], seq 1:78, ack 1, win 507, options [nop,nop,TS val 2072195828 ecr 4276006323], length 77: HTTP: GET / HTTP/1.1
+&lt;/pre&gt;
+&lt;/div&gt;
+&lt;div class="section" id="analyzing-network-traffic-with-wireshark"&gt;
+&lt;h3 id="hidanalyzing-network-traffic-with-wireshark"&gt;Analyzing Network Traffic with Wireshark&lt;a class="headerlink" href="#hidanalyzing-network-traffic-with-wireshark" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
+&lt;p&gt;When using Wireshark to open a saved pcapng format file, the relevant process, container,
+and Pod information will be displayed in the Wireshark interface:&lt;/p&gt;
+&lt;img alt="" src="/static/images/bpf/ptcpdump-wireshark.png" /&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;div class="section" id="references"&gt;
+&lt;h2 id="hidreferences"&gt;References&lt;a class="headerlink" href="#hidreferences" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;ul class="simple"&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://github.com/mozillazg/ptcpdump"&gt;mozillazg/ptcpdump: Process-aware, eBPF-based tcpdump&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://www.tcpdump.org/manpages/tcpdump.1-4.99.4.html"&gt;tcpdump(1) man page | TCPDUMP &amp;amp; LIBPCAP&lt;/a&gt;&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/div&gt;
+</summary><category term="ebpf"></category><category term="ptcpdump"></category><category term="tcpdump"></category><category term="pcapng"></category><category term="wireshark"></category><category term="container"></category><category term="pod"></category><category term="en-version"></category></entry><entry><title>一个使用 tracepoint 追踪 execve 系统调用时无法正确获取系统调用参数的场景</title><link href="https://mozillazg.com/2024/03/ebpf-tracepoint-syscalls-sys-enter-execve-can-not-get-filename-argv-values-case.html" rel="alternate"></link><published>2024-03-31T00:00:00+00:00</published><updated>2024-03-31T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2024-03-31:2024/03/ebpf-tracepoint-syscalls-sys-enter-execve-can-not-get-filename-argv-values-case.html</id><summary type="html">&lt;div class="section" id="section-1"&gt;
 &lt;h2 id="hidsection-1"&gt;背景&lt;a class="headerlink" href="#hidsection-1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;p&gt;前段时间有网友在 slack 上的 &lt;a class="reference external" href="https://ebpf.io/slack"&gt;ebpf 频道&lt;/a&gt;
 中咨询一个他遇到的问题：&lt;/p&gt;
@@ -889,556 +1476,4 @@ $ git log pr47
 $ git checkout pr47
 Switched to branch 'pr47'
 &lt;/pre&gt;
-</summary><category term="en-version"></category></entry><entry><title>Amazon EKS Pod Identity 新特性探索</title><link href="https://mozillazg.com/2023/12/security-deep-dive-into-aws-eks-pod-identity-feature.html" rel="alternate"></link><published>2023-12-03T00:00:00+00:00</published><updated>2023-12-03T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2023-12-03:2023/12/security-deep-dive-into-aws-eks-pod-identity-feature.html</id><summary type="html">&lt;p&gt;本文将简单探索一下 AWS 本周新发布的名为 &lt;a class="reference external" href="https://aws.amazon.com/blogs/aws/amazon-eks-pod-identity-simplifies-iam-permissions-for-applications-on-amazon-eks-clusters/"&gt;Amazon EKS Pod Identity&lt;/a&gt; 的 EKS 安全特性。&lt;/p&gt;
-&lt;div class="section" id="section-1"&gt;
-&lt;h2 id="hidsection-1"&gt;功能介绍&lt;a class="headerlink" href="#hidsection-1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
-&lt;p&gt;Amazon EKS Pod Identity 是 AWS 对 EKS 原有的 &lt;a class="reference external" href="https://aws.amazon.com/blogs/opensource/introducing-fine-grained-iam-roles-service-accounts/"&gt;IAM roles for service accounts (IRSA)&lt;/a&gt;  功能的补充，通过新增的 EKS Pod Identity 功能，用户可以用更简便的方式实现为 Pod 安全的授予 AWS API 访问权限，
-并且所有的配置管理操作都可以通过 AWS API 或者控制台完成。&lt;/p&gt;
-&lt;/div&gt;
-&lt;div class="section" id="section-2"&gt;
-&lt;h2 id="hidsection-2"&gt;使用方法&lt;a class="headerlink" href="#hidsection-2" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
-&lt;p&gt;用户只需执行如下操作, 即可基于 EKS Pod Identity 特性实现为 Pod 内应用安全的授予 AWS API 访问权限。&lt;/p&gt;
-&lt;ol class="arabic simple"&gt;
-&lt;li&gt;首先，需要创建一个 IAM 角色，确保该角色信任 &lt;tt class="docutils literal"&gt;pods.eks.amazonaws.com&lt;/tt&gt; 。角色信任策略示例如下。&lt;/li&gt;
-&lt;/ol&gt;
-&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="p"&gt;{&lt;/span&gt;
-&lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="nt"&gt;&amp;quot;Version&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="s2"&gt;&amp;quot;2012-10-17&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;
-&lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="nt"&gt;&amp;quot;Statement&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="p"&gt;[&lt;/span&gt;
-&lt;span class="w"&gt;        &lt;/span&gt;&lt;span class="p"&gt;{&lt;/span&gt;
-&lt;span class="w"&gt;            &lt;/span&gt;&lt;span class="nt"&gt;&amp;quot;Effect&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="s2"&gt;&amp;quot;Allow&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;
-&lt;span class="w"&gt;            &lt;/span&gt;&lt;span class="nt"&gt;&amp;quot;Principal&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="p"&gt;{&lt;/span&gt;
-&lt;span class="w"&gt;                &lt;/span&gt;&lt;span class="nt"&gt;&amp;quot;Service&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="s2"&gt;&amp;quot;pods.eks.amazonaws.com&amp;quot;&lt;/span&gt;
-&lt;span class="w"&gt;            &lt;/span&gt;&lt;span class="p"&gt;},&lt;/span&gt;
-&lt;span class="w"&gt;            &lt;/span&gt;&lt;span class="nt"&gt;&amp;quot;Action&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="p"&gt;[&lt;/span&gt;
-&lt;span class="w"&gt;                &lt;/span&gt;&lt;span class="s2"&gt;&amp;quot;sts:AssumeRole&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;
-&lt;span class="w"&gt;                &lt;/span&gt;&lt;span class="s2"&gt;&amp;quot;sts:TagSession&amp;quot;&lt;/span&gt;
-&lt;span class="w"&gt;            &lt;/span&gt;&lt;span class="p"&gt;]&lt;/span&gt;
-&lt;span class="w"&gt;        &lt;/span&gt;&lt;span class="p"&gt;}&lt;/span&gt;
-&lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="p"&gt;]&lt;/span&gt;
-&lt;span class="p"&gt;}&lt;/span&gt;
-&lt;/pre&gt;&lt;/div&gt;
-&lt;ol class="arabic simple" start="2"&gt;
-&lt;li&gt;其次，需要在 EKS 集群内安装 &lt;a class="reference external" href="https://docs.aws.amazon.com/eks/latest/userguide/pod-id-agent-setup.html"&gt;eks-pod-identity-agent&lt;/a&gt;
-组件（支持通过控制台安装）。&lt;/li&gt;
-&lt;/ol&gt;
-&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;aws&lt;span class="w"&gt; &lt;/span&gt;eks&lt;span class="w"&gt; &lt;/span&gt;create-addon&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="se"&gt;\&lt;/span&gt;
---cluster-name&lt;span class="w"&gt; &lt;/span&gt;&amp;lt;CLUSTER_NAME&amp;gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="se"&gt;\&lt;/span&gt;
---addon-name&lt;span class="w"&gt; &lt;/span&gt;eks-pod-identity-agent&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="se"&gt;\&lt;/span&gt;
---addon-version&lt;span class="w"&gt; &lt;/span&gt;v1.0.0-eksbuild.1
-&lt;/pre&gt;&lt;/div&gt;
-&lt;ol class="arabic simple" start="3"&gt;
-&lt;li&gt;然后，需要配置应用 Pod 所使用的 Service Account 与 AWS IAM 角色之间的关联关系，
-允许使用该 Service Account 的应用扮演特定的 IAM 角色（支持通过控制台配置）。&lt;/li&gt;
-&lt;/ol&gt;
-&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;aws&lt;span class="w"&gt; &lt;/span&gt;eks&lt;span class="w"&gt; &lt;/span&gt;create-pod-identity-association&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="se"&gt;\&lt;/span&gt;
-&lt;span class="w"&gt;  &lt;/span&gt;--cluster-name&lt;span class="w"&gt; &lt;/span&gt;&amp;lt;CLUSTER_NAME&amp;gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="se"&gt;\&lt;/span&gt;
-&lt;span class="w"&gt;  &lt;/span&gt;--namespace&lt;span class="w"&gt; &lt;/span&gt;&amp;lt;NAMESPACE&amp;gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="se"&gt;\&lt;/span&gt;
-&lt;span class="w"&gt;  &lt;/span&gt;--service-account&lt;span class="w"&gt; &lt;/span&gt;&amp;lt;SERVICE_ACCOUNT_NAME&amp;gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="se"&gt;\&lt;/span&gt;
-&lt;span class="w"&gt;  &lt;/span&gt;--role-arn&lt;span class="w"&gt; &lt;/span&gt;&amp;lt;IAM_ROLE_ARN&amp;gt;
-&lt;/pre&gt;&lt;/div&gt;
-&lt;ol class="arabic simple" start="4"&gt;
-&lt;li&gt;最后，应用程序需要更新使用最新的支持 EKS Pod Identity 特性的 &lt;a class="reference external" href="https://docs.aws.amazon.com/eks/latest/userguide/pod-id-minimum-sdk.html"&gt;AWS SDK&lt;/a&gt; ，
-并且代码里需要使用 SDK 提供的 &lt;a class="reference external" href="https://docs.aws.amazon.com/sdkref/latest/guide/standardized-credentials.html#credentialProviderChain"&gt;默认凭证搜索逻辑&lt;/a&gt;
-或者显式调用 EKS Pod Identity 依赖的 &lt;a class="reference external" href="https://docs.aws.amazon.com/sdkref/latest/guide/feature-container-credentials.html"&gt;Container credential provider&lt;/a&gt; 。&lt;/li&gt;
-&lt;/ol&gt;
-&lt;/div&gt;
-&lt;div class="section" id="section-3"&gt;
-&lt;h2 id="hidsection-3"&gt;工作流程&lt;a class="headerlink" href="#hidsection-3" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
-&lt;p&gt;EKS Pod Identity 特性的工作流程如下。&lt;/p&gt;
-&lt;p&gt;&lt;img alt="image" src="/static/images/security/eks-pod-identity.png" /&gt;&lt;/p&gt;
-&lt;ol class="arabic simple"&gt;
-&lt;li&gt;当用户/Controller 向 apiserver 提交 Pod 时，会触发 &lt;a class="reference external" href="https://github.com/aws/amazon-eks-pod-identity-webhook"&gt;eks-pod-identity-webhook&lt;/a&gt; 的 mutating webhook 流程。&lt;/li&gt;
-&lt;li&gt;eks-pod-identity-webhook 的 mutating webhook 流程会为 Pod 挂载 service account oidc token 文件以及配置环境变量
-(&lt;tt class="docutils literal"&gt;AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE&lt;/tt&gt;, &lt;tt class="docutils literal"&gt;AWS_CONTAINER_CREDENTIALS_FULL_URI&lt;/tt&gt; ）。&lt;/li&gt;
-&lt;/ol&gt;
-&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="p p-Indicator"&gt;-&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nt"&gt;env&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;
-&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="w w-Error"&gt; &lt;/span&gt;&lt;span class="p p-Indicator"&gt;-&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nt"&gt;name&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l l-Scalar l-Scalar-Plain"&gt;AWS_STS_REGIONAL_ENDPOINTS&lt;/span&gt;
-&lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="nt"&gt;value&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l l-Scalar l-Scalar-Plain"&gt;regional&lt;/span&gt;
-&lt;span class="w"&gt;  &lt;/span&gt;&lt;span class="p p-Indicator"&gt;-&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nt"&gt;name&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l l-Scalar l-Scalar-Plain"&gt;AWS_DEFAULT_REGION&lt;/span&gt;
-&lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="nt"&gt;value&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l l-Scalar l-Scalar-Plain"&gt;us-west-2&lt;/span&gt;
-&lt;span class="w"&gt;  &lt;/span&gt;&lt;span class="p p-Indicator"&gt;-&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nt"&gt;name&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l l-Scalar l-Scalar-Plain"&gt;AWS_REGION&lt;/span&gt;
-&lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="nt"&gt;value&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l l-Scalar l-Scalar-Plain"&gt;us-west-2&lt;/span&gt;
-&lt;span class="w"&gt;  &lt;/span&gt;&lt;span class="p p-Indicator"&gt;-&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nt"&gt;name&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l l-Scalar l-Scalar-Plain"&gt;AWS_CONTAINER_CREDENTIALS_FULL_URI&lt;/span&gt;
-&lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="nt"&gt;value&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l l-Scalar l-Scalar-Plain"&gt;http://169.254.170.23/v1/credentials&lt;/span&gt;
-&lt;span class="w"&gt;  &lt;/span&gt;&lt;span class="p p-Indicator"&gt;-&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nt"&gt;name&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l l-Scalar l-Scalar-Plain"&gt;AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE&lt;/span&gt;
-&lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="nt"&gt;value&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l l-Scalar l-Scalar-Plain"&gt;/var/run/secrets/pods.eks.amazonaws.com/serviceaccount/eks-pod-identity-token&lt;/span&gt;
-&lt;span class="w"&gt;  &lt;/span&gt;&lt;span class="nt"&gt;volumeMounts&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;
-&lt;span class="w"&gt;  &lt;/span&gt;&lt;span class="p p-Indicator"&gt;-&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nt"&gt;mountPath&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l l-Scalar l-Scalar-Plain"&gt;/var/run/secrets/pods.eks.amazonaws.com/serviceaccount&lt;/span&gt;
-&lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="nt"&gt;name&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l l-Scalar l-Scalar-Plain"&gt;eks-pod-identity-token&lt;/span&gt;
-&lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="nt"&gt;readOnly&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l l-Scalar l-Scalar-Plain"&gt;true&lt;/span&gt;
-&lt;span class="nt"&gt;volumes&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;
-&lt;span class="p p-Indicator"&gt;-&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nt"&gt;name&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l l-Scalar l-Scalar-Plain"&gt;eks-pod-identity-token&lt;/span&gt;
-&lt;span class="w"&gt;  &lt;/span&gt;&lt;span class="nt"&gt;projected&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;
-&lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="nt"&gt;defaultMode&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l l-Scalar l-Scalar-Plain"&gt;420&lt;/span&gt;
-&lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="nt"&gt;sources&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;
-&lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="p p-Indicator"&gt;-&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nt"&gt;serviceAccountToken&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;
-&lt;span class="w"&gt;        &lt;/span&gt;&lt;span class="nt"&gt;audience&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l l-Scalar l-Scalar-Plain"&gt;pods.eks.amazonaws.com&lt;/span&gt;
-&lt;span class="w"&gt;        &lt;/span&gt;&lt;span class="nt"&gt;expirationSeconds&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l l-Scalar l-Scalar-Plain"&gt;86400&lt;/span&gt;
-&lt;span class="w"&gt;        &lt;/span&gt;&lt;span class="nt"&gt;path&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l l-Scalar l-Scalar-Plain"&gt;eks-pod-identity-token&lt;/span&gt;
-&lt;/pre&gt;&lt;/div&gt;
-&lt;ol class="arabic simple" start="3"&gt;
-&lt;li&gt;Pod 容器内的应用使用的 AWS SDK 将使用通过环境变量 &lt;tt class="docutils literal"&gt;AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE&lt;/tt&gt; 获取的
-service account oidc token 访问环境变量 &lt;tt class="docutils literal"&gt;AWS_CONTAINER_CREDENTIALS_FULL_URI&lt;/tt&gt; 指向的地址
-（&lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;http://169.254.170.23/v1/credentials&lt;/span&gt;&lt;/tt&gt;）获取 AWS sts token。&lt;/li&gt;
-&lt;/ol&gt;
-&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="l l-Scalar l-Scalar-Plain"&gt;$ curl $AWS_CONTAINER_CREDENTIALS_FULL_URI -H &amp;quot;Authorization&lt;/span&gt;&lt;span class="p p-Indicator"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l l-Scalar l-Scalar-Plain"&gt;$(cat $AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE)&amp;quot; 2&amp;gt;/dev/null |jq&lt;/span&gt;
-&lt;span class="p p-Indicator"&gt;{&lt;/span&gt;
-&lt;span class="w"&gt;  &lt;/span&gt;&lt;span class="s"&gt;&amp;quot;AccessKeyId&amp;quot;&lt;/span&gt;&lt;span class="p p-Indicator"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="s"&gt;&amp;quot;ASXXXXXXXXXXXXX&amp;quot;&lt;/span&gt;&lt;span class="p p-Indicator"&gt;,&lt;/span&gt;
-&lt;span class="w"&gt;  &lt;/span&gt;&lt;span class="s"&gt;&amp;quot;SecretAccessKey&amp;quot;&lt;/span&gt;&lt;span class="p p-Indicator"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="s"&gt;&amp;quot;+j5XXXXXXXX&amp;quot;&lt;/span&gt;&lt;span class="p p-Indicator"&gt;,&lt;/span&gt;
-&lt;span class="w"&gt;  &lt;/span&gt;&lt;span class="s"&gt;&amp;quot;Token&amp;quot;&lt;/span&gt;&lt;span class="p p-Indicator"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="s"&gt;&amp;quot;IQoJb3JpXXXXXXX&amp;quot;&lt;/span&gt;&lt;span class="p p-Indicator"&gt;,&lt;/span&gt;
-&lt;span class="w"&gt;  &lt;/span&gt;&lt;span class="s"&gt;&amp;quot;AccountId&amp;quot;&lt;/span&gt;&lt;span class="p p-Indicator"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="s"&gt;&amp;quot;5XXXXXXXXXXX&amp;quot;&lt;/span&gt;&lt;span class="p p-Indicator"&gt;,&lt;/span&gt;
-&lt;span class="w"&gt;  &lt;/span&gt;&lt;span class="s"&gt;&amp;quot;Expiration&amp;quot;&lt;/span&gt;&lt;span class="p p-Indicator"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="s"&gt;&amp;quot;2023-12-03T13:13:26Z&amp;quot;&lt;/span&gt;
-&lt;span class="p p-Indicator"&gt;}&lt;/span&gt;
-&lt;/pre&gt;&lt;/div&gt;
-&lt;ol class="arabic simple" start="4"&gt;
-&lt;li&gt;&lt;tt class="docutils literal"&gt;AWS_CONTAINER_CREDENTIALS_FULL_URI&lt;/tt&gt; 指向的其实是 Pod 所在节点上部署的 eks-pod-identity-agent 组件 Pod 所暴露的服务。
-eks-pod-identity-agent 收到请求后，将使用传递过来的 oidc token 访问 EKS 新增的 &lt;a class="reference external" href="https://docs.aws.amazon.com/eks/latest/APIReference/API_auth_AssumeRoleForPodIdentity.html"&gt;AssumeRoleForPodIdentity&lt;/a&gt; API 获取所需的 AWS sts token，然后将获取到的 sts token 返回给客户端。&lt;/li&gt;
-&lt;/ol&gt;
-&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="l l-Scalar l-Scalar-Plain"&gt;$ aws eks-auth assume-role-for-pod-identity --cluster-name test --token $(cat $AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE) |jq&lt;/span&gt;
-&lt;span class="l l-Scalar l-Scalar-Plain"&gt;{&lt;/span&gt;
-&lt;span class="w"&gt;  &lt;/span&gt;&lt;span class="l l-Scalar l-Scalar-Plain"&gt;&amp;quot;subject&amp;quot;&lt;/span&gt;&lt;span class="p p-Indicator"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="p p-Indicator"&gt;{&lt;/span&gt;
-&lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="s"&gt;&amp;quot;namespace&amp;quot;&lt;/span&gt;&lt;span class="p p-Indicator"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="s"&gt;&amp;quot;default&amp;quot;&lt;/span&gt;&lt;span class="p p-Indicator"&gt;,&lt;/span&gt;
-&lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="s"&gt;&amp;quot;serviceAccount&amp;quot;&lt;/span&gt;&lt;span class="p p-Indicator"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="s"&gt;&amp;quot;default&amp;quot;&lt;/span&gt;
-&lt;span class="w"&gt;  &lt;/span&gt;&lt;span class="p p-Indicator"&gt;}&lt;/span&gt;&lt;span class="err"&gt;,&lt;/span&gt;
-&lt;span class="w"&gt;  &lt;/span&gt;&lt;span class="s"&gt;&amp;quot;audience&amp;quot;&lt;/span&gt;&lt;span class="p p-Indicator"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="s"&gt;&amp;quot;pods.eks.amazonaws.com&amp;quot;&lt;/span&gt;&lt;span class="err"&gt;,&lt;/span&gt;
-&lt;span class="w"&gt;  &lt;/span&gt;&lt;span class="s"&gt;&amp;quot;podIdentityAssociation&amp;quot;&lt;/span&gt;&lt;span class="p p-Indicator"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="p p-Indicator"&gt;{&lt;/span&gt;
-&lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="s"&gt;&amp;quot;associationArn&amp;quot;&lt;/span&gt;&lt;span class="p p-Indicator"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="s"&gt;&amp;quot;arn:aws:eks:us-west-2:5XXXXXXXXXXX:podidentityassociation/test/a-6aaXXXXXXXXXXXXXX&amp;quot;&lt;/span&gt;&lt;span class="p p-Indicator"&gt;,&lt;/span&gt;
-&lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="s"&gt;&amp;quot;associationId&amp;quot;&lt;/span&gt;&lt;span class="p p-Indicator"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="s"&gt;&amp;quot;a-6aaXXXXXXXXXXXXXX&amp;quot;&lt;/span&gt;
-&lt;span class="w"&gt;  &lt;/span&gt;&lt;span class="p p-Indicator"&gt;}&lt;/span&gt;&lt;span class="err"&gt;,&lt;/span&gt;
-&lt;span class="w"&gt;  &lt;/span&gt;&lt;span class="s"&gt;&amp;quot;assumedRoleUser&amp;quot;&lt;/span&gt;&lt;span class="p p-Indicator"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="p p-Indicator"&gt;{&lt;/span&gt;
-&lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="s"&gt;&amp;quot;arn&amp;quot;&lt;/span&gt;&lt;span class="p p-Indicator"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="s"&gt;&amp;quot;arn:aws:sts::5XXXXXXXXXXX:assumed-role/test-eks-pod-identity/eks-test-XXXXXXXXXXXXXXXX&amp;quot;&lt;/span&gt;&lt;span class="p p-Indicator"&gt;,&lt;/span&gt;
-&lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="s"&gt;&amp;quot;assumeRoleId&amp;quot;&lt;/span&gt;&lt;span class="p p-Indicator"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="s"&gt;&amp;quot;ARXXXXXXXXXXXXXXXXXXX:eks-test-XXXXXXXXXXXXXXXXXX&amp;quot;&lt;/span&gt;
-&lt;span class="w"&gt;  &lt;/span&gt;&lt;span class="p p-Indicator"&gt;}&lt;/span&gt;&lt;span class="err"&gt;,&lt;/span&gt;
-&lt;span class="w"&gt;  &lt;/span&gt;&lt;span class="s"&gt;&amp;quot;credentials&amp;quot;&lt;/span&gt;&lt;span class="p p-Indicator"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="p p-Indicator"&gt;{&lt;/span&gt;
-&lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="s"&gt;&amp;quot;sessionToken&amp;quot;&lt;/span&gt;&lt;span class="p p-Indicator"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="s"&gt;&amp;quot;IQoXXXXX&amp;quot;&lt;/span&gt;&lt;span class="p p-Indicator"&gt;,&lt;/span&gt;
-&lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="s"&gt;&amp;quot;secretAccessKey&amp;quot;&lt;/span&gt;&lt;span class="p p-Indicator"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="s"&gt;&amp;quot;nR4XXXXXX&amp;quot;&lt;/span&gt;&lt;span class="p p-Indicator"&gt;,&lt;/span&gt;
-&lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="s"&gt;&amp;quot;accessKeyId&amp;quot;&lt;/span&gt;&lt;span class="p p-Indicator"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="s"&gt;&amp;quot;ASXXXXXXXXXXXXXXXXXX&amp;quot;&lt;/span&gt;&lt;span class="p p-Indicator"&gt;,&lt;/span&gt;
-&lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="s"&gt;&amp;quot;expiration&amp;quot;&lt;/span&gt;&lt;span class="p p-Indicator"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="s"&gt;&amp;quot;2023-12-03T13:37:22+00:00&amp;quot;&lt;/span&gt;
-&lt;span class="w"&gt;  &lt;/span&gt;&lt;span class="p p-Indicator"&gt;}&lt;/span&gt;
-&lt;span class="err"&gt;}&lt;/span&gt;
-&lt;/pre&gt;&lt;/div&gt;
-&lt;ol class="arabic simple" start="5"&gt;
-&lt;li&gt;应用调用的 AWS SDK 使用获取到的 sts token 访问应用所需的 AWS 云产品 API。&lt;/li&gt;
-&lt;/ol&gt;
-&lt;p&gt;这个流程中有几个关键的组件和信息需要重点关注，下面将逐个说明。&lt;/p&gt;
-&lt;/div&gt;
-&lt;div class="section" id="eks-pod-identity-webhook"&gt;
-&lt;h2 id="hideks-pod-identity-webhook"&gt;eks-pod-identity-webhook&lt;a class="headerlink" href="#hideks-pod-identity-webhook" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
-&lt;p&gt;EKS Pod Identity 功能直接复用 IRSA 功能所依赖的 &lt;a class="reference external" href="https://github.com/aws/amazon-eks-pod-identity-webhook"&gt;eks-pod-identity-webhook&lt;/a&gt; 组件，
-使用这个组件实现为 Pod 自动注入所需的 oidc token 配置以及环境变量配置。并且，
-EKS 集群控制面中部署的 eks-pod-identity-webhook 为 EKS Pod Identity 做了特殊优化，
-只有当对应的 service account 未包含 IRSA 相关配置，并且存在与之关联
-的 IAM 角色信息（通过前面的使用方法中介绍的方法关联角色）时，才会为 Pod 注入 EKS Pod Identity 相关配置。&lt;/p&gt;
-&lt;p&gt;eks-pod-identity-webhook 为了支持 EKS Pod Identity 所作的修改可以参考开源实现（开源实现缺少判断存在关联角色的逻辑）
-对应的 PR &lt;a class="reference external" href="https://github.com/aws/amazon-eks-pod-identity-webhook/pull/189"&gt;#189&lt;/a&gt; 以及
-&lt;a class="reference external" href="https://github.com/aws/amazon-eks-pod-identity-webhook/pull/196"&gt;#196&lt;/a&gt; 。&lt;/p&gt;
-&lt;/div&gt;
-&lt;div class="section" id="eks-pod-identity-agent"&gt;
-&lt;h2 id="hideks-pod-identity-agent"&gt;eks-pod-identity-agent&lt;a class="headerlink" href="#hideks-pod-identity-agent" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
-&lt;p&gt;官方推荐的 EKS Pod Identity 实现方案依赖在集群里安装名为 &lt;a class="reference external" href="https://docs.aws.amazon.com/eks/latest/userguide/pod-id-agent-setup.html"&gt;eks-pod-identity-agent&lt;/a&gt;
-的组件。该组件的工作负载 YAML 如下。&lt;/p&gt;
-&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="nt"&gt;apiVersion&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l l-Scalar l-Scalar-Plain"&gt;apps/v1&lt;/span&gt;
-&lt;span class="nt"&gt;kind&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l l-Scalar l-Scalar-Plain"&gt;DaemonSet&lt;/span&gt;
-&lt;span class="nt"&gt;metadata&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;
-&lt;span class="w"&gt;  &lt;/span&gt;&lt;span class="nt"&gt;annotations&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;
-&lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="nt"&gt;deprecated.daemonset.template.generation&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="s"&gt;&amp;quot;1&amp;quot;&lt;/span&gt;
-&lt;span class="w"&gt;  &lt;/span&gt;&lt;span class="nt"&gt;creationTimestamp&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="s"&gt;&amp;quot;2023-12-03T04:24:15Z&amp;quot;&lt;/span&gt;
-&lt;span class="w"&gt;  &lt;/span&gt;&lt;span class="nt"&gt;generation&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l l-Scalar l-Scalar-Plain"&gt;1&lt;/span&gt;
-&lt;span class="w"&gt;  &lt;/span&gt;&lt;span class="nt"&gt;labels&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;
-&lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="nt"&gt;app.kubernetes.io/instance&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l l-Scalar l-Scalar-Plain"&gt;eks-pod-identity-agent&lt;/span&gt;
-&lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="nt"&gt;app.kubernetes.io/managed-by&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l l-Scalar l-Scalar-Plain"&gt;Helm&lt;/span&gt;
-&lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="nt"&gt;app.kubernetes.io/name&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l l-Scalar l-Scalar-Plain"&gt;eks-pod-identity-agent&lt;/span&gt;
-&lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="nt"&gt;app.kubernetes.io/version&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l l-Scalar l-Scalar-Plain"&gt;0.0.25&lt;/span&gt;
-&lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="nt"&gt;helm.sh/chart&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l l-Scalar l-Scalar-Plain"&gt;eks-pod-identity-agent-1.0.0&lt;/span&gt;
-&lt;span class="w"&gt;  &lt;/span&gt;&lt;span class="nt"&gt;name&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l l-Scalar l-Scalar-Plain"&gt;eks-pod-identity-agent&lt;/span&gt;
-&lt;span class="w"&gt;  &lt;/span&gt;&lt;span class="nt"&gt;namespace&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l l-Scalar l-Scalar-Plain"&gt;kube-system&lt;/span&gt;
-&lt;span class="w"&gt;  &lt;/span&gt;&lt;span class="nt"&gt;resourceVersion&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="s"&gt;&amp;quot;8978&amp;quot;&lt;/span&gt;
-&lt;span class="w"&gt;  &lt;/span&gt;&lt;span class="nt"&gt;uid&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l l-Scalar l-Scalar-Plain"&gt;08c03e91-69d4-460b-8acb-b9f9f546dd87&lt;/span&gt;
-&lt;span class="nt"&gt;spec&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;
-&lt;span class="w"&gt;  &lt;/span&gt;&lt;span class="nt"&gt;revisionHistoryLimit&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l l-Scalar l-Scalar-Plain"&gt;10&lt;/span&gt;
-&lt;span class="w"&gt;  &lt;/span&gt;&lt;span class="nt"&gt;selector&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;
-&lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="nt"&gt;matchLabels&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;
-&lt;span class="w"&gt;      &lt;/span&gt;&lt;span class="nt"&gt;app.kubernetes.io/instance&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l l-Scalar l-Scalar-Plain"&gt;eks-pod-identity-agent&lt;/span&gt;
-&lt;span class="w"&gt;      &lt;/span&gt;&lt;span class="nt"&gt;app.kubernetes.io/name&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l l-Scalar l-Scalar-Plain"&gt;eks-pod-identity-agent&lt;/span&gt;
-&lt;span class="w"&gt;  &lt;/span&gt;&lt;span class="nt"&gt;template&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;
-&lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="nt"&gt;metadata&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;
-&lt;span class="w"&gt;      &lt;/span&gt;&lt;span class="nt"&gt;creationTimestamp&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l l-Scalar l-Scalar-Plain"&gt;null&lt;/span&gt;
-&lt;span class="w"&gt;      &lt;/span&gt;&lt;span class="nt"&gt;labels&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;
-&lt;span class="w"&gt;        &lt;/span&gt;&lt;span class="nt"&gt;app.kubernetes.io/instance&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l l-Scalar l-Scalar-Plain"&gt;eks-pod-identity-agent&lt;/span&gt;
-&lt;span class="w"&gt;        &lt;/span&gt;&lt;span class="nt"&gt;app.kubernetes.io/name&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l l-Scalar l-Scalar-Plain"&gt;eks-pod-identity-agent&lt;/span&gt;
-&lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="nt"&gt;spec&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;
-&lt;span class="w"&gt;      &lt;/span&gt;&lt;span class="nt"&gt;affinity&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;
-&lt;span class="w"&gt;        &lt;/span&gt;&lt;span class="nt"&gt;nodeAffinity&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;
-&lt;span class="w"&gt;          &lt;/span&gt;&lt;span class="nt"&gt;requiredDuringSchedulingIgnoredDuringExecution&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;
-&lt;span class="w"&gt;            &lt;/span&gt;&lt;span class="nt"&gt;nodeSelectorTerms&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;
-&lt;span class="w"&gt;            &lt;/span&gt;&lt;span class="p p-Indicator"&gt;-&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nt"&gt;matchExpressions&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;
-&lt;span class="w"&gt;              &lt;/span&gt;&lt;span class="p p-Indicator"&gt;-&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nt"&gt;key&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l l-Scalar l-Scalar-Plain"&gt;kubernetes.io/os&lt;/span&gt;
-&lt;span class="w"&gt;                &lt;/span&gt;&lt;span class="nt"&gt;operator&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l l-Scalar l-Scalar-Plain"&gt;In&lt;/span&gt;
-&lt;span class="w"&gt;                &lt;/span&gt;&lt;span class="nt"&gt;values&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;
-&lt;span class="w"&gt;                &lt;/span&gt;&lt;span class="p p-Indicator"&gt;-&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l l-Scalar l-Scalar-Plain"&gt;linux&lt;/span&gt;
-&lt;span class="w"&gt;              &lt;/span&gt;&lt;span class="p p-Indicator"&gt;-&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nt"&gt;key&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l l-Scalar l-Scalar-Plain"&gt;kubernetes.io/arch&lt;/span&gt;
-&lt;span class="w"&gt;                &lt;/span&gt;&lt;span class="nt"&gt;operator&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l l-Scalar l-Scalar-Plain"&gt;In&lt;/span&gt;
-&lt;span class="w"&gt;                &lt;/span&gt;&lt;span class="nt"&gt;values&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;
-&lt;span class="w"&gt;                &lt;/span&gt;&lt;span class="p p-Indicator"&gt;-&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l l-Scalar l-Scalar-Plain"&gt;amd64&lt;/span&gt;
-&lt;span class="w"&gt;                &lt;/span&gt;&lt;span class="p p-Indicator"&gt;-&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l l-Scalar l-Scalar-Plain"&gt;arm64&lt;/span&gt;
-&lt;span class="w"&gt;              &lt;/span&gt;&lt;span class="p p-Indicator"&gt;-&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nt"&gt;key&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l l-Scalar l-Scalar-Plain"&gt;eks.amazonaws.com/compute-type&lt;/span&gt;
-&lt;span class="w"&gt;                &lt;/span&gt;&lt;span class="nt"&gt;operator&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l l-Scalar l-Scalar-Plain"&gt;NotIn&lt;/span&gt;
-&lt;span class="w"&gt;                &lt;/span&gt;&lt;span class="nt"&gt;values&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;
-&lt;span class="w"&gt;                &lt;/span&gt;&lt;span class="p p-Indicator"&gt;-&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l l-Scalar l-Scalar-Plain"&gt;fargate&lt;/span&gt;
-&lt;span class="w"&gt;      &lt;/span&gt;&lt;span class="nt"&gt;containers&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;
-&lt;span class="w"&gt;      &lt;/span&gt;&lt;span class="p p-Indicator"&gt;-&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nt"&gt;args&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;
-&lt;span class="w"&gt;        &lt;/span&gt;&lt;span class="p p-Indicator"&gt;-&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l l-Scalar l-Scalar-Plain"&gt;--port&lt;/span&gt;
-&lt;span class="w"&gt;        &lt;/span&gt;&lt;span class="p p-Indicator"&gt;-&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="s"&gt;&amp;quot;80&amp;quot;&lt;/span&gt;
-&lt;span class="w"&gt;        &lt;/span&gt;&lt;span class="p p-Indicator"&gt;-&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l l-Scalar l-Scalar-Plain"&gt;--cluster-name&lt;/span&gt;
-&lt;span class="w"&gt;        &lt;/span&gt;&lt;span class="p p-Indicator"&gt;-&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l l-Scalar l-Scalar-Plain"&gt;test&lt;/span&gt;
-&lt;span class="w"&gt;        &lt;/span&gt;&lt;span class="p p-Indicator"&gt;-&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l l-Scalar l-Scalar-Plain"&gt;--probe-port&lt;/span&gt;
-&lt;span class="w"&gt;        &lt;/span&gt;&lt;span class="p p-Indicator"&gt;-&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="s"&gt;&amp;quot;2703&amp;quot;&lt;/span&gt;
-&lt;span class="w"&gt;        &lt;/span&gt;&lt;span class="nt"&gt;command&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;
-&lt;span class="w"&gt;        &lt;/span&gt;&lt;span class="p p-Indicator"&gt;-&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l l-Scalar l-Scalar-Plain"&gt;/go-runner&lt;/span&gt;
-&lt;span class="w"&gt;        &lt;/span&gt;&lt;span class="p p-Indicator"&gt;-&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l l-Scalar l-Scalar-Plain"&gt;/eks-pod-identity-agent&lt;/span&gt;
-&lt;span class="w"&gt;        &lt;/span&gt;&lt;span class="p p-Indicator"&gt;-&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l l-Scalar l-Scalar-Plain"&gt;server&lt;/span&gt;
-&lt;span class="w"&gt;        &lt;/span&gt;&lt;span class="nt"&gt;env&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;
-&lt;span class="w"&gt;        &lt;/span&gt;&lt;span class="p p-Indicator"&gt;-&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nt"&gt;name&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l l-Scalar l-Scalar-Plain"&gt;AWS_REGION&lt;/span&gt;
-&lt;span class="w"&gt;          &lt;/span&gt;&lt;span class="nt"&gt;value&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l l-Scalar l-Scalar-Plain"&gt;us-west-2&lt;/span&gt;
-&lt;span class="w"&gt;        &lt;/span&gt;&lt;span class="nt"&gt;image&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l l-Scalar l-Scalar-Plain"&gt;602401143452.dkr.ecr.us-west-2.amazonaws.com/eks/eks-pod-identity-agent:0.0.25&lt;/span&gt;
-&lt;span class="w"&gt;        &lt;/span&gt;&lt;span class="nt"&gt;imagePullPolicy&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l l-Scalar l-Scalar-Plain"&gt;Always&lt;/span&gt;
-&lt;span class="w"&gt;        &lt;/span&gt;&lt;span class="nt"&gt;livenessProbe&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;
-&lt;span class="w"&gt;          &lt;/span&gt;&lt;span class="nt"&gt;failureThreshold&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l l-Scalar l-Scalar-Plain"&gt;3&lt;/span&gt;
-&lt;span class="w"&gt;          &lt;/span&gt;&lt;span class="nt"&gt;httpGet&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;
-&lt;span class="w"&gt;            &lt;/span&gt;&lt;span class="nt"&gt;host&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l l-Scalar l-Scalar-Plain"&gt;localhost&lt;/span&gt;
-&lt;span class="w"&gt;            &lt;/span&gt;&lt;span class="nt"&gt;path&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l l-Scalar l-Scalar-Plain"&gt;/healthz&lt;/span&gt;
-&lt;span class="w"&gt;            &lt;/span&gt;&lt;span class="nt"&gt;port&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l l-Scalar l-Scalar-Plain"&gt;probes-port&lt;/span&gt;
-&lt;span class="w"&gt;            &lt;/span&gt;&lt;span class="nt"&gt;scheme&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l l-Scalar l-Scalar-Plain"&gt;HTTP&lt;/span&gt;
-&lt;span class="w"&gt;          &lt;/span&gt;&lt;span class="nt"&gt;initialDelaySeconds&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l l-Scalar l-Scalar-Plain"&gt;30&lt;/span&gt;
-&lt;span class="w"&gt;          &lt;/span&gt;&lt;span class="nt"&gt;periodSeconds&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l l-Scalar l-Scalar-Plain"&gt;10&lt;/span&gt;
-&lt;span class="w"&gt;          &lt;/span&gt;&lt;span class="nt"&gt;successThreshold&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l l-Scalar l-Scalar-Plain"&gt;1&lt;/span&gt;
-&lt;span class="w"&gt;          &lt;/span&gt;&lt;span class="nt"&gt;timeoutSeconds&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l l-Scalar l-Scalar-Plain"&gt;10&lt;/span&gt;
-&lt;span class="w"&gt;        &lt;/span&gt;&lt;span class="nt"&gt;name&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l l-Scalar l-Scalar-Plain"&gt;eks-pod-identity-agent&lt;/span&gt;
-&lt;span class="w"&gt;        &lt;/span&gt;&lt;span class="nt"&gt;ports&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;
-&lt;span class="w"&gt;        &lt;/span&gt;&lt;span class="p p-Indicator"&gt;-&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nt"&gt;containerPort&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l l-Scalar l-Scalar-Plain"&gt;80&lt;/span&gt;
-&lt;span class="w"&gt;          &lt;/span&gt;&lt;span class="nt"&gt;name&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l l-Scalar l-Scalar-Plain"&gt;proxy&lt;/span&gt;
-&lt;span class="w"&gt;          &lt;/span&gt;&lt;span class="nt"&gt;protocol&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l l-Scalar l-Scalar-Plain"&gt;TCP&lt;/span&gt;
-&lt;span class="w"&gt;        &lt;/span&gt;&lt;span class="p p-Indicator"&gt;-&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nt"&gt;containerPort&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l l-Scalar l-Scalar-Plain"&gt;2703&lt;/span&gt;
-&lt;span class="w"&gt;          &lt;/span&gt;&lt;span class="nt"&gt;name&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l l-Scalar l-Scalar-Plain"&gt;probes-port&lt;/span&gt;
-&lt;span class="w"&gt;          &lt;/span&gt;&lt;span class="nt"&gt;protocol&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l l-Scalar l-Scalar-Plain"&gt;TCP&lt;/span&gt;
-&lt;span class="w"&gt;        &lt;/span&gt;&lt;span class="nt"&gt;readinessProbe&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;
-&lt;span class="w"&gt;          &lt;/span&gt;&lt;span class="nt"&gt;failureThreshold&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l l-Scalar l-Scalar-Plain"&gt;30&lt;/span&gt;
-&lt;span class="w"&gt;          &lt;/span&gt;&lt;span class="nt"&gt;httpGet&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;
-&lt;span class="w"&gt;            &lt;/span&gt;&lt;span class="nt"&gt;host&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l l-Scalar l-Scalar-Plain"&gt;localhost&lt;/span&gt;
-&lt;span class="w"&gt;            &lt;/span&gt;&lt;span class="nt"&gt;path&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l l-Scalar l-Scalar-Plain"&gt;/readyz&lt;/span&gt;
-&lt;span class="w"&gt;            &lt;/span&gt;&lt;span class="nt"&gt;port&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l l-Scalar l-Scalar-Plain"&gt;probes-port&lt;/span&gt;
-&lt;span class="w"&gt;            &lt;/span&gt;&lt;span class="nt"&gt;scheme&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l l-Scalar l-Scalar-Plain"&gt;HTTP&lt;/span&gt;
-&lt;span class="w"&gt;          &lt;/span&gt;&lt;span class="nt"&gt;initialDelaySeconds&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l l-Scalar l-Scalar-Plain"&gt;1&lt;/span&gt;
-&lt;span class="w"&gt;          &lt;/span&gt;&lt;span class="nt"&gt;periodSeconds&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l l-Scalar l-Scalar-Plain"&gt;10&lt;/span&gt;
-&lt;span class="w"&gt;          &lt;/span&gt;&lt;span class="nt"&gt;successThreshold&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l l-Scalar l-Scalar-Plain"&gt;1&lt;/span&gt;
-&lt;span class="w"&gt;          &lt;/span&gt;&lt;span class="nt"&gt;timeoutSeconds&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l l-Scalar l-Scalar-Plain"&gt;10&lt;/span&gt;
-&lt;span class="w"&gt;        &lt;/span&gt;&lt;span class="nt"&gt;resources&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="p p-Indicator"&gt;{}&lt;/span&gt;
-&lt;span class="w"&gt;        &lt;/span&gt;&lt;span class="nt"&gt;securityContext&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;
-&lt;span class="w"&gt;          &lt;/span&gt;&lt;span class="nt"&gt;capabilities&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;
-&lt;span class="w"&gt;            &lt;/span&gt;&lt;span class="nt"&gt;add&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;
-&lt;span class="w"&gt;            &lt;/span&gt;&lt;span class="p p-Indicator"&gt;-&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l l-Scalar l-Scalar-Plain"&gt;CAP_NET_BIND_SERVICE&lt;/span&gt;
-&lt;span class="w"&gt;        &lt;/span&gt;&lt;span class="nt"&gt;terminationMessagePath&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l l-Scalar l-Scalar-Plain"&gt;/dev/termination-log&lt;/span&gt;
-&lt;span class="w"&gt;        &lt;/span&gt;&lt;span class="nt"&gt;terminationMessagePolicy&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l l-Scalar l-Scalar-Plain"&gt;File&lt;/span&gt;
-&lt;span class="w"&gt;      &lt;/span&gt;&lt;span class="nt"&gt;dnsPolicy&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l l-Scalar l-Scalar-Plain"&gt;ClusterFirst&lt;/span&gt;
-&lt;span class="w"&gt;      &lt;/span&gt;&lt;span class="nt"&gt;hostNetwork&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l l-Scalar l-Scalar-Plain"&gt;true&lt;/span&gt;
-&lt;span class="w"&gt;      &lt;/span&gt;&lt;span class="nt"&gt;initContainers&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;
-&lt;span class="w"&gt;      &lt;/span&gt;&lt;span class="p p-Indicator"&gt;-&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nt"&gt;command&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;
-&lt;span class="w"&gt;        &lt;/span&gt;&lt;span class="p p-Indicator"&gt;-&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l l-Scalar l-Scalar-Plain"&gt;/go-runner&lt;/span&gt;
-&lt;span class="w"&gt;        &lt;/span&gt;&lt;span class="p p-Indicator"&gt;-&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l l-Scalar l-Scalar-Plain"&gt;/eks-pod-identity-agent&lt;/span&gt;
-&lt;span class="w"&gt;        &lt;/span&gt;&lt;span class="p p-Indicator"&gt;-&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l l-Scalar l-Scalar-Plain"&gt;initialize&lt;/span&gt;
-&lt;span class="w"&gt;        &lt;/span&gt;&lt;span class="nt"&gt;image&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l l-Scalar l-Scalar-Plain"&gt;602401143452.dkr.ecr.us-west-2.amazonaws.com/eks/eks-pod-identity-agent:0.0.25&lt;/span&gt;
-&lt;span class="w"&gt;        &lt;/span&gt;&lt;span class="nt"&gt;imagePullPolicy&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l l-Scalar l-Scalar-Plain"&gt;Always&lt;/span&gt;
-&lt;span class="w"&gt;        &lt;/span&gt;&lt;span class="nt"&gt;name&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l l-Scalar l-Scalar-Plain"&gt;eks-pod-identity-agent-init&lt;/span&gt;
-&lt;span class="w"&gt;        &lt;/span&gt;&lt;span class="nt"&gt;resources&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="p p-Indicator"&gt;{}&lt;/span&gt;
-&lt;span class="w"&gt;        &lt;/span&gt;&lt;span class="nt"&gt;securityContext&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;
-&lt;span class="w"&gt;          &lt;/span&gt;&lt;span class="nt"&gt;privileged&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l l-Scalar l-Scalar-Plain"&gt;true&lt;/span&gt;
-&lt;span class="w"&gt;        &lt;/span&gt;&lt;span class="nt"&gt;terminationMessagePath&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l l-Scalar l-Scalar-Plain"&gt;/dev/termination-log&lt;/span&gt;
-&lt;span class="w"&gt;        &lt;/span&gt;&lt;span class="nt"&gt;terminationMessagePolicy&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l l-Scalar l-Scalar-Plain"&gt;File&lt;/span&gt;
-&lt;span class="w"&gt;      &lt;/span&gt;&lt;span class="nt"&gt;priorityClassName&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l l-Scalar l-Scalar-Plain"&gt;system-node-critical&lt;/span&gt;
-&lt;span class="w"&gt;      &lt;/span&gt;&lt;span class="nt"&gt;restartPolicy&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l l-Scalar l-Scalar-Plain"&gt;Always&lt;/span&gt;
-&lt;span class="w"&gt;      &lt;/span&gt;&lt;span class="nt"&gt;schedulerName&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l l-Scalar l-Scalar-Plain"&gt;default-scheduler&lt;/span&gt;
-&lt;span class="w"&gt;      &lt;/span&gt;&lt;span class="nt"&gt;securityContext&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="p p-Indicator"&gt;{}&lt;/span&gt;
-&lt;span class="w"&gt;      &lt;/span&gt;&lt;span class="nt"&gt;terminationGracePeriodSeconds&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l l-Scalar l-Scalar-Plain"&gt;30&lt;/span&gt;
-&lt;span class="w"&gt;  &lt;/span&gt;&lt;span class="nt"&gt;updateStrategy&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;
-&lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="nt"&gt;rollingUpdate&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;
-&lt;span class="w"&gt;      &lt;/span&gt;&lt;span class="nt"&gt;maxSurge&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l l-Scalar l-Scalar-Plain"&gt;0&lt;/span&gt;
-&lt;span class="w"&gt;      &lt;/span&gt;&lt;span class="nt"&gt;maxUnavailable&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l l-Scalar l-Scalar-Plain"&gt;10%&lt;/span&gt;
-&lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="nt"&gt;type&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l l-Scalar l-Scalar-Plain"&gt;RollingUpdate&lt;/span&gt;
-&lt;span class="nt"&gt;status&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;
-&lt;span class="w"&gt;  &lt;/span&gt;&lt;span class="nt"&gt;currentNumberScheduled&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l l-Scalar l-Scalar-Plain"&gt;1&lt;/span&gt;
-&lt;span class="w"&gt;  &lt;/span&gt;&lt;span class="nt"&gt;desiredNumberScheduled&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l l-Scalar l-Scalar-Plain"&gt;1&lt;/span&gt;
-&lt;span class="w"&gt;  &lt;/span&gt;&lt;span class="nt"&gt;numberAvailable&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l l-Scalar l-Scalar-Plain"&gt;1&lt;/span&gt;
-&lt;span class="w"&gt;  &lt;/span&gt;&lt;span class="nt"&gt;numberMisscheduled&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l l-Scalar l-Scalar-Plain"&gt;0&lt;/span&gt;
-&lt;span class="w"&gt;  &lt;/span&gt;&lt;span class="nt"&gt;numberReady&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l l-Scalar l-Scalar-Plain"&gt;1&lt;/span&gt;
-&lt;span class="w"&gt;  &lt;/span&gt;&lt;span class="nt"&gt;observedGeneration&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l l-Scalar l-Scalar-Plain"&gt;1&lt;/span&gt;
-&lt;/pre&gt;&lt;/div&gt;
-&lt;p&gt;eks-pod-identity-agent 组件具有如下特点：&lt;/p&gt;
-&lt;ul class="simple"&gt;
-&lt;li&gt;依赖节点 IAM 角色被授予如下 IAM 权限策略。&lt;/li&gt;
-&lt;/ul&gt;
-&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="p"&gt;{&lt;/span&gt;
-&lt;span class="w"&gt;   &lt;/span&gt;&lt;span class="nt"&gt;&amp;quot;Version&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="s2"&gt;&amp;quot;2012-10-17&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;
-&lt;span class="w"&gt;   &lt;/span&gt;&lt;span class="nt"&gt;&amp;quot;Statement&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="p"&gt;[&lt;/span&gt;
-&lt;span class="w"&gt;       &lt;/span&gt;&lt;span class="p"&gt;{&lt;/span&gt;
-&lt;span class="w"&gt;           &lt;/span&gt;&lt;span class="nt"&gt;&amp;quot;Effect&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="s2"&gt;&amp;quot;Allow&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;
-&lt;span class="w"&gt;           &lt;/span&gt;&lt;span class="nt"&gt;&amp;quot;Action&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="p"&gt;[&lt;/span&gt;
-&lt;span class="w"&gt;               &lt;/span&gt;&lt;span class="s2"&gt;&amp;quot;eks-auth:AssumeRoleForPodIdentity&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;
-&lt;span class="w"&gt;           &lt;/span&gt;&lt;span class="p"&gt;],&lt;/span&gt;
-&lt;span class="w"&gt;           &lt;/span&gt;&lt;span class="nt"&gt;&amp;quot;Resource&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="s2"&gt;&amp;quot;*&amp;quot;&lt;/span&gt;
-&lt;span class="w"&gt;       &lt;/span&gt;&lt;span class="p"&gt;}&lt;/span&gt;
-&lt;span class="w"&gt;   &lt;/span&gt;&lt;span class="p"&gt;]&lt;/span&gt;
-&lt;span class="p"&gt;}&lt;/span&gt;
-&lt;/pre&gt;&lt;/div&gt;
-&lt;ul class="simple"&gt;
-&lt;li&gt;组件 Pod 使用 &lt;tt class="docutils literal"&gt;hostNetwork&lt;/tt&gt; 。&lt;/li&gt;
-&lt;li&gt;组件内的服务将监听 80 和 2703 端口。&lt;/li&gt;
-&lt;li&gt;其中 80 端口监听的 IPv4 地址为 &lt;tt class="docutils literal"&gt;169.254.170.23&lt;/tt&gt;, IPv6 地址为 &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;[fd00:ec2::23]&lt;/span&gt;&lt;/tt&gt; 。&lt;/li&gt;
-&lt;/ul&gt;
-&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;$&lt;span class="w"&gt; &lt;/span&gt;ss&lt;span class="w"&gt; &lt;/span&gt;-anltp&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="p"&gt;|&lt;/span&gt;grep&lt;span class="w"&gt; &lt;/span&gt;eks-pod
-LISTEN&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="m"&gt;0&lt;/span&gt;&lt;span class="w"&gt;      &lt;/span&gt;&lt;span class="m"&gt;4096&lt;/span&gt;&lt;span class="w"&gt;        &lt;/span&gt;&lt;span class="m"&gt;127&lt;/span&gt;.0.0.1:2703&lt;span class="w"&gt;       &lt;/span&gt;&lt;span class="m"&gt;0&lt;/span&gt;.0.0.0:*&lt;span class="w"&gt;    &lt;/span&gt;users:&lt;span class="o"&gt;((&lt;/span&gt;&lt;span class="s2"&gt;&amp;quot;eks-pod-identit&amp;quot;&lt;/span&gt;,pid&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="m"&gt;3798&lt;/span&gt;,fd&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="m"&gt;5&lt;/span&gt;&lt;span class="o"&gt;))&lt;/span&gt;
-LISTEN&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="m"&gt;0&lt;/span&gt;&lt;span class="w"&gt;      &lt;/span&gt;&lt;span class="m"&gt;4096&lt;/span&gt;&lt;span class="w"&gt;   &lt;/span&gt;&lt;span class="m"&gt;169&lt;/span&gt;.254.170.23:80&lt;span class="w"&gt;         &lt;/span&gt;&lt;span class="m"&gt;0&lt;/span&gt;.0.0.0:*&lt;span class="w"&gt;    &lt;/span&gt;users:&lt;span class="o"&gt;((&lt;/span&gt;&lt;span class="s2"&gt;&amp;quot;eks-pod-identit&amp;quot;&lt;/span&gt;,pid&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="m"&gt;3798&lt;/span&gt;,fd&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="m"&gt;4&lt;/span&gt;&lt;span class="o"&gt;))&lt;/span&gt;
-LISTEN&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="m"&gt;0&lt;/span&gt;&lt;span class="w"&gt;      &lt;/span&gt;&lt;span class="m"&gt;4096&lt;/span&gt;&lt;span class="w"&gt;   &lt;/span&gt;&lt;span class="o"&gt;[&lt;/span&gt;fd00:ec2::23&lt;span class="o"&gt;]&lt;/span&gt;:80&lt;span class="w"&gt;            &lt;/span&gt;&lt;span class="o"&gt;[&lt;/span&gt;::&lt;span class="o"&gt;]&lt;/span&gt;:*&lt;span class="w"&gt;    &lt;/span&gt;users:&lt;span class="o"&gt;((&lt;/span&gt;&lt;span class="s2"&gt;&amp;quot;eks-pod-identit&amp;quot;&lt;/span&gt;,pid&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="m"&gt;3798&lt;/span&gt;,fd&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="m"&gt;3&lt;/span&gt;&lt;span class="o"&gt;))&lt;/span&gt;
-&lt;/pre&gt;&lt;/div&gt;
-&lt;ul class="simple"&gt;
-&lt;li&gt;组件将通过 init 容器在节点上创建一个 IPv4 地址为 &lt;tt class="docutils literal"&gt;169.254.170.23&lt;/tt&gt;, IPv6 地址为 &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;[fd00:ec2::23]&lt;/span&gt;&lt;/tt&gt; 的网络接口 &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;pod-id-link0&lt;/span&gt;&lt;/tt&gt; 。&lt;/li&gt;
-&lt;/ul&gt;
-&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;pod-id-link0:&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nv"&gt;flags&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="m"&gt;195&lt;/span&gt;&amp;lt;UP,BROADCAST,RUNNING,NOARP&amp;gt;&lt;span class="w"&gt;  &lt;/span&gt;mtu&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="m"&gt;1500&lt;/span&gt;
-&lt;span class="w"&gt;        &lt;/span&gt;inet&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="m"&gt;169&lt;/span&gt;.254.170.23&lt;span class="w"&gt;  &lt;/span&gt;netmask&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="m"&gt;255&lt;/span&gt;.255.255.255&lt;span class="w"&gt;  &lt;/span&gt;broadcast&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="m"&gt;0&lt;/span&gt;.0.0.0
-&lt;span class="w"&gt;        &lt;/span&gt;inet6&lt;span class="w"&gt; &lt;/span&gt;fe80::2078:53ff:fe2f:c723&lt;span class="w"&gt;  &lt;/span&gt;prefixlen&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="m"&gt;64&lt;/span&gt;&lt;span class="w"&gt;  &lt;/span&gt;scopeid&lt;span class="w"&gt; &lt;/span&gt;0x20&amp;lt;link&amp;gt;
-&lt;span class="w"&gt;        &lt;/span&gt;inet6&lt;span class="w"&gt; &lt;/span&gt;fd00:ec2::23&lt;span class="w"&gt;  &lt;/span&gt;prefixlen&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="m"&gt;128&lt;/span&gt;&lt;span class="w"&gt;  &lt;/span&gt;scopeid&lt;span class="w"&gt; &lt;/span&gt;0x0&amp;lt;global&amp;gt;
-&lt;span class="w"&gt;        &lt;/span&gt;ether&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="m"&gt;22&lt;/span&gt;:78:53:2f:c7:23&lt;span class="w"&gt;  &lt;/span&gt;txqueuelen&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="m"&gt;1000&lt;/span&gt;&lt;span class="w"&gt;  &lt;/span&gt;&lt;span class="o"&gt;(&lt;/span&gt;Ethernet&lt;span class="o"&gt;)&lt;/span&gt;
-&lt;span class="w"&gt;        &lt;/span&gt;RX&lt;span class="w"&gt; &lt;/span&gt;packets&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="m"&gt;0&lt;/span&gt;&lt;span class="w"&gt;  &lt;/span&gt;bytes&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="m"&gt;0&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;(&lt;/span&gt;&lt;span class="m"&gt;0&lt;/span&gt;.0&lt;span class="w"&gt; &lt;/span&gt;B&lt;span class="o"&gt;)&lt;/span&gt;
-&lt;span class="w"&gt;        &lt;/span&gt;RX&lt;span class="w"&gt; &lt;/span&gt;errors&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="m"&gt;0&lt;/span&gt;&lt;span class="w"&gt;  &lt;/span&gt;dropped&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="m"&gt;0&lt;/span&gt;&lt;span class="w"&gt;  &lt;/span&gt;overruns&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="m"&gt;0&lt;/span&gt;&lt;span class="w"&gt;  &lt;/span&gt;frame&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="m"&gt;0&lt;/span&gt;
-&lt;span class="w"&gt;        &lt;/span&gt;TX&lt;span class="w"&gt; &lt;/span&gt;packets&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="m"&gt;10&lt;/span&gt;&lt;span class="w"&gt;  &lt;/span&gt;bytes&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="m"&gt;700&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;(&lt;/span&gt;&lt;span class="m"&gt;700&lt;/span&gt;.0&lt;span class="w"&gt; &lt;/span&gt;B&lt;span class="o"&gt;)&lt;/span&gt;
-&lt;span class="w"&gt;        &lt;/span&gt;TX&lt;span class="w"&gt; &lt;/span&gt;errors&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="m"&gt;0&lt;/span&gt;&lt;span class="w"&gt;  &lt;/span&gt;dropped&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="m"&gt;0&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;overruns&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="m"&gt;0&lt;/span&gt;&lt;span class="w"&gt;  &lt;/span&gt;carrier&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="m"&gt;0&lt;/span&gt;&lt;span class="w"&gt;  &lt;/span&gt;collisions&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="m"&gt;0&lt;/span&gt;
-&lt;/pre&gt;&lt;/div&gt;
-&lt;ul class="simple"&gt;
-&lt;li&gt;init 容器还会设置下面这样的的路由规则，确保在本机处理发往 &lt;tt class="docutils literal"&gt;169.254.170.23&lt;/tt&gt; 的流量。&lt;/li&gt;
-&lt;/ul&gt;
-&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="m"&gt;169&lt;/span&gt;.254.170.23&lt;span class="w"&gt; &lt;/span&gt;dev&lt;span class="w"&gt; &lt;/span&gt;pod-id-link0
-&lt;/pre&gt;&lt;/div&gt;
-&lt;/div&gt;
-&lt;div class="section" id="assumeroleforpodidentity"&gt;
-&lt;h2 id="hidassumeroleforpodidentity"&gt;AssumeRoleForPodIdentity&lt;a class="headerlink" href="#hidassumeroleforpodidentity" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
-&lt;p&gt;EKS 提供了一个新的 API  &lt;a class="reference external" href="https://docs.aws.amazon.com/eks/latest/APIReference/API_auth_AssumeRoleForPodIdentity.html"&gt;AssumeRoleForPodIdentity&lt;/a&gt; ，
-用于使用 service account oidc token 获取扮演 service account 关联 IAM 角色的 sts token。&lt;/p&gt;
-&lt;p&gt;service account oidc token 中的 payload 的内容示例如下。&lt;/p&gt;
-&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="p"&gt;{&lt;/span&gt;
-&lt;span class="w"&gt;  &lt;/span&gt;&lt;span class="nt"&gt;&amp;quot;aud&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="p"&gt;[&lt;/span&gt;
-&lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="s2"&gt;&amp;quot;pods.eks.amazonaws.com&amp;quot;&lt;/span&gt;
-&lt;span class="w"&gt;  &lt;/span&gt;&lt;span class="p"&gt;],&lt;/span&gt;
-&lt;span class="w"&gt;  &lt;/span&gt;&lt;span class="nt"&gt;&amp;quot;exp&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="mi"&gt;1701672885&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;
-&lt;span class="w"&gt;  &lt;/span&gt;&lt;span class="nt"&gt;&amp;quot;iat&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="mi"&gt;1701586485&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;
-&lt;span class="w"&gt;  &lt;/span&gt;&lt;span class="nt"&gt;&amp;quot;iss&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="s2"&gt;&amp;quot;https://oidc.eks.us-west-2.amazonaws.com/id/DA16E524AXXXXXX&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;
-&lt;span class="w"&gt;  &lt;/span&gt;&lt;span class="nt"&gt;&amp;quot;kubernetes.io&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="p"&gt;{&lt;/span&gt;
-&lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="nt"&gt;&amp;quot;namespace&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="s2"&gt;&amp;quot;default&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;
-&lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="nt"&gt;&amp;quot;pod&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="p"&gt;{&lt;/span&gt;
-&lt;span class="w"&gt;      &lt;/span&gt;&lt;span class="nt"&gt;&amp;quot;name&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="s2"&gt;&amp;quot;test-596475c6d5-xgvml&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;
-&lt;span class="w"&gt;      &lt;/span&gt;&lt;span class="nt"&gt;&amp;quot;uid&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="s2"&gt;&amp;quot;924e66b2-841e-4969-9fa7-a19f3f6f1029&amp;quot;&lt;/span&gt;
-&lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="p"&gt;},&lt;/span&gt;
-&lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="nt"&gt;&amp;quot;serviceaccount&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="p"&gt;{&lt;/span&gt;
-&lt;span class="w"&gt;      &lt;/span&gt;&lt;span class="nt"&gt;&amp;quot;name&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="s2"&gt;&amp;quot;default&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;
-&lt;span class="w"&gt;      &lt;/span&gt;&lt;span class="nt"&gt;&amp;quot;uid&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="s2"&gt;&amp;quot;eca98cb1-ca2e-469b-8f9d-2be9f5a3354f&amp;quot;&lt;/span&gt;
-&lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="p"&gt;}&lt;/span&gt;
-&lt;span class="w"&gt;  &lt;/span&gt;&lt;span class="p"&gt;},&lt;/span&gt;
-&lt;span class="w"&gt;  &lt;/span&gt;&lt;span class="nt"&gt;&amp;quot;nbf&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="mi"&gt;1701586485&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;
-&lt;span class="w"&gt;  &lt;/span&gt;&lt;span class="nt"&gt;&amp;quot;sub&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="s2"&gt;&amp;quot;system:serviceaccount:default:default&amp;quot;&lt;/span&gt;
-&lt;span class="p"&gt;}&lt;/span&gt;
-&lt;/pre&gt;&lt;/div&gt;
-&lt;p&gt;可以看到这个 oidc token 跟 IRSA 方案中的 oidc token 相比，除了 aud 不一样外（IRSA 中是 &lt;tt class="docutils literal"&gt;sts.amazonaws.com&lt;/tt&gt; ），
-其他内容都是一样的。&lt;/p&gt;
-&lt;p&gt;因此，据我猜测，AssumeRoleForPodIdentity 的后端逻辑可能类似下面这样：&lt;/p&gt;
-&lt;ol class="arabic simple"&gt;
-&lt;li&gt;首先，基于 oidc 协议解析和校验客户端传递过来的 oidc token 的有效性和合法性。&lt;/li&gt;
-&lt;li&gt;然后，基于用户配置的 service account 与 IAM 角色关联关系，获取需要扮演的角色信息。&lt;/li&gt;
-&lt;li&gt;最后，调用 sts API 扮演对应角色，获取客户端所需的 sts token。&lt;/li&gt;
-&lt;/ol&gt;
-&lt;/div&gt;
-&lt;div class="section" id="service-account-iam"&gt;
-&lt;h2 id="hidservice-account-iam"&gt;service account 关联 IAM 角色&lt;a class="headerlink" href="#hidservice-account-iam" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
-&lt;p&gt;为了简化用户为 service account 关联 IAM 角色的操作，EKS 新增了一组用于管理 service account 与 IAM 角色关联关系的 API。
-同时还增加了对应的 EKS 控制台操作页面，并且关联关系都存储在 EKS 侧，并没有去修改角色的信任策略。&lt;/p&gt;
-&lt;ul class="simple"&gt;
-&lt;li&gt;&lt;a class="reference external" href="https://docs.aws.amazon.com/eks/latest/APIReference/API_CreatePodIdentityAssociation.html"&gt;CreatePodIdentityAssociation&lt;/a&gt; ：为 service account 关联角色。&lt;/li&gt;
-&lt;li&gt;&lt;a class="reference external" href="https://docs.aws.amazon.com/eks/latest/APIReference/API_DescribePodIdentityAssociation.html"&gt;DescribePodIdentityAssociation&lt;/a&gt; : 查看单条角色关联记录的详情。&lt;/li&gt;
-&lt;li&gt;&lt;a class="reference external" href="https://docs.aws.amazon.com/eks/latest/APIReference/API_UpdatePodIdentityAssociation.html"&gt;UpdatePodIdentityAssociation&lt;/a&gt; ：修改 service account 关联的角色信息。&lt;/li&gt;
-&lt;li&gt;&lt;a class="reference external" href="https://docs.aws.amazon.com/eks/latest/APIReference/API_DeletePodIdentityAssociation.html"&gt;DeletePodIdentityAssociation&lt;/a&gt; ：删除一条角色关联记录。&lt;/li&gt;
-&lt;li&gt;&lt;a class="reference external" href="https://docs.aws.amazon.com/eks/latest/APIReference/API_ListPodIdentityAssociations.html"&gt;ListPodIdentityAssociations&lt;/a&gt; ：获取当前存在的角色关联记录。&lt;/li&gt;
-&lt;/ul&gt;
-&lt;/div&gt;
-&lt;div class="section" id="section-4"&gt;
-&lt;h2 id="hidsection-4"&gt;权限控制&lt;a class="headerlink" href="#hidsection-4" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
-&lt;p&gt;在 IRSA 方案中，我们需要在 IAM 角色的信任策略中配置允许的集群 oidc provider 以及 service account 信息。
-但是，在 EKS Pod Identity 方案中，我们不再需要修改角色的信任策略，只需要使用前面介绍的方法使用 EKS 控制台或者 EKS API
-即可完成控制角色能被哪些集群的哪些 service account 使用，这些关联关系存储在 EKS 侧，不再需要频繁的更新角色的信任策略。&lt;/p&gt;
-&lt;p&gt;通过这种方式， EKS Pod Identity 解决了 IRSA 中因为角色信任策略的内容大小限制导致一个角色只能被有限的几个
-service account 关联使用的问题 （详见 &lt;a class="reference external" href="https://github.com/aws/containers-roadmap/issues/1408"&gt;#148&lt;/a&gt; ），
-在 EKS Pod Identity 方案中，一个角色可以与不限数量的 service account 进行关联。&lt;/p&gt;
-&lt;div class="section" id="attribute-based-access-control-abac"&gt;
-&lt;h3 id="hidattribute-based-access-control-abac"&gt;attribute-based access control (ABAC)&lt;a class="headerlink" href="#hidattribute-based-access-control-abac" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
-&lt;p&gt;EKS Pod Identity 方案还引入了新的基于属性的访问控制能力（attribute-based access control (ABAC)）：
-通过 EKS Pod Identity 方案获取到的 sts token 默认都携带了集群信息、命名空间以及 service account 等 tag 属性，
-用户可以基于 IAM 提供的 &lt;a class="reference external" href="https://docs.aws.amazon.com/IAM/latest/UserGuide/access_iam-tags.html"&gt;tag 鉴权&lt;/a&gt; 特性，
-在为角色配置权限策略时，实现基于属性的访问控制能力。&lt;/p&gt;
-&lt;p&gt;通过 EKS Pod Identity 获取的 sts token 默认携带了如下 tag ：&lt;/p&gt;
-&lt;ul class="simple"&gt;
-&lt;li&gt;&lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;eks-cluster-arn&lt;/span&gt;&lt;/tt&gt; ：当前集群的 ARN。&lt;/li&gt;
-&lt;li&gt;&lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;eks-cluster-name&lt;/span&gt;&lt;/tt&gt; ：当前集群的名称。&lt;/li&gt;
-&lt;li&gt;&lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;kubernetes-namespace&lt;/span&gt;&lt;/tt&gt;: service account 所在的命名空间名称。&lt;/li&gt;
-&lt;li&gt;&lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;kubernetes-service-account&lt;/span&gt;&lt;/tt&gt; ：service account 的名称。&lt;/li&gt;
-&lt;li&gt;&lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;kubernetes-pod-name&lt;/span&gt;&lt;/tt&gt; ：使用 service account 的 pod 的名称。&lt;/li&gt;
-&lt;li&gt;&lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;kubernetes-pod-uid&lt;/span&gt;&lt;/tt&gt; ：使用 service account 的 pod 的 uid。&lt;/li&gt;
-&lt;/ul&gt;
-&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="nt"&gt;&amp;quot;tags&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="p"&gt;[&lt;/span&gt;
-&lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="p"&gt;{&lt;/span&gt;
-&lt;span class="w"&gt;        &lt;/span&gt;&lt;span class="nt"&gt;&amp;quot;key&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="s2"&gt;&amp;quot;eks-cluster-arn&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;
-&lt;span class="w"&gt;        &lt;/span&gt;&lt;span class="nt"&gt;&amp;quot;value&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="s2"&gt;&amp;quot;arn:aws:eks:us-west-2:5XXXXXXXXXXX:cluster/test&amp;quot;&lt;/span&gt;
-&lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="p"&gt;},&lt;/span&gt;
-&lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="p"&gt;{&lt;/span&gt;
-&lt;span class="w"&gt;        &lt;/span&gt;&lt;span class="nt"&gt;&amp;quot;key&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="s2"&gt;&amp;quot;eks-cluster-name&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;
-&lt;span class="w"&gt;        &lt;/span&gt;&lt;span class="nt"&gt;&amp;quot;value&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="s2"&gt;&amp;quot;test&amp;quot;&lt;/span&gt;
-&lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="p"&gt;},&lt;/span&gt;
-&lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="p"&gt;{&lt;/span&gt;
-&lt;span class="w"&gt;        &lt;/span&gt;&lt;span class="nt"&gt;&amp;quot;key&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="s2"&gt;&amp;quot;kubernetes-namespace&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;
-&lt;span class="w"&gt;        &lt;/span&gt;&lt;span class="nt"&gt;&amp;quot;value&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="s2"&gt;&amp;quot;default&amp;quot;&lt;/span&gt;
-&lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="p"&gt;},&lt;/span&gt;
-&lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="p"&gt;{&lt;/span&gt;
-&lt;span class="w"&gt;        &lt;/span&gt;&lt;span class="nt"&gt;&amp;quot;key&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="s2"&gt;&amp;quot;kubernetes-service-account&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;
-&lt;span class="w"&gt;        &lt;/span&gt;&lt;span class="nt"&gt;&amp;quot;value&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="s2"&gt;&amp;quot;default&amp;quot;&lt;/span&gt;
-&lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="p"&gt;},&lt;/span&gt;
-&lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="p"&gt;{&lt;/span&gt;
-&lt;span class="w"&gt;        &lt;/span&gt;&lt;span class="nt"&gt;&amp;quot;key&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="s2"&gt;&amp;quot;kubernetes-pod-name&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;
-&lt;span class="w"&gt;        &lt;/span&gt;&lt;span class="nt"&gt;&amp;quot;value&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="s2"&gt;&amp;quot;test-596475c6d5-xgvml&amp;quot;&lt;/span&gt;
-&lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="p"&gt;},&lt;/span&gt;
-&lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="p"&gt;{&lt;/span&gt;
-&lt;span class="w"&gt;        &lt;/span&gt;&lt;span class="nt"&gt;&amp;quot;key&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="s2"&gt;&amp;quot;kubernetes-pod-uid&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;
-&lt;span class="w"&gt;        &lt;/span&gt;&lt;span class="nt"&gt;&amp;quot;value&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="s2"&gt;&amp;quot;924e66b2-841e-4969-9fa7-a19f3f6f1029&amp;quot;&lt;/span&gt;
-&lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="p"&gt;}&lt;/span&gt;
-&lt;span class="p"&gt;]&lt;/span&gt;
-&lt;/pre&gt;&lt;/div&gt;
-&lt;p&gt;我们在定义角色权限策略的时候，可以通过 &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;${aws:PrincipalTag/&amp;lt;tag-key&amp;gt;}&lt;/span&gt;&lt;/tt&gt; 的方式
-在权限策略的 &lt;tt class="docutils literal"&gt;Condition&lt;/tt&gt; 配置中表示凭证属性中包含的特定 tag 的值。&lt;/p&gt;
-&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="p"&gt;{&lt;/span&gt;
-&lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="nt"&gt;&amp;quot;Version&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="s2"&gt;&amp;quot;2012-10-17&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;
-&lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="nt"&gt;&amp;quot;Statement&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="p"&gt;[&lt;/span&gt;
-&lt;span class="w"&gt;        &lt;/span&gt;&lt;span class="p"&gt;{&lt;/span&gt;
-&lt;span class="w"&gt;            &lt;/span&gt;&lt;span class="nt"&gt;&amp;quot;Effect&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="s2"&gt;&amp;quot;Allow&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;
-&lt;span class="w"&gt;            &lt;/span&gt;&lt;span class="nt"&gt;&amp;quot;Action&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="p"&gt;[&lt;/span&gt;
-&lt;span class="w"&gt;                &lt;/span&gt;&lt;span class="s2"&gt;&amp;quot;s3:GetObject&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;
-&lt;span class="w"&gt;                &lt;/span&gt;&lt;span class="s2"&gt;&amp;quot;s3:GetObjectTagging&amp;quot;&lt;/span&gt;
-&lt;span class="w"&gt;            &lt;/span&gt;&lt;span class="p"&gt;],&lt;/span&gt;
-&lt;span class="w"&gt;            &lt;/span&gt;&lt;span class="nt"&gt;&amp;quot;Resource&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="s2"&gt;&amp;quot;*&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;
-&lt;span class="w"&gt;            &lt;/span&gt;&lt;span class="nt"&gt;&amp;quot;Condition&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="p"&gt;{&lt;/span&gt;
-&lt;span class="w"&gt;                &lt;/span&gt;&lt;span class="nt"&gt;&amp;quot;StringEquals&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="p"&gt;{&lt;/span&gt;
-&lt;span class="w"&gt;                    &lt;/span&gt;&lt;span class="nt"&gt;&amp;quot;s3:ExistingObjectTag/eks-cluster-name&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="s2"&gt;&amp;quot;${aws:PrincipalTag/eks-cluster-name}&amp;quot;&lt;/span&gt;
-&lt;span class="w"&gt;                &lt;/span&gt;&lt;span class="p"&gt;},&lt;/span&gt;
-&lt;span class="w"&gt;                &lt;/span&gt;&lt;span class="nt"&gt;&amp;quot;StringEqualsIfExists&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="p"&gt;{&lt;/span&gt;
-&lt;span class="w"&gt;                    &lt;/span&gt;&lt;span class="nt"&gt;&amp;quot;aws:ResourceTag/kubernetes-namespace&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="s2"&gt;&amp;quot;s3-demo&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;
-&lt;span class="w"&gt;                    &lt;/span&gt;&lt;span class="nt"&gt;&amp;quot;aws:Resourcelag/kubernetes-service-account&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="s2"&gt;&amp;quot;${aws:PrincipalTag/kubernetes-service-account}&amp;quot;&lt;/span&gt;
-&lt;span class="w"&gt;                &lt;/span&gt;&lt;span class="p"&gt;}&lt;/span&gt;
-&lt;span class="w"&gt;            &lt;/span&gt;&lt;span class="p"&gt;}&lt;/span&gt;
-&lt;span class="w"&gt;        &lt;/span&gt;&lt;span class="p"&gt;}&lt;/span&gt;
-&lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="p"&gt;]&lt;/span&gt;
-&lt;span class="p"&gt;}&lt;/span&gt;
-&lt;/pre&gt;&lt;/div&gt;
-&lt;p&gt;通过上面这个示例权限策略，我们可以对通过 EKS Pod Identity 特性扮演角色获取的 sts token 的权限做如下限制：&lt;/p&gt;
-&lt;ul class="simple"&gt;
-&lt;li&gt;只允许访问存在名为 &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;eks-cluster-name&lt;/span&gt;&lt;/tt&gt; 的 tag 的 s3 object ，并且 tag 的值必须是当前 sts token 关联集群的名称。&lt;/li&gt;
-&lt;li&gt;如果 s3 object 存在名为 &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;kubernetes-namespace&lt;/span&gt;&lt;/tt&gt; 的 tag，只允许访问这个 tag 的值是 &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;s3-demo&lt;/span&gt;&lt;/tt&gt; 的 object。&lt;/li&gt;
-&lt;li&gt;如果 s3 object 存在名为 &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;kubernetes-service-account&lt;/span&gt;&lt;/tt&gt; 的 tag，只允许访问这个 tag 的值是当前 sts token 关联的 service account 名称的 object。&lt;/li&gt;
-&lt;/ul&gt;
-&lt;/div&gt;
-&lt;/div&gt;
-&lt;div class="section" id="irsa"&gt;
-&lt;h2 id="hidirsa"&gt;与 IRSA 的区别&lt;a class="headerlink" href="#hidirsa" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
-&lt;p&gt;根据上面介绍的信息，我们可以比较一下 EKS Pod Identity 与 IRSA 特性的区别，它们主要的区别如下：&lt;/p&gt;
-&lt;table border="1" class="docutils"&gt;
-&lt;colgroup&gt;
-&lt;col width="29%" /&gt;
-&lt;col width="36%" /&gt;
-&lt;col width="35%" /&gt;
-&lt;/colgroup&gt;
-&lt;thead valign="bottom"&gt;
-&lt;tr&gt;&lt;th class="head"&gt;比较项&lt;/th&gt;
-&lt;th class="head"&gt;EKS Pod Identity&lt;/th&gt;
-&lt;th class="head"&gt;IRSA&lt;/th&gt;
-&lt;/tr&gt;
-&lt;/thead&gt;
-&lt;tbody valign="top"&gt;
-&lt;tr&gt;&lt;td&gt;节点 IAM 角色增加额外权限&lt;/td&gt;
-&lt;td&gt;需要增加 &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;eks-auth:AssumeRoleForPodIdentity&lt;/span&gt;&lt;/tt&gt; 权限&lt;/td&gt;
-&lt;td&gt;&lt;strong&gt;不需要&lt;/strong&gt;&lt;/td&gt;
-&lt;/tr&gt;
-&lt;tr&gt;&lt;td&gt;创建 IAM oidc provider&lt;/td&gt;
-&lt;td&gt;&lt;strong&gt;不需要&lt;/strong&gt;&lt;/td&gt;
-&lt;td&gt;需要为每个集群创建一个 oidc provider&lt;/td&gt;
-&lt;/tr&gt;
-&lt;tr&gt;&lt;td&gt;service account 关联角色&lt;/td&gt;
-&lt;td&gt;&lt;strong&gt;通过 EKS API/控制台&lt;/strong&gt;&lt;/td&gt;
-&lt;td&gt;配置 service account annotation + 修改角色信任策略&lt;/td&gt;
-&lt;/tr&gt;
-&lt;tr&gt;&lt;td rowspan="2"&gt;一个角色可以关联的 service account 数量&lt;/td&gt;
-&lt;td rowspan="2"&gt;&lt;strong&gt;无限制&lt;/strong&gt;&lt;/td&gt;
-&lt;td rowspan="2"&gt;角色信任策略有 4096 个字符限制，
-最多关联 10 个左右 service account 或 集群&lt;/td&gt;
-&lt;/tr&gt;
-&lt;tr&gt;&lt;/tr&gt;
-&lt;tr&gt;&lt;td&gt;一个 service account 可以关联的角色数量&lt;/td&gt;
-&lt;td&gt;一个&lt;/td&gt;
-&lt;td&gt;无限制&lt;/td&gt;
-&lt;/tr&gt;
-&lt;tr&gt;&lt;td rowspan="2"&gt;角色信任策略修改次数&lt;/td&gt;
-&lt;td rowspan="2"&gt;&lt;strong&gt;只需修改一次&lt;/strong&gt; 确保信任
-&lt;tt class="docutils literal"&gt;pods.eks.amazonaws.com&lt;/tt&gt;
-以及包含所需的 action&lt;/td&gt;
-&lt;td rowspan="2"&gt;需要为每个关联的集群修改至少一次&lt;/td&gt;
-&lt;/tr&gt;
-&lt;tr&gt;&lt;/tr&gt;
-&lt;tr&gt;&lt;td&gt;基于 service account 相关属性进行访问控制&lt;/td&gt;
-&lt;td&gt;&lt;strong&gt;通过 ABAC 进行支持&lt;/strong&gt;&lt;/td&gt;
-&lt;td&gt;不支持&lt;/td&gt;
-&lt;/tr&gt;
-&lt;tr&gt;&lt;td rowspan="2"&gt;集群类型&lt;/td&gt;
-&lt;td rowspan="2"&gt;只支持 EKS 集群，不支持 AWS Outposts、
-不支持 EKS Anywhere、AWS Fargate (Fargate)、自建集群&lt;/td&gt;
-&lt;td rowspan="2"&gt;&lt;strong&gt;仅不支持 AWS Outposts&lt;/strong&gt;&lt;/td&gt;
-&lt;/tr&gt;
-&lt;tr&gt;&lt;/tr&gt;
-&lt;tr&gt;&lt;td&gt;数据面依赖&lt;/td&gt;
-&lt;td&gt;kubelet + eks-pod-identity-agent&lt;/td&gt;
-&lt;td&gt;&lt;strong&gt;kublet&lt;/strong&gt;&lt;/td&gt;
-&lt;/tr&gt;
-&lt;tr&gt;&lt;td rowspan="5"&gt;稳定性风险&lt;/td&gt;
-&lt;td rowspan="5"&gt;依赖集群控制面和数据面的稳定性 + EKS API；
-同时还依赖 eks-pod-identity-agent 的稳定性；
-应用 pod 如果先于 eks-pod-identity-agent pod
-启动/就绪会出现短暂的无法获取到 sts token 的问题
-（比如，同样配置了 &lt;tt class="docutils literal"&gt;hostNetwork&lt;/tt&gt; 的 pod 在
-自动伸缩场景可能会遇到这种情况，以及不建议 CNI、CSI
-这些常常会先于 agent pod 启动的组件使用）；&lt;/td&gt;
-&lt;td rowspan="5"&gt;&lt;strong&gt;依赖集群控制面和数据面的稳定性 + STS API&lt;/strong&gt;&lt;/td&gt;
-&lt;/tr&gt;
-&lt;tr&gt;&lt;/tr&gt;
-&lt;tr&gt;&lt;/tr&gt;
-&lt;tr&gt;&lt;/tr&gt;
-&lt;tr&gt;&lt;/tr&gt;
-&lt;/tbody&gt;
-&lt;/table&gt;
-&lt;p&gt;BTW, 虽然 EKS Pod Identity 方案的官方教程和文档中都是说的需要依赖 eks-pod-identity-agent 这个组件，
-但是从前面的内容中我们也可以看到：我们其实也可以在不安装 eks-pod-identity-agent 组件的情况下，使用该方案。
-具体来说就是，我们可以通过在应用程序内直接访问 EKS 提供的 AssumeRoleForPodIdentity API 的方式来解除对该组件的依赖。&lt;/p&gt;
-&lt;/div&gt;
-&lt;div class="section" id="section-5"&gt;
-&lt;h2 id="hidsection-5"&gt;参考资料&lt;a class="headerlink" href="#hidsection-5" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
-&lt;ul class="simple"&gt;
-&lt;li&gt;&lt;a class="reference external" href="https://aws.amazon.com/blogs/aws/amazon-eks-pod-identity-simplifies-iam-permissions-for-applications-on-amazon-eks-clusters/"&gt;Amazon EKS Pod Identity simplifies IAM permissions for applications on Amazon EKS clusters | AWS News Blog&lt;/a&gt;&lt;/li&gt;
-&lt;li&gt;&lt;a class="reference external" href="https://aws.amazon.com/blogs/opensource/introducing-fine-grained-iam-roles-service-accounts/"&gt;Introducing fine-grained IAM roles for service accounts | AWS Open Source Blog&lt;/a&gt;&lt;/li&gt;
-&lt;li&gt;&lt;a class="reference external" href="https://docs.aws.amazon.com/eks/latest/userguide/pod-identities.html"&gt;EKS Pod Identities - Amazon EKS&lt;/a&gt;&lt;/li&gt;
-&lt;li&gt;&lt;a class="reference external" href="https://github.com/aws/amazon-eks-pod-identity-webhook"&gt;aws/amazon-eks-pod-identity-webhook: Amazon EKS Pod Identity Webhook&lt;/a&gt;&lt;/li&gt;
-&lt;li&gt;&lt;a class="reference external" href="https://docs.aws.amazon.com/eks/latest/userguide/pod-id-abac.html"&gt;Define permissions for EKS Pod Identities to assume roles based on tags - Amazon EKS&lt;/a&gt;&lt;/li&gt;
-&lt;li&gt;&lt;a class="reference external" href="https://docs.aws.amazon.com/IAM/latest/UserGuide/access_iam-tags.html"&gt;Controlling access to and for IAM users and roles using tags - AWS Identity and Access Management&lt;/a&gt;&lt;/li&gt;
-&lt;li&gt;&lt;a class="reference external" href="https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_policies_elements_condition.html"&gt;IAM JSON policy elements: Condition - AWS Identity and Access Management&lt;/a&gt;&lt;/li&gt;
-&lt;li&gt;&lt;a class="reference external" href="https://securitylabs.datadoghq.com/articles/eks-pod-identity-deep-dive/"&gt;Deep dive into the new Amazon EKS Pod Identity feature | Datadog Security Labs&lt;/a&gt;&lt;/li&gt;
-&lt;/ul&gt;
-&lt;/div&gt;
-</summary><category term="kubernetes"></category><category term="k8s"></category><category term="aws"></category><category term="eks"></category><category term="pod-identity"></category><category term="irsa"></category><category term="cloud-security"></category></entry></feed>
+</summary><category term="en-version"></category></entry></feed>

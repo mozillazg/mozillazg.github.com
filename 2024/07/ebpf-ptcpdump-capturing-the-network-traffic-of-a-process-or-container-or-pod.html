@@ -1,0 +1,618 @@
+<!DOCTYPE html>
+<html lang="zh"  prefix="og: http://ogp.me/ns# fb: https://www.facebook.com/2008/fbml" class="han-init">
+<head>
+    <title>ptcpdump: 抓包时显示进程信息以及对任意进程、容器或 Pod 进行抓包 - mozillazg's Blog</title>
+    <!-- Using the latest rendering mode for IE -->
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <!-- share.css -->
+    <link rel="stylesheet" href="/theme/cdn.jsdelivr.net/npm/social-share.js@1.0.16/dist/css/share.min.css">
+
+
+    <link href="https://mozillazg.com/favicon.ico" rel="icon">
+
+<link rel="canonical" href="https://mozillazg.com/2024/07/ebpf-ptcpdump-capturing-the-network-traffic-of-a-process-or-container-or-pod.html">
+
+        <meta name="author" content="mozillazg" />
+        <meta name="keywords" content="ebpf,ebpf,ptcpdump,tcpdump,pcapng,wireshark,container,pod" />
+    <meta name="description" content="前言 tcpdump 是我们常用的一个网络抓包工具，它的功能非常的强大。但是它还缺少一个大家反馈很久却一直没实现的一个特性， 那就是：在结果中包含/显示发送网络请求/流量的进程信息，以及支持抓取指定进程的网络流量。 当前针对 tcpdump 抓取的流量信息，如果要获取对应的进程信息的话，常见的方法是： 基于请求的连接信息，通过 ss 或 netstat 之内的工具反查进程信息。 这个方法的缺点是：操作起来比较繁琐以及无法查找匹配短生命周期的进程所发送的网络流量。 至于基于 tcpdump 实现抓取指定进程的网络流量，常见的方法是：在知晓进程要访问的目标服务地址信息的前提下， 在使用 tcpdump 时按目的地址信息过滤流量； 或者是在特定的网络命名空间中运行目标进程，然后再在该网络命名空间下使用 tcpdump 抓包。 这两个方法的缺点是：需要提前知晓目标进程访问的目的地址或者需要改变目标进程的执行方式，适用场景有限。 本文将介绍一个新的工具 ptcpdump，基于这个工具，我们既可以在抓包时直接感知发送流量的进程信息， 也可以直接对运行中或待运行的任意进程进行网络抓包。如果流量是从容器内的进程发出的话， 它还支持显示流量的容器或 Pod 信息以及对特定容器或 Pod 进行抓包。 ptcpdump 介绍 ptcpdump 是一个使用 eBPF 技术开发的、类 tcpdump 的网络抓包工具。 它除了兼容 tcpdump 的常用命令行参数以及包过滤语法外， 还额外提供了如下核心特性： 在输出中记录和显示发送网络流量的进程、容器、Pod 信息。 支持对指定进程、容器以及 Pod 进行抓包。 支持将抓取的数据包保存为 pcapng 格式，可以使用 tcpdump 或者 Wireshark 做进一步分析。 当在 Wireshark 中打开保存的 pcapng 文件时，将能够看到每个数据包对应的进程、容器、Pod 信息。 使用静态链接的方式编译该工具，系统中不需要安装额外的系统链接库。 更多信息请参考项目的源代码仓库： https://github.com/mozillazg/ptcpdump 下面将以示例的形式介绍 ptcpdump 的核心功能。 兼容 tcpdump 的常用命令行参数和包过滤语法 sudo tcpdump -i eth0 tcp sudo tcpdump -i eth0 tcp and port 80 and host 10.10.1.1 sudo tcpdump -i eth0 &#39;tcp[tcpflags] &amp; (tcp-syn|tcp-fin) != 0&#39; sudo tcpdump -i any sudo tcpdump -i any -s 0 -n -c 100 -w demo.pcapng port 80 上面这些常见的 tcpdump 命令可以直接无缝替换为对应的 ptcpdump 命令，只需要将 tcpdump 改为 ptcpdump 即可: sudo ptcpdump -i eth0 tcp sudo ptcpdump -i eth0 tcp and port 80 and host 10.10.1.1 sudo ptcpdump -i eth0 &#39;tcp[tcpflags] &amp; (tcp-syn|tcp-fin) != 0&#39; sudo ptcpdump -i any sudo ptcpdump -i any -s 0 -n -c 100 -w demo.pcapng port 80 在输出中记录和显示发送网络流量的进程、容器和 Pod 信息 默认情况下，ptcpdump 将在输出中显示简单的进程、容器以及 Pod 信息: $ sudo ptcpdump -i any -c 4 port 80 or port 443 2024-07-07 12:56:56 WARN ptcpdump: verbose output suppressed, use -v[v]... for verbose output 2024-07-07 12:56:56 WARN capturing on any, link-type EN10MB (Ethernet), snapshot length 262144 bytes 12:56:59.517657 veth18618a4a wget.13626 In IP 10.244.0.4.46834 &gt; 13.251.96.10.443: Flags [S], seq 2743105662, win 64240, length 0, Container [test], Pod [test.default] 12:56:59.517836 eth0 wget.13626 Out IP 172.19.0.2.46834 &gt; 13.251.96.10.443: Flags [S], seq 2743105662, win 64240, length 0, Container [test], Pod [test.default] 12:56:59.692593 eth0 wget.13626 In IP 13.251.96.10.443 &gt; 172.19.0.2.46834: Flags [S.], seq 1966397178, ack 2743105663, win 65084, length 0, Container [test], Pod [test.default] 12:56:59.692754 veth18618a4a wget.13626 Out IP 13.251.96.10.443 &gt; 10.244.0.4.46834: Flags [S.], seq 1966397178, ack 2743105663, win 65084, length 0, Container [test], Pod [test.default] 4 packets captured 6 packets received by filter 0 packets dropped by kernel 可以通过指定 -v 参数，查看更详细的进程、容器以及 Pod 信息: $ ptcpdump -i any -c 4 -v port 80 or port 443 2024-07-07 12:58:59 WARN ptcpdump: capturing on any, link-type EN10MB (Ethernet), snapshot length 262144 bytes 12:59:02.265356 veth18618a4a In IP (tos 0x0, ttl 64, id 35996, offset 0, flags [DF], proto TCP (6), length 60) 10.244.0.4.41666 &gt; 13.215.144.61.443: Flags [S], cksum 0xa93a, seq 40651020, win 64240, options [mss 1460,sackOK,TS val 2665081987 ecr 0,nop,wscale 7], length 0 Process (pid 14565, cmd /usr/bin/wget, args wget https://mozillazg.com -O /dev/null) Container (name test, id 78116e60ff73d3dc41c795288fbf955ed543c964e56cada0c3fa466bc939a339, image docker.io/library/alpine:3.18, labels {&#34;io.cri-containerd.kind&#34;:&#34;container&#34;,&#34;io.kubernetes.container.name&#34;:&#34;test&#34;,&#34;io.kubernetes.pod.name&#34;:&#34;test&#34;,&#34;io.kubernetes.pod.namespace&#34;:&#34;default&#34;,&#34;io.kubernetes.pod.uid&#34;:&#34;9e4bc54b-de48-4b1c-8b9e-54709f67ed0c&#34;}) Pod (name test, namespace default, UID 9e4bc54b-de48-4b1c-8b9e-54709f67ed0c, labels {&#34;run&#34;:&#34;test&#34;}, annotations {&#34;kubernetes.io/config.seen&#34;:&#34;2024-07-07T12:43:29.121307922Z&#34;,&#34;kubernetes.io/config.source&#34;:&#34;api&#34;}) 12:59:02.265606 eth0 Out IP (tos 0x0, ttl 63, id 35996, offset 0, flags [DF], proto TCP (6), length 60) 172.19.0.2.41666 &gt; 13.215.144.61.443: Flags [S], cksum 0x4a58, seq 40651020, win 64240, options [mss 1460,sackOK,TS val 2665081987 ecr 0,nop,wscale 7], length 0 Process (pid 14565, cmd /usr/bin/wget, args wget https://mozillazg.com -O /dev/null) Container (name test, id 78116e60ff73d3dc41c795288fbf955ed543c964e56cada0c3fa466bc939a339, image docker.io/library/alpine:3.18, labels {&#34;io.cri-containerd.kind&#34;:&#34;container&#34;,&#34;io.kubernetes.container.name&#34;:&#34;test&#34;,&#34;io.kubernetes.pod.name&#34;:&#34;test&#34;,&#34;io.kubernetes.pod.namespace&#34;:&#34;default&#34;,&#34;io.kubernetes.pod.uid&#34;:&#34;9e4bc54b-de48-4b1c-8b9e-54709f67ed0c&#34;}) Pod (name test, namespace default, UID 9e4bc54b-de48-4b1c-8b9e-54709f67ed0c, labels {&#34;run&#34;:&#34;test&#34;}, annotations {&#34;kubernetes.io/config.seen&#34;:&#34;2024-07-07T12:43:29.121307922Z&#34;,&#34;kubernetes.io/config.source&#34;:&#34;api&#34;}) 12:59:02.462586 eth0 In IP (tos 0x4, ttl 47, id 0, offset 0, flags [DF], proto TCP (6), length 60) 13.215.144.61.443 &gt; 172.19.0.2.41666: Flags [S.], cksum 0x9772, seq 3160052321, ack 40651021, win 65084, options [mss 1240,sackOK,TS val 3710435767 ecr 2665081987,nop,wscale 9], length 0 Process (pid 14565, cmd /usr/bin/wget, args wget https://mozillazg.com -O /dev/null) Container (name test, id 78116e60ff73d3dc41c795288fbf955ed543c964e56cada0c3fa466bc939a339, image docker.io/library/alpine:3.18, labels {&#34;io.cri-containerd.kind&#34;:&#34;container&#34;,&#34;io.kubernetes.container.name&#34;:&#34;test&#34;,&#34;io.kubernetes.pod.name&#34;:&#34;test&#34;,&#34;io.kubernetes.pod.namespace&#34;:&#34;default&#34;,&#34;io.kubernetes.pod.uid&#34;:&#34;9e4bc54b-de48-4b1c-8b9e-54709f67ed0c&#34;}) Pod (name test, namespace default, UID 9e4bc54b-de48-4b1c-8b9e-54709f67ed0c, labels {&#34;run&#34;:&#34;test&#34;}, annotations {&#34;kubernetes.io/config.seen&#34;:&#34;2024-07-07T12:43:29.121307922Z&#34;,&#34;kubernetes.io/config.source&#34;:&#34;api&#34;}) 12:59:02.462782 veth18618a4a Out IP (tos 0x4, ttl 46, id 0, offset 0, flags [DF], proto TCP (6), length 60) 13.215.144.61.443 &gt; 10.244.0.4.41666: Flags [S.], cksum 0x3890, seq 3160052321, ack 40651021, win 65084, options [mss 1240,sackOK,TS val 3710435767 ecr 2665081987,nop,wscale 9], length 0 Process (pid 14565, cmd /usr/bin/wget, args wget https://mozillazg.com -O /dev/null) Container (name test, id 78116e60ff73d3dc41c795288fbf955ed543c964e56cada0c3fa466bc939a339, image docker.io/library/alpine:3.18, labels {&#34;io.cri-containerd.kind&#34;:&#34;container&#34;,&#34;io.kubernetes.container.name&#34;:&#34;test&#34;,&#34;io.kubernetes.pod.name&#34;:&#34;test&#34;,&#34;io.kubernetes.pod.namespace&#34;:&#34;default&#34;,&#34;io.kubernetes.pod.uid&#34;:&#34;9e4bc54b-de48-4b1c-8b9e-54709f67ed0c&#34;}) Pod (name test, namespace default, UID 9e4bc54b-de48-4b1c-8b9e-54709f67ed0c, labels {&#34;run&#34;:&#34;test&#34;}, annotations {&#34;kubernetes.io/config.seen&#34;:&#34;2024-07-07T12:43:29.121307922Z&#34;,&#34;kubernetes.io/config.source&#34;:&#34;api&#34;}) 4 packets captured 6 packets received by filter 0 packets dropped by kernel 支持对指定进程、容器或 Pod 进行抓包 指定进程 pid 抓包 可以通过 --pid 参数指定要抓包的进程 pid，实现对指定进程进行抓包: $ sudo ptcpdump -i any -c 4 --pid 82106 2024-07-07 13:11:40 WARN ptcpdump: verbose output suppressed, use -v[v]... for verbose output 2024-07-07 13:11:40 WARN capturing on any, link-type EN10MB (Ethernet), snapshot length 262144 bytes 13:11:50.170538 ens33 python3.10.82106 Out IP 10.0.2.15.36648 &gt; 13.251.96.10.443: Flags [S], seq 1633417447, win 64240, length 0 13:11:50.369972 ens33 python3.10.82106 In IP 13.251.96.10.443 &gt; 10.0.2.15.36648: Flags [S.], seq 1793291274, ack 1633417448, win 64240, length 0 2 packets captured 3 packets received by filter 0 packets dropped by kernel 同时还可以通过指定 -f 参数对该进程创建的子进程也进行抓包: $ sudo ptcpdump -i any -c 4 --pid 82106 -f &#39;tcp[tcpflags] &amp; tcp-fin != 0&#39; 2024-07-07 13:17:31 WARN ptcpdump: verbose output suppressed, use -v[v]... for verbose output 2024-07-07 13:17:31 WARN capturing on any, link-type EN10MB (Ethernet), snapshot length 262144 bytes 13:17:37.800903 ens33 python3.10.82106 Out IP 10.0.2.15.38576 &gt; 52.74.166.77.443: Flags [F.], seq 2442149577, ack 367271121, win 62780, length 0 13:17:37.977316 ens33 python3.10.82106 In IP 52.74.166.77.443 &gt; 10.0.2.15.38576: Flags [FP.], seq 367271145, ack 2442149578, win 64239, length 0 13:17:44.390627 ens33 curl.95920 Out IP 10.0.2.15.38590 &gt; 52.74.166.77.443: Flags [F.], seq 3726932781, ack 1510095004, win 63045, length 0 13:17:44.564990 ens33 curl.95920 In IP 52.74.166.77.443 &gt; 10.0.2.15.38590: Flags [FP.], seq 1510095028, ack 3726932782, win 64239, length 0 4 packets captured 4 packets received by filter 0 packets dropped by kernel 指定进程名称抓包 可以通过 --pname 参数指定进程名称（comm），实现指定进程名称抓包: $ sudo ptcpdump -i any -c 2 --pname curl 2024-07-07 13:23:18 WARN ptcpdump: verbose output suppressed, use -v[v]... for verbose output 2024-07-07 13:23:18 WARN capturing on any, link-type EN10MB (Ethernet), snapshot length 262144 bytes 13:23:24.881499 lo curl.26511 Out IP 127.0.0.1.43332 &gt; 127.0.0.53.53: 44133+ [1au] A? mozillazg.com. (42) 13:23:24.881663 lo curl.26511 Out IP 127.0.0.1.43332 &gt; 127.0.0.53.53: 14694+ [1au] AAAA? mozillazg.com. (42) 2 packets captured 2 packets received by filter 0 packets dropped by kernel 通过运行目标程序来抓包 有需要的话，也可以通过使用 -- 参数运行目标程序的方式来实现对特定程序进行抓包: $ sudo ptcpdump -i any -- curl -I https://mozillazg.com 2024-07-07 13:26:44 WARN ptcpdump: verbose output suppressed, use -v[v]... for verbose output 2024-07-07 13:26:44 WARN capturing on any, link-type EN10MB (Ethernet), snapshot length 262144 bytes 13:26:44.055757 lo curl.28094 Out IP 127.0.0.1.48826 &gt; 127.0.0.53.53: 8942+ [1au] A? mozillazg.com. (42) 13:26:44.055914 lo curl.28094 Out IP 127.0.0.1.48826 &gt; 127.0.0.53.53: 34274+ [1au] AAAA? mozillazg.com. (42) 13:26:44.775840 lo curl.28094 In IP 127.0.0.53.53 &gt; 127.0.0.1.48826: 8942 3/0/1 CNAME mozillazg.netlify.com., A 13.251.96.10, A 46.137.195.11 (106) 13:26:45.135988 lo curl.28094 In IP 127.0.0.53.53 &gt; 127.0.0.1.48826: 34274 3/0/1 CNAME mozillazg.netlify.com., AAAA 2406:da18:880:3802::c8, AAAA 2406:da18:b3d:e202::64 (130) 13:26:45.136819 wlp4s0 curl.28094 Out IP6 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744 &gt; 2406:da18:880:3802::c8.443: Flags [S], seq 3460683104, win 64800, length 0 13:26:45.310505 wlp4s0 curl.28094 In IP6 2406:da18:880:3802::c8.443 &gt; 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744: Flags [S.], seq 630810442, ack 3460683105, win 65232, length 0 13:26:45.310821 wlp4s0 curl.28094 Out IP6 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744 &gt; 2406:da18:880:3802::c8.443: Flags [.], seq 3460683105, ack 630810443, win 507, length 0 13:26:45.414551 wlp4s0 curl.28094 Out IP6 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744 &gt; 2406:da18:880:3802::c8.443: Flags [P.], seq 3460683105:3460683622, ack 630810443, win 507, length 517 13:26:45.595214 wlp4s0 curl.28094 In IP6 2406:da18:880:3802::c8.443 &gt; 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744: Flags [.], seq 630810443, ack 3460683622, win 127, length 0 13:26:45.595413 wlp4s0 curl.28094 In IP6 2406:da18:880:3802::c8.443 &gt; 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744: Flags [.], seq 630810443:630811651, ack 3460683622, win 127, length 1208 13:26:45.595595 wlp4s0 curl.28094 Out IP6 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744 &gt; 2406:da18:880:3802::c8.443: Flags [.], seq 3460683622, ack 630811651, win 501, length 0 13:26:45.595702 wlp4s0 curl.28094 In IP6 2406:da18:880:3802::c8.443 &gt; 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744: Flags [P.], seq 630811651:630812859, ack 3460683622, win 127, length 1208 13:26:45.595797 wlp4s0 curl.28094 Out IP6 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744 &gt; 2406:da18:880:3802::c8.443: Flags [.], seq 3460683622, ack 630812859, win 492, length 0 13:26:45.595862 wlp4s0 curl.28094 In IP6 2406:da18:880:3802::c8.443 &gt; 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744: Flags [P.], seq 630812859:630813338, ack 3460683622, win 127, length 479 13:26:45.595934 wlp4s0 curl.28094 Out IP6 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744 &gt; 2406:da18:880:3802::c8.443: Flags [.], seq 3460683622, ack 630813338, win 489, length 0 13:26:45.600998 wlp4s0 curl.28094 Out IP6 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744 &gt; 2406:da18:880:3802::c8.443: Flags [P.], seq 3460683622:3460683686, ack 630813338, win 489, length 64 13:26:45.601344 wlp4s0 curl.28094 Out IP6 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744 &gt; 2406:da18:880:3802::c8.443: Flags [P.], seq 3460683686:3460683781, ack 630813338, win 489, length 95 13:26:45.616759 wlp4s0 curl.28094 Out IP6 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744 &gt; 2406:da18:880:3802::c8.443: Flags [P.], seq 3460683781:3460683882, ack 630813338, win 501, length 101 13:26:45.779516 wlp4s0 curl.28094 In IP6 2406:da18:880:3802::c8.443 &gt; 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744: Flags [.], seq 630813338, ack 3460683781, win 127, length 0 13:26:45.779792 wlp4s0 curl.28094 In IP6 2406:da18:880:3802::c8.443 &gt; 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744: Flags [P.], seq 630813338:630813399, ack 3460683781, win 127, length 61 13:26:45.779996 wlp4s0 curl.28094 In IP6 2406:da18:880:3802::c8.443 &gt; 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744: Flags [P.], seq 630813399:630813443, ack 3460683781, win 127, length 44 13:26:45.780318 wlp4s0 curl.28094 Out IP6 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744 &gt; 2406:da18:880:3802::c8.443: Flags [P.], seq 3460683882:3460683913, ack 630813443, win 501, length 31 HTTP/2 200 13:26:45.788787 wlp4s0 curl.28094 In IP6 2406:da18:880:3802::c8.443 &gt; 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744: Flags [P.], seq 630813443:630813677, ack 3460683882, win 127, length 234 accept-ranges: bytes age: 79059 cache-control: public,max-age=0,must-revalidate cache-status: &#34;Netlify Edge&#34;; hit content-type: text/html; charset=UTF-8 date: Sun, 07 Jul 2024 05:26:44 GMT etag: &#34;80cf37f5974e2232d976c6f622121dee-ssl&#34; server: Netlify strict-transport-security: max-age=31536000 x-nf-request-id: 01J25THACQSN9364YHSR2C0X5F content-length: 11727 13:26:45.789558 wlp4s0 curl.28094 Out IP6 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744 &gt; 2406:da18:880:3802::c8.443: Flags [P.], seq 3460683913:3460683937, ack 630813677, win 501, length 24 13:26:45.791514 wlp4s0 curl.28094 Out IP6 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744 &gt; 2406:da18:880:3802::c8.443: Flags [F.], seq 3460683937, ack 630813677, win 501, length 0 13:26:45.963642 wlp4s0 curl.28094 In IP6 2406:da18:880:3802::c8.443 &gt; 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744: Flags [.], seq 630813677, ack 3460683937, win 127, length 0 13:26:45.963956 wlp4s0 curl.28094 In IP6 2406:da18:880:3802::c8.443 &gt; 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744: Flags [P.], seq 630813677:630813701, ack 3460683937, win 127, length 24 13:26:45.964172 wlp4s0 curl.28094 Out IP6 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744 &gt; 2406:da18:880:3802::c8.443: Flags [R], seq 3460683937, win 0, length 0 13:26:45.964415 wlp4s0 curl.28094 In IP6 2406:da18:880:3802::c8.443 &gt; 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744: Flags [F.], seq 630813701, ack 3460683937, win 127, length 0 13:26:45.964506 wlp4s0 curl.28094 Out IP6 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744 &gt; 2406:da18:880:3802::c8.443: Flags [R], seq 3460683937, win 0, length 0 13:26:45.966158 wlp4s0 curl.28094 In IP6 2406:da18:880:3802::c8.443 &gt; 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744: Flags [.], seq 630813702, ack 3460683938, win 127, length 0 13:26:45.966299 wlp4s0 curl.28094 Out IP6 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744 &gt; 2406:da18:880:3802::c8.443: Flags [R], seq 3460683938, win 0, length 0 32 packets captured 32 packets received by filter 0 packets dropped by kernel 指定容器抓包 可以通过 --container-id 参数指定容器 id 进行抓包: $ sudo ptcpdump -i any -c 2 --container-id 36f0310403b1 2024-07-07 13:36:19 WARN ptcpdump: verbose output suppressed, use -v[v]... for verbose output 2024-07-07 13:36:19 WARN capturing on any, link-type EN10MB (Ethernet), snapshot length 262144 bytes 13:36:24.191242 veth09dec8f curl.32636 In IP 172.19.0.2.48960 &gt; 18.139.194.139.443: Flags [S], seq 3213779351, win 64240, length 0, Container [kind-control-plane] 13:36:24.191369 wlp4s0 curl.32636 Out IP 192.168.1.50.48960 &gt; 18.139.194.139.443: Flags [S], seq 3213779351, win 64240, length 0, Container [kind-control-plane] 2 packets captured 2 packets received by filter 0 packets dropped by kernel 也可以通过 --container-name 参数指定容器名称进行抓包: $ sudo ptcpdump -i any -c 2 --container-name kind-control-plane 2024-07-07 13:37:16 WARN ptcpdump: verbose output suppressed, use -v[v]... for verbose output 2024-07-07 13:37:16 WARN capturing on any, link-type EN10MB (Ethernet), snapshot length 262144 bytes 13:37:22.560764 veth09dec8f curl.33093 In IP 172.19.0.2.39084 &gt; 18.139.194.139.443: Flags [S], seq 3645727033, win 64240, length 0, Container [kind-control-plane] 13:37:22.561010 wlp4s0 curl.33093 Out IP 192.168.1.50.39084 &gt; 18.139.194.139.443: Flags [S], seq 3645727033, win 64240, length 0, Container [kind-control-plane] 2 packets captured 2 packets received by filter 0 packets dropped by kernel 指定 Pod 抓包 可以通过 --pod-name 参数指定 Pod 名称进行抓包, 参数值的格式为 &lt;pod 名称&gt;.&lt;pod 命名空间&gt;: $ sudo ptcpdump -i any -c 2 --pod-name test.default 2024-07-07 13:38:29 WARN ptcpdump: verbose output suppressed, use -v[v]... for verbose output 2024-07-07 13:38:29 WARN capturing on any, link-type EN10MB (Ethernet), snapshot length 262144 bytes 13:38:34.175752 eth0 wget.33660 Out IP 172.19.0.2.51564 &gt; 13.215.144.61.443: Flags [S], seq 567383917, win 64240, length 0, Container [test], Pod [test.default] 13:38:34.372894 eth0 wget.33660 In IP 13.215.144.61.443 &gt; 172.19.0.2.51564: Flags [S.], seq 2654865684, ack 567383918, win 65084, length 0, Container [test], Pod [test.default] 2 packets captured 3 packets received by filter 0 packets dropped by kernel 将数据保存为 pcapng 格式使用 tcpdump 或 Wireshark 进行分析 保存为 pcapng 格式 可以通过 -w 参数将抓包数据保存为 pcapng 格式: $ sudo ptcpdump -i any -c 5 -w demo.pcapng 2024-07-07 13:41:32 WARN ptcpdump: verbose output suppressed, use -v[v]... for verbose output 2024-07-07 13:41:32 WARN capturing on any, link-type EN10MB (Ethernet), snapshot length 262144 bytes 5 packets captured 22 packets received by filter 0 packets dropped by kernel 使用 tcpdump 进行分析 可以直接通过管道的方式通过 tcpdump 对抓取的数据进行分析: $ sudo ptcpdump -i any -c 5 -w - port 80 | tcpdump -n -r - reading from file -, link-type EN10MB (Ethernet), snapshot length 65535 2024-07-07 13:44:33 WARN ptcpdump: verbose output suppressed, use -v[v]... for verbose output 2024-07-07 13:44:33 WARN capturing on any, link-type EN10MB (Ethernet), snapshot length 262144 bytes 13:44:44.530637 IP6 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.50858 &gt; 2406:da18:880:3801::c8.80: Flags [S], seq 495824072, win 64800, options [mss 1440,sackOK,TS val 2411675580 ecr 0,nop,wscale 7], length 0 13:44:44.708902 IP6 2406:da18:880:3801::c8.80 &gt; 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.50858: Flags [S.], seq 640438481, ack 495824073, win 65232, options [mss 1220,sackOK,TS val 1591525382 ecr 2411675580,nop,wscale 9], length 0 13:44:44.709261 IP6 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.50858 &gt; 2406:da18:880:3801::c8.80: Flags [.], ack 1, win 507, options [nop,nop,TS val 2411675670 ecr 1591525382], length 0 13:44:44.709475 IP6 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.50858 &gt; 2406:da18:880:3801::c8.80: Flags [P.], seq 1:78, ack 1, win 507, options [nop,nop,TS val 2411675670 ecr 1591525382], length 77: HTTP: GET / HTTP/1.1 5 packets captured 6 packets received by filter 0 packets dropped by kernel 13:44:44.877110 IP6 2406:da18:880:3801::c8.80 &gt; 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.50858: Flags [P.], seq 1:266, ack 78, win 128, options [nop,nop,TS val 1591525469 ecr 2411675670], length 265: HTTP: HTTP/1.1 301 Moved Permanently 也可以通过读取文件的方式通过 tcpdump 对抓取的数据进行分析: $ tcpdump -n -r demo.pcapng reading from file demo.pcapng, link-type EN10MB (Ethernet), snapshot length 65535 13:47:41.169584 IP6 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.43038 &gt; 2406:da18:b3d:e201::64.80: Flags [S], seq 3876639697, win 64800, options [mss 1440,sackOK,TS val 2072195434 ecr 0,nop,wscale 7], length 0 13:47:41.571055 IP 192.168.1.50.60580 &gt; 18.139.194.139.80: Flags [S], seq 481256927, win 64240, options [mss 1460,sackOK,TS val 2707199178 ecr 0,nop,wscale 7], length 0 13:47:41.956270 IP6 2406:da18:b3d:e201::64.80 &gt; 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.43038: Flags [S.], seq 2283576526, ack 3876639698, win 65232, options [mss 1220,sackOK,TS val 4276006323 ecr 2072195434,nop,wscale 9], length 0 13:47:41.956437 IP6 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.43038 &gt; 2406:da18:b3d:e201::64.80: Flags [.], ack 1, win 507, options [nop,nop,TS val 2072195828 ecr 4276006323], length 0 13:47:41.956733 IP6 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.43038 &gt; 2406:da18:b3d:e201::64.80: Flags [P.], seq 1:78, ack 1, win 507, options [nop,nop,TS val 2072195828 ecr 4276006323], length 77: HTTP: GET / HTTP/1.1 使用 Wireshark 进行分析 当使用 Wireshark 打开保存的 pcapng 格式的文件时，将在 Wireshark 的界面中显示相关的进程、容器以及 Pod 信息： 参考资料 mozillazg/ptcpdump: Process-aware, eBPF-based tcpdump tcpdump(1) man page | TCPDUMP &amp; LIBPCAP" />
+
+    <style>
+      .js-toc {
+        margin-bottom: 20px;
+      }
+      .donate-modal {
+        text-align: center;
+      }
+      #donate-modal-container .donate-image {
+        max-height: 300px !important;
+        min-height: inherit !important;
+      }
+    </style>
+
+        <meta property="og:site_name" content="mozillazg's Blog" />
+        <meta property="og:type" content="article"/>
+        <meta property="og:title" content="ptcpdump: 抓包时显示进程信息以及对任意进程、容器或 Pod 进行抓包"/>
+        <meta property="og:url" content="https://mozillazg.com/2024/07/ebpf-ptcpdump-capturing-the-network-traffic-of-a-process-or-container-or-pod.html"/>
+        <meta property="og:description" content="前言 tcpdump 是我们常用的一个网络抓包工具，它的功能非常的强大。但是它还缺少一个大家反馈很久却一直没实现的一个特性， 那就是：在结果中包含/显示发送网络请求/流量的进程信息，以及支持抓取指定进程的网络流量。 当前针对 tcpdump 抓取的流量信息，如果要获取对应的进程信息的话，常见的方法是： 基于请求的连接信息，通过 ss 或 netstat 之内的工具反查进程信息。 这个方法的缺点是：操作起来比较繁琐以及无法查找匹配短生命周期的进程所发送的网络流量。 至于基于 tcpdump 实现抓取指定进程的网络流量，常见的方法是：在知晓进程要访问的目标服务地址信息的前提下， 在使用 tcpdump 时按目的地址信息过滤流量； 或者是在特定的网络命名空间中运行目标进程，然后再在该网络命名空间下使用 tcpdump 抓包。 这两个方法的缺点是：需要提前知晓目标进程访问的目的地址或者需要改变目标进程的执行方式，适用场景有限。 本文将介绍一个新的工具 ptcpdump，基于这个工具，我们既可以在抓包时直接感知发送流量的进程信息， 也可以直接对运行中或待运行的任意进程进行网络抓包。如果流量是从容器内的进程发出的话， 它还支持显示流量的容器或 Pod 信息以及对特定容器或 Pod 进行抓包。 ptcpdump 介绍 ptcpdump 是一个使用 eBPF 技术开发的、类 tcpdump 的网络抓包工具。 它除了兼容 tcpdump 的常用命令行参数以及包过滤语法外， 还额外提供了如下核心特性： 在输出中记录和显示发送网络流量的进程、容器、Pod 信息。 支持对指定进程、容器以及 Pod 进行抓包。 支持将抓取的数据包保存为 pcapng 格式，可以使用 tcpdump 或者 Wireshark 做进一步分析。 当在 Wireshark 中打开保存的 pcapng 文件时，将能够看到每个数据包对应的进程、容器、Pod 信息。 使用静态链接的方式编译该工具，系统中不需要安装额外的系统链接库。 更多信息请参考项目的源代码仓库： https://github.com/mozillazg/ptcpdump 下面将以示例的形式介绍 ptcpdump 的核心功能。 兼容 tcpdump 的常用命令行参数和包过滤语法 sudo tcpdump -i eth0 tcp sudo tcpdump -i eth0 tcp and port 80 and host 10.10.1.1 sudo tcpdump -i eth0 &#39;tcp[tcpflags] &amp; (tcp-syn|tcp-fin) != 0&#39; sudo tcpdump -i any sudo tcpdump -i any -s 0 -n -c 100 -w demo.pcapng port 80 上面这些常见的 tcpdump 命令可以直接无缝替换为对应的 ptcpdump 命令，只需要将 tcpdump 改为 ptcpdump 即可: sudo ptcpdump -i eth0 tcp sudo ptcpdump -i eth0 tcp and port 80 and host 10.10.1.1 sudo ptcpdump -i eth0 &#39;tcp[tcpflags] &amp; (tcp-syn|tcp-fin) != 0&#39; sudo ptcpdump -i any sudo ptcpdump -i any -s 0 -n -c 100 -w demo.pcapng port 80 在输出中记录和显示发送网络流量的进程、容器和 Pod 信息 默认情况下，ptcpdump 将在输出中显示简单的进程、容器以及 Pod 信息: $ sudo ptcpdump -i any -c 4 port 80 or port 443 2024-07-07 12:56:56 WARN ptcpdump: verbose output suppressed, use -v[v]... for verbose output 2024-07-07 12:56:56 WARN capturing on any, link-type EN10MB (Ethernet), snapshot length 262144 bytes 12:56:59.517657 veth18618a4a wget.13626 In IP 10.244.0.4.46834 &gt; 13.251.96.10.443: Flags [S], seq 2743105662, win 64240, length 0, Container [test], Pod [test.default] 12:56:59.517836 eth0 wget.13626 Out IP 172.19.0.2.46834 &gt; 13.251.96.10.443: Flags [S], seq 2743105662, win 64240, length 0, Container [test], Pod [test.default] 12:56:59.692593 eth0 wget.13626 In IP 13.251.96.10.443 &gt; 172.19.0.2.46834: Flags [S.], seq 1966397178, ack 2743105663, win 65084, length 0, Container [test], Pod [test.default] 12:56:59.692754 veth18618a4a wget.13626 Out IP 13.251.96.10.443 &gt; 10.244.0.4.46834: Flags [S.], seq 1966397178, ack 2743105663, win 65084, length 0, Container [test], Pod [test.default] 4 packets captured 6 packets received by filter 0 packets dropped by kernel 可以通过指定 -v 参数，查看更详细的进程、容器以及 Pod 信息: $ ptcpdump -i any -c 4 -v port 80 or port 443 2024-07-07 12:58:59 WARN ptcpdump: capturing on any, link-type EN10MB (Ethernet), snapshot length 262144 bytes 12:59:02.265356 veth18618a4a In IP (tos 0x0, ttl 64, id 35996, offset 0, flags [DF], proto TCP (6), length 60) 10.244.0.4.41666 &gt; 13.215.144.61.443: Flags [S], cksum 0xa93a, seq 40651020, win 64240, options [mss 1460,sackOK,TS val 2665081987 ecr 0,nop,wscale 7], length 0 Process (pid 14565, cmd /usr/bin/wget, args wget https://mozillazg.com -O /dev/null) Container (name test, id 78116e60ff73d3dc41c795288fbf955ed543c964e56cada0c3fa466bc939a339, image docker.io/library/alpine:3.18, labels {&#34;io.cri-containerd.kind&#34;:&#34;container&#34;,&#34;io.kubernetes.container.name&#34;:&#34;test&#34;,&#34;io.kubernetes.pod.name&#34;:&#34;test&#34;,&#34;io.kubernetes.pod.namespace&#34;:&#34;default&#34;,&#34;io.kubernetes.pod.uid&#34;:&#34;9e4bc54b-de48-4b1c-8b9e-54709f67ed0c&#34;}) Pod (name test, namespace default, UID 9e4bc54b-de48-4b1c-8b9e-54709f67ed0c, labels {&#34;run&#34;:&#34;test&#34;}, annotations {&#34;kubernetes.io/config.seen&#34;:&#34;2024-07-07T12:43:29.121307922Z&#34;,&#34;kubernetes.io/config.source&#34;:&#34;api&#34;}) 12:59:02.265606 eth0 Out IP (tos 0x0, ttl 63, id 35996, offset 0, flags [DF], proto TCP (6), length 60) 172.19.0.2.41666 &gt; 13.215.144.61.443: Flags [S], cksum 0x4a58, seq 40651020, win 64240, options [mss 1460,sackOK,TS val 2665081987 ecr 0,nop,wscale 7], length 0 Process (pid 14565, cmd /usr/bin/wget, args wget https://mozillazg.com -O /dev/null) Container (name test, id 78116e60ff73d3dc41c795288fbf955ed543c964e56cada0c3fa466bc939a339, image docker.io/library/alpine:3.18, labels {&#34;io.cri-containerd.kind&#34;:&#34;container&#34;,&#34;io.kubernetes.container.name&#34;:&#34;test&#34;,&#34;io.kubernetes.pod.name&#34;:&#34;test&#34;,&#34;io.kubernetes.pod.namespace&#34;:&#34;default&#34;,&#34;io.kubernetes.pod.uid&#34;:&#34;9e4bc54b-de48-4b1c-8b9e-54709f67ed0c&#34;}) Pod (name test, namespace default, UID 9e4bc54b-de48-4b1c-8b9e-54709f67ed0c, labels {&#34;run&#34;:&#34;test&#34;}, annotations {&#34;kubernetes.io/config.seen&#34;:&#34;2024-07-07T12:43:29.121307922Z&#34;,&#34;kubernetes.io/config.source&#34;:&#34;api&#34;}) 12:59:02.462586 eth0 In IP (tos 0x4, ttl 47, id 0, offset 0, flags [DF], proto TCP (6), length 60) 13.215.144.61.443 &gt; 172.19.0.2.41666: Flags [S.], cksum 0x9772, seq 3160052321, ack 40651021, win 65084, options [mss 1240,sackOK,TS val 3710435767 ecr 2665081987,nop,wscale 9], length 0 Process (pid 14565, cmd /usr/bin/wget, args wget https://mozillazg.com -O /dev/null) Container (name test, id 78116e60ff73d3dc41c795288fbf955ed543c964e56cada0c3fa466bc939a339, image docker.io/library/alpine:3.18, labels {&#34;io.cri-containerd.kind&#34;:&#34;container&#34;,&#34;io.kubernetes.container.name&#34;:&#34;test&#34;,&#34;io.kubernetes.pod.name&#34;:&#34;test&#34;,&#34;io.kubernetes.pod.namespace&#34;:&#34;default&#34;,&#34;io.kubernetes.pod.uid&#34;:&#34;9e4bc54b-de48-4b1c-8b9e-54709f67ed0c&#34;}) Pod (name test, namespace default, UID 9e4bc54b-de48-4b1c-8b9e-54709f67ed0c, labels {&#34;run&#34;:&#34;test&#34;}, annotations {&#34;kubernetes.io/config.seen&#34;:&#34;2024-07-07T12:43:29.121307922Z&#34;,&#34;kubernetes.io/config.source&#34;:&#34;api&#34;}) 12:59:02.462782 veth18618a4a Out IP (tos 0x4, ttl 46, id 0, offset 0, flags [DF], proto TCP (6), length 60) 13.215.144.61.443 &gt; 10.244.0.4.41666: Flags [S.], cksum 0x3890, seq 3160052321, ack 40651021, win 65084, options [mss 1240,sackOK,TS val 3710435767 ecr 2665081987,nop,wscale 9], length 0 Process (pid 14565, cmd /usr/bin/wget, args wget https://mozillazg.com -O /dev/null) Container (name test, id 78116e60ff73d3dc41c795288fbf955ed543c964e56cada0c3fa466bc939a339, image docker.io/library/alpine:3.18, labels {&#34;io.cri-containerd.kind&#34;:&#34;container&#34;,&#34;io.kubernetes.container.name&#34;:&#34;test&#34;,&#34;io.kubernetes.pod.name&#34;:&#34;test&#34;,&#34;io.kubernetes.pod.namespace&#34;:&#34;default&#34;,&#34;io.kubernetes.pod.uid&#34;:&#34;9e4bc54b-de48-4b1c-8b9e-54709f67ed0c&#34;}) Pod (name test, namespace default, UID 9e4bc54b-de48-4b1c-8b9e-54709f67ed0c, labels {&#34;run&#34;:&#34;test&#34;}, annotations {&#34;kubernetes.io/config.seen&#34;:&#34;2024-07-07T12:43:29.121307922Z&#34;,&#34;kubernetes.io/config.source&#34;:&#34;api&#34;}) 4 packets captured 6 packets received by filter 0 packets dropped by kernel 支持对指定进程、容器或 Pod 进行抓包 指定进程 pid 抓包 可以通过 --pid 参数指定要抓包的进程 pid，实现对指定进程进行抓包: $ sudo ptcpdump -i any -c 4 --pid 82106 2024-07-07 13:11:40 WARN ptcpdump: verbose output suppressed, use -v[v]... for verbose output 2024-07-07 13:11:40 WARN capturing on any, link-type EN10MB (Ethernet), snapshot length 262144 bytes 13:11:50.170538 ens33 python3.10.82106 Out IP 10.0.2.15.36648 &gt; 13.251.96.10.443: Flags [S], seq 1633417447, win 64240, length 0 13:11:50.369972 ens33 python3.10.82106 In IP 13.251.96.10.443 &gt; 10.0.2.15.36648: Flags [S.], seq 1793291274, ack 1633417448, win 64240, length 0 2 packets captured 3 packets received by filter 0 packets dropped by kernel 同时还可以通过指定 -f 参数对该进程创建的子进程也进行抓包: $ sudo ptcpdump -i any -c 4 --pid 82106 -f &#39;tcp[tcpflags] &amp; tcp-fin != 0&#39; 2024-07-07 13:17:31 WARN ptcpdump: verbose output suppressed, use -v[v]... for verbose output 2024-07-07 13:17:31 WARN capturing on any, link-type EN10MB (Ethernet), snapshot length 262144 bytes 13:17:37.800903 ens33 python3.10.82106 Out IP 10.0.2.15.38576 &gt; 52.74.166.77.443: Flags [F.], seq 2442149577, ack 367271121, win 62780, length 0 13:17:37.977316 ens33 python3.10.82106 In IP 52.74.166.77.443 &gt; 10.0.2.15.38576: Flags [FP.], seq 367271145, ack 2442149578, win 64239, length 0 13:17:44.390627 ens33 curl.95920 Out IP 10.0.2.15.38590 &gt; 52.74.166.77.443: Flags [F.], seq 3726932781, ack 1510095004, win 63045, length 0 13:17:44.564990 ens33 curl.95920 In IP 52.74.166.77.443 &gt; 10.0.2.15.38590: Flags [FP.], seq 1510095028, ack 3726932782, win 64239, length 0 4 packets captured 4 packets received by filter 0 packets dropped by kernel 指定进程名称抓包 可以通过 --pname 参数指定进程名称（comm），实现指定进程名称抓包: $ sudo ptcpdump -i any -c 2 --pname curl 2024-07-07 13:23:18 WARN ptcpdump: verbose output suppressed, use -v[v]... for verbose output 2024-07-07 13:23:18 WARN capturing on any, link-type EN10MB (Ethernet), snapshot length 262144 bytes 13:23:24.881499 lo curl.26511 Out IP 127.0.0.1.43332 &gt; 127.0.0.53.53: 44133+ [1au] A? mozillazg.com. (42) 13:23:24.881663 lo curl.26511 Out IP 127.0.0.1.43332 &gt; 127.0.0.53.53: 14694+ [1au] AAAA? mozillazg.com. (42) 2 packets captured 2 packets received by filter 0 packets dropped by kernel 通过运行目标程序来抓包 有需要的话，也可以通过使用 -- 参数运行目标程序的方式来实现对特定程序进行抓包: $ sudo ptcpdump -i any -- curl -I https://mozillazg.com 2024-07-07 13:26:44 WARN ptcpdump: verbose output suppressed, use -v[v]... for verbose output 2024-07-07 13:26:44 WARN capturing on any, link-type EN10MB (Ethernet), snapshot length 262144 bytes 13:26:44.055757 lo curl.28094 Out IP 127.0.0.1.48826 &gt; 127.0.0.53.53: 8942+ [1au] A? mozillazg.com. (42) 13:26:44.055914 lo curl.28094 Out IP 127.0.0.1.48826 &gt; 127.0.0.53.53: 34274+ [1au] AAAA? mozillazg.com. (42) 13:26:44.775840 lo curl.28094 In IP 127.0.0.53.53 &gt; 127.0.0.1.48826: 8942 3/0/1 CNAME mozillazg.netlify.com., A 13.251.96.10, A 46.137.195.11 (106) 13:26:45.135988 lo curl.28094 In IP 127.0.0.53.53 &gt; 127.0.0.1.48826: 34274 3/0/1 CNAME mozillazg.netlify.com., AAAA 2406:da18:880:3802::c8, AAAA 2406:da18:b3d:e202::64 (130) 13:26:45.136819 wlp4s0 curl.28094 Out IP6 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744 &gt; 2406:da18:880:3802::c8.443: Flags [S], seq 3460683104, win 64800, length 0 13:26:45.310505 wlp4s0 curl.28094 In IP6 2406:da18:880:3802::c8.443 &gt; 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744: Flags [S.], seq 630810442, ack 3460683105, win 65232, length 0 13:26:45.310821 wlp4s0 curl.28094 Out IP6 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744 &gt; 2406:da18:880:3802::c8.443: Flags [.], seq 3460683105, ack 630810443, win 507, length 0 13:26:45.414551 wlp4s0 curl.28094 Out IP6 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744 &gt; 2406:da18:880:3802::c8.443: Flags [P.], seq 3460683105:3460683622, ack 630810443, win 507, length 517 13:26:45.595214 wlp4s0 curl.28094 In IP6 2406:da18:880:3802::c8.443 &gt; 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744: Flags [.], seq 630810443, ack 3460683622, win 127, length 0 13:26:45.595413 wlp4s0 curl.28094 In IP6 2406:da18:880:3802::c8.443 &gt; 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744: Flags [.], seq 630810443:630811651, ack 3460683622, win 127, length 1208 13:26:45.595595 wlp4s0 curl.28094 Out IP6 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744 &gt; 2406:da18:880:3802::c8.443: Flags [.], seq 3460683622, ack 630811651, win 501, length 0 13:26:45.595702 wlp4s0 curl.28094 In IP6 2406:da18:880:3802::c8.443 &gt; 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744: Flags [P.], seq 630811651:630812859, ack 3460683622, win 127, length 1208 13:26:45.595797 wlp4s0 curl.28094 Out IP6 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744 &gt; 2406:da18:880:3802::c8.443: Flags [.], seq 3460683622, ack 630812859, win 492, length 0 13:26:45.595862 wlp4s0 curl.28094 In IP6 2406:da18:880:3802::c8.443 &gt; 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744: Flags [P.], seq 630812859:630813338, ack 3460683622, win 127, length 479 13:26:45.595934 wlp4s0 curl.28094 Out IP6 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744 &gt; 2406:da18:880:3802::c8.443: Flags [.], seq 3460683622, ack 630813338, win 489, length 0 13:26:45.600998 wlp4s0 curl.28094 Out IP6 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744 &gt; 2406:da18:880:3802::c8.443: Flags [P.], seq 3460683622:3460683686, ack 630813338, win 489, length 64 13:26:45.601344 wlp4s0 curl.28094 Out IP6 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744 &gt; 2406:da18:880:3802::c8.443: Flags [P.], seq 3460683686:3460683781, ack 630813338, win 489, length 95 13:26:45.616759 wlp4s0 curl.28094 Out IP6 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744 &gt; 2406:da18:880:3802::c8.443: Flags [P.], seq 3460683781:3460683882, ack 630813338, win 501, length 101 13:26:45.779516 wlp4s0 curl.28094 In IP6 2406:da18:880:3802::c8.443 &gt; 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744: Flags [.], seq 630813338, ack 3460683781, win 127, length 0 13:26:45.779792 wlp4s0 curl.28094 In IP6 2406:da18:880:3802::c8.443 &gt; 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744: Flags [P.], seq 630813338:630813399, ack 3460683781, win 127, length 61 13:26:45.779996 wlp4s0 curl.28094 In IP6 2406:da18:880:3802::c8.443 &gt; 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744: Flags [P.], seq 630813399:630813443, ack 3460683781, win 127, length 44 13:26:45.780318 wlp4s0 curl.28094 Out IP6 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744 &gt; 2406:da18:880:3802::c8.443: Flags [P.], seq 3460683882:3460683913, ack 630813443, win 501, length 31 HTTP/2 200 13:26:45.788787 wlp4s0 curl.28094 In IP6 2406:da18:880:3802::c8.443 &gt; 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744: Flags [P.], seq 630813443:630813677, ack 3460683882, win 127, length 234 accept-ranges: bytes age: 79059 cache-control: public,max-age=0,must-revalidate cache-status: &#34;Netlify Edge&#34;; hit content-type: text/html; charset=UTF-8 date: Sun, 07 Jul 2024 05:26:44 GMT etag: &#34;80cf37f5974e2232d976c6f622121dee-ssl&#34; server: Netlify strict-transport-security: max-age=31536000 x-nf-request-id: 01J25THACQSN9364YHSR2C0X5F content-length: 11727 13:26:45.789558 wlp4s0 curl.28094 Out IP6 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744 &gt; 2406:da18:880:3802::c8.443: Flags [P.], seq 3460683913:3460683937, ack 630813677, win 501, length 24 13:26:45.791514 wlp4s0 curl.28094 Out IP6 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744 &gt; 2406:da18:880:3802::c8.443: Flags [F.], seq 3460683937, ack 630813677, win 501, length 0 13:26:45.963642 wlp4s0 curl.28094 In IP6 2406:da18:880:3802::c8.443 &gt; 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744: Flags [.], seq 630813677, ack 3460683937, win 127, length 0 13:26:45.963956 wlp4s0 curl.28094 In IP6 2406:da18:880:3802::c8.443 &gt; 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744: Flags [P.], seq 630813677:630813701, ack 3460683937, win 127, length 24 13:26:45.964172 wlp4s0 curl.28094 Out IP6 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744 &gt; 2406:da18:880:3802::c8.443: Flags [R], seq 3460683937, win 0, length 0 13:26:45.964415 wlp4s0 curl.28094 In IP6 2406:da18:880:3802::c8.443 &gt; 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744: Flags [F.], seq 630813701, ack 3460683937, win 127, length 0 13:26:45.964506 wlp4s0 curl.28094 Out IP6 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744 &gt; 2406:da18:880:3802::c8.443: Flags [R], seq 3460683937, win 0, length 0 13:26:45.966158 wlp4s0 curl.28094 In IP6 2406:da18:880:3802::c8.443 &gt; 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744: Flags [.], seq 630813702, ack 3460683938, win 127, length 0 13:26:45.966299 wlp4s0 curl.28094 Out IP6 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744 &gt; 2406:da18:880:3802::c8.443: Flags [R], seq 3460683938, win 0, length 0 32 packets captured 32 packets received by filter 0 packets dropped by kernel 指定容器抓包 可以通过 --container-id 参数指定容器 id 进行抓包: $ sudo ptcpdump -i any -c 2 --container-id 36f0310403b1 2024-07-07 13:36:19 WARN ptcpdump: verbose output suppressed, use -v[v]... for verbose output 2024-07-07 13:36:19 WARN capturing on any, link-type EN10MB (Ethernet), snapshot length 262144 bytes 13:36:24.191242 veth09dec8f curl.32636 In IP 172.19.0.2.48960 &gt; 18.139.194.139.443: Flags [S], seq 3213779351, win 64240, length 0, Container [kind-control-plane] 13:36:24.191369 wlp4s0 curl.32636 Out IP 192.168.1.50.48960 &gt; 18.139.194.139.443: Flags [S], seq 3213779351, win 64240, length 0, Container [kind-control-plane] 2 packets captured 2 packets received by filter 0 packets dropped by kernel 也可以通过 --container-name 参数指定容器名称进行抓包: $ sudo ptcpdump -i any -c 2 --container-name kind-control-plane 2024-07-07 13:37:16 WARN ptcpdump: verbose output suppressed, use -v[v]... for verbose output 2024-07-07 13:37:16 WARN capturing on any, link-type EN10MB (Ethernet), snapshot length 262144 bytes 13:37:22.560764 veth09dec8f curl.33093 In IP 172.19.0.2.39084 &gt; 18.139.194.139.443: Flags [S], seq 3645727033, win 64240, length 0, Container [kind-control-plane] 13:37:22.561010 wlp4s0 curl.33093 Out IP 192.168.1.50.39084 &gt; 18.139.194.139.443: Flags [S], seq 3645727033, win 64240, length 0, Container [kind-control-plane] 2 packets captured 2 packets received by filter 0 packets dropped by kernel 指定 Pod 抓包 可以通过 --pod-name 参数指定 Pod 名称进行抓包, 参数值的格式为 &lt;pod 名称&gt;.&lt;pod 命名空间&gt;: $ sudo ptcpdump -i any -c 2 --pod-name test.default 2024-07-07 13:38:29 WARN ptcpdump: verbose output suppressed, use -v[v]... for verbose output 2024-07-07 13:38:29 WARN capturing on any, link-type EN10MB (Ethernet), snapshot length 262144 bytes 13:38:34.175752 eth0 wget.33660 Out IP 172.19.0.2.51564 &gt; 13.215.144.61.443: Flags [S], seq 567383917, win 64240, length 0, Container [test], Pod [test.default] 13:38:34.372894 eth0 wget.33660 In IP 13.215.144.61.443 &gt; 172.19.0.2.51564: Flags [S.], seq 2654865684, ack 567383918, win 65084, length 0, Container [test], Pod [test.default] 2 packets captured 3 packets received by filter 0 packets dropped by kernel 将数据保存为 pcapng 格式使用 tcpdump 或 Wireshark 进行分析 保存为 pcapng 格式 可以通过 -w 参数将抓包数据保存为 pcapng 格式: $ sudo ptcpdump -i any -c 5 -w demo.pcapng 2024-07-07 13:41:32 WARN ptcpdump: verbose output suppressed, use -v[v]... for verbose output 2024-07-07 13:41:32 WARN capturing on any, link-type EN10MB (Ethernet), snapshot length 262144 bytes 5 packets captured 22 packets received by filter 0 packets dropped by kernel 使用 tcpdump 进行分析 可以直接通过管道的方式通过 tcpdump 对抓取的数据进行分析: $ sudo ptcpdump -i any -c 5 -w - port 80 | tcpdump -n -r - reading from file -, link-type EN10MB (Ethernet), snapshot length 65535 2024-07-07 13:44:33 WARN ptcpdump: verbose output suppressed, use -v[v]... for verbose output 2024-07-07 13:44:33 WARN capturing on any, link-type EN10MB (Ethernet), snapshot length 262144 bytes 13:44:44.530637 IP6 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.50858 &gt; 2406:da18:880:3801::c8.80: Flags [S], seq 495824072, win 64800, options [mss 1440,sackOK,TS val 2411675580 ecr 0,nop,wscale 7], length 0 13:44:44.708902 IP6 2406:da18:880:3801::c8.80 &gt; 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.50858: Flags [S.], seq 640438481, ack 495824073, win 65232, options [mss 1220,sackOK,TS val 1591525382 ecr 2411675580,nop,wscale 9], length 0 13:44:44.709261 IP6 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.50858 &gt; 2406:da18:880:3801::c8.80: Flags [.], ack 1, win 507, options [nop,nop,TS val 2411675670 ecr 1591525382], length 0 13:44:44.709475 IP6 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.50858 &gt; 2406:da18:880:3801::c8.80: Flags [P.], seq 1:78, ack 1, win 507, options [nop,nop,TS val 2411675670 ecr 1591525382], length 77: HTTP: GET / HTTP/1.1 5 packets captured 6 packets received by filter 0 packets dropped by kernel 13:44:44.877110 IP6 2406:da18:880:3801::c8.80 &gt; 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.50858: Flags [P.], seq 1:266, ack 78, win 128, options [nop,nop,TS val 1591525469 ecr 2411675670], length 265: HTTP: HTTP/1.1 301 Moved Permanently 也可以通过读取文件的方式通过 tcpdump 对抓取的数据进行分析: $ tcpdump -n -r demo.pcapng reading from file demo.pcapng, link-type EN10MB (Ethernet), snapshot length 65535 13:47:41.169584 IP6 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.43038 &gt; 2406:da18:b3d:e201::64.80: Flags [S], seq 3876639697, win 64800, options [mss 1440,sackOK,TS val 2072195434 ecr 0,nop,wscale 7], length 0 13:47:41.571055 IP 192.168.1.50.60580 &gt; 18.139.194.139.80: Flags [S], seq 481256927, win 64240, options [mss 1460,sackOK,TS val 2707199178 ecr 0,nop,wscale 7], length 0 13:47:41.956270 IP6 2406:da18:b3d:e201::64.80 &gt; 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.43038: Flags [S.], seq 2283576526, ack 3876639698, win 65232, options [mss 1220,sackOK,TS val 4276006323 ecr 2072195434,nop,wscale 9], length 0 13:47:41.956437 IP6 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.43038 &gt; 2406:da18:b3d:e201::64.80: Flags [.], ack 1, win 507, options [nop,nop,TS val 2072195828 ecr 4276006323], length 0 13:47:41.956733 IP6 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.43038 &gt; 2406:da18:b3d:e201::64.80: Flags [P.], seq 1:78, ack 1, win 507, options [nop,nop,TS val 2072195828 ecr 4276006323], length 77: HTTP: GET / HTTP/1.1 使用 Wireshark 进行分析 当使用 Wireshark 打开保存的 pcapng 格式的文件时，将在 Wireshark 的界面中显示相关的进程、容器以及 Pod 信息： 参考资料 mozillazg/ptcpdump: Process-aware, eBPF-based tcpdump tcpdump(1) man page | TCPDUMP &amp; LIBPCAP"/>
+        <meta property="article:published_time" content="2024-07-06" />
+            <meta property="article:section" content="ebpf" />
+            <meta property="article:tag" content="ebpf" />
+            <meta property="article:tag" content="ebpf" />
+            <meta property="article:tag" content="ptcpdump" />
+            <meta property="article:tag" content="tcpdump" />
+            <meta property="article:tag" content="pcapng" />
+            <meta property="article:tag" content="wireshark" />
+            <meta property="article:tag" content="container" />
+            <meta property="article:tag" content="pod" />
+            <meta property="article:author" content="mozillazg" />
+            <meta property="og:image"
+                  content="https://mozillazg.com/static/avatar.jpeg"/>
+
+
+    <meta name="twitter:card" content="summary">
+        <meta name="twitter:site" content="@mozillazg">
+        <meta name="twitter:creator" content="@mozillazg">
+    <meta name="twitter:domain" content="https://mozillazg.com">
+            <meta property="twitter:image"
+                  content="https://mozillazg.com/static/avatar.jpeg"/>
+
+    <!-- Bootstrap -->
+        <link rel="stylesheet" href="/theme/cdn.jsdelivr.net/npm/bootstrap@3.3.4/dist/css/bootstrap.min.css" type="text/css"/>
+    <link href="/theme/cdn.jsdelivr.net/npm/font-awesome@4.3.0/css/font-awesome.min.css" rel="stylesheet">
+
+    <link href="/theme/cdn.jsdelivr.net/npm/pygments-css@1.0.0/github.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://mozillazg.com/theme/css/style.css" type="text/css"/>
+            <link href="/static/han.min.css" rel="stylesheet">
+            <link href="/static/yue.css" rel="stylesheet">
+            <link href="/static/custom.css" rel="stylesheet">
+
+        <link href="https://mozillazg.com/feeds/all.atom.xml" type="application/atom+xml" rel="alternate"
+              title="mozillazg's Blog ATOM Feed"/>
+
+        <link href="https://mozillazg.com/feeds/all.rss.xml" type="application/rss+xml" rel="alternate"
+              title="mozillazg's Blog RSS Feed"/>
+
+
+        <link href="https://mozillazg.com/feeds/ebpf.atom.xml" type="application/atom+xml" rel="alternate"
+              title="mozillazg's Blog ebpf ATOM Feed"/>
+
+
+    <script type="application/ld+json">
+    {
+        "@context": "https://schema.org",
+        "@type": "BlogPosting",
+        "publisher": {
+            "@type": "Person",
+            "name": "mozillazg",
+            "logo": "https://mozillazg.com/static/avatar.jpeg"
+        },
+        "author": {
+            "@type": "Person",
+            "name": "mozillazg",
+            "image": "https://mozillazg.com/static/avatar.jpeg",
+            "url": "https://mozillazg.com",
+            "sameAs": []
+        },
+        "headline": "ptcpdump: 抓包时显示进程信息以及对任意进程、容器或 Pod 进行抓包",
+        "url": "https://mozillazg.com/2024/07/ebpf-ptcpdump-capturing-the-network-traffic-of-a-process-or-container-or-pod.html",
+        "image": [
+            "https://mozillazg.com/static/avatar.jpeg"
+         ],
+        "keywords": "ebpf, ebpf, ptcpdump, tcpdump, pcapng, wireshark, container, pod",
+        "description": "前言 tcpdump 是我们常用的一个网络抓包工具，它的功能非常的强大。但是它还缺少一个大家反馈很久却一直没实现的一个特性， 那就是：在结果中包含/显示发送网络请求/流量的进程信息，以及支持抓取指定进程的网络流量。 当前针对 tcpdump 抓取的流量信息，如果要获取对应的进程信息的话，常见的方法是： 基于请求的连接信息，通过 ss 或 netstat 之内的工具反查进程信息。 这个方法的缺点是：操作起来比较繁琐以及无法查找匹配短生命周期的进程所发送的网络流量。 至于基于 tcpdump 实现抓取指定进程的网络流量，常见的方法是：在知晓进程要访问的目标服务地址信息的前提下， 在使用 tcpdump 时按目的地址信息过滤流量； 或者是在特定的网络命名空间中运行目标进程，然后再在该网络命名空间下使用 tcpdump 抓包。 这两个方法的缺点是：需要提前知晓目标进程访问的目的地址或者需要改变目标进程的执行方式，适用场景有限。 本文将介绍一个新的工具 ptcpdump，基于这个工具，我们既可以在抓包时直接感知发送流量的进程信息， 也可以直接对运行中或待运行的任意进程进行网络抓包。如果流量是从容器内的进程发出的话， 它还支持显示流量的容器或 Pod 信息以及对特定容器或 Pod 进行抓包。 ptcpdump 介绍 ptcpdump 是一个使用 eBPF 技术开发的、类 tcpdump 的网络抓包工具。 它除了兼容 tcpdump 的常用命令行参数以及包过滤语法外， 还额外提供了如下核心特性： 在输出中记录和显示发送网络流量的进程、容器、Pod 信息。 支持对指定进程、容器以及 Pod 进行抓包。 支持将抓取的数据包保存为 pcapng 格式，可以使用 tcpdump 或者 Wireshark 做进一步分析。 当在 Wireshark 中打开保存的 pcapng 文件时，将能够看到每个数据包对应的进程、容器、Pod 信息。 使用静态链接的方式编译该工具，系统中不需要安装额外的系统链接库。 更多信息请参考项目的源代码仓库： https://github.com/mozillazg/ptcpdump 下面将以示例的形式介绍 ptcpdump 的核心功能。 兼容 tcpdump 的常用命令行参数和包过滤语法 sudo tcpdump -i eth0 tcp sudo tcpdump -i eth0 tcp and port 80 and host 10.10.1.1 sudo tcpdump -i eth0 &#39;tcp[tcpflags] &amp; (tcp-syn|tcp-fin) != 0&#39; sudo tcpdump -i any sudo tcpdump -i any -s 0 -n -c 100 -w demo.pcapng port 80 上面这些常见的 tcpdump 命令可以直接无缝替换为对应的 ptcpdump 命令，只需要将 tcpdump 改为 ptcpdump 即可: sudo ptcpdump -i eth0 tcp sudo ptcpdump -i eth0 tcp and port 80 and host 10.10.1.1 sudo ptcpdump -i eth0 &#39;tcp[tcpflags] &amp; (tcp-syn|tcp-fin) != 0&#39; sudo ptcpdump -i any sudo ptcpdump -i any -s 0 -n -c 100 -w demo.pcapng port 80 在输出中记录和显示发送网络流量的进程、容器和 Pod 信息 默认情况下，ptcpdump 将在输出中显示简单的进程、容器以及 Pod 信息: $ sudo ptcpdump -i any -c 4 port 80 or port 443 2024-07-07 12:56:56 WARN ptcpdump: verbose output suppressed, use -v[v]... for verbose output 2024-07-07 12:56:56 WARN capturing on any, link-type EN10MB (Ethernet), snapshot length 262144 bytes 12:56:59.517657 veth18618a4a wget.13626 In IP 10.244.0.4.46834 &gt; 13.251.96.10.443: Flags [S], seq 2743105662, win 64240, length 0, Container [test], Pod [test.default] 12:56:59.517836 eth0 wget.13626 Out IP 172.19.0.2.46834 &gt; 13.251.96.10.443: Flags [S], seq 2743105662, win 64240, length 0, Container [test], Pod [test.default] 12:56:59.692593 eth0 wget.13626 In IP 13.251.96.10.443 &gt; 172.19.0.2.46834: Flags [S.], seq 1966397178, ack 2743105663, win 65084, length 0, Container [test], Pod [test.default] 12:56:59.692754 veth18618a4a wget.13626 Out IP 13.251.96.10.443 &gt; 10.244.0.4.46834: Flags [S.], seq 1966397178, ack 2743105663, win 65084, length 0, Container [test], Pod [test.default] 4 packets captured 6 packets received by filter 0 packets dropped by kernel 可以通过指定 -v 参数，查看更详细的进程、容器以及 Pod 信息: $ ptcpdump -i any -c 4 -v port 80 or port 443 2024-07-07 12:58:59 WARN ptcpdump: capturing on any, link-type EN10MB (Ethernet), snapshot length 262144 bytes 12:59:02.265356 veth18618a4a In IP (tos 0x0, ttl 64, id 35996, offset 0, flags [DF], proto TCP (6), length 60) 10.244.0.4.41666 &gt; 13.215.144.61.443: Flags [S], cksum 0xa93a, seq 40651020, win 64240, options [mss 1460,sackOK,TS val 2665081987 ecr 0,nop,wscale 7], length 0 Process (pid 14565, cmd /usr/bin/wget, args wget https://mozillazg.com -O /dev/null) Container (name test, id 78116e60ff73d3dc41c795288fbf955ed543c964e56cada0c3fa466bc939a339, image docker.io/library/alpine:3.18, labels {&#34;io.cri-containerd.kind&#34;:&#34;container&#34;,&#34;io.kubernetes.container.name&#34;:&#34;test&#34;,&#34;io.kubernetes.pod.name&#34;:&#34;test&#34;,&#34;io.kubernetes.pod.namespace&#34;:&#34;default&#34;,&#34;io.kubernetes.pod.uid&#34;:&#34;9e4bc54b-de48-4b1c-8b9e-54709f67ed0c&#34;}) Pod (name test, namespace default, UID 9e4bc54b-de48-4b1c-8b9e-54709f67ed0c, labels {&#34;run&#34;:&#34;test&#34;}, annotations {&#34;kubernetes.io/config.seen&#34;:&#34;2024-07-07T12:43:29.121307922Z&#34;,&#34;kubernetes.io/config.source&#34;:&#34;api&#34;}) 12:59:02.265606 eth0 Out IP (tos 0x0, ttl 63, id 35996, offset 0, flags [DF], proto TCP (6), length 60) 172.19.0.2.41666 &gt; 13.215.144.61.443: Flags [S], cksum 0x4a58, seq 40651020, win 64240, options [mss 1460,sackOK,TS val 2665081987 ecr 0,nop,wscale 7], length 0 Process (pid 14565, cmd /usr/bin/wget, args wget https://mozillazg.com -O /dev/null) Container (name test, id 78116e60ff73d3dc41c795288fbf955ed543c964e56cada0c3fa466bc939a339, image docker.io/library/alpine:3.18, labels {&#34;io.cri-containerd.kind&#34;:&#34;container&#34;,&#34;io.kubernetes.container.name&#34;:&#34;test&#34;,&#34;io.kubernetes.pod.name&#34;:&#34;test&#34;,&#34;io.kubernetes.pod.namespace&#34;:&#34;default&#34;,&#34;io.kubernetes.pod.uid&#34;:&#34;9e4bc54b-de48-4b1c-8b9e-54709f67ed0c&#34;}) Pod (name test, namespace default, UID 9e4bc54b-de48-4b1c-8b9e-54709f67ed0c, labels {&#34;run&#34;:&#34;test&#34;}, annotations {&#34;kubernetes.io/config.seen&#34;:&#34;2024-07-07T12:43:29.121307922Z&#34;,&#34;kubernetes.io/config.source&#34;:&#34;api&#34;}) 12:59:02.462586 eth0 In IP (tos 0x4, ttl 47, id 0, offset 0, flags [DF], proto TCP (6), length 60) 13.215.144.61.443 &gt; 172.19.0.2.41666: Flags [S.], cksum 0x9772, seq 3160052321, ack 40651021, win 65084, options [mss 1240,sackOK,TS val 3710435767 ecr 2665081987,nop,wscale 9], length 0 Process (pid 14565, cmd /usr/bin/wget, args wget https://mozillazg.com -O /dev/null) Container (name test, id 78116e60ff73d3dc41c795288fbf955ed543c964e56cada0c3fa466bc939a339, image docker.io/library/alpine:3.18, labels {&#34;io.cri-containerd.kind&#34;:&#34;container&#34;,&#34;io.kubernetes.container.name&#34;:&#34;test&#34;,&#34;io.kubernetes.pod.name&#34;:&#34;test&#34;,&#34;io.kubernetes.pod.namespace&#34;:&#34;default&#34;,&#34;io.kubernetes.pod.uid&#34;:&#34;9e4bc54b-de48-4b1c-8b9e-54709f67ed0c&#34;}) Pod (name test, namespace default, UID 9e4bc54b-de48-4b1c-8b9e-54709f67ed0c, labels {&#34;run&#34;:&#34;test&#34;}, annotations {&#34;kubernetes.io/config.seen&#34;:&#34;2024-07-07T12:43:29.121307922Z&#34;,&#34;kubernetes.io/config.source&#34;:&#34;api&#34;}) 12:59:02.462782 veth18618a4a Out IP (tos 0x4, ttl 46, id 0, offset 0, flags [DF], proto TCP (6), length 60) 13.215.144.61.443 &gt; 10.244.0.4.41666: Flags [S.], cksum 0x3890, seq 3160052321, ack 40651021, win 65084, options [mss 1240,sackOK,TS val 3710435767 ecr 2665081987,nop,wscale 9], length 0 Process (pid 14565, cmd /usr/bin/wget, args wget https://mozillazg.com -O /dev/null) Container (name test, id 78116e60ff73d3dc41c795288fbf955ed543c964e56cada0c3fa466bc939a339, image docker.io/library/alpine:3.18, labels {&#34;io.cri-containerd.kind&#34;:&#34;container&#34;,&#34;io.kubernetes.container.name&#34;:&#34;test&#34;,&#34;io.kubernetes.pod.name&#34;:&#34;test&#34;,&#34;io.kubernetes.pod.namespace&#34;:&#34;default&#34;,&#34;io.kubernetes.pod.uid&#34;:&#34;9e4bc54b-de48-4b1c-8b9e-54709f67ed0c&#34;}) Pod (name test, namespace default, UID 9e4bc54b-de48-4b1c-8b9e-54709f67ed0c, labels {&#34;run&#34;:&#34;test&#34;}, annotations {&#34;kubernetes.io/config.seen&#34;:&#34;2024-07-07T12:43:29.121307922Z&#34;,&#34;kubernetes.io/config.source&#34;:&#34;api&#34;}) 4 packets captured 6 packets received by filter 0 packets dropped by kernel 支持对指定进程、容器或 Pod 进行抓包 指定进程 pid 抓包 可以通过 --pid 参数指定要抓包的进程 pid，实现对指定进程进行抓包: $ sudo ptcpdump -i any -c 4 --pid 82106 2024-07-07 13:11:40 WARN ptcpdump: verbose output suppressed, use -v[v]... for verbose output 2024-07-07 13:11:40 WARN capturing on any, link-type EN10MB (Ethernet), snapshot length 262144 bytes 13:11:50.170538 ens33 python3.10.82106 Out IP 10.0.2.15.36648 &gt; 13.251.96.10.443: Flags [S], seq 1633417447, win 64240, length 0 13:11:50.369972 ens33 python3.10.82106 In IP 13.251.96.10.443 &gt; 10.0.2.15.36648: Flags [S.], seq 1793291274, ack 1633417448, win 64240, length 0 2 packets captured 3 packets received by filter 0 packets dropped by kernel 同时还可以通过指定 -f 参数对该进程创建的子进程也进行抓包: $ sudo ptcpdump -i any -c 4 --pid 82106 -f &#39;tcp[tcpflags] &amp; tcp-fin != 0&#39; 2024-07-07 13:17:31 WARN ptcpdump: verbose output suppressed, use -v[v]... for verbose output 2024-07-07 13:17:31 WARN capturing on any, link-type EN10MB (Ethernet), snapshot length 262144 bytes 13:17:37.800903 ens33 python3.10.82106 Out IP 10.0.2.15.38576 &gt; 52.74.166.77.443: Flags [F.], seq 2442149577, ack 367271121, win 62780, length 0 13:17:37.977316 ens33 python3.10.82106 In IP 52.74.166.77.443 &gt; 10.0.2.15.38576: Flags [FP.], seq 367271145, ack 2442149578, win 64239, length 0 13:17:44.390627 ens33 curl.95920 Out IP 10.0.2.15.38590 &gt; 52.74.166.77.443: Flags [F.], seq 3726932781, ack 1510095004, win 63045, length 0 13:17:44.564990 ens33 curl.95920 In IP 52.74.166.77.443 &gt; 10.0.2.15.38590: Flags [FP.], seq 1510095028, ack 3726932782, win 64239, length 0 4 packets captured 4 packets received by filter 0 packets dropped by kernel 指定进程名称抓包 可以通过 --pname 参数指定进程名称（comm），实现指定进程名称抓包: $ sudo ptcpdump -i any -c 2 --pname curl 2024-07-07 13:23:18 WARN ptcpdump: verbose output suppressed, use -v[v]... for verbose output 2024-07-07 13:23:18 WARN capturing on any, link-type EN10MB (Ethernet), snapshot length 262144 bytes 13:23:24.881499 lo curl.26511 Out IP 127.0.0.1.43332 &gt; 127.0.0.53.53: 44133+ [1au] A? mozillazg.com. (42) 13:23:24.881663 lo curl.26511 Out IP 127.0.0.1.43332 &gt; 127.0.0.53.53: 14694+ [1au] AAAA? mozillazg.com. (42) 2 packets captured 2 packets received by filter 0 packets dropped by kernel 通过运行目标程序来抓包 有需要的话，也可以通过使用 -- 参数运行目标程序的方式来实现对特定程序进行抓包: $ sudo ptcpdump -i any -- curl -I https://mozillazg.com 2024-07-07 13:26:44 WARN ptcpdump: verbose output suppressed, use -v[v]... for verbose output 2024-07-07 13:26:44 WARN capturing on any, link-type EN10MB (Ethernet), snapshot length 262144 bytes 13:26:44.055757 lo curl.28094 Out IP 127.0.0.1.48826 &gt; 127.0.0.53.53: 8942+ [1au] A? mozillazg.com. (42) 13:26:44.055914 lo curl.28094 Out IP 127.0.0.1.48826 &gt; 127.0.0.53.53: 34274+ [1au] AAAA? mozillazg.com. (42) 13:26:44.775840 lo curl.28094 In IP 127.0.0.53.53 &gt; 127.0.0.1.48826: 8942 3/0/1 CNAME mozillazg.netlify.com., A 13.251.96.10, A 46.137.195.11 (106) 13:26:45.135988 lo curl.28094 In IP 127.0.0.53.53 &gt; 127.0.0.1.48826: 34274 3/0/1 CNAME mozillazg.netlify.com., AAAA 2406:da18:880:3802::c8, AAAA 2406:da18:b3d:e202::64 (130) 13:26:45.136819 wlp4s0 curl.28094 Out IP6 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744 &gt; 2406:da18:880:3802::c8.443: Flags [S], seq 3460683104, win 64800, length 0 13:26:45.310505 wlp4s0 curl.28094 In IP6 2406:da18:880:3802::c8.443 &gt; 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744: Flags [S.], seq 630810442, ack 3460683105, win 65232, length 0 13:26:45.310821 wlp4s0 curl.28094 Out IP6 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744 &gt; 2406:da18:880:3802::c8.443: Flags [.], seq 3460683105, ack 630810443, win 507, length 0 13:26:45.414551 wlp4s0 curl.28094 Out IP6 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744 &gt; 2406:da18:880:3802::c8.443: Flags [P.], seq 3460683105:3460683622, ack 630810443, win 507, length 517 13:26:45.595214 wlp4s0 curl.28094 In IP6 2406:da18:880:3802::c8.443 &gt; 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744: Flags [.], seq 630810443, ack 3460683622, win 127, length 0 13:26:45.595413 wlp4s0 curl.28094 In IP6 2406:da18:880:3802::c8.443 &gt; 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744: Flags [.], seq 630810443:630811651, ack 3460683622, win 127, length 1208 13:26:45.595595 wlp4s0 curl.28094 Out IP6 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744 &gt; 2406:da18:880:3802::c8.443: Flags [.], seq 3460683622, ack 630811651, win 501, length 0 13:26:45.595702 wlp4s0 curl.28094 In IP6 2406:da18:880:3802::c8.443 &gt; 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744: Flags [P.], seq 630811651:630812859, ack 3460683622, win 127, length 1208 13:26:45.595797 wlp4s0 curl.28094 Out IP6 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744 &gt; 2406:da18:880:3802::c8.443: Flags [.], seq 3460683622, ack 630812859, win 492, length 0 13:26:45.595862 wlp4s0 curl.28094 In IP6 2406:da18:880:3802::c8.443 &gt; 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744: Flags [P.], seq 630812859:630813338, ack 3460683622, win 127, length 479 13:26:45.595934 wlp4s0 curl.28094 Out IP6 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744 &gt; 2406:da18:880:3802::c8.443: Flags [.], seq 3460683622, ack 630813338, win 489, length 0 13:26:45.600998 wlp4s0 curl.28094 Out IP6 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744 &gt; 2406:da18:880:3802::c8.443: Flags [P.], seq 3460683622:3460683686, ack 630813338, win 489, length 64 13:26:45.601344 wlp4s0 curl.28094 Out IP6 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744 &gt; 2406:da18:880:3802::c8.443: Flags [P.], seq 3460683686:3460683781, ack 630813338, win 489, length 95 13:26:45.616759 wlp4s0 curl.28094 Out IP6 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744 &gt; 2406:da18:880:3802::c8.443: Flags [P.], seq 3460683781:3460683882, ack 630813338, win 501, length 101 13:26:45.779516 wlp4s0 curl.28094 In IP6 2406:da18:880:3802::c8.443 &gt; 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744: Flags [.], seq 630813338, ack 3460683781, win 127, length 0 13:26:45.779792 wlp4s0 curl.28094 In IP6 2406:da18:880:3802::c8.443 &gt; 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744: Flags [P.], seq 630813338:630813399, ack 3460683781, win 127, length 61 13:26:45.779996 wlp4s0 curl.28094 In IP6 2406:da18:880:3802::c8.443 &gt; 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744: Flags [P.], seq 630813399:630813443, ack 3460683781, win 127, length 44 13:26:45.780318 wlp4s0 curl.28094 Out IP6 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744 &gt; 2406:da18:880:3802::c8.443: Flags [P.], seq 3460683882:3460683913, ack 630813443, win 501, length 31 HTTP/2 200 13:26:45.788787 wlp4s0 curl.28094 In IP6 2406:da18:880:3802::c8.443 &gt; 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744: Flags [P.], seq 630813443:630813677, ack 3460683882, win 127, length 234 accept-ranges: bytes age: 79059 cache-control: public,max-age=0,must-revalidate cache-status: &#34;Netlify Edge&#34;; hit content-type: text/html; charset=UTF-8 date: Sun, 07 Jul 2024 05:26:44 GMT etag: &#34;80cf37f5974e2232d976c6f622121dee-ssl&#34; server: Netlify strict-transport-security: max-age=31536000 x-nf-request-id: 01J25THACQSN9364YHSR2C0X5F content-length: 11727 13:26:45.789558 wlp4s0 curl.28094 Out IP6 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744 &gt; 2406:da18:880:3802::c8.443: Flags [P.], seq 3460683913:3460683937, ack 630813677, win 501, length 24 13:26:45.791514 wlp4s0 curl.28094 Out IP6 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744 &gt; 2406:da18:880:3802::c8.443: Flags [F.], seq 3460683937, ack 630813677, win 501, length 0 13:26:45.963642 wlp4s0 curl.28094 In IP6 2406:da18:880:3802::c8.443 &gt; 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744: Flags [.], seq 630813677, ack 3460683937, win 127, length 0 13:26:45.963956 wlp4s0 curl.28094 In IP6 2406:da18:880:3802::c8.443 &gt; 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744: Flags [P.], seq 630813677:630813701, ack 3460683937, win 127, length 24 13:26:45.964172 wlp4s0 curl.28094 Out IP6 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744 &gt; 2406:da18:880:3802::c8.443: Flags [R], seq 3460683937, win 0, length 0 13:26:45.964415 wlp4s0 curl.28094 In IP6 2406:da18:880:3802::c8.443 &gt; 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744: Flags [F.], seq 630813701, ack 3460683937, win 127, length 0 13:26:45.964506 wlp4s0 curl.28094 Out IP6 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744 &gt; 2406:da18:880:3802::c8.443: Flags [R], seq 3460683937, win 0, length 0 13:26:45.966158 wlp4s0 curl.28094 In IP6 2406:da18:880:3802::c8.443 &gt; 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744: Flags [.], seq 630813702, ack 3460683938, win 127, length 0 13:26:45.966299 wlp4s0 curl.28094 Out IP6 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744 &gt; 2406:da18:880:3802::c8.443: Flags [R], seq 3460683938, win 0, length 0 32 packets captured 32 packets received by filter 0 packets dropped by kernel 指定容器抓包 可以通过 --container-id 参数指定容器 id 进行抓包: $ sudo ptcpdump -i any -c 2 --container-id 36f0310403b1 2024-07-07 13:36:19 WARN ptcpdump: verbose output suppressed, use -v[v]... for verbose output 2024-07-07 13:36:19 WARN capturing on any, link-type EN10MB (Ethernet), snapshot length 262144 bytes 13:36:24.191242 veth09dec8f curl.32636 In IP 172.19.0.2.48960 &gt; 18.139.194.139.443: Flags [S], seq 3213779351, win 64240, length 0, Container [kind-control-plane] 13:36:24.191369 wlp4s0 curl.32636 Out IP 192.168.1.50.48960 &gt; 18.139.194.139.443: Flags [S], seq 3213779351, win 64240, length 0, Container [kind-control-plane] 2 packets captured 2 packets received by filter 0 packets dropped by kernel 也可以通过 --container-name 参数指定容器名称进行抓包: $ sudo ptcpdump -i any -c 2 --container-name kind-control-plane 2024-07-07 13:37:16 WARN ptcpdump: verbose output suppressed, use -v[v]... for verbose output 2024-07-07 13:37:16 WARN capturing on any, link-type EN10MB (Ethernet), snapshot length 262144 bytes 13:37:22.560764 veth09dec8f curl.33093 In IP 172.19.0.2.39084 &gt; 18.139.194.139.443: Flags [S], seq 3645727033, win 64240, length 0, Container [kind-control-plane] 13:37:22.561010 wlp4s0 curl.33093 Out IP 192.168.1.50.39084 &gt; 18.139.194.139.443: Flags [S], seq 3645727033, win 64240, length 0, Container [kind-control-plane] 2 packets captured 2 packets received by filter 0 packets dropped by kernel 指定 Pod 抓包 可以通过 --pod-name 参数指定 Pod 名称进行抓包, 参数值的格式为 &lt;pod 名称&gt;.&lt;pod 命名空间&gt;: $ sudo ptcpdump -i any -c 2 --pod-name test.default 2024-07-07 13:38:29 WARN ptcpdump: verbose output suppressed, use -v[v]... for verbose output 2024-07-07 13:38:29 WARN capturing on any, link-type EN10MB (Ethernet), snapshot length 262144 bytes 13:38:34.175752 eth0 wget.33660 Out IP 172.19.0.2.51564 &gt; 13.215.144.61.443: Flags [S], seq 567383917, win 64240, length 0, Container [test], Pod [test.default] 13:38:34.372894 eth0 wget.33660 In IP 13.215.144.61.443 &gt; 172.19.0.2.51564: Flags [S.], seq 2654865684, ack 567383918, win 65084, length 0, Container [test], Pod [test.default] 2 packets captured 3 packets received by filter 0 packets dropped by kernel 将数据保存为 pcapng 格式使用 tcpdump 或 Wireshark 进行分析 保存为 pcapng 格式 可以通过 -w 参数将抓包数据保存为 pcapng 格式: $ sudo ptcpdump -i any -c 5 -w demo.pcapng 2024-07-07 13:41:32 WARN ptcpdump: verbose output suppressed, use -v[v]... for verbose output 2024-07-07 13:41:32 WARN capturing on any, link-type EN10MB (Ethernet), snapshot length 262144 bytes 5 packets captured 22 packets received by filter 0 packets dropped by kernel 使用 tcpdump 进行分析 可以直接通过管道的方式通过 tcpdump 对抓取的数据进行分析: $ sudo ptcpdump -i any -c 5 -w - port 80 | tcpdump -n -r - reading from file -, link-type EN10MB (Ethernet), snapshot length 65535 2024-07-07 13:44:33 WARN ptcpdump: verbose output suppressed, use -v[v]... for verbose output 2024-07-07 13:44:33 WARN capturing on any, link-type EN10MB (Ethernet), snapshot length 262144 bytes 13:44:44.530637 IP6 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.50858 &gt; 2406:da18:880:3801::c8.80: Flags [S], seq 495824072, win 64800, options [mss 1440,sackOK,TS val 2411675580 ecr 0,nop,wscale 7], length 0 13:44:44.708902 IP6 2406:da18:880:3801::c8.80 &gt; 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.50858: Flags [S.], seq 640438481, ack 495824073, win 65232, options [mss 1220,sackOK,TS val 1591525382 ecr 2411675580,nop,wscale 9], length 0 13:44:44.709261 IP6 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.50858 &gt; 2406:da18:880:3801::c8.80: Flags [.], ack 1, win 507, options [nop,nop,TS val 2411675670 ecr 1591525382], length 0 13:44:44.709475 IP6 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.50858 &gt; 2406:da18:880:3801::c8.80: Flags [P.], seq 1:78, ack 1, win 507, options [nop,nop,TS val 2411675670 ecr 1591525382], length 77: HTTP: GET / HTTP/1.1 5 packets captured 6 packets received by filter 0 packets dropped by kernel 13:44:44.877110 IP6 2406:da18:880:3801::c8.80 &gt; 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.50858: Flags [P.], seq 1:266, ack 78, win 128, options [nop,nop,TS val 1591525469 ecr 2411675670], length 265: HTTP: HTTP/1.1 301 Moved Permanently 也可以通过读取文件的方式通过 tcpdump 对抓取的数据进行分析: $ tcpdump -n -r demo.pcapng reading from file demo.pcapng, link-type EN10MB (Ethernet), snapshot length 65535 13:47:41.169584 IP6 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.43038 &gt; 2406:da18:b3d:e201::64.80: Flags [S], seq 3876639697, win 64800, options [mss 1440,sackOK,TS val 2072195434 ecr 0,nop,wscale 7], length 0 13:47:41.571055 IP 192.168.1.50.60580 &gt; 18.139.194.139.80: Flags [S], seq 481256927, win 64240, options [mss 1460,sackOK,TS val 2707199178 ecr 0,nop,wscale 7], length 0 13:47:41.956270 IP6 2406:da18:b3d:e201::64.80 &gt; 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.43038: Flags [S.], seq 2283576526, ack 3876639698, win 65232, options [mss 1220,sackOK,TS val 4276006323 ecr 2072195434,nop,wscale 9], length 0 13:47:41.956437 IP6 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.43038 &gt; 2406:da18:b3d:e201::64.80: Flags [.], ack 1, win 507, options [nop,nop,TS val 2072195828 ecr 4276006323], length 0 13:47:41.956733 IP6 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.43038 &gt; 2406:da18:b3d:e201::64.80: Flags [P.], seq 1:78, ack 1, win 507, options [nop,nop,TS val 2072195828 ecr 4276006323], length 77: HTTP: GET / HTTP/1.1 使用 Wireshark 进行分析 当使用 Wireshark 打开保存的 pcapng 格式的文件时，将在 Wireshark 的界面中显示相关的进程、容器以及 Pod 信息： 参考资料 mozillazg/ptcpdump: Process-aware, eBPF-based tcpdump tcpdump(1) man page | TCPDUMP &amp; LIBPCAP",
+        "mainEntityOfPage": {
+             "@type": "WebPage",
+             "@id": "https://mozillazg.com/2024/07/ebpf-ptcpdump-capturing-the-network-traffic-of-a-process-or-container-or-pod.html"
+        },
+        "datePublished": "2024-07-06"
+    }
+    </script>
+
+</head>
+<body>
+
+<div class="navbar" role="navigation">
+	<div class="container">
+        <div class="navbar-header">
+            <button type="button" class="navbar-toggle" data-toggle="collapse" data-target=".navbar-ex1-collapse">
+                <span class="sr-only">Toggle navigation</span>
+                <span class="icon-bar"></span>
+                <span class="icon-bar"></span>
+                <span class="icon-bar"></span>
+            </button>
+            <a href="https://mozillazg.com/" class="navbar-brand">
+mozillazg's Blog            </a>
+        </div>
+        <div class="collapse navbar-collapse navbar-ex1-collapse">
+            <ul class="nav navbar-nav">
+                    <li><a href="https://mozillazg.com/feeds/all.atom.xml">Feed</a></li>
+                    <li><a href="/2014/10/pages/about-me.html">About</a></li>
+            </ul>
+            <ul class="nav navbar-nav navbar-right">
+              <li><a href="https://mozillazg.com/archives.html"><i class="fa fa-th-list"></i><span class="icon-label">Archives</span></a></li>
+            </ul>
+        </div>
+        <!-- /.navbar-collapse -->
+    </div>
+</div> <!-- /.navbar -->
+<!-- Banner -->
+<!-- End Banner -->
+<div class="container">
+    <div class="row">
+        <div class="col-lg-12">
+    <section id="content" class="yue">
+        <article>
+            <header class="text-center">
+                <h1>
+                    <a href="https://mozillazg.com/2024/07/ebpf-ptcpdump-capturing-the-network-traffic-of-a-process-or-container-or-pod.html"
+                       rel="bookmark"
+                       title="Permalink to ptcpdump: 抓包时显示进程信息以及对任意进程、容器或 Pod 进行抓包">
+                        ptcpdump: 抓包时显示进程信息以及对任意进程、容器或 Pod 进行抓包
+                    </a>
+                </h1>
+                <p class="published">
+                    <time datetime="2024-07-06T00:00:00+00:00">
+                    2024-07-06
+                    </time>
+                </p>
+            </header>
+            <div class="entry-content">
+                <div class="well-sm article-info">
+<footer class="post-info">
+        <a href="https://mozillazg.com/category/ebpf.html">ebpf</a>
+
+
+<span class="label label-default hide">Tags</span>
+	<a href="https://mozillazg.com/tag/ebpf.html">ebpf</a>
+        /
+	<a href="https://mozillazg.com/tag/ptcpdump.html">ptcpdump</a>
+        /
+	<a href="https://mozillazg.com/tag/tcpdump.html">tcpdump</a>
+        /
+	<a href="https://mozillazg.com/tag/pcapng.html">pcapng</a>
+        /
+	<a href="https://mozillazg.com/tag/wireshark.html">wireshark</a>
+        /
+	<a href="https://mozillazg.com/tag/container.html">container</a>
+        /
+	<a href="https://mozillazg.com/tag/pod.html">pod</a>
+    <span class="label label-default">Lang</span>
+	<a href="https://mozillazg.com/2024/07/ebpf-ptcpdump-capturing-the-network-traffic-of-a-process-or-container-or-pod-en.html">en</a>
+
+</footer><!-- /.post-info -->                </div>
+                <div class="js-toc"></div>
+                <div>
+                <div class="section" id="section-1">
+<h2 id="hidsection-1">前言<a class="headerlink" href="#hidsection-1" title="Permalink to this headline">¶</a></h2>
+<p>tcpdump 是我们常用的一个网络抓包工具，它的功能非常的强大。但是它还缺少一个大家反馈很久却一直没实现的一个特性，
+那就是：在结果中包含/显示发送网络请求/流量的进程信息，以及支持抓取指定进程的网络流量。</p>
+<p>当前针对 tcpdump 抓取的流量信息，如果要获取对应的进程信息的话，常见的方法是：
+基于请求的连接信息，通过 <tt class="docutils literal">ss</tt> 或 <tt class="docutils literal">netstat</tt> 之内的工具反查进程信息。
+这个方法的缺点是：操作起来比较繁琐以及无法查找匹配短生命周期的进程所发送的网络流量。</p>
+<p>至于基于 tcpdump 实现抓取指定进程的网络流量，常见的方法是：在知晓进程要访问的目标服务地址信息的前提下，
+在使用 tcpdump 时按目的地址信息过滤流量；
+或者是在特定的网络命名空间中运行目标进程，然后再在该网络命名空间下使用 tcpdump 抓包。
+这两个方法的缺点是：需要提前知晓目标进程访问的目的地址或者需要改变目标进程的执行方式，适用场景有限。</p>
+<p>本文将介绍一个新的工具 ptcpdump，基于这个工具，我们既可以在抓包时直接感知发送流量的进程信息，
+也可以直接对运行中或待运行的任意进程进行网络抓包。如果流量是从容器内的进程发出的话，
+它还支持显示流量的容器或 Pod 信息以及对特定容器或 Pod 进行抓包。</p>
+</div>
+<div class="section" id="ptcpdump">
+<h2 id="hidptcpdump">ptcpdump 介绍<a class="headerlink" href="#hidptcpdump" title="Permalink to this headline">¶</a></h2>
+<p>ptcpdump 是一个使用 eBPF 技术开发的、类 tcpdump 的网络抓包工具。
+它除了兼容 tcpdump 的常用命令行参数以及包过滤语法外，
+还额外提供了如下核心特性：</p>
+<ul class="simple">
+<li>在输出中记录和显示发送网络流量的进程、容器、Pod 信息。</li>
+<li>支持对指定进程、容器以及 Pod 进行抓包。</li>
+<li>支持将抓取的数据包保存为 pcapng 格式，可以使用 tcpdump 或者 Wireshark 做进一步分析。</li>
+<li>当在 Wireshark 中打开保存的 pcapng 文件时，将能够看到每个数据包对应的进程、容器、Pod 信息。</li>
+<li>使用静态链接的方式编译该工具，系统中不需要安装额外的系统链接库。</li>
+</ul>
+<p>更多信息请参考项目的源代码仓库： <a class="reference external" href="https://github.com/mozillazg/ptcpdump">https://github.com/mozillazg/ptcpdump</a></p>
+<p>下面将以示例的形式介绍 ptcpdump 的核心功能。</p>
+</div>
+<div class="section" id="tcpdump">
+<h2 id="hidtcpdump">兼容 tcpdump 的常用命令行参数和包过滤语法<a class="headerlink" href="#hidtcpdump" title="Permalink to this headline">¶</a></h2>
+<pre class="literal-block">
+sudo tcpdump -i eth0 tcp
+sudo tcpdump -i eth0 tcp and port 80 and host 10.10.1.1
+sudo tcpdump -i eth0 'tcp[tcpflags] &amp; (tcp-syn|tcp-fin) != 0'
+sudo tcpdump -i any
+sudo tcpdump -i any -s 0 -n -c 100 -w demo.pcapng port 80
+</pre>
+<p>上面这些常见的 tcpdump 命令可以直接无缝替换为对应的 ptcpdump 命令，只需要将 tcpdump 改为 ptcpdump 即可:</p>
+<pre class="literal-block">
+sudo ptcpdump -i eth0 tcp
+sudo ptcpdump -i eth0 tcp and port 80 and host 10.10.1.1
+sudo ptcpdump -i eth0 'tcp[tcpflags] &amp; (tcp-syn|tcp-fin) != 0'
+sudo ptcpdump -i any
+sudo ptcpdump -i any -s 0 -n -c 100 -w demo.pcapng port 80
+</pre>
+</div>
+<div class="section" id="pod">
+<h2 id="hidpod">在输出中记录和显示发送网络流量的进程、容器和 Pod 信息<a class="headerlink" href="#hidpod" title="Permalink to this headline">¶</a></h2>
+<p>默认情况下，ptcpdump 将在输出中显示简单的进程、容器以及 Pod 信息:</p>
+<pre class="literal-block">
+$ sudo ptcpdump -i any -c 4 port 80 or port 443
+2024-07-07 12:56:56 WARN ptcpdump: verbose output suppressed, use -v[v]... for verbose output
+2024-07-07 12:56:56 WARN capturing on any, link-type EN10MB (Ethernet), snapshot length 262144 bytes
+12:56:59.517657 veth18618a4a wget.13626 In IP 10.244.0.4.46834 &gt; 13.251.96.10.443: Flags [S], seq 2743105662, win 64240, length 0, Container [test], Pod [test.default]
+12:56:59.517836 eth0 wget.13626 Out IP 172.19.0.2.46834 &gt; 13.251.96.10.443: Flags [S], seq 2743105662, win 64240, length 0, Container [test], Pod [test.default]
+12:56:59.692593 eth0 wget.13626 In IP 13.251.96.10.443 &gt; 172.19.0.2.46834: Flags [S.], seq 1966397178, ack 2743105663, win 65084, length 0, Container [test], Pod [test.default]
+12:56:59.692754 veth18618a4a wget.13626 Out IP 13.251.96.10.443 &gt; 10.244.0.4.46834: Flags [S.], seq 1966397178, ack 2743105663, win 65084, length 0, Container [test], Pod [test.default]
+4 packets captured
+6 packets received by filter
+0 packets dropped by kernel
+</pre>
+<p>可以通过指定 <tt class="docutils literal"><span class="pre">-v</span></tt> 参数，查看更详细的进程、容器以及 Pod 信息:</p>
+<pre class="literal-block">
+$ ptcpdump -i any -c 4 -v port 80 or port 443
+2024-07-07 12:58:59 WARN ptcpdump: capturing on any, link-type EN10MB (Ethernet), snapshot length 262144 bytes
+12:59:02.265356 veth18618a4a In IP (tos 0x0, ttl 64, id 35996, offset 0, flags [DF], proto TCP (6), length 60)
+    10.244.0.4.41666 &gt; 13.215.144.61.443: Flags [S], cksum 0xa93a, seq 40651020, win 64240, options [mss 1460,sackOK,TS val 2665081987 ecr 0,nop,wscale 7], length 0
+    Process (pid 14565, cmd /usr/bin/wget, args wget https://mozillazg.com -O /dev/null)
+    Container (name test, id 78116e60ff73d3dc41c795288fbf955ed543c964e56cada0c3fa466bc939a339, image docker.io/library/alpine:3.18, labels {&quot;io.cri-containerd.kind&quot;:&quot;container&quot;,&quot;io.kubernetes.container.name&quot;:&quot;test&quot;,&quot;io.kubernetes.pod.name&quot;:&quot;test&quot;,&quot;io.kubernetes.pod.namespace&quot;:&quot;default&quot;,&quot;io.kubernetes.pod.uid&quot;:&quot;9e4bc54b-de48-4b1c-8b9e-54709f67ed0c&quot;})
+    Pod (name test, namespace default, UID 9e4bc54b-de48-4b1c-8b9e-54709f67ed0c, labels {&quot;run&quot;:&quot;test&quot;}, annotations {&quot;kubernetes.io/config.seen&quot;:&quot;2024-07-07T12:43:29.121307922Z&quot;,&quot;kubernetes.io/config.source&quot;:&quot;api&quot;})
+12:59:02.265606 eth0 Out IP (tos 0x0, ttl 63, id 35996, offset 0, flags [DF], proto TCP (6), length 60)
+    172.19.0.2.41666 &gt; 13.215.144.61.443: Flags [S], cksum 0x4a58, seq 40651020, win 64240, options [mss 1460,sackOK,TS val 2665081987 ecr 0,nop,wscale 7], length 0
+    Process (pid 14565, cmd /usr/bin/wget, args wget https://mozillazg.com -O /dev/null)
+    Container (name test, id 78116e60ff73d3dc41c795288fbf955ed543c964e56cada0c3fa466bc939a339, image docker.io/library/alpine:3.18, labels {&quot;io.cri-containerd.kind&quot;:&quot;container&quot;,&quot;io.kubernetes.container.name&quot;:&quot;test&quot;,&quot;io.kubernetes.pod.name&quot;:&quot;test&quot;,&quot;io.kubernetes.pod.namespace&quot;:&quot;default&quot;,&quot;io.kubernetes.pod.uid&quot;:&quot;9e4bc54b-de48-4b1c-8b9e-54709f67ed0c&quot;})
+    Pod (name test, namespace default, UID 9e4bc54b-de48-4b1c-8b9e-54709f67ed0c, labels {&quot;run&quot;:&quot;test&quot;}, annotations {&quot;kubernetes.io/config.seen&quot;:&quot;2024-07-07T12:43:29.121307922Z&quot;,&quot;kubernetes.io/config.source&quot;:&quot;api&quot;})
+12:59:02.462586 eth0 In IP (tos 0x4, ttl 47, id 0, offset 0, flags [DF], proto TCP (6), length 60)
+    13.215.144.61.443 &gt; 172.19.0.2.41666: Flags [S.], cksum 0x9772, seq 3160052321, ack 40651021, win 65084, options [mss 1240,sackOK,TS val 3710435767 ecr 2665081987,nop,wscale 9], length 0
+    Process (pid 14565, cmd /usr/bin/wget, args wget https://mozillazg.com -O /dev/null)
+    Container (name test, id 78116e60ff73d3dc41c795288fbf955ed543c964e56cada0c3fa466bc939a339, image docker.io/library/alpine:3.18, labels {&quot;io.cri-containerd.kind&quot;:&quot;container&quot;,&quot;io.kubernetes.container.name&quot;:&quot;test&quot;,&quot;io.kubernetes.pod.name&quot;:&quot;test&quot;,&quot;io.kubernetes.pod.namespace&quot;:&quot;default&quot;,&quot;io.kubernetes.pod.uid&quot;:&quot;9e4bc54b-de48-4b1c-8b9e-54709f67ed0c&quot;})
+    Pod (name test, namespace default, UID 9e4bc54b-de48-4b1c-8b9e-54709f67ed0c, labels {&quot;run&quot;:&quot;test&quot;}, annotations {&quot;kubernetes.io/config.seen&quot;:&quot;2024-07-07T12:43:29.121307922Z&quot;,&quot;kubernetes.io/config.source&quot;:&quot;api&quot;})
+12:59:02.462782 veth18618a4a Out IP (tos 0x4, ttl 46, id 0, offset 0, flags [DF], proto TCP (6), length 60)
+    13.215.144.61.443 &gt; 10.244.0.4.41666: Flags [S.], cksum 0x3890, seq 3160052321, ack 40651021, win 65084, options [mss 1240,sackOK,TS val 3710435767 ecr 2665081987,nop,wscale 9], length 0
+    Process (pid 14565, cmd /usr/bin/wget, args wget https://mozillazg.com -O /dev/null)
+    Container (name test, id 78116e60ff73d3dc41c795288fbf955ed543c964e56cada0c3fa466bc939a339, image docker.io/library/alpine:3.18, labels {&quot;io.cri-containerd.kind&quot;:&quot;container&quot;,&quot;io.kubernetes.container.name&quot;:&quot;test&quot;,&quot;io.kubernetes.pod.name&quot;:&quot;test&quot;,&quot;io.kubernetes.pod.namespace&quot;:&quot;default&quot;,&quot;io.kubernetes.pod.uid&quot;:&quot;9e4bc54b-de48-4b1c-8b9e-54709f67ed0c&quot;})
+    Pod (name test, namespace default, UID 9e4bc54b-de48-4b1c-8b9e-54709f67ed0c, labels {&quot;run&quot;:&quot;test&quot;}, annotations {&quot;kubernetes.io/config.seen&quot;:&quot;2024-07-07T12:43:29.121307922Z&quot;,&quot;kubernetes.io/config.source&quot;:&quot;api&quot;})
+4 packets captured
+6 packets received by filter
+0 packets dropped by kernel
+</pre>
+</div>
+<div class="section" id="pod-1">
+<h2 id="hidpod-1">支持对指定进程、容器或 Pod 进行抓包<a class="headerlink" href="#hidpod-1" title="Permalink to this headline">¶</a></h2>
+<div class="section" id="pid">
+<h3 id="hidpid">指定进程 pid 抓包<a class="headerlink" href="#hidpid" title="Permalink to this headline">¶</a></h3>
+<p>可以通过 <tt class="docutils literal"><span class="pre">--pid</span></tt> 参数指定要抓包的进程 pid，实现对指定进程进行抓包:</p>
+<pre class="literal-block">
+$ sudo ptcpdump -i any -c 4 --pid 82106
+2024-07-07 13:11:40 WARN ptcpdump: verbose output suppressed, use -v[v]... for verbose output
+2024-07-07 13:11:40 WARN capturing on any, link-type EN10MB (Ethernet), snapshot length 262144 bytes
+13:11:50.170538 ens33 python3.10.82106 Out IP 10.0.2.15.36648 &gt; 13.251.96.10.443: Flags [S], seq 1633417447, win 64240, length 0
+13:11:50.369972 ens33 python3.10.82106 In IP 13.251.96.10.443 &gt; 10.0.2.15.36648: Flags [S.], seq 1793291274, ack 1633417448, win 64240, length 0
+2 packets captured
+3 packets received by filter
+0 packets dropped by kernel
+</pre>
+<p>同时还可以通过指定 <tt class="docutils literal"><span class="pre">-f</span></tt> 参数对该进程创建的子进程也进行抓包:</p>
+<pre class="literal-block">
+$ sudo ptcpdump -i any -c 4 --pid 82106 -f 'tcp[tcpflags] &amp; tcp-fin != 0'
+2024-07-07 13:17:31 WARN ptcpdump: verbose output suppressed, use -v[v]... for verbose output
+2024-07-07 13:17:31 WARN capturing on any, link-type EN10MB (Ethernet), snapshot length 262144 bytes
+13:17:37.800903 ens33 python3.10.82106 Out IP 10.0.2.15.38576 &gt; 52.74.166.77.443: Flags [F.], seq 2442149577, ack 367271121, win 62780, length 0
+13:17:37.977316 ens33 python3.10.82106 In IP 52.74.166.77.443 &gt; 10.0.2.15.38576: Flags [FP.], seq 367271145, ack 2442149578, win 64239, length 0
+13:17:44.390627 ens33 curl.95920 Out IP 10.0.2.15.38590 &gt; 52.74.166.77.443: Flags [F.], seq 3726932781, ack 1510095004, win 63045, length 0
+13:17:44.564990 ens33 curl.95920 In IP 52.74.166.77.443 &gt; 10.0.2.15.38590: Flags [FP.], seq 1510095028, ack 3726932782, win 64239, length 0
+4 packets captured
+4 packets received by filter
+0 packets dropped by kernel
+</pre>
+</div>
+<div class="section" id="section-2">
+<h3 id="hidsection-2">指定进程名称抓包<a class="headerlink" href="#hidsection-2" title="Permalink to this headline">¶</a></h3>
+<p>可以通过 <tt class="docutils literal"><span class="pre">--pname</span></tt> 参数指定进程名称（comm），实现指定进程名称抓包:</p>
+<pre class="literal-block">
+$ sudo ptcpdump -i any -c 2 --pname curl
+2024-07-07 13:23:18 WARN ptcpdump: verbose output suppressed, use -v[v]... for verbose output
+2024-07-07 13:23:18 WARN capturing on any, link-type EN10MB (Ethernet), snapshot length 262144 bytes
+13:23:24.881499 lo curl.26511 Out IP 127.0.0.1.43332 &gt; 127.0.0.53.53: 44133+ [1au] A? mozillazg.com. (42)
+13:23:24.881663 lo curl.26511 Out IP 127.0.0.1.43332 &gt; 127.0.0.53.53: 14694+ [1au] AAAA? mozillazg.com. (42)
+2 packets captured
+2 packets received by filter
+0 packets dropped by kernel
+</pre>
+</div>
+<div class="section" id="section-3">
+<h3 id="hidsection-3">通过运行目标程序来抓包<a class="headerlink" href="#hidsection-3" title="Permalink to this headline">¶</a></h3>
+<p>有需要的话，也可以通过使用 <tt class="docutils literal"><span class="pre">--</span></tt> 参数运行目标程序的方式来实现对特定程序进行抓包:</p>
+<pre class="literal-block">
+$ sudo ptcpdump -i any -- curl -I https://mozillazg.com
+2024-07-07 13:26:44 WARN ptcpdump: verbose output suppressed, use -v[v]... for verbose output
+2024-07-07 13:26:44 WARN capturing on any, link-type EN10MB (Ethernet), snapshot length 262144 bytes
+13:26:44.055757 lo curl.28094 Out IP 127.0.0.1.48826 &gt; 127.0.0.53.53: 8942+ [1au] A? mozillazg.com. (42)
+13:26:44.055914 lo curl.28094 Out IP 127.0.0.1.48826 &gt; 127.0.0.53.53: 34274+ [1au] AAAA? mozillazg.com. (42)
+13:26:44.775840 lo curl.28094 In IP 127.0.0.53.53 &gt; 127.0.0.1.48826: 8942 3/0/1 CNAME mozillazg.netlify.com., A 13.251.96.10, A 46.137.195.11 (106)
+13:26:45.135988 lo curl.28094 In IP 127.0.0.53.53 &gt; 127.0.0.1.48826: 34274 3/0/1 CNAME mozillazg.netlify.com., AAAA 2406:da18:880:3802::c8, AAAA 2406:da18:b3d:e202::64 (130)
+13:26:45.136819 wlp4s0 curl.28094 Out IP6 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744 &gt; 2406:da18:880:3802::c8.443: Flags [S], seq 3460683104, win 64800, length 0
+13:26:45.310505 wlp4s0 curl.28094 In IP6 2406:da18:880:3802::c8.443 &gt; 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744: Flags [S.], seq 630810442, ack 3460683105, win 65232, length 0
+13:26:45.310821 wlp4s0 curl.28094 Out IP6 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744 &gt; 2406:da18:880:3802::c8.443: Flags [.], seq 3460683105, ack 630810443, win 507, length 0
+13:26:45.414551 wlp4s0 curl.28094 Out IP6 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744 &gt; 2406:da18:880:3802::c8.443: Flags [P.], seq 3460683105:3460683622, ack 630810443, win 507, length 517
+13:26:45.595214 wlp4s0 curl.28094 In IP6 2406:da18:880:3802::c8.443 &gt; 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744: Flags [.], seq 630810443, ack 3460683622, win 127, length 0
+13:26:45.595413 wlp4s0 curl.28094 In IP6 2406:da18:880:3802::c8.443 &gt; 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744: Flags [.], seq 630810443:630811651, ack 3460683622, win 127, length 1208
+13:26:45.595595 wlp4s0 curl.28094 Out IP6 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744 &gt; 2406:da18:880:3802::c8.443: Flags [.], seq 3460683622, ack 630811651, win 501, length 0
+13:26:45.595702 wlp4s0 curl.28094 In IP6 2406:da18:880:3802::c8.443 &gt; 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744: Flags [P.], seq 630811651:630812859, ack 3460683622, win 127, length 1208
+13:26:45.595797 wlp4s0 curl.28094 Out IP6 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744 &gt; 2406:da18:880:3802::c8.443: Flags [.], seq 3460683622, ack 630812859, win 492, length 0
+13:26:45.595862 wlp4s0 curl.28094 In IP6 2406:da18:880:3802::c8.443 &gt; 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744: Flags [P.], seq 630812859:630813338, ack 3460683622, win 127, length 479
+13:26:45.595934 wlp4s0 curl.28094 Out IP6 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744 &gt; 2406:da18:880:3802::c8.443: Flags [.], seq 3460683622, ack 630813338, win 489, length 0
+13:26:45.600998 wlp4s0 curl.28094 Out IP6 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744 &gt; 2406:da18:880:3802::c8.443: Flags [P.], seq 3460683622:3460683686, ack 630813338, win 489, length 64
+13:26:45.601344 wlp4s0 curl.28094 Out IP6 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744 &gt; 2406:da18:880:3802::c8.443: Flags [P.], seq 3460683686:3460683781, ack 630813338, win 489, length 95
+13:26:45.616759 wlp4s0 curl.28094 Out IP6 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744 &gt; 2406:da18:880:3802::c8.443: Flags [P.], seq 3460683781:3460683882, ack 630813338, win 501, length 101
+13:26:45.779516 wlp4s0 curl.28094 In IP6 2406:da18:880:3802::c8.443 &gt; 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744: Flags [.], seq 630813338, ack 3460683781, win 127, length 0
+13:26:45.779792 wlp4s0 curl.28094 In IP6 2406:da18:880:3802::c8.443 &gt; 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744: Flags [P.], seq 630813338:630813399, ack 3460683781, win 127, length 61
+13:26:45.779996 wlp4s0 curl.28094 In IP6 2406:da18:880:3802::c8.443 &gt; 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744: Flags [P.], seq 630813399:630813443, ack 3460683781, win 127, length 44
+13:26:45.780318 wlp4s0 curl.28094 Out IP6 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744 &gt; 2406:da18:880:3802::c8.443: Flags [P.], seq 3460683882:3460683913, ack 630813443, win 501, length 31
+HTTP/2 200
+13:26:45.788787 wlp4s0 curl.28094 In IP6 2406:da18:880:3802::c8.443 &gt; 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744: Flags [P.], seq 630813443:630813677, ack 3460683882, win 127, length 234
+accept-ranges: bytes
+age: 79059
+cache-control: public,max-age=0,must-revalidate
+cache-status: &quot;Netlify Edge&quot;; hit
+content-type: text/html; charset=UTF-8
+date: Sun, 07 Jul 2024 05:26:44 GMT
+etag: &quot;80cf37f5974e2232d976c6f622121dee-ssl&quot;
+server: Netlify
+strict-transport-security: max-age=31536000
+x-nf-request-id: 01J25THACQSN9364YHSR2C0X5F
+content-length: 11727
+
+13:26:45.789558 wlp4s0 curl.28094 Out IP6 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744 &gt; 2406:da18:880:3802::c8.443: Flags [P.], seq 3460683913:3460683937, ack 630813677, win 501, length 24
+13:26:45.791514 wlp4s0 curl.28094 Out IP6 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744 &gt; 2406:da18:880:3802::c8.443: Flags [F.], seq 3460683937, ack 630813677, win 501, length 0
+13:26:45.963642 wlp4s0 curl.28094 In IP6 2406:da18:880:3802::c8.443 &gt; 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744: Flags [.], seq 630813677, ack 3460683937, win 127, length 0
+13:26:45.963956 wlp4s0 curl.28094 In IP6 2406:da18:880:3802::c8.443 &gt; 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744: Flags [P.], seq 630813677:630813701, ack 3460683937, win 127, length 24
+13:26:45.964172 wlp4s0 curl.28094 Out IP6 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744 &gt; 2406:da18:880:3802::c8.443: Flags [R], seq 3460683937, win 0, length 0
+13:26:45.964415 wlp4s0 curl.28094 In IP6 2406:da18:880:3802::c8.443 &gt; 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744: Flags [F.], seq 630813701, ack 3460683937, win 127, length 0
+13:26:45.964506 wlp4s0 curl.28094 Out IP6 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744 &gt; 2406:da18:880:3802::c8.443: Flags [R], seq 3460683937, win 0, length 0
+13:26:45.966158 wlp4s0 curl.28094 In IP6 2406:da18:880:3802::c8.443 &gt; 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744: Flags [.], seq 630813702, ack 3460683938, win 127, length 0
+13:26:45.966299 wlp4s0 curl.28094 Out IP6 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744 &gt; 2406:da18:880:3802::c8.443: Flags [R], seq 3460683938, win 0, length 0
+32 packets captured
+32 packets received by filter
+0 packets dropped by kernel
+</pre>
+</div>
+<div class="section" id="section-4">
+<h3 id="hidsection-4">指定容器抓包<a class="headerlink" href="#hidsection-4" title="Permalink to this headline">¶</a></h3>
+<p>可以通过 <tt class="docutils literal"><span class="pre">--container-id</span></tt> 参数指定容器 id 进行抓包:</p>
+<pre class="literal-block">
+$ sudo ptcpdump -i any -c 2 --container-id 36f0310403b1
+2024-07-07 13:36:19 WARN ptcpdump: verbose output suppressed, use -v[v]... for verbose output
+2024-07-07 13:36:19 WARN capturing on any, link-type EN10MB (Ethernet), snapshot length 262144 bytes
+13:36:24.191242 veth09dec8f curl.32636 In IP 172.19.0.2.48960 &gt; 18.139.194.139.443: Flags [S], seq 3213779351, win 64240, length 0, Container [kind-control-plane]
+13:36:24.191369 wlp4s0 curl.32636 Out IP 192.168.1.50.48960 &gt; 18.139.194.139.443: Flags [S], seq 3213779351, win 64240, length 0, Container [kind-control-plane]
+2 packets captured
+2 packets received by filter
+0 packets dropped by kernel
+</pre>
+<p>也可以通过 <tt class="docutils literal"><span class="pre">--container-name</span></tt> 参数指定容器名称进行抓包:</p>
+<pre class="literal-block">
+$ sudo ptcpdump -i any -c 2 --container-name kind-control-plane
+2024-07-07 13:37:16 WARN ptcpdump: verbose output suppressed, use -v[v]... for verbose output
+2024-07-07 13:37:16 WARN capturing on any, link-type EN10MB (Ethernet), snapshot length 262144 bytes
+13:37:22.560764 veth09dec8f curl.33093 In IP 172.19.0.2.39084 &gt; 18.139.194.139.443: Flags [S], seq 3645727033, win 64240, length 0, Container [kind-control-plane]
+13:37:22.561010 wlp4s0 curl.33093 Out IP 192.168.1.50.39084 &gt; 18.139.194.139.443: Flags [S], seq 3645727033, win 64240, length 0, Container [kind-control-plane]
+2 packets captured
+2 packets received by filter
+0 packets dropped by kernel
+</pre>
+</div>
+<div class="section" id="pod-2">
+<h3 id="hidpod-2">指定 Pod 抓包<a class="headerlink" href="#hidpod-2" title="Permalink to this headline">¶</a></h3>
+<p>可以通过 <tt class="docutils literal"><span class="pre">--pod-name</span></tt> 参数指定 Pod 名称进行抓包, 参数值的格式为 <tt class="docutils literal">&lt;pod <span class="pre">名称&gt;.&lt;pod</span> 命名空间&gt;</tt>:</p>
+<pre class="literal-block">
+$ sudo ptcpdump -i any -c 2 --pod-name test.default
+2024-07-07 13:38:29 WARN ptcpdump: verbose output suppressed, use -v[v]... for verbose output
+2024-07-07 13:38:29 WARN capturing on any, link-type EN10MB (Ethernet), snapshot length 262144 bytes
+13:38:34.175752 eth0 wget.33660 Out IP 172.19.0.2.51564 &gt; 13.215.144.61.443: Flags [S], seq 567383917, win 64240, length 0, Container [test], Pod [test.default]
+13:38:34.372894 eth0 wget.33660 In IP 13.215.144.61.443 &gt; 172.19.0.2.51564: Flags [S.], seq 2654865684, ack 567383918, win 65084, length 0, Container [test], Pod [test.default]
+2 packets captured
+3 packets received by filter
+0 packets dropped by kernel
+</pre>
+</div>
+</div>
+<div class="section" id="pcapng-tcpdump-wireshark">
+<h2 id="hidpcapng-tcpdump-wireshark">将数据保存为 pcapng 格式使用 tcpdump 或 Wireshark 进行分析<a class="headerlink" href="#hidpcapng-tcpdump-wireshark" title="Permalink to this headline">¶</a></h2>
+<div class="section" id="pcapng">
+<h3 id="hidpcapng">保存为 pcapng 格式<a class="headerlink" href="#hidpcapng" title="Permalink to this headline">¶</a></h3>
+<p>可以通过 <tt class="docutils literal"><span class="pre">-w</span></tt> 参数将抓包数据保存为 pcapng 格式:</p>
+<pre class="literal-block">
+$ sudo ptcpdump -i any -c 5 -w demo.pcapng
+2024-07-07 13:41:32 WARN ptcpdump: verbose output suppressed, use -v[v]... for verbose output
+2024-07-07 13:41:32 WARN capturing on any, link-type EN10MB (Ethernet), snapshot length 262144 bytes
+5 packets captured
+22 packets received by filter
+0 packets dropped by kernel
+</pre>
+</div>
+<div class="section" id="tcpdump-1">
+<h3 id="hidtcpdump-1">使用 tcpdump 进行分析<a class="headerlink" href="#hidtcpdump-1" title="Permalink to this headline">¶</a></h3>
+<p>可以直接通过管道的方式通过 tcpdump 对抓取的数据进行分析:</p>
+<pre class="literal-block">
+$ sudo ptcpdump -i any -c 5 -w - port 80 | tcpdump -n -r -
+reading from file -, link-type EN10MB (Ethernet), snapshot length 65535
+2024-07-07 13:44:33 WARN ptcpdump: verbose output suppressed, use -v[v]... for verbose output
+2024-07-07 13:44:33 WARN capturing on any, link-type EN10MB (Ethernet), snapshot length 262144 bytes
+13:44:44.530637 IP6 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.50858 &gt; 2406:da18:880:3801::c8.80: Flags [S], seq 495824072, win 64800, options [mss 1440,sackOK,TS val 2411675580 ecr 0,nop,wscale 7], length 0
+13:44:44.708902 IP6 2406:da18:880:3801::c8.80 &gt; 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.50858: Flags [S.], seq 640438481, ack 495824073, win 65232, options [mss 1220,sackOK,TS val 1591525382 ecr 2411675580,nop,wscale 9], length 0
+13:44:44.709261 IP6 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.50858 &gt; 2406:da18:880:3801::c8.80: Flags [.], ack 1, win 507, options [nop,nop,TS val 2411675670 ecr 1591525382], length 0
+13:44:44.709475 IP6 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.50858 &gt; 2406:da18:880:3801::c8.80: Flags [P.], seq 1:78, ack 1, win 507, options [nop,nop,TS val 2411675670 ecr 1591525382], length 77: HTTP: GET / HTTP/1.1
+5 packets captured
+6 packets received by filter
+0 packets dropped by kernel
+13:44:44.877110 IP6 2406:da18:880:3801::c8.80 &gt; 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.50858: Flags [P.], seq 1:266, ack 78, win 128, options [nop,nop,TS val 1591525469 ecr 2411675670], length 265: HTTP: HTTP/1.1 301 Moved Permanently
+</pre>
+<p>也可以通过读取文件的方式通过 tcpdump 对抓取的数据进行分析:</p>
+<pre class="literal-block">
+$ tcpdump -n -r demo.pcapng
+reading from file demo.pcapng, link-type EN10MB (Ethernet), snapshot length 65535
+13:47:41.169584 IP6 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.43038 &gt; 2406:da18:b3d:e201::64.80: Flags [S], seq 3876639697, win 64800, options [mss 1440,sackOK,TS val 2072195434 ecr 0,nop,wscale 7], length 0
+13:47:41.571055 IP 192.168.1.50.60580 &gt; 18.139.194.139.80: Flags [S], seq 481256927, win 64240, options [mss 1460,sackOK,TS val 2707199178 ecr 0,nop,wscale 7], length 0
+13:47:41.956270 IP6 2406:da18:b3d:e201::64.80 &gt; 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.43038: Flags [S.], seq 2283576526, ack 3876639698, win 65232, options [mss 1220,sackOK,TS val 4276006323 ecr 2072195434,nop,wscale 9], length 0
+13:47:41.956437 IP6 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.43038 &gt; 2406:da18:b3d:e201::64.80: Flags [.], ack 1, win 507, options [nop,nop,TS val 2072195828 ecr 4276006323], length 0
+13:47:41.956733 IP6 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.43038 &gt; 2406:da18:b3d:e201::64.80: Flags [P.], seq 1:78, ack 1, win 507, options [nop,nop,TS val 2072195828 ecr 4276006323], length 77: HTTP: GET / HTTP/1.1
+</pre>
+</div>
+<div class="section" id="wireshark">
+<h3 id="hidwireshark">使用 Wireshark 进行分析<a class="headerlink" href="#hidwireshark" title="Permalink to this headline">¶</a></h3>
+<p>当使用 Wireshark 打开保存的 pcapng 格式的文件时，将在 Wireshark 的界面中显示相关的进程、容器以及 Pod 信息：</p>
+<img alt="" src="/static/images/bpf/ptcpdump-wireshark.png" />
+</div>
+</div>
+<div class="section" id="section-5">
+<h2 id="hidsection-5">参考资料<a class="headerlink" href="#hidsection-5" title="Permalink to this headline">¶</a></h2>
+<ul class="simple">
+<li><a class="reference external" href="https://github.com/mozillazg/ptcpdump">mozillazg/ptcpdump: Process-aware, eBPF-based tcpdump</a></li>
+<li><a class="reference external" href="https://www.tcpdump.org/manpages/tcpdump.1-4.99.4.html">tcpdump(1) man page | TCPDUMP &amp; LIBPCAP</a></li>
+</ul>
+</div>
+
+                </div>
+            </div>
+            <!-- /.entry-content -->
+<section class="text-center">
+  
+<div id="donate"></div>
+
+<div class="social-share"></div>
+<div class="social-comment-note">
+<p class="text-center">有任何建议和想法欢迎在下方评论区留言或者加我<a href="/static/wechat.png">微信</a>交流</p>
+</div>
+
+</section>
+<section class="well" id="related-posts">
+    <p>Related Posts:</p>
+    <ul>
+        <li><a href="https://mozillazg.com/2024/07/ebpf-ptcpdump-capturing-the-network-traffic-of-a-process-or-container-or-pod-en.html">ptcpdump: Capturing the Network Traffic of any Process, Container, or Pod</a></li>
+        <li><a href="https://mozillazg.com/2015/05/open-tcpdump-result-with-wireshark-gui.html">使用 wireshark 查看 tcpdump 的抓包结果</a></li>
+        <li><a href="https://mozillazg.com/2022/07/ebpf-libbpf-what-is-load_byte-load_half-load_word-en.html">Introduction of load_byte/load_half/load_word functions commonly used in ebpf programs</a></li>
+        <li><a href="https://mozillazg.com/2022/07/ebpf-libbpf-what-is-load_byte-load_half-load_word.html">ebpf 程序中常用的 load_byte/load_half/load_word 功能介绍</a></li>
+        <li><a href="https://mozillazg.com/2021/05/ebpf-gobpf-how-to-find-system-call-kernel-function-for-kprobe-elf-section.html">gobpf 使用示例：如何找到一个系统调用对应的可用于 kprobe SEC 的内核函数</a></li>
+    </ul>
+</section>
+<hr/>
+<section class="comments" id="comments">
+    <h2>Comments</h2>
+    <script src="https://giscus.app/client.js"
+            data-repo="mozillazg/mozillazg.github.com"
+            data-repo-id="MDEwOlJlcG9zaXRvcnk3Njc4MTA2"
+            data-category="Announcements"
+            data-category-id="DIC_kwDOAHUoms4CckZl"
+            data-mapping="pathname"
+            data-strict="0"
+            data-reactions-enabled="1"
+            data-emit-metadata="0"
+            data-input-position="bottom"
+            data-theme="preferred_color_scheme"
+            data-lang="en"
+            data-loading="lazy"
+            crossorigin="anonymous"
+            async>
+    </script>
+</section>
+        </article>
+    </section>
+
+        </div>
+    </div>
+</div>
+<footer>
+   <div class="container">
+      <hr>
+      <div class="row">
+         <div class="col-xs-10">&copy; 2024 mozillazg
+            &middot; Powered by <a href="https://github.com/DandyDev/pelican-bootstrap3" target="_blank">pelican-bootstrap3</a>,
+            <a href="http://docs.getpelican.com/" target="_blank">Pelican</a>,
+            <a href="http://getbootstrap.com" target="_blank">Bootstrap</a>
+            &middot; <a href="/privacy-policy.html" target="_blank">Privacy</a>              <p><small>  <a rel="license" href="http://creativecommons.org/licenses/by-sa/4.0/"><img alt="Creative Commons License" style="border-width:0" src="/static/images/by-sa-80x15.png" /></a>
+    &quot;<span xmlns:dct="http://purl.org/dc/terms/" property="dct:title">mozillazg's Blog</span>&quot; by <a xmlns:cc="http://creativecommons.org/ns#" href="https://mozillazg.com" property="cc:attributionName" rel="cc:attributionURL">mozillazg</a> is
+  licensed under a <a rel="license" href="http://creativecommons.org/licenses/by-sa/4.0/">Creative Commons Attribution-ShareAlike 4.0 International License</a>, except where indicated otherwise.
+</small></p>
+         </div>
+         <div class="col-xs-2"><p class="pull-right"><i class="fa fa-arrow-up"></i> <a href="#">Back to top</a></p></div>
+      </div>
+   </div>
+</footer>
+<script src="/theme/cdn.jsdelivr.net/npm/jquery@2.1.1/dist/jquery.min.js"></script>
+
+<!-- Include all compiled plugins (below), or include individual files as needed -->
+<script src="/theme/cdn.jsdelivr.net/npm/bootstrap@3.3.4/dist/js/bootstrap.min.js"></script>
+
+<!-- Enable responsive features in IE8 with Respond.js (https://github.com/scottjehl/Respond) -->
+
+
+<!-- share.js -->
+<script src="/theme/cdn.jsdelivr.net/npm/social-share.js@1.0.16/dist/js/social-share.min.js"></script>
+
+
+
+<script src="/theme/cdn.jsdelivr.net/npm/tocbot@3.0.2/dist/tocbot.min.js"></script>
+<script>
+$(document).ready(function(){
+  tocbot.init({
+    // Where to render the table of contents.
+    tocSelector: '.js-toc',
+    // Where to grab the headings to build the table of contents.
+    contentSelector: '.entry-content',
+    // Which headings to grab inside of the contentSelector element.
+    headingSelector: 'h2, h3, h4,h5',
+    // Headings that match the ignoreSelector will be skipped.
+    ignoreSelector: '.js-toc-ignore',
+    // Main class to add to links.
+    linkClass: 'toc-link',
+    // Extra classes to add to links.
+    extraLinkClasses: '',
+    // Class to add to active links,
+    // the link corresponding to the top most heading on the page.
+    activeLinkClass: 'is-active-link',
+    // Main class to add to lists.
+    listClass: 'toc-list',
+    // Extra classes to add to lists.
+    extraListClasses: '',
+    // Class that gets added when a list should be collapsed.
+    isCollapsedClass: 'is-collapsed',
+    // Class that gets added when a list should be able
+    // to be collapsed but isn't necessarily collpased.
+    collapsibleClass: 'is-collapsible',
+    // Class to add to list items.
+    listItemClass: 'toc-list-item',
+    // How many heading levels should not be collpased.
+    // For example, number 6 will show everything since
+    // there are only 6 heading levels and number 0 will collpase them all.
+    // The sections that are hidden will open
+    // and close as you scroll to headings within them.
+    collapseDepth: 6,
+    // Smooth scrolling enabled.
+    smoothScroll: true,
+    // Smooth scroll duration.
+    smoothScrollDuration: 420,
+    // Callback for scroll end (requires: smoothScroll).
+    scrollEndCallback: function (e) {},
+    // Headings offset between the headings and the top of the document (this is meant for minor adjustments).
+    headingsOffset: 0,
+    // Timeout between events firing to make sure it's
+    // not too rapid (for performance reasons).
+    throttleTimeout: 50,
+    // Element to add the positionFixedClass to.
+    positionFixedSelector: null,
+    // Fixed position class to add to make sidebar fixed after scrolling
+    // down past the fixedSidebarOffset.
+    positionFixedClass: 'is-position-fixed',
+    // fixedSidebarOffset can be any number but by default is set
+    // to auto which sets the fixedSidebarOffset to the sidebar
+    // element's offsetTop from the top of the document on init.
+    fixedSidebarOffset: 'auto',
+    // includeHtml can be set to true to include the HTML markup from the
+    // heading node instead of just including the textContent.
+    includeHtml: false
+  });
+});
+</script>
+</body>
+</html>

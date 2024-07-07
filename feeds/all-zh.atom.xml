@@ -1,5 +1,292 @@
 <?xml version="1.0" encoding="utf-8"?>
-<feed xmlns="http://www.w3.org/2005/Atom"><title>mozillazg's Blog</title><link href="https://mozillazg.com/" rel="alternate"></link><link href="https://mozillazg.com/feeds/all-zh.atom.xml" rel="self"></link><id>https://mozillazg.com/</id><updated>2024-03-31T00:00:00+00:00</updated><entry><title>一个使用 tracepoint 追踪 execve 系统调用时无法正确获取系统调用参数的场景</title><link href="https://mozillazg.com/2024/03/ebpf-tracepoint-syscalls-sys-enter-execve-can-not-get-filename-argv-values-case.html" rel="alternate"></link><published>2024-03-31T00:00:00+00:00</published><updated>2024-03-31T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2024-03-31:2024/03/ebpf-tracepoint-syscalls-sys-enter-execve-can-not-get-filename-argv-values-case.html</id><summary type="html">&lt;div class="section" id="section-1"&gt;
+<feed xmlns="http://www.w3.org/2005/Atom"><title>mozillazg's Blog</title><link href="https://mozillazg.com/" rel="alternate"></link><link href="https://mozillazg.com/feeds/all-zh.atom.xml" rel="self"></link><id>https://mozillazg.com/</id><updated>2024-07-06T00:00:00+00:00</updated><entry><title>ptcpdump: 抓包时显示进程信息以及对任意进程、容器或 Pod 进行抓包</title><link href="https://mozillazg.com/2024/07/ebpf-ptcpdump-capturing-the-network-traffic-of-a-process-or-container-or-pod.html" rel="alternate"></link><published>2024-07-06T00:00:00+00:00</published><updated>2024-07-06T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2024-07-06:2024/07/ebpf-ptcpdump-capturing-the-network-traffic-of-a-process-or-container-or-pod.html</id><summary type="html">&lt;div class="section" id="section-1"&gt;
+&lt;h2 id="hidsection-1"&gt;前言&lt;a class="headerlink" href="#hidsection-1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;tcpdump 是我们常用的一个网络抓包工具，它的功能非常的强大。但是它还缺少一个大家反馈很久却一直没实现的一个特性，
+那就是：在结果中包含/显示发送网络请求/流量的进程信息，以及支持抓取指定进程的网络流量。&lt;/p&gt;
+&lt;p&gt;当前针对 tcpdump 抓取的流量信息，如果要获取对应的进程信息的话，常见的方法是：
+基于请求的连接信息，通过 &lt;tt class="docutils literal"&gt;ss&lt;/tt&gt; 或 &lt;tt class="docutils literal"&gt;netstat&lt;/tt&gt; 之内的工具反查进程信息。
+这个方法的缺点是：操作起来比较繁琐以及无法查找匹配短生命周期的进程所发送的网络流量。&lt;/p&gt;
+&lt;p&gt;至于基于 tcpdump 实现抓取指定进程的网络流量，常见的方法是：在知晓进程要访问的目标服务地址信息的前提下，
+在使用 tcpdump 时按目的地址信息过滤流量；
+或者是在特定的网络命名空间中运行目标进程，然后再在该网络命名空间下使用 tcpdump 抓包。
+这两个方法的缺点是：需要提前知晓目标进程访问的目的地址或者需要改变目标进程的执行方式，适用场景有限。&lt;/p&gt;
+&lt;p&gt;本文将介绍一个新的工具 ptcpdump，基于这个工具，我们既可以在抓包时直接感知发送流量的进程信息，
+也可以直接对运行中或待运行的任意进程进行网络抓包。如果流量是从容器内的进程发出的话，
+它还支持显示流量的容器或 Pod 信息以及对特定容器或 Pod 进行抓包。&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class="section" id="ptcpdump"&gt;
+&lt;h2 id="hidptcpdump"&gt;ptcpdump 介绍&lt;a class="headerlink" href="#hidptcpdump" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;ptcpdump 是一个使用 eBPF 技术开发的、类 tcpdump 的网络抓包工具。
+它除了兼容 tcpdump 的常用命令行参数以及包过滤语法外，
+还额外提供了如下核心特性：&lt;/p&gt;
+&lt;ul class="simple"&gt;
+&lt;li&gt;在输出中记录和显示发送网络流量的进程、容器、Pod 信息。&lt;/li&gt;
+&lt;li&gt;支持对指定进程、容器以及 Pod 进行抓包。&lt;/li&gt;
+&lt;li&gt;支持将抓取的数据包保存为 pcapng 格式，可以使用 tcpdump 或者 Wireshark 做进一步分析。&lt;/li&gt;
+&lt;li&gt;当在 Wireshark 中打开保存的 pcapng 文件时，将能够看到每个数据包对应的进程、容器、Pod 信息。&lt;/li&gt;
+&lt;li&gt;使用静态链接的方式编译该工具，系统中不需要安装额外的系统链接库。&lt;/li&gt;
+&lt;/ul&gt;
+&lt;p&gt;更多信息请参考项目的源代码仓库： &lt;a class="reference external" href="https://github.com/mozillazg/ptcpdump"&gt;https://github.com/mozillazg/ptcpdump&lt;/a&gt;&lt;/p&gt;
+&lt;p&gt;下面将以示例的形式介绍 ptcpdump 的核心功能。&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class="section" id="tcpdump"&gt;
+&lt;h2 id="hidtcpdump"&gt;兼容 tcpdump 的常用命令行参数和包过滤语法&lt;a class="headerlink" href="#hidtcpdump" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;pre class="literal-block"&gt;
+sudo tcpdump -i eth0 tcp
+sudo tcpdump -i eth0 tcp and port 80 and host 10.10.1.1
+sudo tcpdump -i eth0 'tcp[tcpflags] &amp;amp; (tcp-syn|tcp-fin) != 0'
+sudo tcpdump -i any
+sudo tcpdump -i any -s 0 -n -c 100 -w demo.pcapng port 80
+&lt;/pre&gt;
+&lt;p&gt;上面这些常见的 tcpdump 命令可以直接无缝替换为对应的 ptcpdump 命令，只需要将 tcpdump 改为 ptcpdump 即可:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+sudo ptcpdump -i eth0 tcp
+sudo ptcpdump -i eth0 tcp and port 80 and host 10.10.1.1
+sudo ptcpdump -i eth0 'tcp[tcpflags] &amp;amp; (tcp-syn|tcp-fin) != 0'
+sudo ptcpdump -i any
+sudo ptcpdump -i any -s 0 -n -c 100 -w demo.pcapng port 80
+&lt;/pre&gt;
+&lt;/div&gt;
+&lt;div class="section" id="pod"&gt;
+&lt;h2 id="hidpod"&gt;在输出中记录和显示发送网络流量的进程、容器和 Pod 信息&lt;a class="headerlink" href="#hidpod" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;默认情况下，ptcpdump 将在输出中显示简单的进程、容器以及 Pod 信息:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+$ sudo ptcpdump -i any -c 4 port 80 or port 443
+2024-07-07 12:56:56 WARN ptcpdump: verbose output suppressed, use -v[v]... for verbose output
+2024-07-07 12:56:56 WARN capturing on any, link-type EN10MB (Ethernet), snapshot length 262144 bytes
+12:56:59.517657 veth18618a4a wget.13626 In IP 10.244.0.4.46834 &amp;gt; 13.251.96.10.443: Flags [S], seq 2743105662, win 64240, length 0, Container [test], Pod [test.default]
+12:56:59.517836 eth0 wget.13626 Out IP 172.19.0.2.46834 &amp;gt; 13.251.96.10.443: Flags [S], seq 2743105662, win 64240, length 0, Container [test], Pod [test.default]
+12:56:59.692593 eth0 wget.13626 In IP 13.251.96.10.443 &amp;gt; 172.19.0.2.46834: Flags [S.], seq 1966397178, ack 2743105663, win 65084, length 0, Container [test], Pod [test.default]
+12:56:59.692754 veth18618a4a wget.13626 Out IP 13.251.96.10.443 &amp;gt; 10.244.0.4.46834: Flags [S.], seq 1966397178, ack 2743105663, win 65084, length 0, Container [test], Pod [test.default]
+4 packets captured
+6 packets received by filter
+0 packets dropped by kernel
+&lt;/pre&gt;
+&lt;p&gt;可以通过指定 &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;-v&lt;/span&gt;&lt;/tt&gt; 参数，查看更详细的进程、容器以及 Pod 信息:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+$ ptcpdump -i any -c 4 -v port 80 or port 443
+2024-07-07 12:58:59 WARN ptcpdump: capturing on any, link-type EN10MB (Ethernet), snapshot length 262144 bytes
+12:59:02.265356 veth18618a4a In IP (tos 0x0, ttl 64, id 35996, offset 0, flags [DF], proto TCP (6), length 60)
+    10.244.0.4.41666 &amp;gt; 13.215.144.61.443: Flags [S], cksum 0xa93a, seq 40651020, win 64240, options [mss 1460,sackOK,TS val 2665081987 ecr 0,nop,wscale 7], length 0
+    Process (pid 14565, cmd /usr/bin/wget, args wget https://mozillazg.com -O /dev/null)
+    Container (name test, id 78116e60ff73d3dc41c795288fbf955ed543c964e56cada0c3fa466bc939a339, image docker.io/library/alpine:3.18, labels {&amp;quot;io.cri-containerd.kind&amp;quot;:&amp;quot;container&amp;quot;,&amp;quot;io.kubernetes.container.name&amp;quot;:&amp;quot;test&amp;quot;,&amp;quot;io.kubernetes.pod.name&amp;quot;:&amp;quot;test&amp;quot;,&amp;quot;io.kubernetes.pod.namespace&amp;quot;:&amp;quot;default&amp;quot;,&amp;quot;io.kubernetes.pod.uid&amp;quot;:&amp;quot;9e4bc54b-de48-4b1c-8b9e-54709f67ed0c&amp;quot;})
+    Pod (name test, namespace default, UID 9e4bc54b-de48-4b1c-8b9e-54709f67ed0c, labels {&amp;quot;run&amp;quot;:&amp;quot;test&amp;quot;}, annotations {&amp;quot;kubernetes.io/config.seen&amp;quot;:&amp;quot;2024-07-07T12:43:29.121307922Z&amp;quot;,&amp;quot;kubernetes.io/config.source&amp;quot;:&amp;quot;api&amp;quot;})
+12:59:02.265606 eth0 Out IP (tos 0x0, ttl 63, id 35996, offset 0, flags [DF], proto TCP (6), length 60)
+    172.19.0.2.41666 &amp;gt; 13.215.144.61.443: Flags [S], cksum 0x4a58, seq 40651020, win 64240, options [mss 1460,sackOK,TS val 2665081987 ecr 0,nop,wscale 7], length 0
+    Process (pid 14565, cmd /usr/bin/wget, args wget https://mozillazg.com -O /dev/null)
+    Container (name test, id 78116e60ff73d3dc41c795288fbf955ed543c964e56cada0c3fa466bc939a339, image docker.io/library/alpine:3.18, labels {&amp;quot;io.cri-containerd.kind&amp;quot;:&amp;quot;container&amp;quot;,&amp;quot;io.kubernetes.container.name&amp;quot;:&amp;quot;test&amp;quot;,&amp;quot;io.kubernetes.pod.name&amp;quot;:&amp;quot;test&amp;quot;,&amp;quot;io.kubernetes.pod.namespace&amp;quot;:&amp;quot;default&amp;quot;,&amp;quot;io.kubernetes.pod.uid&amp;quot;:&amp;quot;9e4bc54b-de48-4b1c-8b9e-54709f67ed0c&amp;quot;})
+    Pod (name test, namespace default, UID 9e4bc54b-de48-4b1c-8b9e-54709f67ed0c, labels {&amp;quot;run&amp;quot;:&amp;quot;test&amp;quot;}, annotations {&amp;quot;kubernetes.io/config.seen&amp;quot;:&amp;quot;2024-07-07T12:43:29.121307922Z&amp;quot;,&amp;quot;kubernetes.io/config.source&amp;quot;:&amp;quot;api&amp;quot;})
+12:59:02.462586 eth0 In IP (tos 0x4, ttl 47, id 0, offset 0, flags [DF], proto TCP (6), length 60)
+    13.215.144.61.443 &amp;gt; 172.19.0.2.41666: Flags [S.], cksum 0x9772, seq 3160052321, ack 40651021, win 65084, options [mss 1240,sackOK,TS val 3710435767 ecr 2665081987,nop,wscale 9], length 0
+    Process (pid 14565, cmd /usr/bin/wget, args wget https://mozillazg.com -O /dev/null)
+    Container (name test, id 78116e60ff73d3dc41c795288fbf955ed543c964e56cada0c3fa466bc939a339, image docker.io/library/alpine:3.18, labels {&amp;quot;io.cri-containerd.kind&amp;quot;:&amp;quot;container&amp;quot;,&amp;quot;io.kubernetes.container.name&amp;quot;:&amp;quot;test&amp;quot;,&amp;quot;io.kubernetes.pod.name&amp;quot;:&amp;quot;test&amp;quot;,&amp;quot;io.kubernetes.pod.namespace&amp;quot;:&amp;quot;default&amp;quot;,&amp;quot;io.kubernetes.pod.uid&amp;quot;:&amp;quot;9e4bc54b-de48-4b1c-8b9e-54709f67ed0c&amp;quot;})
+    Pod (name test, namespace default, UID 9e4bc54b-de48-4b1c-8b9e-54709f67ed0c, labels {&amp;quot;run&amp;quot;:&amp;quot;test&amp;quot;}, annotations {&amp;quot;kubernetes.io/config.seen&amp;quot;:&amp;quot;2024-07-07T12:43:29.121307922Z&amp;quot;,&amp;quot;kubernetes.io/config.source&amp;quot;:&amp;quot;api&amp;quot;})
+12:59:02.462782 veth18618a4a Out IP (tos 0x4, ttl 46, id 0, offset 0, flags [DF], proto TCP (6), length 60)
+    13.215.144.61.443 &amp;gt; 10.244.0.4.41666: Flags [S.], cksum 0x3890, seq 3160052321, ack 40651021, win 65084, options [mss 1240,sackOK,TS val 3710435767 ecr 2665081987,nop,wscale 9], length 0
+    Process (pid 14565, cmd /usr/bin/wget, args wget https://mozillazg.com -O /dev/null)
+    Container (name test, id 78116e60ff73d3dc41c795288fbf955ed543c964e56cada0c3fa466bc939a339, image docker.io/library/alpine:3.18, labels {&amp;quot;io.cri-containerd.kind&amp;quot;:&amp;quot;container&amp;quot;,&amp;quot;io.kubernetes.container.name&amp;quot;:&amp;quot;test&amp;quot;,&amp;quot;io.kubernetes.pod.name&amp;quot;:&amp;quot;test&amp;quot;,&amp;quot;io.kubernetes.pod.namespace&amp;quot;:&amp;quot;default&amp;quot;,&amp;quot;io.kubernetes.pod.uid&amp;quot;:&amp;quot;9e4bc54b-de48-4b1c-8b9e-54709f67ed0c&amp;quot;})
+    Pod (name test, namespace default, UID 9e4bc54b-de48-4b1c-8b9e-54709f67ed0c, labels {&amp;quot;run&amp;quot;:&amp;quot;test&amp;quot;}, annotations {&amp;quot;kubernetes.io/config.seen&amp;quot;:&amp;quot;2024-07-07T12:43:29.121307922Z&amp;quot;,&amp;quot;kubernetes.io/config.source&amp;quot;:&amp;quot;api&amp;quot;})
+4 packets captured
+6 packets received by filter
+0 packets dropped by kernel
+&lt;/pre&gt;
+&lt;/div&gt;
+&lt;div class="section" id="pod-1"&gt;
+&lt;h2 id="hidpod-1"&gt;支持对指定进程、容器或 Pod 进行抓包&lt;a class="headerlink" href="#hidpod-1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;div class="section" id="pid"&gt;
+&lt;h3 id="hidpid"&gt;指定进程 pid 抓包&lt;a class="headerlink" href="#hidpid" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
+&lt;p&gt;可以通过 &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;--pid&lt;/span&gt;&lt;/tt&gt; 参数指定要抓包的进程 pid，实现对指定进程进行抓包:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+$ sudo ptcpdump -i any -c 4 --pid 82106
+2024-07-07 13:11:40 WARN ptcpdump: verbose output suppressed, use -v[v]... for verbose output
+2024-07-07 13:11:40 WARN capturing on any, link-type EN10MB (Ethernet), snapshot length 262144 bytes
+13:11:50.170538 ens33 python3.10.82106 Out IP 10.0.2.15.36648 &amp;gt; 13.251.96.10.443: Flags [S], seq 1633417447, win 64240, length 0
+13:11:50.369972 ens33 python3.10.82106 In IP 13.251.96.10.443 &amp;gt; 10.0.2.15.36648: Flags [S.], seq 1793291274, ack 1633417448, win 64240, length 0
+2 packets captured
+3 packets received by filter
+0 packets dropped by kernel
+&lt;/pre&gt;
+&lt;p&gt;同时还可以通过指定 &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;-f&lt;/span&gt;&lt;/tt&gt; 参数对该进程创建的子进程也进行抓包:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+$ sudo ptcpdump -i any -c 4 --pid 82106 -f 'tcp[tcpflags] &amp;amp; tcp-fin != 0'
+2024-07-07 13:17:31 WARN ptcpdump: verbose output suppressed, use -v[v]... for verbose output
+2024-07-07 13:17:31 WARN capturing on any, link-type EN10MB (Ethernet), snapshot length 262144 bytes
+13:17:37.800903 ens33 python3.10.82106 Out IP 10.0.2.15.38576 &amp;gt; 52.74.166.77.443: Flags [F.], seq 2442149577, ack 367271121, win 62780, length 0
+13:17:37.977316 ens33 python3.10.82106 In IP 52.74.166.77.443 &amp;gt; 10.0.2.15.38576: Flags [FP.], seq 367271145, ack 2442149578, win 64239, length 0
+13:17:44.390627 ens33 curl.95920 Out IP 10.0.2.15.38590 &amp;gt; 52.74.166.77.443: Flags [F.], seq 3726932781, ack 1510095004, win 63045, length 0
+13:17:44.564990 ens33 curl.95920 In IP 52.74.166.77.443 &amp;gt; 10.0.2.15.38590: Flags [FP.], seq 1510095028, ack 3726932782, win 64239, length 0
+4 packets captured
+4 packets received by filter
+0 packets dropped by kernel
+&lt;/pre&gt;
+&lt;/div&gt;
+&lt;div class="section" id="section-2"&gt;
+&lt;h3 id="hidsection-2"&gt;指定进程名称抓包&lt;a class="headerlink" href="#hidsection-2" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
+&lt;p&gt;可以通过 &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;--pname&lt;/span&gt;&lt;/tt&gt; 参数指定进程名称（comm），实现指定进程名称抓包:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+$ sudo ptcpdump -i any -c 2 --pname curl
+2024-07-07 13:23:18 WARN ptcpdump: verbose output suppressed, use -v[v]... for verbose output
+2024-07-07 13:23:18 WARN capturing on any, link-type EN10MB (Ethernet), snapshot length 262144 bytes
+13:23:24.881499 lo curl.26511 Out IP 127.0.0.1.43332 &amp;gt; 127.0.0.53.53: 44133+ [1au] A? mozillazg.com. (42)
+13:23:24.881663 lo curl.26511 Out IP 127.0.0.1.43332 &amp;gt; 127.0.0.53.53: 14694+ [1au] AAAA? mozillazg.com. (42)
+2 packets captured
+2 packets received by filter
+0 packets dropped by kernel
+&lt;/pre&gt;
+&lt;/div&gt;
+&lt;div class="section" id="section-3"&gt;
+&lt;h3 id="hidsection-3"&gt;通过运行目标程序来抓包&lt;a class="headerlink" href="#hidsection-3" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
+&lt;p&gt;有需要的话，也可以通过使用 &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;--&lt;/span&gt;&lt;/tt&gt; 参数运行目标程序的方式来实现对特定程序进行抓包:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+$ sudo ptcpdump -i any -- curl -I https://mozillazg.com
+2024-07-07 13:26:44 WARN ptcpdump: verbose output suppressed, use -v[v]... for verbose output
+2024-07-07 13:26:44 WARN capturing on any, link-type EN10MB (Ethernet), snapshot length 262144 bytes
+13:26:44.055757 lo curl.28094 Out IP 127.0.0.1.48826 &amp;gt; 127.0.0.53.53: 8942+ [1au] A? mozillazg.com. (42)
+13:26:44.055914 lo curl.28094 Out IP 127.0.0.1.48826 &amp;gt; 127.0.0.53.53: 34274+ [1au] AAAA? mozillazg.com. (42)
+13:26:44.775840 lo curl.28094 In IP 127.0.0.53.53 &amp;gt; 127.0.0.1.48826: 8942 3/0/1 CNAME mozillazg.netlify.com., A 13.251.96.10, A 46.137.195.11 (106)
+13:26:45.135988 lo curl.28094 In IP 127.0.0.53.53 &amp;gt; 127.0.0.1.48826: 34274 3/0/1 CNAME mozillazg.netlify.com., AAAA 2406:da18:880:3802::c8, AAAA 2406:da18:b3d:e202::64 (130)
+13:26:45.136819 wlp4s0 curl.28094 Out IP6 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744 &amp;gt; 2406:da18:880:3802::c8.443: Flags [S], seq 3460683104, win 64800, length 0
+13:26:45.310505 wlp4s0 curl.28094 In IP6 2406:da18:880:3802::c8.443 &amp;gt; 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744: Flags [S.], seq 630810442, ack 3460683105, win 65232, length 0
+13:26:45.310821 wlp4s0 curl.28094 Out IP6 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744 &amp;gt; 2406:da18:880:3802::c8.443: Flags [.], seq 3460683105, ack 630810443, win 507, length 0
+13:26:45.414551 wlp4s0 curl.28094 Out IP6 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744 &amp;gt; 2406:da18:880:3802::c8.443: Flags [P.], seq 3460683105:3460683622, ack 630810443, win 507, length 517
+13:26:45.595214 wlp4s0 curl.28094 In IP6 2406:da18:880:3802::c8.443 &amp;gt; 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744: Flags [.], seq 630810443, ack 3460683622, win 127, length 0
+13:26:45.595413 wlp4s0 curl.28094 In IP6 2406:da18:880:3802::c8.443 &amp;gt; 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744: Flags [.], seq 630810443:630811651, ack 3460683622, win 127, length 1208
+13:26:45.595595 wlp4s0 curl.28094 Out IP6 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744 &amp;gt; 2406:da18:880:3802::c8.443: Flags [.], seq 3460683622, ack 630811651, win 501, length 0
+13:26:45.595702 wlp4s0 curl.28094 In IP6 2406:da18:880:3802::c8.443 &amp;gt; 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744: Flags [P.], seq 630811651:630812859, ack 3460683622, win 127, length 1208
+13:26:45.595797 wlp4s0 curl.28094 Out IP6 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744 &amp;gt; 2406:da18:880:3802::c8.443: Flags [.], seq 3460683622, ack 630812859, win 492, length 0
+13:26:45.595862 wlp4s0 curl.28094 In IP6 2406:da18:880:3802::c8.443 &amp;gt; 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744: Flags [P.], seq 630812859:630813338, ack 3460683622, win 127, length 479
+13:26:45.595934 wlp4s0 curl.28094 Out IP6 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744 &amp;gt; 2406:da18:880:3802::c8.443: Flags [.], seq 3460683622, ack 630813338, win 489, length 0
+13:26:45.600998 wlp4s0 curl.28094 Out IP6 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744 &amp;gt; 2406:da18:880:3802::c8.443: Flags [P.], seq 3460683622:3460683686, ack 630813338, win 489, length 64
+13:26:45.601344 wlp4s0 curl.28094 Out IP6 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744 &amp;gt; 2406:da18:880:3802::c8.443: Flags [P.], seq 3460683686:3460683781, ack 630813338, win 489, length 95
+13:26:45.616759 wlp4s0 curl.28094 Out IP6 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744 &amp;gt; 2406:da18:880:3802::c8.443: Flags [P.], seq 3460683781:3460683882, ack 630813338, win 501, length 101
+13:26:45.779516 wlp4s0 curl.28094 In IP6 2406:da18:880:3802::c8.443 &amp;gt; 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744: Flags [.], seq 630813338, ack 3460683781, win 127, length 0
+13:26:45.779792 wlp4s0 curl.28094 In IP6 2406:da18:880:3802::c8.443 &amp;gt; 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744: Flags [P.], seq 630813338:630813399, ack 3460683781, win 127, length 61
+13:26:45.779996 wlp4s0 curl.28094 In IP6 2406:da18:880:3802::c8.443 &amp;gt; 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744: Flags [P.], seq 630813399:630813443, ack 3460683781, win 127, length 44
+13:26:45.780318 wlp4s0 curl.28094 Out IP6 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744 &amp;gt; 2406:da18:880:3802::c8.443: Flags [P.], seq 3460683882:3460683913, ack 630813443, win 501, length 31
+HTTP/2 200
+13:26:45.788787 wlp4s0 curl.28094 In IP6 2406:da18:880:3802::c8.443 &amp;gt; 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744: Flags [P.], seq 630813443:630813677, ack 3460683882, win 127, length 234
+accept-ranges: bytes
+age: 79059
+cache-control: public,max-age=0,must-revalidate
+cache-status: &amp;quot;Netlify Edge&amp;quot;; hit
+content-type: text/html; charset=UTF-8
+date: Sun, 07 Jul 2024 05:26:44 GMT
+etag: &amp;quot;80cf37f5974e2232d976c6f622121dee-ssl&amp;quot;
+server: Netlify
+strict-transport-security: max-age=31536000
+x-nf-request-id: 01J25THACQSN9364YHSR2C0X5F
+content-length: 11727
+
+13:26:45.789558 wlp4s0 curl.28094 Out IP6 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744 &amp;gt; 2406:da18:880:3802::c8.443: Flags [P.], seq 3460683913:3460683937, ack 630813677, win 501, length 24
+13:26:45.791514 wlp4s0 curl.28094 Out IP6 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744 &amp;gt; 2406:da18:880:3802::c8.443: Flags [F.], seq 3460683937, ack 630813677, win 501, length 0
+13:26:45.963642 wlp4s0 curl.28094 In IP6 2406:da18:880:3802::c8.443 &amp;gt; 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744: Flags [.], seq 630813677, ack 3460683937, win 127, length 0
+13:26:45.963956 wlp4s0 curl.28094 In IP6 2406:da18:880:3802::c8.443 &amp;gt; 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744: Flags [P.], seq 630813677:630813701, ack 3460683937, win 127, length 24
+13:26:45.964172 wlp4s0 curl.28094 Out IP6 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744 &amp;gt; 2406:da18:880:3802::c8.443: Flags [R], seq 3460683937, win 0, length 0
+13:26:45.964415 wlp4s0 curl.28094 In IP6 2406:da18:880:3802::c8.443 &amp;gt; 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744: Flags [F.], seq 630813701, ack 3460683937, win 127, length 0
+13:26:45.964506 wlp4s0 curl.28094 Out IP6 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744 &amp;gt; 2406:da18:880:3802::c8.443: Flags [R], seq 3460683937, win 0, length 0
+13:26:45.966158 wlp4s0 curl.28094 In IP6 2406:da18:880:3802::c8.443 &amp;gt; 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744: Flags [.], seq 630813702, ack 3460683938, win 127, length 0
+13:26:45.966299 wlp4s0 curl.28094 Out IP6 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.53744 &amp;gt; 2406:da18:880:3802::c8.443: Flags [R], seq 3460683938, win 0, length 0
+32 packets captured
+32 packets received by filter
+0 packets dropped by kernel
+&lt;/pre&gt;
+&lt;/div&gt;
+&lt;div class="section" id="section-4"&gt;
+&lt;h3 id="hidsection-4"&gt;指定容器抓包&lt;a class="headerlink" href="#hidsection-4" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
+&lt;p&gt;可以通过 &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;--container-id&lt;/span&gt;&lt;/tt&gt; 参数指定容器 id 进行抓包:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+$ sudo ptcpdump -i any -c 2 --container-id 36f0310403b1
+2024-07-07 13:36:19 WARN ptcpdump: verbose output suppressed, use -v[v]... for verbose output
+2024-07-07 13:36:19 WARN capturing on any, link-type EN10MB (Ethernet), snapshot length 262144 bytes
+13:36:24.191242 veth09dec8f curl.32636 In IP 172.19.0.2.48960 &amp;gt; 18.139.194.139.443: Flags [S], seq 3213779351, win 64240, length 0, Container [kind-control-plane]
+13:36:24.191369 wlp4s0 curl.32636 Out IP 192.168.1.50.48960 &amp;gt; 18.139.194.139.443: Flags [S], seq 3213779351, win 64240, length 0, Container [kind-control-plane]
+2 packets captured
+2 packets received by filter
+0 packets dropped by kernel
+&lt;/pre&gt;
+&lt;p&gt;也可以通过 &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;--container-name&lt;/span&gt;&lt;/tt&gt; 参数指定容器名称进行抓包:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+$ sudo ptcpdump -i any -c 2 --container-name kind-control-plane
+2024-07-07 13:37:16 WARN ptcpdump: verbose output suppressed, use -v[v]... for verbose output
+2024-07-07 13:37:16 WARN capturing on any, link-type EN10MB (Ethernet), snapshot length 262144 bytes
+13:37:22.560764 veth09dec8f curl.33093 In IP 172.19.0.2.39084 &amp;gt; 18.139.194.139.443: Flags [S], seq 3645727033, win 64240, length 0, Container [kind-control-plane]
+13:37:22.561010 wlp4s0 curl.33093 Out IP 192.168.1.50.39084 &amp;gt; 18.139.194.139.443: Flags [S], seq 3645727033, win 64240, length 0, Container [kind-control-plane]
+2 packets captured
+2 packets received by filter
+0 packets dropped by kernel
+&lt;/pre&gt;
+&lt;/div&gt;
+&lt;div class="section" id="pod-2"&gt;
+&lt;h3 id="hidpod-2"&gt;指定 Pod 抓包&lt;a class="headerlink" href="#hidpod-2" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
+&lt;p&gt;可以通过 &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;--pod-name&lt;/span&gt;&lt;/tt&gt; 参数指定 Pod 名称进行抓包, 参数值的格式为 &lt;tt class="docutils literal"&gt;&amp;lt;pod &lt;span class="pre"&gt;名称&amp;gt;.&amp;lt;pod&lt;/span&gt; 命名空间&amp;gt;&lt;/tt&gt;:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+$ sudo ptcpdump -i any -c 2 --pod-name test.default
+2024-07-07 13:38:29 WARN ptcpdump: verbose output suppressed, use -v[v]... for verbose output
+2024-07-07 13:38:29 WARN capturing on any, link-type EN10MB (Ethernet), snapshot length 262144 bytes
+13:38:34.175752 eth0 wget.33660 Out IP 172.19.0.2.51564 &amp;gt; 13.215.144.61.443: Flags [S], seq 567383917, win 64240, length 0, Container [test], Pod [test.default]
+13:38:34.372894 eth0 wget.33660 In IP 13.215.144.61.443 &amp;gt; 172.19.0.2.51564: Flags [S.], seq 2654865684, ack 567383918, win 65084, length 0, Container [test], Pod [test.default]
+2 packets captured
+3 packets received by filter
+0 packets dropped by kernel
+&lt;/pre&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;div class="section" id="pcapng-tcpdump-wireshark"&gt;
+&lt;h2 id="hidpcapng-tcpdump-wireshark"&gt;将数据保存为 pcapng 格式使用 tcpdump 或 Wireshark 进行分析&lt;a class="headerlink" href="#hidpcapng-tcpdump-wireshark" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;div class="section" id="pcapng"&gt;
+&lt;h3 id="hidpcapng"&gt;保存为 pcapng 格式&lt;a class="headerlink" href="#hidpcapng" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
+&lt;p&gt;可以通过 &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;-w&lt;/span&gt;&lt;/tt&gt; 参数将抓包数据保存为 pcapng 格式:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+$ sudo ptcpdump -i any -c 5 -w demo.pcapng
+2024-07-07 13:41:32 WARN ptcpdump: verbose output suppressed, use -v[v]... for verbose output
+2024-07-07 13:41:32 WARN capturing on any, link-type EN10MB (Ethernet), snapshot length 262144 bytes
+5 packets captured
+22 packets received by filter
+0 packets dropped by kernel
+&lt;/pre&gt;
+&lt;/div&gt;
+&lt;div class="section" id="tcpdump-1"&gt;
+&lt;h3 id="hidtcpdump-1"&gt;使用 tcpdump 进行分析&lt;a class="headerlink" href="#hidtcpdump-1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
+&lt;p&gt;可以直接通过管道的方式通过 tcpdump 对抓取的数据进行分析:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+$ sudo ptcpdump -i any -c 5 -w - port 80 | tcpdump -n -r -
+reading from file -, link-type EN10MB (Ethernet), snapshot length 65535
+2024-07-07 13:44:33 WARN ptcpdump: verbose output suppressed, use -v[v]... for verbose output
+2024-07-07 13:44:33 WARN capturing on any, link-type EN10MB (Ethernet), snapshot length 262144 bytes
+13:44:44.530637 IP6 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.50858 &amp;gt; 2406:da18:880:3801::c8.80: Flags [S], seq 495824072, win 64800, options [mss 1440,sackOK,TS val 2411675580 ecr 0,nop,wscale 7], length 0
+13:44:44.708902 IP6 2406:da18:880:3801::c8.80 &amp;gt; 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.50858: Flags [S.], seq 640438481, ack 495824073, win 65232, options [mss 1220,sackOK,TS val 1591525382 ecr 2411675580,nop,wscale 9], length 0
+13:44:44.709261 IP6 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.50858 &amp;gt; 2406:da18:880:3801::c8.80: Flags [.], ack 1, win 507, options [nop,nop,TS val 2411675670 ecr 1591525382], length 0
+13:44:44.709475 IP6 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.50858 &amp;gt; 2406:da18:880:3801::c8.80: Flags [P.], seq 1:78, ack 1, win 507, options [nop,nop,TS val 2411675670 ecr 1591525382], length 77: HTTP: GET / HTTP/1.1
+5 packets captured
+6 packets received by filter
+0 packets dropped by kernel
+13:44:44.877110 IP6 2406:da18:880:3801::c8.80 &amp;gt; 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.50858: Flags [P.], seq 1:266, ack 78, win 128, options [nop,nop,TS val 1591525469 ecr 2411675670], length 265: HTTP: HTTP/1.1 301 Moved Permanently
+&lt;/pre&gt;
+&lt;p&gt;也可以通过读取文件的方式通过 tcpdump 对抓取的数据进行分析:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+$ tcpdump -n -r demo.pcapng
+reading from file demo.pcapng, link-type EN10MB (Ethernet), snapshot length 65535
+13:47:41.169584 IP6 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.43038 &amp;gt; 2406:da18:b3d:e201::64.80: Flags [S], seq 3876639697, win 64800, options [mss 1440,sackOK,TS val 2072195434 ecr 0,nop,wscale 7], length 0
+13:47:41.571055 IP 192.168.1.50.60580 &amp;gt; 18.139.194.139.80: Flags [S], seq 481256927, win 64240, options [mss 1460,sackOK,TS val 2707199178 ecr 0,nop,wscale 7], length 0
+13:47:41.956270 IP6 2406:da18:b3d:e201::64.80 &amp;gt; 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.43038: Flags [S.], seq 2283576526, ack 3876639698, win 65232, options [mss 1220,sackOK,TS val 4276006323 ecr 2072195434,nop,wscale 9], length 0
+13:47:41.956437 IP6 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.43038 &amp;gt; 2406:da18:b3d:e201::64.80: Flags [.], ack 1, win 507, options [nop,nop,TS val 2072195828 ecr 4276006323], length 0
+13:47:41.956733 IP6 2409:8a00:2631:22f0:acdc:55a6:9015:b8f1.43038 &amp;gt; 2406:da18:b3d:e201::64.80: Flags [P.], seq 1:78, ack 1, win 507, options [nop,nop,TS val 2072195828 ecr 4276006323], length 77: HTTP: GET / HTTP/1.1
+&lt;/pre&gt;
+&lt;/div&gt;
+&lt;div class="section" id="wireshark"&gt;
+&lt;h3 id="hidwireshark"&gt;使用 Wireshark 进行分析&lt;a class="headerlink" href="#hidwireshark" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
+&lt;p&gt;当使用 Wireshark 打开保存的 pcapng 格式的文件时，将在 Wireshark 的界面中显示相关的进程、容器以及 Pod 信息：&lt;/p&gt;
+&lt;img alt="" src="/static/images/bpf/ptcpdump-wireshark.png" /&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;div class="section" id="section-5"&gt;
+&lt;h2 id="hidsection-5"&gt;参考资料&lt;a class="headerlink" href="#hidsection-5" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;ul class="simple"&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://github.com/mozillazg/ptcpdump"&gt;mozillazg/ptcpdump: Process-aware, eBPF-based tcpdump&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://www.tcpdump.org/manpages/tcpdump.1-4.99.4.html"&gt;tcpdump(1) man page | TCPDUMP &amp;amp; LIBPCAP&lt;/a&gt;&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/div&gt;
+</summary><category term="ebpf"></category><category term="ptcpdump"></category><category term="tcpdump"></category><category term="pcapng"></category><category term="wireshark"></category><category term="container"></category><category term="pod"></category></entry><entry><title>一个使用 tracepoint 追踪 execve 系统调用时无法正确获取系统调用参数的场景</title><link href="https://mozillazg.com/2024/03/ebpf-tracepoint-syscalls-sys-enter-execve-can-not-get-filename-argv-values-case.html" rel="alternate"></link><published>2024-03-31T00:00:00+00:00</published><updated>2024-03-31T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2024-03-31:2024/03/ebpf-tracepoint-syscalls-sys-enter-execve-can-not-get-filename-argv-values-case.html</id><summary type="html">&lt;div class="section" id="section-1"&gt;
 &lt;h2 id="hidsection-1"&gt;背景&lt;a class="headerlink" href="#hidsection-1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;p&gt;前段时间有网友在 slack 上的 &lt;a class="reference external" href="https://ebpf.io/slack"&gt;ebpf 频道&lt;/a&gt;
 中咨询一个他遇到的问题：&lt;/p&gt;
@@ -1133,196 +1420,4 @@ service account 关联使用的问题 （详见 &lt;a class="reference external"
 &lt;li&gt;&lt;a class="reference external" href="https://github.com/libbpf/libbpf/issues/354"&gt;Support static initialization of BPF_MAP_TYPE_PROG_ARRAY · Issue #354 · libbpf/libbpf&lt;/a&gt;&lt;/li&gt;
 &lt;/ul&gt;
 &lt;/div&gt;
-</summary><category term="libbpf"></category><category term="libbpfgo"></category></entry><entry><title>解决 ebpf 验证器提示类型错误问题的一种方法</title><link href="https://mozillazg.com/2022/10/ebpf-libbpf-verifier-fix-type-expected-issue.html" rel="alternate"></link><published>2022-10-06T00:00:00+00:00</published><updated>2022-10-06T00:00:00+00:00</updated><author><name>mozillazg</name></author><id>tag:mozillazg.com,2022-10-06:2022/10/ebpf-libbpf-verifier-fix-type-expected-issue.html</id><summary type="html">&lt;p&gt;有时当我们加载编译后的 eBPF 程序的时候，eBPF 验证器会提示程序中有类型错误的问题导致程序加载失败。 本文记录一下这种错误的一种解决方法。&lt;/p&gt;
-&lt;div class="section" id="section-1"&gt;
-&lt;h2 id="hidsection-1"&gt;错误示例&lt;a class="headerlink" href="#hidsection-1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
-&lt;p&gt;比如，当下面这段 eBPF 程序&lt;/p&gt;
-&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="n"&gt;SEC&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="s"&gt;&amp;quot;iter/bpf_sk_storage_map&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
-&lt;span class="kt"&gt;int&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;iter__bpf_sk_storage_map&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="k"&gt;struct&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nc"&gt;bpf_iter__bpf_sk_storage_map&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;*&lt;/span&gt;&lt;span class="n"&gt;ctx&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
-&lt;span class="p"&gt;{&lt;/span&gt;
-&lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="k"&gt;if&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;ctx&lt;/span&gt;&lt;span class="o"&gt;-&amp;gt;&lt;/span&gt;&lt;span class="n"&gt;sk&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
-&lt;span class="w"&gt;        &lt;/span&gt;&lt;span class="n"&gt;bpf_sk_storage_delete&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="o"&gt;&amp;amp;&lt;/span&gt;&lt;span class="n"&gt;sk_storage_map&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;ctx&lt;/span&gt;&lt;span class="o"&gt;-&amp;gt;&lt;/span&gt;&lt;span class="n"&gt;sk&lt;/span&gt;&lt;span class="p"&gt;);&lt;/span&gt;
-
-&lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="k"&gt;return&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="mi"&gt;0&lt;/span&gt;&lt;span class="p"&gt;;&lt;/span&gt;
-&lt;span class="p"&gt;}&lt;/span&gt;
-&lt;/pre&gt;&lt;/div&gt;
-&lt;p&gt;被加载到内核中时会提示如下类型错误:&lt;/p&gt;
-&lt;pre class="literal-block"&gt;
-libbpf: prog 'iter__bpf_sk_storage_map': BPF program load failed: Permission denied
-libbpf: prog 'iter__bpf_sk_storage_map': -- BEGIN PROG LOAD LOG --
-R1 type=ctx expected=fp
-; if (ctx-&amp;gt;sk)
-0: (79) r2 = *(u64 *)(r1 +16)
-; if (ctx-&amp;gt;sk)
-1: (15) if r2 == 0x0 goto pc+4
- R1=ctx(id=0,off=0,imm=0) R2_w=ptr_sock(id=0,off=0,imm=0) R10=fp0
-; bpf_sk_storage_delete(&amp;amp;sk_storage_map, ctx-&amp;gt;sk);
-2: (79) r2 = *(u64 *)(r1 +16)
-; bpf_sk_storage_delete(&amp;amp;sk_storage_map, ctx-&amp;gt;sk);
-3: (18) r1 = 0xffffa0658305aa00
-5: (85) call bpf_sk_storage_delete#108
-R2 type=ptr_or_null_ expected=ptr_
-processed 5 insns (limit 1000000) max_states_per_insn 0 total_states 0 peak_states 0 mark_read 0
--- END PROG LOAD LOG --
-libbpf: prog 'iter__bpf_sk_storage_map': failed to load: -13
-libbpf: failed to load object 'main.bpf.o'
-failed to load BPF object: permission denied
-&lt;/pre&gt;
-&lt;div class="section" id="section-2"&gt;
-&lt;h3 id="hidsection-2"&gt;解决办法&lt;a class="headerlink" href="#hidsection-2" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
-&lt;p&gt;这个错误信息有两个关键错误，一个错误是:&lt;/p&gt;
-&lt;pre class="literal-block"&gt;
-R1 type=ctx expected=fp
-; if (ctx-&amp;gt;sk)
-0: (79) r2 = *(u64 *)(r1 +16)
-; if (ctx-&amp;gt;sk)
-1: (15) if r2 == 0x0 goto pc+4
-&lt;/pre&gt;
-&lt;p&gt;其中 &lt;tt class="docutils literal"&gt;R1 type=ctx expected=fp&lt;/tt&gt; 说的是，验证器期望 &lt;tt class="docutils literal"&gt;R1&lt;/tt&gt; 的类型是 &lt;tt class="docutils literal"&gt;fp&lt;/tt&gt; 而不是 &lt;tt class="docutils literal"&gt;ctx&lt;/tt&gt; 。 所谓的 &lt;tt class="docutils literal"&gt;fp&lt;/tt&gt; 指的是栈上的指针类型，即期望 &lt;tt class="docutils literal"&gt;R1&lt;/tt&gt; 是栈上的数据而不是 &lt;tt class="docutils literal"&gt;ctx&lt;/tt&gt; 。&lt;/p&gt;
-&lt;p&gt;另一个错误是:&lt;/p&gt;
-&lt;pre class="literal-block"&gt;
- R1=ctx(id=0,off=0,imm=0) R2_w=ptr_sock(id=0,off=0,imm=0) R10=fp0
-; bpf_sk_storage_delete(&amp;amp;sk_storage_map, ctx-&amp;gt;sk);
-2: (79) r2 = *(u64 *)(r1 +16)
-; bpf_sk_storage_delete(&amp;amp;sk_storage_map, ctx-&amp;gt;sk);
-3: (18) r1 = 0xffffa0658305aa00
-5: (85) call bpf_sk_storage_delete#108
-R2 type=ptr_or_null_ expected=ptr_
-&lt;/pre&gt;
-&lt;p&gt;其中 &lt;tt class="docutils literal"&gt;R2 type=ptr_or_null_ expected=ptr_&lt;/tt&gt; 说的是，验证器期望 &lt;tt class="docutils literal"&gt;R2&lt;/tt&gt; 的类型是 &lt;tt class="docutils literal"&gt;ptr&lt;/tt&gt; 而不是 &lt;tt class="docutils literal"&gt;prt_or_null&lt;/tt&gt; ，即，期望 &lt;tt class="docutils literal"&gt;R2&lt;/tt&gt; 是一个指针而不是一个指针或 &lt;tt class="docutils literal"&gt;NULL&lt;/tt&gt; 。 这里可能会有点疑惑，前面的判断 &lt;tt class="docutils literal"&gt;if &lt;span class="pre"&gt;(ctx-&amp;gt;sk)&lt;/span&gt;&lt;/tt&gt; 已经确保了不会为 &lt;tt class="docutils literal"&gt;NULL&lt;/tt&gt; ， 为啥这里还会认为它有可能为 &lt;tt class="docutils literal"&gt;NULL&lt;/tt&gt; ，这是因为前面的 if 判断的不是栈变量， 存在 &lt;tt class="docutils literal"&gt;R1 type=ctx expected=fp&lt;/tt&gt; 的问题也就无法保证它一定不是 &lt;tt class="docutils literal"&gt;NULL&lt;/tt&gt; 了。&lt;/p&gt;
-&lt;p&gt;解决办法也很简单，就是用一个临时变量保存 ctx-&amp;gt;sk 的值， 然后用这个栈上的临时变量做后续的操作:&lt;/p&gt;
-&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;SEC(&amp;quot;iter/bpf_sk_storage_map&amp;quot;)
-&lt;span class="w"&gt; &lt;/span&gt;int iter__bpf_sk_storage_map(struct bpf_iter__bpf_sk_storage_map *ctx)
-&lt;span class="w"&gt; &lt;/span&gt;{
-&lt;span class="gd"&gt;-    if (ctx-&amp;gt;sk)&lt;/span&gt;
-&lt;span class="gd"&gt;-        bpf_sk_storage_delete(&amp;amp;sk_storage_map, ctx-&amp;gt;sk);&lt;/span&gt;
-&lt;span class="gi"&gt;+    struct sock *sk = ctx-&amp;gt;sk;&lt;/span&gt;
-&lt;span class="gi"&gt;+    if (sk)&lt;/span&gt;
-&lt;span class="gi"&gt;+        bpf_sk_storage_delete(&amp;amp;sk_storage_map, sk);&lt;/span&gt;
-
-&lt;span class="w"&gt; &lt;/span&gt;    return 0;
-&lt;span class="w"&gt; &lt;/span&gt;}
-&lt;/pre&gt;&lt;/div&gt;
-&lt;/div&gt;
-&lt;/div&gt;
-&lt;div class="section" id="section-3"&gt;
-&lt;h2 id="hidsection-3"&gt;常见类型关键字的含义&lt;a class="headerlink" href="#hidsection-3" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
-&lt;p&gt;这里记录一下类似前面 &lt;tt class="docutils literal"&gt;fp&lt;/tt&gt; 这样的常见类型关键字具体的含义：&lt;/p&gt;
-&lt;table border="1" class="docutils"&gt;
-&lt;colgroup&gt;
-&lt;col width="33%" /&gt;
-&lt;col width="67%" /&gt;
-&lt;/colgroup&gt;
-&lt;thead valign="bottom"&gt;
-&lt;tr&gt;&lt;th class="head"&gt;关键字&lt;/th&gt;
-&lt;th class="head"&gt;含义&lt;/th&gt;
-&lt;/tr&gt;
-&lt;/thead&gt;
-&lt;tbody valign="top"&gt;
-&lt;tr&gt;&lt;td&gt;&lt;tt class="docutils literal"&gt;scalar&lt;/tt&gt;&lt;/td&gt;
-&lt;td&gt;标量类型（scalar type），不是一个有效的指针类型&lt;/td&gt;
-&lt;/tr&gt;
-&lt;tr&gt;&lt;td&gt;&lt;tt class="docutils literal"&gt;ctx&lt;/tt&gt;&lt;/td&gt;
-&lt;td&gt;bpf_context 指针&lt;/td&gt;
-&lt;/tr&gt;
-&lt;tr&gt;&lt;td&gt;&lt;tt class="docutils literal"&gt;map_ptr&lt;/tt&gt;&lt;/td&gt;
-&lt;td&gt;bpf_map 类型的指针&lt;/td&gt;
-&lt;/tr&gt;
-&lt;tr&gt;&lt;td&gt;&lt;tt class="docutils literal"&gt;map_value&lt;/tt&gt;&lt;/td&gt;
-&lt;td&gt;指向 map 中的元素 value 的指针&lt;/td&gt;
-&lt;/tr&gt;
-&lt;tr&gt;&lt;td&gt;&lt;tt class="docutils literal"&gt;map_value_or_null&lt;/tt&gt;&lt;/td&gt;
-&lt;td&gt;指向 map 中的元素 value 的指针或 NULL&lt;/td&gt;
-&lt;/tr&gt;
-&lt;tr&gt;&lt;td&gt;&lt;tt class="docutils literal"&gt;map_key&lt;/tt&gt;&lt;/td&gt;
-&lt;td&gt;指向 map 中的元素 key 的指针&lt;/td&gt;
-&lt;/tr&gt;
-&lt;tr&gt;&lt;td&gt;&lt;tt class="docutils literal"&gt;fp&lt;/tt&gt;&lt;/td&gt;
-&lt;td&gt;栈上的指针（frame pointer）&lt;/td&gt;
-&lt;/tr&gt;
-&lt;tr&gt;&lt;td&gt;&lt;tt class="docutils literal"&gt;pkt&lt;/tt&gt;&lt;/td&gt;
-&lt;td&gt;skb-&amp;gt;data 指针&lt;/td&gt;
-&lt;/tr&gt;
-&lt;tr&gt;&lt;td&gt;&lt;tt class="docutils literal"&gt;pkt_meta&lt;/tt&gt;&lt;/td&gt;
-&lt;td&gt;skb-&amp;gt;data - meta_len 位置的指针&lt;/td&gt;
-&lt;/tr&gt;
-&lt;tr&gt;&lt;td&gt;&lt;tt class="docutils literal"&gt;pkt_end&lt;/tt&gt;&lt;/td&gt;
-&lt;td&gt;skb-&amp;gt;data + headlen 位置的指针&lt;/td&gt;
-&lt;/tr&gt;
-&lt;tr&gt;&lt;td&gt;&lt;tt class="docutils literal"&gt;sock&lt;/tt&gt;&lt;/td&gt;
-&lt;td&gt;bpf_sock 类型的指针&lt;/td&gt;
-&lt;/tr&gt;
-&lt;tr&gt;&lt;td&gt;&lt;tt class="docutils literal"&gt;sock_or_null&lt;/tt&gt;&lt;/td&gt;
-&lt;td&gt;bpf_sock 类型的指针或 NULL&lt;/td&gt;
-&lt;/tr&gt;
-&lt;tr&gt;&lt;td&gt;&lt;tt class="docutils literal"&gt;sock_common&lt;/tt&gt;&lt;/td&gt;
-&lt;td&gt;sock_common 类型指针&lt;/td&gt;
-&lt;/tr&gt;
-&lt;tr&gt;&lt;td&gt;&lt;tt class="docutils literal"&gt;sock_common_or_null&lt;/tt&gt;&lt;/td&gt;
-&lt;td&gt;sock_common 类型指针或 NULL&lt;/td&gt;
-&lt;/tr&gt;
-&lt;tr&gt;&lt;td&gt;&lt;tt class="docutils literal"&gt;tcp_sock&lt;/tt&gt;&lt;/td&gt;
-&lt;td&gt;tcp_sock 类型指针&lt;/td&gt;
-&lt;/tr&gt;
-&lt;tr&gt;&lt;td&gt;&lt;tt class="docutils literal"&gt;tcp_sock_or_null&lt;/tt&gt;&lt;/td&gt;
-&lt;td&gt;tcp_sock 类型指针或 NULL&lt;/td&gt;
-&lt;/tr&gt;
-&lt;tr&gt;&lt;td&gt;&lt;tt class="docutils literal"&gt;tp_buffer&lt;/tt&gt;&lt;/td&gt;
-&lt;td&gt;可写的 raw tracepoint buffer 指针&lt;/td&gt;
-&lt;/tr&gt;
-&lt;tr&gt;&lt;td&gt;&lt;tt class="docutils literal"&gt;xdp_sock&lt;/tt&gt;&lt;/td&gt;
-&lt;td&gt;xdp_sock 类型指针&lt;/td&gt;
-&lt;/tr&gt;
-&lt;tr&gt;&lt;td&gt;&lt;tt class="docutils literal"&gt;ptr_&lt;/tt&gt;&lt;/td&gt;
-&lt;td&gt;一个 BTF ID，非空指针&lt;/td&gt;
-&lt;/tr&gt;
-&lt;tr&gt;&lt;td&gt;&lt;tt class="docutils literal"&gt;ptr_or_null_&lt;/tt&gt;&lt;/td&gt;
-&lt;td&gt;一个 BTF ID 或 NULL，可能为空的指针&lt;/td&gt;
-&lt;/tr&gt;
-&lt;tr&gt;&lt;td&gt;&lt;tt class="docutils literal"&gt;dynptr_ptr&lt;/tt&gt;&lt;/td&gt;
-&lt;td&gt;动态指针（dynptr 指针）&lt;/td&gt;
-&lt;/tr&gt;
-&lt;tr&gt;&lt;td&gt;&lt;tt class="docutils literal"&gt;mem&lt;/tt&gt;&lt;/td&gt;
-&lt;td&gt;指向一块有效内存区域的指针&lt;/td&gt;
-&lt;/tr&gt;
-&lt;tr&gt;&lt;td&gt;&lt;tt class="docutils literal"&gt;mem_or_null&lt;/tt&gt;&lt;/td&gt;
-&lt;td&gt;指向一块有效内存区域的指针或 NULL&lt;/td&gt;
-&lt;/tr&gt;
-&lt;tr&gt;&lt;td&gt;&lt;tt class="docutils literal"&gt;buf&lt;/tt&gt;&lt;/td&gt;
-&lt;td&gt;指向一个读/写 buffer 的指针&lt;/td&gt;
-&lt;/tr&gt;
-&lt;tr&gt;&lt;td&gt;&lt;tt class="docutils literal"&gt;func&lt;/tt&gt;&lt;/td&gt;
-&lt;td&gt;BPF 程序函数指针&lt;/td&gt;
-&lt;/tr&gt;
-&lt;tr&gt;&lt;td&gt;&lt;tt class="docutils literal"&gt;inv&lt;/tt&gt;&lt;/td&gt;
-&lt;td&gt;无效类型（invalid type），不是一个有效的指针类型&lt;/td&gt;
-&lt;/tr&gt;
-&lt;tr&gt;&lt;td&gt;&lt;tt class="docutils literal"&gt;flow_keys&lt;/tt&gt;&lt;/td&gt;
-&lt;td&gt;bpf_flow_keys 类型的指针&lt;/td&gt;
-&lt;/tr&gt;
-&lt;tr&gt;&lt;td&gt;&lt;tt class="docutils literal"&gt;percpu_ptr_&lt;/tt&gt;&lt;/td&gt;
-&lt;td&gt;指向一个 percpu 内核变量的指针&lt;/td&gt;
-&lt;/tr&gt;
-&lt;tr&gt;&lt;td&gt;&lt;tt class="docutils literal"&gt;rdonly_buf&lt;/tt&gt;&lt;/td&gt;
-&lt;td&gt;指向一个只读 buffer 的指针&lt;/td&gt;
-&lt;/tr&gt;
-&lt;tr&gt;&lt;td&gt;&lt;tt class="docutils literal"&gt;rdonly_buf_or_null&lt;/tt&gt;&lt;/td&gt;
-&lt;td&gt;指向一个只读 buffer 的指针或 NULL&lt;/td&gt;
-&lt;/tr&gt;
-&lt;tr&gt;&lt;td&gt;&lt;tt class="docutils literal"&gt;rdwr_buf&lt;/tt&gt;&lt;/td&gt;
-&lt;td&gt;指向一个读/写 buffer 的指针&lt;/td&gt;
-&lt;/tr&gt;
-&lt;tr&gt;&lt;td&gt;&lt;tt class="docutils literal"&gt;rdwr_buf_or_null&lt;/tt&gt;&lt;/td&gt;
-&lt;td&gt;指向一个读/写 buffer 的指针或 NULL&lt;/td&gt;
-&lt;/tr&gt;
-&lt;/tbody&gt;
-&lt;/table&gt;
-&lt;/div&gt;
-&lt;div class="section" id="section-4"&gt;
-&lt;h2 id="hidsection-4"&gt;参考资料&lt;a class="headerlink" href="#hidsection-4" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
-&lt;ul class="simple"&gt;
-&lt;li&gt;&lt;a class="reference external" href="https://elixir.bootlin.com/linux/v5.19.14/source/kernel/bpf/verifier.c#L533"&gt;verifier.c - kernel/bpf/verifier.c - Linux source code (v5.19.14) - Bootlin&lt;/a&gt;&lt;/li&gt;
-&lt;li&gt;&lt;a class="reference external" href="https://elixir.bootlin.com/linux/v5.13/source/kernel/bpf/verifier.c#L548"&gt;verifier.c - kernel/bpf/verifier.c - Linux source code (v5.13) - Bootlin&lt;/a&gt;&lt;/li&gt;
-&lt;/ul&gt;
-&lt;/div&gt;
-</summary><category term="libbpf"></category></entry></feed>
+</summary><category term="libbpf"></category><category term="libbpfgo"></category></entry></feed>
