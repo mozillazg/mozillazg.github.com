@@ -17,7 +17,7 @@
 
         <meta name="author" content="mozillazg" />
         <meta name="keywords" content="ebpf,libbpf,libbpfgo,go,golang" />
-    <meta name="description" content="前言 本文简单记录一下如何编写一个使用 ringbuf map 传递数据的 ebpf 程序， 以及如何使用 libbpfgo 处理 ringbuf map 中存储的数据。 ebpf 代码 ebpf c 代码中使用 ringbuf map 的方法主要分三步： 定义一个 BPF_MAP_TYPE_RINGBUF 类型的 map 写入数据前，先通过 bpf_ringbuf_reserve 申请内存空间，申请成功后才能真正写入数据，缺少这一步的话，程序执行时会提示 libbpf: load bpf program failed: Invalid argument 错误 通过 bpf_ringbuf_submit 函数写入数据 示例程序代码片段如下: /* 定义 map */ /* BPF ringbuf map */ struct { __uint(type, BPF_MAP_TYPE_RINGBUF); __uint(max_entries, 256 * 1024 /* 256 KB */); } events SEC(&#34;.maps&#34;); SEC(&#34;kprobe/do_sys_openat2&#34;) int kprobe__do_sys_openat2(struct pt_regs *ctx) { struct event *e; // 必需步骤 e = bpf_ringbuf_reserve(&amp;events, sizeof(*e), 0); if (!e) { return 0; } e-&gt;pid = bpf_get_current_pid_tgid() &gt;&gt; 32; // 写入数据 bpf_ringbuf_submit(e, 0); return 0; } golang 代码 使用 libbpfgo 读取这个 map 里的数据的方法主要有三步： 调用 InitRingBuf 方法初始化一个 ringbuf map 数据接收实例 通过 Start() 启动实例 接收并解码数据 相关代码片段示例如下： eventsChannel := make(chan []byte) pb, err := bpfModule.InitRingBuf(&#34;events&#34;, eventsChannel) if err != nil { panic(err) } pb.Start() defer func() { pb.Stop() pb.Close() }() for { select { case e := &lt;-eventsChannel: // 解码收到的数据: u32 pid pid := binary.LittleEndian.Uint32(e[0:4]) log.Printf(&#34;pid %d&#34;, pid) } } 完整的代码详见：https://github.com/mozillazg/hello-libbpfgo/tree/master/03-ring-buf 参考资料 aquasecurity/libbpfgo: eBPF library for Go, wrapping libbpf" />
+    <meta name="description" content="libbpfgo 使用示例：编写使用 ringbuf map 的 ebpf 程序 - 前言 本文简单记录一下如何编写一个使用 ringbuf map 传递数据的 ebpf 程序， 以及如何使用 libbpfgo 处理 ringbuf map 中存储的数据。 ebpf 代码 ebpf c 代码中使用 ringbuf map 的方法主要分三步： 定义一个 BPF_MAP_TYPE_RINGBUF 类型的 map 写入数据前，先通过 bpf_ringbuf_reserve 申请内存空间，申请成功后才能真正写入数据，缺少这一步的话，程序执行时会提示 libbpf: load bpf program failed: Invalid argument 错误 通过 bpf_ringbuf_submit 函数写入数据 示例程序代码片段如下: /* 定义 map */ /* BPF ringbuf map */ struct { __uint(type, BPF_MAP_TYPE_RINGBUF); __uint(max_entries, 256 * 1024 /* 256 KB */); } events SEC(&#34;.maps&#34;); SEC(&#34;kprobe/do_sys_openat2&#34;) int kprobe__do_sys_openat2(struct pt_regs *ctx) { struct event *e; // 必需步骤 e = bpf_ringbuf_reserve(&amp;events, sizeof(*e), 0); if (!e) { return 0; } e-&gt;pid = bpf_get_current_pid_tgid() &gt;&gt; 32; // 写入数据 bpf_ringbuf_submit(e, 0); return 0; } golang 代码 使用 libbpfgo 读取这个 map 里的数据的方法主要有三步： 调用 InitRingBuf 方法初始化一个 ringbuf map 数据接收实例 通过 Start() 启动实例 接收并解码数据 相关代码片段示例如下： eventsChannel := make(chan []byte) pb, err := bpfModule.InitRingBuf(&#34;events&#34;, eventsChannel) if err != nil { panic(err) } pb.Start() defer func() { pb.Stop() pb.Close() }() for { select { case e := &lt;-eventsChannel: // 解码收到的数据: u32 pid pid := binary.LittleEndian.Uint32(e[0:4]) log.Printf(&#34;pid %d&#34;, pid) } } 完整的代码详见：https://github.com/mozillazg/hello-libbpfgo/tree/master/03-ring-buf 参考资料 aquasecurity/libbpfgo: eBPF library for Go, wrapping libbpf" />
 
     <style>
       .js-toc {
@@ -293,6 +293,7 @@ mozillazg's Blog            </a>
             data-emit-metadata="0"
             data-input-position="bottom"
             data-theme="preferred_color_scheme"
+            data-description="<description>"
             data-lang="en"
             data-loading="lazy"
             crossorigin="anonymous"

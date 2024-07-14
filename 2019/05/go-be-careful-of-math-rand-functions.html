@@ -17,7 +17,7 @@
 
         <meta name="author" content="mozillazg" />
         <meta name="keywords" content="go,rand" />
-    <meta name="description" content="一句话总结：math/rand 包中默认的随机数相关函数共享了一个全局锁， 即：所有使用默认随机函数的代码都会去竞争一个全局锁，有时这可能不是你想要的结果。 全局锁 比如 rand.Int63 这个函数的 源代码 如下: func Int63n(n int64) int64 { return globalRand.Int63n(n) } 可以看到它其实是调用了一个全局的 Rand 实例 globalRand ，我们来看一下 globalRand 的 定义 : var globalRand = New(&amp;lockedSource{src: NewSource(1).(Source64)}) 通过 New 的源码以及 globalRand.Int63n 的源码可以看到关键点是 lockedSource.Int63 方法的定义: type lockedSource struct { lk sync.Mutex src Source64 } func (r *lockedSource) Int63() (n int64) { r.lk.Lock() n = r.src.Int63() r.lk.Unlock() return } 通过同样的方法查看其他默认的随机函数可以发现，所有的默认随机函数都共享了一个全局锁，调用这些默认随机函数的时候都会先进行一次获取锁的操作。 解决方法 大部分情况下不需要管这个全局锁的问题，因为大部分情况下都不会介意这点性能消耗。 如果确实特别在意这点性能消耗的话，可以通过定义一个你的包共享的或者结构体实例共享的 Rand 实例来优化锁的性能消耗（最小化锁的粒度，不跟其他包/代码竞争这个锁）。 例子: type Xyz struct { // Rand 实例不是并发安全的，需要自行解决并发安全问题 rndMu sync.Mutex rnd *rand.Rand } func (x *Xyz) random() int32 { x.rndMu.Lock() n := x.rnd.Int31() x.rndMu.Unlock() return n } func main() { x := &amp;Xyz{ rnd: rand.New(rand.NewSource(time.Now().UnixNano())), } fmt.Println(x.random()) } 或者可以考虑使用性能更好的第三方 rand 包： valyala/fastrand 参考资料 The Hidden Dangers of Default Rand · Scott Mansfield go/rand.go at release-branch.go1.12 · golang/go rand - GoDoc valyala/fastrand: Fast and scalable pseudorandom generator for Go" />
+    <meta name="description" content="Go: 谨慎使用 math/rand 包中的默认随机数函数 - 一句话总结：math/rand 包中默认的随机数相关函数共享了一个全局锁， 即：所有使用默认随机函数的代码都会去竞争一个全局锁，有时这可能不是你想要的结果。 全局锁 比如 rand.Int63 这个函数的 源代码 如下: func Int63n(n int64) int64 { return globalRand.Int63n(n) } 可以看到它其实是调用了一个全局的 Rand 实例 globalRand ，我们来看一下 globalRand 的 定义 : var globalRand = New(&amp;lockedSource{src: NewSource(1).(Source64)}) 通过 New 的源码以及 globalRand.Int63n 的源码可以看到关键点是 lockedSource.Int63 方法的定义: type lockedSource struct { lk sync.Mutex src Source64 } func (r *lockedSource) Int63() (n int64) { r.lk.Lock() n = r.src.Int63() r.lk.Unlock() return } 通过同样的方法查看其他默认的随机函数可以发现，所有的默认随机函数都共享了一个全局锁，调用这些默认随机函数的时候都会先进行一次获取锁的操作。 解决方法 大部分情况下不需要管这个全局锁的问题，因为大部分情况下都不会介意这点性能消耗。 如果确实特别在意这点性能消耗的话，可以通过定义一个你的包共享的或者结构体实例共享的 Rand 实例来优化锁的性能消耗（最小化锁的粒度，不跟其他包/代码竞争这个锁）。 例子: type Xyz struct { // Rand 实例不是并发安全的，需要自行解决并发安全问题 rndMu sync.Mutex rnd *rand.Rand } func (x *Xyz) random() int32 { x.rndMu.Lock() n := x.rnd.Int31() x.rndMu.Unlock() return n } func main() { x := &amp;Xyz{ rnd: rand.New(rand.NewSource(time.Now().UnixNano())), } fmt.Println(x.random()) } 或者可以考虑使用性能更好的第三方 rand 包： valyala/fastrand 参考资料 The Hidden Dangers of Default Rand · Scott Mansfield go/rand.go at release-branch.go1.12 · golang/go rand - GoDoc valyala/fastrand: Fast and scalable pseudorandom generator for Go" />
 
     <style>
       .js-toc {
@@ -256,6 +256,7 @@ mozillazg's Blog            </a>
             data-emit-metadata="0"
             data-input-position="bottom"
             data-theme="preferred_color_scheme"
+            data-description="<description>"
             data-lang="en"
             data-loading="lazy"
             crossorigin="anonymous"

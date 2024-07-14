@@ -1,0 +1,931 @@
+<!DOCTYPE html>
+<html lang="zh"  prefix="og: http://ogp.me/ns# fb: https://www.facebook.com/2008/fbml" class="han-init">
+<head>
+    <title>[译] BPF CO-RE 参考指南 (2021) - mozillazg's Blog</title>
+    <!-- Using the latest rendering mode for IE -->
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <!-- share.css -->
+    <link rel="stylesheet" href="/theme/cdn.jsdelivr.net/npm/social-share.js@1.0.16/dist/css/share.min.css">
+
+
+    <link href="https://mozillazg.com/favicon.ico" rel="icon">
+
+<link rel="canonical" href="https://mozillazg.com/2024/07/bpf-core-reference-guide-zh.html">
+
+        <meta name="author" content="mozillazg" />
+        <meta name="keywords" content="ebpf,ebpf,bpf,CO-RE,libbpf" />
+    <meta name="description" content="[译] BPF CO-RE 参考指南 (2021) - 本文译自 BPF CO-RE reference guide - Andrii Nakryiko&#39;s Blog 。 缺失的手册 BPF CO-RE (Compile Once – Run Everywhere)（一次编译，到处运行）是一种现代的用于编写可移植 BPF 应用程序的方法。 通过这个方法编写的 BPF 程序无需修改就能在多个内核版本和配置上运行， 并且还不需要在目标机器上编译源代码。 这与更传统的 BCC 框架提供的方法形成鲜明对比， 后者将 BPF 应用程序源代码编译推迟到目标主机的运行时，这需要携带庞大的编译器工具链才能实现。 请查看 这篇博文 ， 它介绍了 BPF CO-RE 的概念，并解释了为什么这对许多真实世界的 BPF 应用程序至关重要和必要， 以及在没有 内核 BTF 的情况下，这会变得多么困难。 随着 BPF CO-RE 成为一种成熟的方法，关于其所有功能以及如何在实践中使用它的一些建议非常缺失。 在这篇博客文章中，我将尝试填补这一空白，并将介绍 BPF CO-RE （以及作为其官方实现的 libbpf ）提供的所有不同功能。 如果您之前编写过 BPF CO-RE 应用程序，您很可能已经使用了本文描述的一些功能。 但遗憾的是，其中一些功能仍然鲜为人知。然而，正是这些鲜为人知的 BPF CO-RE 秘密有时 使真实世界的 BPF 应用程序变得可行，简单且易于实现和支持，避免了在主机上编译或预编译同一 BPF 应用程序的 多个变体（flavors），每个变体针对不同的内核。 这篇文章很长，但因为它的目标是作为一个参考指南，因此将其保持为一个整体而不是将其分成几个部分分几周发布会更好。 它分为三个部分，从最常用的功能开始，逐渐向更高级和不太常用的功能发展， 希望能够自然地引导刚开始使用 BPF CO-RE 范式编写 BPF 应用程序的人。 在本文中，我将假设您正在使用 vmlinux.h ，它为内核提供了 CO-RE 可重定位类型定义（CO-RE-relocatable type definitions）， 这个文件可以通过 bpftool 工具生成。如果您对 vmlinux.h 不熟悉，请参阅 libbpf-bootstrap 博文 。在接近文章末尾的更高级用法部分，我还将详细介绍如何在没有 vmlinux.h 的情况下使用 BPF CO-RE。 在讨论过程中，我会尽量保持高层次的描述，除非绝对必要我将避免深入到细节的实现部分。 如果您想进一步了解，建议查看 bpf_core_read.h 头文件，以及在 BPF 邮件列表 中提问。 读取内核数据 目前，BPF CO-RE 操作中最常见的操作是从内核结构中读取字段的值。 libbpf 提供了一整套辅助函数，使得读取字段变得简单且 CO-RE 可重定位（CO-RE-relocatable）。 CO-RE 可重定位 意味着无论结构体的实际内存布局如何（这取决于实际使用的 内核版本 和 内核配置 ）， BPF 程序将被调整以在结构体的开始处相对正确的偏移处读取字段。 bpf_core_read() 最基本的以 CO-RE 可重定位方式读取字段的辅助函数是 bpf_core_read(dst, sz, src) ， 它将从 src 引用的字段中读取 sz 字节，然后将其读入 dst 指向的内存中： struct task_struct *task = (void *)bpf_get_current_task(); struct task_struct ..." />
+
+    <style>
+      .js-toc {
+        margin-bottom: 20px;
+      }
+      .donate-modal {
+        text-align: center;
+      }
+      #donate-modal-container .donate-image {
+        max-height: 300px !important;
+        min-height: inherit !important;
+      }
+    </style>
+
+        <meta property="og:site_name" content="mozillazg's Blog" />
+        <meta property="og:type" content="article"/>
+        <meta property="og:title" content="[译] BPF CO-RE 参考指南 (2021)"/>
+        <meta property="og:url" content="https://mozillazg.com/2024/07/bpf-core-reference-guide-zh.html"/>
+        <meta property="og:description" content="本文译自 BPF CO-RE reference guide - Andrii Nakryiko&#39;s Blog 。 缺失的手册 BPF CO-RE (Compile Once – Run Everywhere)（一次编译，到处运行）是一种现代的用于编写可移植 BPF 应用程序的方法。 通过这个方法编写的 BPF 程序无需修改就能在多个内核版本和配置上运行， 并且还不需要在目标机器上编译源代码。 这与更传统的 BCC 框架提供的方法形成鲜明对比， 后者将 BPF 应用程序源代码编译推迟到目标主机的运行时，这需要携带庞大的编译器工具链才能实现。 请查看 这篇博文 ， 它介绍了 BPF CO-RE 的概念，并解释了为什么这对许多真实世界的 BPF 应用程序至关重要和必要， 以及在没有 内核 BTF 的情况下，这会变得多么困难。 随着 BPF CO-RE 成为一种成熟的方法，关于其所有功能以及如何在实践中使用它的一些建议非常缺失。 在这篇博客文章中，我将尝试填补这一空白，并将介绍 BPF CO-RE （以及作为其官方实现的 libbpf ）提供的所有不同功能。 如果您之前编写过 BPF CO-RE 应用程序，您很可能已经使用了本文描述的一些功能。 但遗憾的是，其中一些功能仍然鲜为人知。然而，正是这些鲜为人知的 BPF CO-RE 秘密有时 使真实世界的 BPF 应用程序变得可行，简单且易于实现和支持，避免了在主机上编译或预编译同一 BPF 应用程序的 多个变体（flavors），每个变体针对不同的内核。 这篇文章很长，但因为它的目标是作为一个参考指南，因此将其保持为一个整体而不是将其分成几个部分分几周发布会更好。 它分为三个部分，从最常用的功能开始，逐渐向更高级和不太常用的功能发展， 希望能够自然地引导刚开始使用 BPF CO-RE 范式编写 BPF 应用程序的人。 在本文中，我将假设您正在使用 vmlinux.h ，它为内核提供了 CO-RE 可重定位类型定义（CO-RE-relocatable type definitions）， 这个文件可以通过 bpftool 工具生成。如果您对 vmlinux.h 不熟悉，请参阅 libbpf-bootstrap 博文 。在接近文章末尾的更高级用法部分，我还将详细介绍如何在没有 vmlinux.h 的情况下使用 BPF CO-RE。 在讨论过程中，我会尽量保持高层次的描述，除非绝对必要我将避免深入到细节的实现部分。 如果您想进一步了解，建议查看 bpf_core_read.h 头文件，以及在 BPF 邮件列表 中提问。 读取内核数据 目前，BPF CO-RE 操作中最常见的操作是从内核结构中读取字段的值。 libbpf 提供了一整套辅助函数，使得读取字段变得简单且 CO-RE 可重定位（CO-RE-relocatable）。 CO-RE 可重定位 意味着无论结构体的实际内存布局如何（这取决于实际使用的 内核版本 和 内核配置 ）， BPF 程序将被调整以在结构体的开始处相对正确的偏移处读取字段。 bpf_core_read() 最基本的以 CO-RE 可重定位方式读取字段的辅助函数是 bpf_core_read(dst, sz, src) ， 它将从 src 引用的字段中读取 sz 字节，然后将其读入 dst 指向的内存中： struct task_struct *task = (void *)bpf_get_current_task(); struct task_struct *parent_task; int err; err = bpf_core_read(&amp;parent_task, sizeof(void *), &amp;task-&gt;parent); if (err) { /* handle error */ } /* parent_task contains the value of task-&gt;parent pointer */ bpf_core_read() 与 bpf_probe_read_kernel() BPF 辅助函数类似， 不同之处在于它记录的是应该在目标内核上重新定位的字段的信息。 比如，如果由于在 struct task_struct 前面添加了新字段而导致其中的 parent 字段被移动到了不同的偏移量， libbpf 将自动调整实际偏移量到正确的值。 有一个重要的一点需要记住，字段的 大小 并不会自动重定位 ， 只有其偏移量会自动重定位。所以，如果你正在读取的字段是一个 struct ， 并且其大小发生了变化，你可能会遇到问题。 请参阅 &#34;计算内核类型和字段的大小&#34; 部分以了解处理这种情况的方法。一般的建议是尽可能不要将整个结构体字段一次性读取，最好只读取你最感兴趣的基本字段。 bpf_core_read_str() 就像有 bpf_probe_read_kernel() 和 bpf_probe_read_kernel_str() 这一对 BPF 助手函数一样， 前者读取指定数量的字节，而后者读取一个变长的以零结尾的 C 字符串， bpf_core_read() 也有个对应的函数 bpf_core_read_str() 。 它的工作方式类似于 bpf_probe_read_kernel_str() ，不同之处在于它记录了包含以零结尾的 C 字符串的源字符数组字段 的 CO-RE 重定位信息。因此，bpf_core_read_str() 是 bpf_probe_read_kernel_str() 的可 CO-RE 重定位版本。 注意 字符数组 字段和 字符指针 字段之间的重要但微妙区别。在 C 语言中，当读取字符串值时，它们可以互换使用， 因为编译器会自动将数组视为指针。然而，在 CO-RE 的上下文中，这种区别 非常重要 。 让我们来看看我们希望读取的假想内核类型： struct my_kernel_type { const char *name; char type[32]; }; name 字段指向存储字符串的位置，但 type 字段实际上 就是 包含字符串的内存。 如果您需要使用 CO-RE 读取 name 指向的字符串，正确的处理方式是首先以 CO-RE 可重定位的方式读取指针的值， 然后进行普通的（非 CO-RE） bpf_probe_read_kernel_str() 读取（为简洁起见，下面的示例忽略了错误处理）： struct my_kernel_type *t = ...; const char *p; char str[32]; /* get string pointer, CO-RE-relocatable */ bpf_core_read(&amp;p, sizeof(p), &amp;t-&gt;name); /* read the string, non-CO-RE-relocatable, pointer is valid regardless */ bpf_probe_read_kernel_str(str, sizeof(str), p); 如果我们需要读取 type 字符串，相应的示例将是： struct my_kernel_type *t = ...; char str[32]; /* read string as CO-RE-relocatable */ bpf_core_read_str(str, sizeof(str), &amp;t-&gt;type); 请花点时间思考为什么第一个示例不能使用 bpf_core_read_str() （_提示_ ：您可能会将 指针值 解释为 C 字符串本身）， 以及为什么第二个示例不能作为指针读取然后在进行字符串读取 （_提示_ ：字符串本身是结构体的一部分，所以没有专用指针，它位于相对于 t 指针指向位置的 偏移量 ）。这种情况很微妙，幸运的是很少遇到，但如果您不清楚这种差异，在实践中可能会感到非常困惑。 BPF_CORE_READ() bpf_core_read() 函数虽然允许进行大量的控制和精细的错误处理，但直接使用起来确实有些繁琐， 特别是在读取需要通过较长指针解引用链访问的字段时。 让我们来看一个读取运行中进程的可执行文件名称的例子。 如果你正在用 C 语言编写简单的内核代码，并想要实现这个功能，你需要像下面这样做： struct task_struct *t = ...; const char *name; name = t-&gt;mm-&gt;exe_file-&gt;fpath.dentry-&gt;d_name.name; /* now read string contents with bpf_probe_read_kernel_str() */ 请注意指针解引用的顺序，其中夹杂了一些子结构的访问（即 fpath.dentry 和 d_name.name ）。 使用 bpf_core_read() 做这样的事情很快就会变得一团糟： struct task_struct *t = ...; struct mm_struct *mm; struct file *exe_file; struct dentry *dentry; const char *name; bpf_core_read(&amp;mm, 8, &amp;t-&gt;mm); bpf_core_read(&amp;exe_file, 8, &amp;mm-&gt;exe_file); bpf_core_read(&amp;dentry, 8, &amp;exe_file-&gt;path.dentry); bpf_core_read(&amp;name, 8, &amp;dentry-&gt;d_name.name); /* now read string contents with bpf_probe_read_kernel_str() */ 诚然，这是一个相当极端的例子，通常指针解引用链不会那么长，但观点依然存在： 使用这种方法是很痛苦的。尽管上面的例子完全忽略了错误处理，但这一切仍然存在。 为了更容易编写这样的多步读取操作，libbpf 提供了 BPF_CORE_READ() 宏。 让我们看看如何通过使用 BPF_CORE_READ() 简化上述代码： struct task_struct *t = ...; const char *name; name = BPF_CORE_READ(t, mm, exe_file, fpath.dentry, d_name.name); /* now read string contents with bpf_probe_read_kernel_str() */ 对比一下 &#34;原生 C&#34; 示例和使用 BPF_CORE_READ() 的示例： /* direct pointer dereference */ name = t-&gt;mm-&gt;exe_file-&gt;fpath.dentry-&gt;d_name.name; /* using BPF_CORE_READ() helper */ name = BPF_CORE_READ(t, mm, exe_file, fpath.dentry, d_name.name); 基本上，每个指针解引用在宏调用中都会被转换成逗号，而每个子结构访问则保持原样。非常简单明了。 你可能已经注意到 BPF_CORE_READ() 直接返回读取的值，不会传播错误。 如果任何指针为 NULL 或指向无效内存，你将会得到 0 （或 NULL ）作为返回值。 但如果你需要错误传播和处理，你就必须使用低级的 bpf_core_read() 原语并显式地处理错误。 在实践中，这通常不是问题或必要的。 BPF_CORE_READ_INTO() 在某些情况下，将结果读入目标内存而不是直接返回结果可能必要的或更方便的， 比如当你从 C 数组中读取值时（比如，从套接字结构中读取 IPv4 地址），因为 C 语言不允许直接从表达式中返回数组。 对于这种情况，libbpf 提供了 BPF_CORE_READ_INTO() 宏，它的行为类似于 BPF_CORE_READ() ， 除了会将最终字段的值读入目标内存。将上述示例转换为 BPF_CORE_READ_INTO() ，我们将得到： struct task_struct *t = ...; const char *name; int err; err = BPF_CORE_READ_INTO(&amp;name, t, mm, binfmt, executable, fpath.dentry, d_name.name); if (err) { /* handle errors */ } /* now `name` contains the pointer to the string */ 请注意在 BPF_CORE_READ_INTO() 中添加了额外的 &amp;name ，以及可以获取上次操作的错误代码 （比如，读取 d_name.name ）。总的来说， BPF_CORE_READ() 在实践中更加方便，更易于阅读。 BPF_CORE_READ_STR_INTO() 对于最后一个字段是字符数组字段的情况（就像上面的假设示例中的 name vs type 一样）， 有一个对应的 BPF_CORE_READ_STR_INTO() 宏，你现在应该对它的工作原理有一个很好的猜测了。 如果没有，请重新查看 bpf_core_read_str() 部分。 可以直接读取内存的 BTF-enabled 的 BPF 程序类型 在上面讨论了 BPF_CORE_READ() 系列宏之后，有个非常重要一点需要注意， 那就是您并不总是需要使用它们来进行 CO-RE 可重定位读取。 或者说，并不总是需要通过 &#34;probe read&#34; 的方式（比如，使用 BPF 辅助函数来读取）来读取内存。 有时候你可以 直接访问 内核内存。 一些 BPF 程序类型是 &#34;BTF-enabled&#34;，这意味着内核中的 BPF 验证器知道与传递给 BPF 程序的输入参数相关联的类型信息。 这使得 BPF 验证器能够知道哪些内存可以在不调用 bpf_core_read() 或 bpf_probe_read_kernel() 的情况下直接 从内核中安全读取。其中一些 BTF-enabled BPF 程序类型包括： BTF-enabled raw tracepoint (libbpf 术语中的 SEC(&#34;tp_btf/...&#34;) ); fentry/fexit/fmod_ret BPF 程序; BPF LSM 程序; 可能还有一些，但是我懒得去确认了。 在这些程序中，如果它们获取到某种内核类型的指针（例如， struct task_struct * ）， BPF 程序代码可以直接访问内存进行解引用，甚至可以跟踪指针。 因此，在我们上面用来演示 BPF_CORE_READ() 使用的详细示例中， 当使用 fentry BPF 程序时，你所需要做的只是： struct task_struct *t = ...; const char *name; name = t-&gt;mm-&gt;binfmt-&gt;executable-&gt;fpath.dentry-&gt;d_name.name; 是的，这与 “原生 C” 的假设示例完全相同。但请记住，要获取字符串的内容本身， 您仍然需要使用 bpf_probe_read_kernel_str() 。 这种直接访问内存的方法快速、方便且简单，您应当在可能的情况下尽量使用这种方法。 不幸的是，在许多真实世界的场景下，您仍然必须明确依赖于 “probe reading”， 因此 BPF_CORE_READ() 将在可预见的未来成为您的朋友，因此一定要熟悉它。 读取不同大小的位域和整数 从 BPF 中读取位域（bitfields）一直是一个挑战。BPF 应用程序开发人员必须费尽心思地编写非常难维护和极其痛苦的的代码， 才能从内核类型中提取位域值。以 struct tcp_sock 为例。 它包含了很多编码为位字域的有用信息。即便使用 BCC 及其源代码编译方法， 提取这些位域仍然是一个主要的麻烦和维护负担。 幸运的是，libbpf 提供了两个易于使用的宏，用于以 CO-RE 可重定位的方式读取位域： BPF_CORE_READ_BITFIELD() 和 BPF_CORE_READ_BITFIELD_PROBED() 。 当要读取的数据需要进行 &#34;probe read&#34; 时，必须使用 _PROBED 变体， 就像使用 BPF_CORE_READ() 一样。只有在可以直接访问内存时 （例如，来自 fentry/ BPF 程序，参见上文 &#34;可以直接读取内存的 BTF-enabled 的 BPF 程序类型&#34; 部分）， 才应该使用 BPF_CORE_READ_BITFIELD() 。 这两个宏都以 u64 整数的形式返回位域的值。 下面是从 struct tcp_sock 中读取位字段的示例： static u64 sk_get_syn_data(const struct tcp_sock* tp) { /* extract tp-&gt;syn_data bitfield value */ return BPF_CORE_READ_BITFIELD_PROBED(tp, syn_data); } 就是这么简单。使用 BCC，实现相同效果可能会导致如下结果 （作为练习，读者可以自行思考为什么这样可以工作以及何时会出现问题）： static u64 sk_get_syn_data(const struct tcp_sock* tp) { u8 s; /* get byte before tlp_high_seq */ bpf_probe_read(&amp;s, 1, &amp;(tp-&gt;tlp_high_seq) - 1); /* syn_data is the third bit of that byte in little-endian */ return (s &gt;&gt; 2) &amp; 0x1; } 随着内核版本的变化，编写、阅读和维护 struct tcp_sock 变得越来越困难，令人感到头痛。 但有了 BPF_CORE_READ_BITFIELD_PROBED() 后，这些问题就都迎刃而解了，变得轻而易举。 值得注意的是 BPF_CORE_READ_BITFIELD() 和 BPF_CORE_READ_BITFIELD_PROBED() 还有一个重要特性。 它们不仅可以读取位域，还可以读取 任意整数 字段。无论字段的实际类型是什么（位域或最多 8 字节大小的整数）， 这些宏都会正确地返回符号扩展的 8 字节整数。即使字段从整数变为位域，或者反之，它们仍然能正常工作。 即使字段从 int 变为 u8 ，它们也可以继续工作。 因此， BPF_CORE_READ_BITFIELD() 宏是 一种通用的读取任何整数字段 的方法，不受字段性质或大小的限制。 计算内核类型和字段的大小 正如在前面某个小节中提到的， BPF_CORE_READ() 并不会自动让读取大小不固定的字段（例如整个结构体或数组）的操作变得 CO-RE 可重定位，因为在内核中预先分配足够的目标内存以适应任何的大小变化通常相当的困难。 然而，在某些情况下，了解字段或类型的大小是很重要的。为了满足这种需求， BPF CO-RE 提供了两个辅助函数： bpf_core_type_size() 和 bpf_core_field_size() 。 它们的使用方式类似于 bpf_core_type_exists() 和 bpf_core_field_exists() （将在下一节中介绍）， 不同的是，它们不返回 0 或 1，而是以字节为单位返回字段或类型的大小。 您可以根据需要自行处理这个值：您可以将其作为第二个参数传递给 bpf_core_read() ， 让读取变得完全 CO-RE 可重定位。如果您处理的是结构体数组，并且需要跳过前几个实例， 您可以使用 bpf_core_type_size() 来计算正确的字节偏移量，以便找到第 N 个元素的起始位置。 或者您可以仅将其用于调试和报告用途，这完全取决于您，BPF CO-RE 并没有限制您如何使用它的特性。 处理内核变更和特性检测 BPF_CORE_READ() 系列宏是 BPF CO-RE 的主力军，然而使用 BPF CO-RE 构建实用的 BPF 应用程序还需要更多的技巧。 BPF 应用程序经常需要处理的一个常见问题是进行特性检测。也就是说，检测特定主机内核是否支持某种新的可选特性， BPF 应用程序可以利用这些特性来获取更多信息或提高效率。如果不支持， BPF 应用程序会选择回退到支持旧版内核的代码，而不是简单地直接失败。 BPF CO-RE 提供了多种不同的机制来满足这类需求。当然，除了特性检测外，您也可以在其他场景下使用下面介绍的机制， 但是，我将以特性检测为主要场景来介绍所有的内容。 bpf_core_field_exists() bpf_core_field_exists() 函数允许检查给定的内核类型是否包含特定的字段。 在内核特性检测的场景下中，如果某个期望的内核特性在被引入的时候，还引入了一些特定字段到其中一个内核类型， 那么就可以简单的通过直接使用 bpf_core_field_exists() 函数来检测这类特性。 举个具体的例子，一种检测内核是否支持 BPF cookie for perf-based BPF program types（tracepoints、kprobes、uprobes） （由 这个提交 引入） 特性的方法是： union bpf_attr *attr = ... /* could be NULL */; if (bpf_core_field_exists(attr-&gt;link_create.perf_event.bpf_cookie)) { /* bpf_cookie is supported */ } else { /* bpf_cookie is NOT supported */ } 上面的示例假设 BPF 程序中有一个 union bpf_attr * 类型的变量。 这个变量可以是 NULL ，这实际上并不重要，因为指针本身从未被读取， 它只是为了向编译器传递类型信息而存在。 对于没有所需类型的现成变量可用的场景，您可以编写如下等效的检查代码（利用 C 语言的类型系统特性）： if (bpf_core_field_exists( ((union bpf_attr *)0)-&gt;link_create.perf_event.bpf_cookie) { /* bpf_cookie is supported */ } else { /* bpf_cookie is NOT supported */ } 在这段代码中，如果主机内核的 union bpf_attr 中没有 link_create.perf_event.bpf_cookie ， 那么 if/else 结构中的第一个分支中的代码将 永远不会被执行 （也 不会被验证 ）。 值得重申的是 BPF 验证器会正确地将这样的代码识别为 死代码（dead code） ， 因此这些代码 不会被验证 。这意味着这样的代码可以使用主机内核上不存在的 内核和 BPF 功能（比如，新的 BPF 辅助函数），并且不需要担心 BPF 验证失败的问题。 比如，如果上述第一个分支要使用 bpf_get_attach_cookie() 辅助函数来使用 BPF cookie 特性， 那么该程序将能够在尚未具有该辅助函数的旧内核上被正确的验证。 bpf_core_type_exists() 在一些场景下，类型的存在本身就很重要，BPF CO-RE 提供了一种检查类型存在性的方式， 即 bpf_core_type_exists() 辅助函数。 以下是一个检测内核是否支持 BPF 环形缓冲区（ring buffer）的示例： if (bpf_core_type_exists(struct bpf_ringbuf)) { /* BPF ringbuf helpers (e.g., bpf_ringbuf_reserve()) exist */ } 请务必确保你在某处定义了 struct bpf_ringbuf （即使是空的）， 否则你将会检查 bpf_ringbuf 的 前向声明（forward declaration） 是否存在， 这几乎肯定不是你想要的结果。在足够新的 vmlinux.h 中，这应该不会成为问题，但是仍然需要注意这一点。 bpf_core_enum_value_exists() 能够检测特定枚举值是否存在是非常有用的。这种检查的一个重要的实际应用是 检测是否支持某个 BPF 辅助函数 。 每个 BPF 辅助函数都对应着 enum bpf_func_id 中的一个枚举值： enum bpf_func_id { ... BPF_FUNC_ringbuf_output = 130, BPF_FUNC_ringbuf_reserve = 131, ... }; 因此，检查 BPF 助手函数 bpf_xxx() 是否存在的最简单方法是检查 enum bpf_func_id 中是否存在 BPF_FUNC_xxx 。 因此，与在之前的示例中使用 bpf_core_type_exists(struct bpf_ringbuf) 进行类型检查不同，我们可以更明确地表达我们的意图： if (bpf_core_enum_value_exists(enum bpf_func_id, BPF_FUNC_ringbuf_reserve)) { /* use bpf_ringbuf_reserve() safely */ } else { /* fall back to using bpf_perf_event_output() */ } 许多其他 BPF 功能也可以类似地被检测到。BPF 程序类型和 BPF map 类型的支持只是另一个例子。 当然，这种功能并不仅限于与 BPF 相关的功能。任何可以通过字段、类型或枚举值的存在 来检测的内核特性都可以轻松地通过 BPF CO-RE 进行处理。 特性检测也不仅仅局限于基于类型系统的检查。在接下来的几节中，我们将看一些其他可以用于执行内核特性检测的 BPF CO-RE 机制。而且不仅仅是特性检测，它们还允许在运行时提取内核特定信息（如 Kconfig 值），这通常无法被事先知道。 LINUX_KERNEL_VERSION 有时候检测必要功能存在的唯一方法是通过检查 Linux 内核版本。 Libbpf 允许在 BPF 程序代码中使用特殊的 extern 变量来实现这一点。 extern int LINUX_KERNEL_VERSION __kconfig; 一旦声明了 LINUX_KERNEL_VERSION ，它会以与内核本身相同的方式编码当前运行的内核版本。 这样的变量可以像任何其他变量一样使用：可以与之进行比较，打印它，记录并发送到用户态（user-space）等。 在所有的这些情况下，BPF 验证器都知道它的确切值，因此它可以检测死代码，就像上面描述的基于类型系统的检查一样。 Libbpf 还提供了一个方便的 KERNEL_VERSION(major, minor, patch) 宏，用于与 LINUX_KERNEL_VERSION 进行比较： #include &lt;bpf/bpf_helpers.h&gt; extern int LINUX_KERNEL_VERSION __kconfig; ... if (LINUX_KERNEL_VERSION &gt; KERNEL_VERSION(5, 15, 0)) { /* we are on v5.15+ */ } Kconfig extern 变量 事实上，libbpf 允许为任何内核配置（Kconfig）值声明特殊的 extern 变量。 请记住，这 仅在内核通过 /proc/config.gz 公开其内核配置时 才被支持， 幸运的是，这在现代 Linux 发行版中是非常普遍的情况。 libbpf 支持几种不同类型的变量。它们的使用取决于实际的 Kconfig 值类型： 对于 y/n/m 三态（tri-state） Kconfig 值，您可以使用 extern enum libbpf_tristate 变量， 它定义了三个可能的值： TRI_YES 、 TRI_NO 、 TRI_MODULE 。 或者，声明一个 extern char 变量，它将直接捕获字符值 （比如，您将确实拥有一个具有 &#39;y&#39; 、 &#39;n&#39; 、 &#39;m&#39; 字符值之一的变量）。 对于 y/n 两状态（two-state）（布尔值）的 Kconfig 值，您还可以使用 bool 类型 （除了已经介绍过的 char 和 enum libbpf_tristate 类型）。 在这种情况下， y 对应 true ，而 n 则被转换为 false 。 对于整数 Kconfig 值，请使用 C 语言中的整型数据类型：支持所有 1、2、4 和 8 字节的有符号和无符号整数。 如果实际的 Kconfig 值超出了已声明的整数类型范围，libbpf 将会报错而不是截断数值。 对于字符串 Kconfig 值，使用 const char[N] 数组变量。如果实际值太长了，它将被截断并在末尾添加零终止符， 但是 libbpf 将会发出一个警告而不是报错。 请记住，如果从 /proc/config.gz 中请求的 Kconfig 值缺失，libbpf 将会因为错误而中止程序加载。 为了更好地处理这种情况，可以将这样的 Kconfig extern 变量声明为弱（weak）变量，并加上 __weak 属性。 在这种情况下，如果值缺失，将会被假定为 false 、 TRI_NO 、 &#39;\0&#39; （零字符）、 0 或 &#34;&#34; （空字符串），具体取决于所使用的类型。 以下是一个快速示例，展示如何声明和使用不同类型的 Kconfig extern 变量: extern int LINUX_KERNEL_VERSION __kconfig; extern enum libbpf_tristate CONFIG_BPF_PRELOAD __kconfig __weak; extern bool CONFIG_BPF_JIT_ALWAYS_ON __kconfig __weak; extern char CONFIG_BPF_JIT_DEFAULT_ON __kconfig __weak; extern int CONFIG_HZ __kconfig; extern const char CONFIG_MODPROBE_PATH[256] __kconfig __weak; ... if (LINUX_KERNEL_VERSION &gt; KERNEL_VERSION(5, 15, 0)) { ... } switch (CONFIG_BPF_PRELOAD) { case TRI_NO: ...; break; case TRI_YES: ...; break; case TRI_MODULE: ...; break; } if (!CONFIG_BPF_JIT_ALWAYS_ON) bpf_printk(&#34;BPF_JIT_DEFAULT_ON: %c\n&#34;, CONFIG_BPF_JIT_DEFAULT_ON ?: &#39;n&#39;); bpf_printk(&#34;HZ is %d, MODPROBE_PATH: %s\n&#34;, CONFIG_HZ, CONFIG_MODPROBE_PATH); 可重定位枚举 一个有趣的挑战是，一些 BPF 应用程序需要处理“不稳定”的内核枚举。也就是说，这些枚举没有固定的常量集或整数值分配给它们。 一个很好的例子是 enum cgroup_subsys_id ， 在 include/linux/cgroup-defs.h 中被定义， 其定义可能会根据内核编译时启用的 cgroup 特性而异（详情请参阅 include/linux/cgroup_subsys.h ）。 因此，如果您需要知道，比如 cgroup_subsys_id::cpu_cgrp_id 的实际整数值， 这可能是一个大问题，因为这个枚举是内核内部的，并且是动态生成的。 再次，BPF CO-RE 发挥了作用。它允许使用 bpf_core_enum_value() 宏来捕获实际的值： int id = bpf_core_enum_value(enum cgroup_subsys_id, cpu_cgrp_id); /* id will contain the actual integer value in the host kernel */ 防护可能会失败的重定位操作 在某些内核上缺少某些字段并不罕见。如果一个 BPF 程序尝试使用 BPF_CORE_READ() 读取一个缺失的字段， 这将在 BPF 验证过程中导致错误。同样，当获取在主机内核中不存在的枚举值（或类型大小）时，CO-RE 重定位将失败。 不幸的是，目前这个错误相当晦涩（但将由 libbpf 很快 改进。译注：最新版的 libbpf 已改进这个错误）， 所以最好意识到这一点，以防您意外遇到它。如果您遇到类似下面的错误， 要知道这是因为 CO-RE 重定位未能找到相应的字段/类型/枚举： 1: (85) call unknown#195896080 invalid func unknown#195896080 195896080 的十六进制表示是 0xbad2310 （代表&#34;bad relo&#34;），它是 libbpf 使用的一个常量， 用于标记失败的 CO-RE 重定位指令。libbpf 不立即报告此类错误的原因是，如果需要， BPF 应用程序可以优雅地处理缺少的字段/类型/枚举以及相应的 CO-RE 重定位失败。 这使得仅通过一个 BPF 应用程序就能适应内核类型的极端变化成为可能（这是 &#34;Compile Once – Run Everywhere&#34; 哲学的关键目标）。 当某个字段/类型/枚举可能缺失时，您可以使用在处理内核变更部分中描述的检查之一来保护这样的代码路径。 如果被正确保护，BPF 验证器将知道在该特定内核中不可能触发该代码路径，因此会将其排除为死代码。 这种方法允许在必要时灵活地捕获内核信息的片段，如果实际运行的内核确实包含这些片段的话。 否则，BPF 应用程序可以优雅地退回到另一种替代逻辑，并妥善处理缺失的功能或数据。 只要适当保护潜在失败的 CO-RE 重定位，一切都能正常运作。这里所说的 CO-RE 重定位指的是任何使用 BPF_CORE_READ() 系列宏、类型/字段大小重定位或枚举值捕获的操作。 如果目标字段/类型/枚举不存在或定义不兼容的话，这些操作就毫无意义。 继续前面关于 cpu_cgrp_id 枚举值的例子，为了处理那些可能没有定义这种枚举值的内核 （例如，由于未设置 CONFIG_CGROUP_PIDS Kconfig 开关）， 可以使用 bpf_core_enum_value_exists() 进行检查（ 存在性检查永远不会失败！ ）， 该检查返回 true/false （严格来说，在 C 中是 0 或 1 ）： int id; if (bpf_core_enum_value_exists(enum cgroup_subsys_id, cpu_cgrp_id)) id = bpf_core_enum_value(enum cgroup_subsys_id, cpu_cgrp_id); else id = -1; /* fallback value */ /* use id even if cpu_cgrp_id isn&#39;t defined */ 上面的示例在任何内核上都能正常运行，无论是否存在 cpu_cgrp_id 枚举， 即使 bpf_core_enum_value() 操作在没有 cpu_cgrp_id 枚举的内核上失败也不会由影响。 这一切都是因为代码路径得到了适当的保护。 高级话题 前面的部分介绍了大多数常见的 CO-RE 功能。本节将涵盖一些您可能会需要面对的更高级的话题， 这取决于您的 BPF 应用程序需要处理多复杂的内核状态以及在不同内核版本中的变化。 定义自己的 CO-RE 可重定位类型定义 直到现在，我们一直假设上述示例中使用的内核类型来自于 vmlinux.h 头文件，这个头文件是基于最近且足够完整的内核 BTF 生成的。但是，在 BPF CO-RE 中使用 vmlinux.h 并不是必需的。它主要是为了方便 BPF 应用程序开发者。 此外，有时候 vmlinux.h 可能不足以解决更高级的情况。这可能是因为所需的类型尚未包含在内核 BTF 中， 或者因为内核中的某些内容以不兼容的方式发生了变化（例如，字段被重命名）， 现在您需要处理两个不兼容的相同内核类型的定义（我们将在下文讨论如何处理这种令人沮丧的情况）。 无论是什么原因，您都很容易定义自己对内核类型的期望，并使其 CO-RE 可重定位。 让我们以 struct task_struct 作为一个典型的例子。 这是一个庞大而复杂的结构体，但通常你只需要从其完整定义中提取几个简单的字段。 利用 BPF CO-RE 只需要声明你将需要的字段，跳过所有其余部分，保持类型定义简单而简洁。 假设你只关心 pid 、 group_leader 和 comm 字段。 按照以下方式声明 struct task_struct 就足以让一切正常运作： struct task_struct { int pid; char comm[16]; struct task_struct *group_leader; } __attribute__((preserve_access_index)); 首先，字段的顺序不重要 。完全不重要。 其次，对于允许直接内存读取的 BPF 程序， __attribute__((preserve_access_index)) 是必需的。 例如，BTF-enabled raw tracepoints（ SEC(tp_btf) ）和 fentry/fexit BPF 程序。 有了这个属性，任何 使用此结构体定义进行直接内存读取的操作都将自动变得 CO-RE 可重定位 。 当使用显式的 BPF_CORE_READ() 宏系列时，不需要使用 __attribute__((preserve_access_index)) ， 因为这些宏会自动强制执行。但如果直接使用旧的 bpf_probe_read_kernel() 辅助函数， 如果结构体具有 preserve_access_index 属性，这种 probe read 操作也会变得 CO-RE 可重定位。 因此，简单来说， 指定这个属性总是一个好主意 。 基本就是这样。您可以将此类型用于任何 CO-RE 读取或检查操作。正如您所看到的，它并不需要完全匹配真正的 struct task_struct 定义。 只需要存在并且兼容的必要字段子集即可。您的 BPF 程序不需要的 struct task_struct 中定义的其他所有内容对 于 BPF CO-RE 来说都是无关紧要的。 处理不兼容的字段和类型变更 正如前面所提到的，有些情况下，内核类型和字段的变更会导致两个不同内核中的类型定义不兼容。 比如，考虑在一个结构体中对字段进行重命名。 作为一个非常真实和具体的例子，让我们看一个最近将 task_struct 的 state 字段重命名为 __state 的 提交 。 如果您要编写一个需要读取任务状态的 BPF 应用程序，那么根据内核版本的不同， 您可能需要通过 两个不同的名称 来获取 相同的字段 。让我们看看 BPF CO-RE 如何处理这种情况。 BPF CO-RE 有一个重要的命名约定（我将其称为 &#34;忽略后缀规则&#34; ）。 这是一个相对不太知名的特性，但它是处理上述情况的关键机制。 对于任何类型、字段、枚举或枚举器，如果实体的名称包含形式为 ___something （三个下划线加上一些文本）的后缀， 那么这类名称后缀在 CO-RE 重定位的过程中会被忽略，就好像它们从未存在过一样。 这意味着，如果您在 BPF 应用程序中定义并使用了一个名为 struct task_struct___my_own_copy 的结构体， 对于 BPF CO-RE 来说，该结构体就等同于内核中的 struct task_struct ，将被匹配和重定位。 字段名称也适用相同的规则（因此 state 或 state___custom 实际上是相同的）， 枚举类型也是如此（包括枚举类型名称本身以及其中的枚举值名称）。实际上，这种匹配是双向的， 所以如果内核中有 struct task_struct 和 struct task_struct___2 这样的结构体 （有时由于 C 类型系统和内核源代码中的头文件包含相互作用）， 那么这两个结构体都将成为与在 BPF 程序源代码中定义的 struct task_struct___my 匹配的候选对象。 这在实践中意味着，您现在可以拥有多个独立且相互冲突的相同内核类型/字段/枚举的定义， 并且可以将代码编译为有效的 C 代码，同时您可以根据您使用的任何 特性检测 方法在运行时选择正确的定义。 让我们来看一个例子，说明如何处理前面提到的将 task_struct-&gt;state 重命名为 task_struct-&gt;__state 的场景： /* latest kernel task_struct definition, which can also come from vmlinux.h */ struct task_struct { int __state; } __attribute__((preserve_access_index)); struct task_struct___old { long state; } __attribute__((preserve_access_index)); ... struct task_struct *t = (void *)bpf_get_current_task(); int state; if (bpf_core_field_exists(t-&gt;__state)) { state = BPF_CORE_READ(t, __state); } else { /* recast pointer to capture task_struct___old type for compiler */ struct task_struct___old *t_old = (void *)t; /* now use old &#34;state&#34; name of the field */ state = BPF_CORE_READ(t_old, state); } ... 在上面的例子中，有两个最关键的部分。 首先，基于最新的 struct task_struct 定义进行字段存在性检查。如果运行的内核版本较旧，尚未具有 __state 字段， bpf_core_field_exists(t-&gt;__state) 将返回 0，对于 if 语句的第一个分支, BPF 验证器将 跳过并消除这段死代码 ， 因此 t-&gt;__state 将永远不会被尝试读取。 其次，将 struct task_struct * 指针重新转换为 struct task_struct___old * 指针。 这是为了让 C 编译器能够跟踪 struct task_struct 的“替代定义” （即本例中的 struct task_struct___old ）的类型信息。 编译器将按有效的 C 表达式识别并编译 t_old-&gt;state 字段引用（隐藏在 BPF_CORE_READ() 实现内部）， 同时还会记录相应的 CO-RE 重定位信息，以便让 libbpf 知道 BPF 程序预期读取的类型和字段信息。 通过 ___suffix 规则，所有操作都会正确工作。当由 libbpf 预处理一个 BPF 程序以供发送到内核进行验证时， libbpf 会执行 CO-RE 重定位并正确调整偏移量。其中一个 CO-RE 重定位将无法被解析 （因为 __state 或 state 在内核中不能同时存在），这将导致相应的 BPF 指令被“污染（poisoning）” （回想一下之前介绍过的 0xbad2310 ），但该指令将受到字段存在逻辑的保护，并在程序加载期间被验证器所消除。 随着 BPF CO-RE 应用程序数量和复杂性的增长，以及 Linux 内核的演进和不可避免的内部变更和重构， 处理不兼容的内核变更的能力将变得越来越重要，因此请注意这项技术。 上述介绍忽略了一堆实现细节，但仍希望能有助于理解如何在实践中使用这个特性。 从用户态内存中读取内核数据结构 在一些情况下可能会出现的一个（尽管不太常见的）需求是需要从用户态内存中读取内核类型。 这个类型很可能是内核 UAPI 类型之一，或者是作为系统调用的输入参数传递。 为了满足这类需求（以及为了完整性），libbpf 提供了其 BPF_CORE_READ() 宏系列的用户态等效版本： bpf_core_read_user(); bpf_core_read_user_str(); BPF_CORE_READ_USER_STR_INTO(); BPF_CORE_READ_USER_INTO(); BPF_CORE_READ_USER(). 它们的功能和行为与它们的非“user”变体完全相同，唯一的区别在于所有的内存读取都是通过 bpf_probe_read_user() 和 bpf_probe_read_user_str() BPF 辅助函数完成的， 因此需要传递用户态指针。 捕获 BTF 类型 ID 如果你熟悉 BTF ，你就会知道 BTF 中的任何类型定义都有对应的 BTF 类型 ID。无论是用于调试和日志记录，还是作为某些 BPF API 的一部分， 了解 BPF 程序正在处理的类型/字段/枚举的 BTF 类型 ID 可能是重要的。 BPF CO-RE 提供了一种从 BPF 程序代码内部捕获这些 BTF 类型 ID 作的整数值的方法。 实际上，它提供了一个捕获两种不同 BTF 类型 ID 的方法。 一种是目标内核 BTF（ 内核类型 ID ），另一种是 BPF 程序自身的 BTF（ 本地类型 ID ）： bpf_core_type_id_kernel() 函数从运行内核的 BTF 中返回已解析的类型 ID； bpf_core_type_id_local() 函数捕获在 BPF 程序编译期间由编译器捕获的类型 ID。 请注意，使用 BPF CO-RE 重定位时，总是涉及到两种 BTF 类型。其中一种是 BPF 程序对 类型定义的本地期望 （比如， vmlinux.h 中的类型或使用 preserve_access_index 属性 手动定义 的类型）。这种本地 BTF 类型为 libbpf 提供了在内核 BTF 中搜索什么的指导。 因此，它可以是类型/字段/枚举的最小定义，可以只包含必要的字段和枚举值。 然后 Libbpf 可以使用本地 BTF 类型定义来找到匹配的实际完整的内核 BTF 类型。 上述辅助函数允许捕获参与 CO-RE 重定位的两种类型的 BTF 类型 ID。 它们可能用于在运行时区分不同的内核或本地类型，用于调试和日志记录， 或者潜在地用于未来的 BPF API，这些 API 将接受 BTF 类型 ID 作为输入参数。 目前还没有这样的 API，但它们肯定会在不久的将来出现。 结语 希望这篇文章在高效地使用 BPF CO-RE 技术方面提供了足够的信息和实用指导。 欢迎在您的 BPF 需求中创造性地使用它们。 如果有任何不对或无法正常工作的地方，请通过 BPF 邮件列表 报告问题。"/>
+        <meta property="article:published_time" content="2024-07-13" />
+            <meta property="article:section" content="ebpf" />
+            <meta property="article:tag" content="ebpf" />
+            <meta property="article:tag" content="ebpf" />
+            <meta property="article:tag" content="bpf" />
+            <meta property="article:tag" content="CO-RE" />
+            <meta property="article:tag" content="libbpf" />
+            <meta property="article:author" content="mozillazg" />
+            <meta property="og:image"
+                  content="https://mozillazg.com/static/avatar.jpeg"/>
+
+
+    <meta name="twitter:card" content="summary">
+        <meta name="twitter:site" content="@mozillazg">
+        <meta name="twitter:creator" content="@mozillazg">
+    <meta name="twitter:domain" content="https://mozillazg.com">
+            <meta property="twitter:image"
+                  content="https://mozillazg.com/static/avatar.jpeg"/>
+
+    <!-- Bootstrap -->
+        <link rel="stylesheet" href="/theme/cdn.jsdelivr.net/npm/bootstrap@3.3.4/dist/css/bootstrap.min.css" type="text/css"/>
+    <link href="/theme/cdn.jsdelivr.net/npm/font-awesome@4.3.0/css/font-awesome.min.css" rel="stylesheet">
+
+    <link href="/theme/cdn.jsdelivr.net/npm/pygments-css@1.0.0/github.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://mozillazg.com/theme/css/style.css" type="text/css"/>
+            <link href="/static/han.min.css" rel="stylesheet">
+            <link href="/static/yue.css" rel="stylesheet">
+            <link href="/static/custom.css" rel="stylesheet">
+
+        <link href="https://mozillazg.com/feeds/all.atom.xml" type="application/atom+xml" rel="alternate"
+              title="mozillazg's Blog ATOM Feed"/>
+
+        <link href="https://mozillazg.com/feeds/all.rss.xml" type="application/rss+xml" rel="alternate"
+              title="mozillazg's Blog RSS Feed"/>
+
+
+        <link href="https://mozillazg.com/feeds/ebpf.atom.xml" type="application/atom+xml" rel="alternate"
+              title="mozillazg's Blog ebpf ATOM Feed"/>
+
+
+    <script type="application/ld+json">
+    {
+        "@context": "https://schema.org",
+        "@type": "BlogPosting",
+        "publisher": {
+            "@type": "Person",
+            "name": "mozillazg",
+            "logo": "https://mozillazg.com/static/avatar.jpeg"
+        },
+        "author": {
+            "@type": "Person",
+            "name": "mozillazg",
+            "image": "https://mozillazg.com/static/avatar.jpeg",
+            "url": "https://mozillazg.com",
+            "sameAs": []
+        },
+        "headline": "[译] BPF CO-RE 参考指南 (2021)",
+        "url": "https://mozillazg.com/2024/07/bpf-core-reference-guide-zh.html",
+        "image": [
+            "https://mozillazg.com/static/avatar.jpeg"
+         ],
+        "keywords": "ebpf, ebpf, bpf, CO-RE, libbpf",
+        "description": "本文译自 BPF CO-RE reference guide - Andrii Nakryiko&#39;s Blog 。 缺失的手册 BPF CO-RE (Compile Once – Run Everywhere)（一次编译，到处运行）是一种现代的用于编写可移植 BPF 应用程序的方法。 通过这个方法编写的 BPF 程序无需修改就能在多个内核版本和配置上运行， 并且还不需要在目标机器上编译源代码。 这与更传统的 BCC 框架提供的方法形成鲜明对比， 后者将 BPF 应用程序源代码编译推迟到目标主机的运行时，这需要携带庞大的编译器工具链才能实现。 请查看 这篇博文 ， 它介绍了 BPF CO-RE 的概念，并解释了为什么这对许多真实世界的 BPF 应用程序至关重要和必要， 以及在没有 内核 BTF 的情况下，这会变得多么困难。 随着 BPF CO-RE 成为一种成熟的方法，关于其所有功能以及如何在实践中使用它的一些建议非常缺失。 在这篇博客文章中，我将尝试填补这一空白，并将介绍 BPF CO-RE （以及作为其官方实现的 libbpf ）提供的所有不同功能。 如果您之前编写过 BPF CO-RE 应用程序，您很可能已经使用了本文描述的一些功能。 但遗憾的是，其中一些功能仍然鲜为人知。然而，正是这些鲜为人知的 BPF CO-RE 秘密有时 使真实世界的 BPF 应用程序变得可行，简单且易于实现和支持，避免了在主机上编译或预编译同一 BPF 应用程序的 多个变体（flavors），每个变体针对不同的内核。 这篇文章很长，但因为它的目标是作为一个参考指南，因此将其保持为一个整体而不是将其分成几个部分分几周发布会更好。 它分为三个部分，从最常用的功能开始，逐渐向更高级和不太常用的功能发展， 希望能够自然地引导刚开始使用 BPF CO-RE 范式编写 BPF 应用程序的人。 在本文中，我将假设您正在使用 vmlinux.h ，它为内核提供了 CO-RE 可重定位类型定义（CO-RE-relocatable type definitions）， 这个文件可以通过 bpftool 工具生成。如果您对 vmlinux.h 不熟悉，请参阅 libbpf-bootstrap 博文 。在接近文章末尾的更高级用法部分，我还将详细介绍如何在没有 vmlinux.h 的情况下使用 BPF CO-RE。 在讨论过程中，我会尽量保持高层次的描述，除非绝对必要我将避免深入到细节的实现部分。 如果您想进一步了解，建议查看 bpf_core_read.h 头文件，以及在 BPF 邮件列表 中提问。 读取内核数据 目前，BPF CO-RE 操作中最常见的操作是从内核结构中读取字段的值。 libbpf 提供了一整套辅助函数，使得读取字段变得简单且 CO-RE 可重定位（CO-RE-relocatable）。 CO-RE 可重定位 意味着无论结构体的实际内存布局如何（这取决于实际使用的 内核版本 和 内核配置 ）， BPF 程序将被调整以在结构体的开始处相对正确的偏移处读取字段。 bpf_core_read() 最基本的以 CO-RE 可重定位方式读取字段的辅助函数是 bpf_core_read(dst, sz, src) ， 它将从 src 引用的字段中读取 sz 字节，然后将其读入 dst 指向的内存中： struct task_struct *task = (void *)bpf_get_current_task(); struct task_struct *parent_task; int err; err = bpf_core_read(&amp;parent_task, sizeof(void *), &amp;task-&gt;parent); if (err) { /* handle error */ } /* parent_task contains the value of task-&gt;parent pointer */ bpf_core_read() 与 bpf_probe_read_kernel() BPF 辅助函数类似， 不同之处在于它记录的是应该在目标内核上重新定位的字段的信息。 比如，如果由于在 struct task_struct 前面添加了新字段而导致其中的 parent 字段被移动到了不同的偏移量， libbpf 将自动调整实际偏移量到正确的值。 有一个重要的一点需要记住，字段的 大小 并不会自动重定位 ， 只有其偏移量会自动重定位。所以，如果你正在读取的字段是一个 struct ， 并且其大小发生了变化，你可能会遇到问题。 请参阅 &#34;计算内核类型和字段的大小&#34; 部分以了解处理这种情况的方法。一般的建议是尽可能不要将整个结构体字段一次性读取，最好只读取你最感兴趣的基本字段。 bpf_core_read_str() 就像有 bpf_probe_read_kernel() 和 bpf_probe_read_kernel_str() 这一对 BPF 助手函数一样， 前者读取指定数量的字节，而后者读取一个变长的以零结尾的 C 字符串， bpf_core_read() 也有个对应的函数 bpf_core_read_str() 。 它的工作方式类似于 bpf_probe_read_kernel_str() ，不同之处在于它记录了包含以零结尾的 C 字符串的源字符数组字段 的 CO-RE 重定位信息。因此，bpf_core_read_str() 是 bpf_probe_read_kernel_str() 的可 CO-RE 重定位版本。 注意 字符数组 字段和 字符指针 字段之间的重要但微妙区别。在 C 语言中，当读取字符串值时，它们可以互换使用， 因为编译器会自动将数组视为指针。然而，在 CO-RE 的上下文中，这种区别 非常重要 。 让我们来看看我们希望读取的假想内核类型： struct my_kernel_type { const char *name; char type[32]; }; name 字段指向存储字符串的位置，但 type 字段实际上 就是 包含字符串的内存。 如果您需要使用 CO-RE 读取 name 指向的字符串，正确的处理方式是首先以 CO-RE 可重定位的方式读取指针的值， 然后进行普通的（非 CO-RE） bpf_probe_read_kernel_str() 读取（为简洁起见，下面的示例忽略了错误处理）： struct my_kernel_type *t = ...; const char *p; char str[32]; /* get string pointer, CO-RE-relocatable */ bpf_core_read(&amp;p, sizeof(p), &amp;t-&gt;name); /* read the string, non-CO-RE-relocatable, pointer is valid regardless */ bpf_probe_read_kernel_str(str, sizeof(str), p); 如果我们需要读取 type 字符串，相应的示例将是： struct my_kernel_type *t = ...; char str[32]; /* read string as CO-RE-relocatable */ bpf_core_read_str(str, sizeof(str), &amp;t-&gt;type); 请花点时间思考为什么第一个示例不能使用 bpf_core_read_str() （_提示_ ：您可能会将 指针值 解释为 C 字符串本身）， 以及为什么第二个示例不能作为指针读取然后在进行字符串读取 （_提示_ ：字符串本身是结构体的一部分，所以没有专用指针，它位于相对于 t 指针指向位置的 偏移量 ）。这种情况很微妙，幸运的是很少遇到，但如果您不清楚这种差异，在实践中可能会感到非常困惑。 BPF_CORE_READ() bpf_core_read() 函数虽然允许进行大量的控制和精细的错误处理，但直接使用起来确实有些繁琐， 特别是在读取需要通过较长指针解引用链访问的字段时。 让我们来看一个读取运行中进程的可执行文件名称的例子。 如果你正在用 C 语言编写简单的内核代码，并想要实现这个功能，你需要像下面这样做： struct task_struct *t = ...; const char *name; name = t-&gt;mm-&gt;exe_file-&gt;fpath.dentry-&gt;d_name.name; /* now read string contents with bpf_probe_read_kernel_str() */ 请注意指针解引用的顺序，其中夹杂了一些子结构的访问（即 fpath.dentry 和 d_name.name ）。 使用 bpf_core_read() 做这样的事情很快就会变得一团糟： struct task_struct *t = ...; struct mm_struct *mm; struct file *exe_file; struct dentry *dentry; const char *name; bpf_core_read(&amp;mm, 8, &amp;t-&gt;mm); bpf_core_read(&amp;exe_file, 8, &amp;mm-&gt;exe_file); bpf_core_read(&amp;dentry, 8, &amp;exe_file-&gt;path.dentry); bpf_core_read(&amp;name, 8, &amp;dentry-&gt;d_name.name); /* now read string contents with bpf_probe_read_kernel_str() */ 诚然，这是一个相当极端的例子，通常指针解引用链不会那么长，但观点依然存在： 使用这种方法是很痛苦的。尽管上面的例子完全忽略了错误处理，但这一切仍然存在。 为了更容易编写这样的多步读取操作，libbpf 提供了 BPF_CORE_READ() 宏。 让我们看看如何通过使用 BPF_CORE_READ() 简化上述代码： struct task_struct *t = ...; const char *name; name = BPF_CORE_READ(t, mm, exe_file, fpath.dentry, d_name.name); /* now read string contents with bpf_probe_read_kernel_str() */ 对比一下 &#34;原生 C&#34; 示例和使用 BPF_CORE_READ() 的示例： /* direct pointer dereference */ name = t-&gt;mm-&gt;exe_file-&gt;fpath.dentry-&gt;d_name.name; /* using BPF_CORE_READ() helper */ name = BPF_CORE_READ(t, mm, exe_file, fpath.dentry, d_name.name); 基本上，每个指针解引用在宏调用中都会被转换成逗号，而每个子结构访问则保持原样。非常简单明了。 你可能已经注意到 BPF_CORE_READ() 直接返回读取的值，不会传播错误。 如果任何指针为 NULL 或指向无效内存，你将会得到 0 （或 NULL ）作为返回值。 但如果你需要错误传播和处理，你就必须使用低级的 bpf_core_read() 原语并显式地处理错误。 在实践中，这通常不是问题或必要的。 BPF_CORE_READ_INTO() 在某些情况下，将结果读入目标内存而不是直接返回结果可能必要的或更方便的， 比如当你从 C 数组中读取值时（比如，从套接字结构中读取 IPv4 地址），因为 C 语言不允许直接从表达式中返回数组。 对于这种情况，libbpf 提供了 BPF_CORE_READ_INTO() 宏，它的行为类似于 BPF_CORE_READ() ， 除了会将最终字段的值读入目标内存。将上述示例转换为 BPF_CORE_READ_INTO() ，我们将得到： struct task_struct *t = ...; const char *name; int err; err = BPF_CORE_READ_INTO(&amp;name, t, mm, binfmt, executable, fpath.dentry, d_name.name); if (err) { /* handle errors */ } /* now `name` contains the pointer to the string */ 请注意在 BPF_CORE_READ_INTO() 中添加了额外的 &amp;name ，以及可以获取上次操作的错误代码 （比如，读取 d_name.name ）。总的来说， BPF_CORE_READ() 在实践中更加方便，更易于阅读。 BPF_CORE_READ_STR_INTO() 对于最后一个字段是字符数组字段的情况（就像上面的假设示例中的 name vs type 一样）， 有一个对应的 BPF_CORE_READ_STR_INTO() 宏，你现在应该对它的工作原理有一个很好的猜测了。 如果没有，请重新查看 bpf_core_read_str() 部分。 可以直接读取内存的 BTF-enabled 的 BPF 程序类型 在上面讨论了 BPF_CORE_READ() 系列宏之后，有个非常重要一点需要注意， 那就是您并不总是需要使用它们来进行 CO-RE 可重定位读取。 或者说，并不总是需要通过 &#34;probe read&#34; 的方式（比如，使用 BPF 辅助函数来读取）来读取内存。 有时候你可以 直接访问 内核内存。 一些 BPF 程序类型是 &#34;BTF-enabled&#34;，这意味着内核中的 BPF 验证器知道与传递给 BPF 程序的输入参数相关联的类型信息。 这使得 BPF 验证器能够知道哪些内存可以在不调用 bpf_core_read() 或 bpf_probe_read_kernel() 的情况下直接 从内核中安全读取。其中一些 BTF-enabled BPF 程序类型包括： BTF-enabled raw tracepoint (libbpf 术语中的 SEC(&#34;tp_btf/...&#34;) ); fentry/fexit/fmod_ret BPF 程序; BPF LSM 程序; 可能还有一些，但是我懒得去确认了。 在这些程序中，如果它们获取到某种内核类型的指针（例如， struct task_struct * ）， BPF 程序代码可以直接访问内存进行解引用，甚至可以跟踪指针。 因此，在我们上面用来演示 BPF_CORE_READ() 使用的详细示例中， 当使用 fentry BPF 程序时，你所需要做的只是： struct task_struct *t = ...; const char *name; name = t-&gt;mm-&gt;binfmt-&gt;executable-&gt;fpath.dentry-&gt;d_name.name; 是的，这与 “原生 C” 的假设示例完全相同。但请记住，要获取字符串的内容本身， 您仍然需要使用 bpf_probe_read_kernel_str() 。 这种直接访问内存的方法快速、方便且简单，您应当在可能的情况下尽量使用这种方法。 不幸的是，在许多真实世界的场景下，您仍然必须明确依赖于 “probe reading”， 因此 BPF_CORE_READ() 将在可预见的未来成为您的朋友，因此一定要熟悉它。 读取不同大小的位域和整数 从 BPF 中读取位域（bitfields）一直是一个挑战。BPF 应用程序开发人员必须费尽心思地编写非常难维护和极其痛苦的的代码， 才能从内核类型中提取位域值。以 struct tcp_sock 为例。 它包含了很多编码为位字域的有用信息。即便使用 BCC 及其源代码编译方法， 提取这些位域仍然是一个主要的麻烦和维护负担。 幸运的是，libbpf 提供了两个易于使用的宏，用于以 CO-RE 可重定位的方式读取位域： BPF_CORE_READ_BITFIELD() 和 BPF_CORE_READ_BITFIELD_PROBED() 。 当要读取的数据需要进行 &#34;probe read&#34; 时，必须使用 _PROBED 变体， 就像使用 BPF_CORE_READ() 一样。只有在可以直接访问内存时 （例如，来自 fentry/ BPF 程序，参见上文 &#34;可以直接读取内存的 BTF-enabled 的 BPF 程序类型&#34; 部分）， 才应该使用 BPF_CORE_READ_BITFIELD() 。 这两个宏都以 u64 整数的形式返回位域的值。 下面是从 struct tcp_sock 中读取位字段的示例： static u64 sk_get_syn_data(const struct tcp_sock* tp) { /* extract tp-&gt;syn_data bitfield value */ return BPF_CORE_READ_BITFIELD_PROBED(tp, syn_data); } 就是这么简单。使用 BCC，实现相同效果可能会导致如下结果 （作为练习，读者可以自行思考为什么这样可以工作以及何时会出现问题）： static u64 sk_get_syn_data(const struct tcp_sock* tp) { u8 s; /* get byte before tlp_high_seq */ bpf_probe_read(&amp;s, 1, &amp;(tp-&gt;tlp_high_seq) - 1); /* syn_data is the third bit of that byte in little-endian */ return (s &gt;&gt; 2) &amp; 0x1; } 随着内核版本的变化，编写、阅读和维护 struct tcp_sock 变得越来越困难，令人感到头痛。 但有了 BPF_CORE_READ_BITFIELD_PROBED() 后，这些问题就都迎刃而解了，变得轻而易举。 值得注意的是 BPF_CORE_READ_BITFIELD() 和 BPF_CORE_READ_BITFIELD_PROBED() 还有一个重要特性。 它们不仅可以读取位域，还可以读取 任意整数 字段。无论字段的实际类型是什么（位域或最多 8 字节大小的整数）， 这些宏都会正确地返回符号扩展的 8 字节整数。即使字段从整数变为位域，或者反之，它们仍然能正常工作。 即使字段从 int 变为 u8 ，它们也可以继续工作。 因此， BPF_CORE_READ_BITFIELD() 宏是 一种通用的读取任何整数字段 的方法，不受字段性质或大小的限制。 计算内核类型和字段的大小 正如在前面某个小节中提到的， BPF_CORE_READ() 并不会自动让读取大小不固定的字段（例如整个结构体或数组）的操作变得 CO-RE 可重定位，因为在内核中预先分配足够的目标内存以适应任何的大小变化通常相当的困难。 然而，在某些情况下，了解字段或类型的大小是很重要的。为了满足这种需求， BPF CO-RE 提供了两个辅助函数： bpf_core_type_size() 和 bpf_core_field_size() 。 它们的使用方式类似于 bpf_core_type_exists() 和 bpf_core_field_exists() （将在下一节中介绍）， 不同的是，它们不返回 0 或 1，而是以字节为单位返回字段或类型的大小。 您可以根据需要自行处理这个值：您可以将其作为第二个参数传递给 bpf_core_read() ， 让读取变得完全 CO-RE 可重定位。如果您处理的是结构体数组，并且需要跳过前几个实例， 您可以使用 bpf_core_type_size() 来计算正确的字节偏移量，以便找到第 N 个元素的起始位置。 或者您可以仅将其用于调试和报告用途，这完全取决于您，BPF CO-RE 并没有限制您如何使用它的特性。 处理内核变更和特性检测 BPF_CORE_READ() 系列宏是 BPF CO-RE 的主力军，然而使用 BPF CO-RE 构建实用的 BPF 应用程序还需要更多的技巧。 BPF 应用程序经常需要处理的一个常见问题是进行特性检测。也就是说，检测特定主机内核是否支持某种新的可选特性， BPF 应用程序可以利用这些特性来获取更多信息或提高效率。如果不支持， BPF 应用程序会选择回退到支持旧版内核的代码，而不是简单地直接失败。 BPF CO-RE 提供了多种不同的机制来满足这类需求。当然，除了特性检测外，您也可以在其他场景下使用下面介绍的机制， 但是，我将以特性检测为主要场景来介绍所有的内容。 bpf_core_field_exists() bpf_core_field_exists() 函数允许检查给定的内核类型是否包含特定的字段。 在内核特性检测的场景下中，如果某个期望的内核特性在被引入的时候，还引入了一些特定字段到其中一个内核类型， 那么就可以简单的通过直接使用 bpf_core_field_exists() 函数来检测这类特性。 举个具体的例子，一种检测内核是否支持 BPF cookie for perf-based BPF program types（tracepoints、kprobes、uprobes） （由 这个提交 引入） 特性的方法是： union bpf_attr *attr = ... /* could be NULL */; if (bpf_core_field_exists(attr-&gt;link_create.perf_event.bpf_cookie)) { /* bpf_cookie is supported */ } else { /* bpf_cookie is NOT supported */ } 上面的示例假设 BPF 程序中有一个 union bpf_attr * 类型的变量。 这个变量可以是 NULL ，这实际上并不重要，因为指针本身从未被读取， 它只是为了向编译器传递类型信息而存在。 对于没有所需类型的现成变量可用的场景，您可以编写如下等效的检查代码（利用 C 语言的类型系统特性）： if (bpf_core_field_exists( ((union bpf_attr *)0)-&gt;link_create.perf_event.bpf_cookie) { /* bpf_cookie is supported */ } else { /* bpf_cookie is NOT supported */ } 在这段代码中，如果主机内核的 union bpf_attr 中没有 link_create.perf_event.bpf_cookie ， 那么 if/else 结构中的第一个分支中的代码将 永远不会被执行 （也 不会被验证 ）。 值得重申的是 BPF 验证器会正确地将这样的代码识别为 死代码（dead code） ， 因此这些代码 不会被验证 。这意味着这样的代码可以使用主机内核上不存在的 内核和 BPF 功能（比如，新的 BPF 辅助函数），并且不需要担心 BPF 验证失败的问题。 比如，如果上述第一个分支要使用 bpf_get_attach_cookie() 辅助函数来使用 BPF cookie 特性， 那么该程序将能够在尚未具有该辅助函数的旧内核上被正确的验证。 bpf_core_type_exists() 在一些场景下，类型的存在本身就很重要，BPF CO-RE 提供了一种检查类型存在性的方式， 即 bpf_core_type_exists() 辅助函数。 以下是一个检测内核是否支持 BPF 环形缓冲区（ring buffer）的示例： if (bpf_core_type_exists(struct bpf_ringbuf)) { /* BPF ringbuf helpers (e.g., bpf_ringbuf_reserve()) exist */ } 请务必确保你在某处定义了 struct bpf_ringbuf （即使是空的）， 否则你将会检查 bpf_ringbuf 的 前向声明（forward declaration） 是否存在， 这几乎肯定不是你想要的结果。在足够新的 vmlinux.h 中，这应该不会成为问题，但是仍然需要注意这一点。 bpf_core_enum_value_exists() 能够检测特定枚举值是否存在是非常有用的。这种检查的一个重要的实际应用是 检测是否支持某个 BPF 辅助函数 。 每个 BPF 辅助函数都对应着 enum bpf_func_id 中的一个枚举值： enum bpf_func_id { ... BPF_FUNC_ringbuf_output = 130, BPF_FUNC_ringbuf_reserve = 131, ... }; 因此，检查 BPF 助手函数 bpf_xxx() 是否存在的最简单方法是检查 enum bpf_func_id 中是否存在 BPF_FUNC_xxx 。 因此，与在之前的示例中使用 bpf_core_type_exists(struct bpf_ringbuf) 进行类型检查不同，我们可以更明确地表达我们的意图： if (bpf_core_enum_value_exists(enum bpf_func_id, BPF_FUNC_ringbuf_reserve)) { /* use bpf_ringbuf_reserve() safely */ } else { /* fall back to using bpf_perf_event_output() */ } 许多其他 BPF 功能也可以类似地被检测到。BPF 程序类型和 BPF map 类型的支持只是另一个例子。 当然，这种功能并不仅限于与 BPF 相关的功能。任何可以通过字段、类型或枚举值的存在 来检测的内核特性都可以轻松地通过 BPF CO-RE 进行处理。 特性检测也不仅仅局限于基于类型系统的检查。在接下来的几节中，我们将看一些其他可以用于执行内核特性检测的 BPF CO-RE 机制。而且不仅仅是特性检测，它们还允许在运行时提取内核特定信息（如 Kconfig 值），这通常无法被事先知道。 LINUX_KERNEL_VERSION 有时候检测必要功能存在的唯一方法是通过检查 Linux 内核版本。 Libbpf 允许在 BPF 程序代码中使用特殊的 extern 变量来实现这一点。 extern int LINUX_KERNEL_VERSION __kconfig; 一旦声明了 LINUX_KERNEL_VERSION ，它会以与内核本身相同的方式编码当前运行的内核版本。 这样的变量可以像任何其他变量一样使用：可以与之进行比较，打印它，记录并发送到用户态（user-space）等。 在所有的这些情况下，BPF 验证器都知道它的确切值，因此它可以检测死代码，就像上面描述的基于类型系统的检查一样。 Libbpf 还提供了一个方便的 KERNEL_VERSION(major, minor, patch) 宏，用于与 LINUX_KERNEL_VERSION 进行比较： #include &lt;bpf/bpf_helpers.h&gt; extern int LINUX_KERNEL_VERSION __kconfig; ... if (LINUX_KERNEL_VERSION &gt; KERNEL_VERSION(5, 15, 0)) { /* we are on v5.15+ */ } Kconfig extern 变量 事实上，libbpf 允许为任何内核配置（Kconfig）值声明特殊的 extern 变量。 请记住，这 仅在内核通过 /proc/config.gz 公开其内核配置时 才被支持， 幸运的是，这在现代 Linux 发行版中是非常普遍的情况。 libbpf 支持几种不同类型的变量。它们的使用取决于实际的 Kconfig 值类型： 对于 y/n/m 三态（tri-state） Kconfig 值，您可以使用 extern enum libbpf_tristate 变量， 它定义了三个可能的值： TRI_YES 、 TRI_NO 、 TRI_MODULE 。 或者，声明一个 extern char 变量，它将直接捕获字符值 （比如，您将确实拥有一个具有 &#39;y&#39; 、 &#39;n&#39; 、 &#39;m&#39; 字符值之一的变量）。 对于 y/n 两状态（two-state）（布尔值）的 Kconfig 值，您还可以使用 bool 类型 （除了已经介绍过的 char 和 enum libbpf_tristate 类型）。 在这种情况下， y 对应 true ，而 n 则被转换为 false 。 对于整数 Kconfig 值，请使用 C 语言中的整型数据类型：支持所有 1、2、4 和 8 字节的有符号和无符号整数。 如果实际的 Kconfig 值超出了已声明的整数类型范围，libbpf 将会报错而不是截断数值。 对于字符串 Kconfig 值，使用 const char[N] 数组变量。如果实际值太长了，它将被截断并在末尾添加零终止符， 但是 libbpf 将会发出一个警告而不是报错。 请记住，如果从 /proc/config.gz 中请求的 Kconfig 值缺失，libbpf 将会因为错误而中止程序加载。 为了更好地处理这种情况，可以将这样的 Kconfig extern 变量声明为弱（weak）变量，并加上 __weak 属性。 在这种情况下，如果值缺失，将会被假定为 false 、 TRI_NO 、 &#39;\\0&#39; （零字符）、 0 或 &#34;&#34; （空字符串），具体取决于所使用的类型。 以下是一个快速示例，展示如何声明和使用不同类型的 Kconfig extern 变量: extern int LINUX_KERNEL_VERSION __kconfig; extern enum libbpf_tristate CONFIG_BPF_PRELOAD __kconfig __weak; extern bool CONFIG_BPF_JIT_ALWAYS_ON __kconfig __weak; extern char CONFIG_BPF_JIT_DEFAULT_ON __kconfig __weak; extern int CONFIG_HZ __kconfig; extern const char CONFIG_MODPROBE_PATH[256] __kconfig __weak; ... if (LINUX_KERNEL_VERSION &gt; KERNEL_VERSION(5, 15, 0)) { ... } switch (CONFIG_BPF_PRELOAD) { case TRI_NO: ...; break; case TRI_YES: ...; break; case TRI_MODULE: ...; break; } if (!CONFIG_BPF_JIT_ALWAYS_ON) bpf_printk(&#34;BPF_JIT_DEFAULT_ON: %c\\n&#34;, CONFIG_BPF_JIT_DEFAULT_ON ?: &#39;n&#39;); bpf_printk(&#34;HZ is %d, MODPROBE_PATH: %s\\n&#34;, CONFIG_HZ, CONFIG_MODPROBE_PATH); 可重定位枚举 一个有趣的挑战是，一些 BPF 应用程序需要处理“不稳定”的内核枚举。也就是说，这些枚举没有固定的常量集或整数值分配给它们。 一个很好的例子是 enum cgroup_subsys_id ， 在 include/linux/cgroup-defs.h 中被定义， 其定义可能会根据内核编译时启用的 cgroup 特性而异（详情请参阅 include/linux/cgroup_subsys.h ）。 因此，如果您需要知道，比如 cgroup_subsys_id::cpu_cgrp_id 的实际整数值， 这可能是一个大问题，因为这个枚举是内核内部的，并且是动态生成的。 再次，BPF CO-RE 发挥了作用。它允许使用 bpf_core_enum_value() 宏来捕获实际的值： int id = bpf_core_enum_value(enum cgroup_subsys_id, cpu_cgrp_id); /* id will contain the actual integer value in the host kernel */ 防护可能会失败的重定位操作 在某些内核上缺少某些字段并不罕见。如果一个 BPF 程序尝试使用 BPF_CORE_READ() 读取一个缺失的字段， 这将在 BPF 验证过程中导致错误。同样，当获取在主机内核中不存在的枚举值（或类型大小）时，CO-RE 重定位将失败。 不幸的是，目前这个错误相当晦涩（但将由 libbpf 很快 改进。译注：最新版的 libbpf 已改进这个错误）， 所以最好意识到这一点，以防您意外遇到它。如果您遇到类似下面的错误， 要知道这是因为 CO-RE 重定位未能找到相应的字段/类型/枚举： 1: (85) call unknown#195896080 invalid func unknown#195896080 195896080 的十六进制表示是 0xbad2310 （代表&#34;bad relo&#34;），它是 libbpf 使用的一个常量， 用于标记失败的 CO-RE 重定位指令。libbpf 不立即报告此类错误的原因是，如果需要， BPF 应用程序可以优雅地处理缺少的字段/类型/枚举以及相应的 CO-RE 重定位失败。 这使得仅通过一个 BPF 应用程序就能适应内核类型的极端变化成为可能（这是 &#34;Compile Once – Run Everywhere&#34; 哲学的关键目标）。 当某个字段/类型/枚举可能缺失时，您可以使用在处理内核变更部分中描述的检查之一来保护这样的代码路径。 如果被正确保护，BPF 验证器将知道在该特定内核中不可能触发该代码路径，因此会将其排除为死代码。 这种方法允许在必要时灵活地捕获内核信息的片段，如果实际运行的内核确实包含这些片段的话。 否则，BPF 应用程序可以优雅地退回到另一种替代逻辑，并妥善处理缺失的功能或数据。 只要适当保护潜在失败的 CO-RE 重定位，一切都能正常运作。这里所说的 CO-RE 重定位指的是任何使用 BPF_CORE_READ() 系列宏、类型/字段大小重定位或枚举值捕获的操作。 如果目标字段/类型/枚举不存在或定义不兼容的话，这些操作就毫无意义。 继续前面关于 cpu_cgrp_id 枚举值的例子，为了处理那些可能没有定义这种枚举值的内核 （例如，由于未设置 CONFIG_CGROUP_PIDS Kconfig 开关）， 可以使用 bpf_core_enum_value_exists() 进行检查（ 存在性检查永远不会失败！ ）， 该检查返回 true/false （严格来说，在 C 中是 0 或 1 ）： int id; if (bpf_core_enum_value_exists(enum cgroup_subsys_id, cpu_cgrp_id)) id = bpf_core_enum_value(enum cgroup_subsys_id, cpu_cgrp_id); else id = -1; /* fallback value */ /* use id even if cpu_cgrp_id isn&#39;t defined */ 上面的示例在任何内核上都能正常运行，无论是否存在 cpu_cgrp_id 枚举， 即使 bpf_core_enum_value() 操作在没有 cpu_cgrp_id 枚举的内核上失败也不会由影响。 这一切都是因为代码路径得到了适当的保护。 高级话题 前面的部分介绍了大多数常见的 CO-RE 功能。本节将涵盖一些您可能会需要面对的更高级的话题， 这取决于您的 BPF 应用程序需要处理多复杂的内核状态以及在不同内核版本中的变化。 定义自己的 CO-RE 可重定位类型定义 直到现在，我们一直假设上述示例中使用的内核类型来自于 vmlinux.h 头文件，这个头文件是基于最近且足够完整的内核 BTF 生成的。但是，在 BPF CO-RE 中使用 vmlinux.h 并不是必需的。它主要是为了方便 BPF 应用程序开发者。 此外，有时候 vmlinux.h 可能不足以解决更高级的情况。这可能是因为所需的类型尚未包含在内核 BTF 中， 或者因为内核中的某些内容以不兼容的方式发生了变化（例如，字段被重命名）， 现在您需要处理两个不兼容的相同内核类型的定义（我们将在下文讨论如何处理这种令人沮丧的情况）。 无论是什么原因，您都很容易定义自己对内核类型的期望，并使其 CO-RE 可重定位。 让我们以 struct task_struct 作为一个典型的例子。 这是一个庞大而复杂的结构体，但通常你只需要从其完整定义中提取几个简单的字段。 利用 BPF CO-RE 只需要声明你将需要的字段，跳过所有其余部分，保持类型定义简单而简洁。 假设你只关心 pid 、 group_leader 和 comm 字段。 按照以下方式声明 struct task_struct 就足以让一切正常运作： struct task_struct { int pid; char comm[16]; struct task_struct *group_leader; } __attribute__((preserve_access_index)); 首先，字段的顺序不重要 。完全不重要。 其次，对于允许直接内存读取的 BPF 程序， __attribute__((preserve_access_index)) 是必需的。 例如，BTF-enabled raw tracepoints（ SEC(tp_btf) ）和 fentry/fexit BPF 程序。 有了这个属性，任何 使用此结构体定义进行直接内存读取的操作都将自动变得 CO-RE 可重定位 。 当使用显式的 BPF_CORE_READ() 宏系列时，不需要使用 __attribute__((preserve_access_index)) ， 因为这些宏会自动强制执行。但如果直接使用旧的 bpf_probe_read_kernel() 辅助函数， 如果结构体具有 preserve_access_index 属性，这种 probe read 操作也会变得 CO-RE 可重定位。 因此，简单来说， 指定这个属性总是一个好主意 。 基本就是这样。您可以将此类型用于任何 CO-RE 读取或检查操作。正如您所看到的，它并不需要完全匹配真正的 struct task_struct 定义。 只需要存在并且兼容的必要字段子集即可。您的 BPF 程序不需要的 struct task_struct 中定义的其他所有内容对 于 BPF CO-RE 来说都是无关紧要的。 处理不兼容的字段和类型变更 正如前面所提到的，有些情况下，内核类型和字段的变更会导致两个不同内核中的类型定义不兼容。 比如，考虑在一个结构体中对字段进行重命名。 作为一个非常真实和具体的例子，让我们看一个最近将 task_struct 的 state 字段重命名为 __state 的 提交 。 如果您要编写一个需要读取任务状态的 BPF 应用程序，那么根据内核版本的不同， 您可能需要通过 两个不同的名称 来获取 相同的字段 。让我们看看 BPF CO-RE 如何处理这种情况。 BPF CO-RE 有一个重要的命名约定（我将其称为 &#34;忽略后缀规则&#34; ）。 这是一个相对不太知名的特性，但它是处理上述情况的关键机制。 对于任何类型、字段、枚举或枚举器，如果实体的名称包含形式为 ___something （三个下划线加上一些文本）的后缀， 那么这类名称后缀在 CO-RE 重定位的过程中会被忽略，就好像它们从未存在过一样。 这意味着，如果您在 BPF 应用程序中定义并使用了一个名为 struct task_struct___my_own_copy 的结构体， 对于 BPF CO-RE 来说，该结构体就等同于内核中的 struct task_struct ，将被匹配和重定位。 字段名称也适用相同的规则（因此 state 或 state___custom 实际上是相同的）， 枚举类型也是如此（包括枚举类型名称本身以及其中的枚举值名称）。实际上，这种匹配是双向的， 所以如果内核中有 struct task_struct 和 struct task_struct___2 这样的结构体 （有时由于 C 类型系统和内核源代码中的头文件包含相互作用）， 那么这两个结构体都将成为与在 BPF 程序源代码中定义的 struct task_struct___my 匹配的候选对象。 这在实践中意味着，您现在可以拥有多个独立且相互冲突的相同内核类型/字段/枚举的定义， 并且可以将代码编译为有效的 C 代码，同时您可以根据您使用的任何 特性检测 方法在运行时选择正确的定义。 让我们来看一个例子，说明如何处理前面提到的将 task_struct-&gt;state 重命名为 task_struct-&gt;__state 的场景： /* latest kernel task_struct definition, which can also come from vmlinux.h */ struct task_struct { int __state; } __attribute__((preserve_access_index)); struct task_struct___old { long state; } __attribute__((preserve_access_index)); ... struct task_struct *t = (void *)bpf_get_current_task(); int state; if (bpf_core_field_exists(t-&gt;__state)) { state = BPF_CORE_READ(t, __state); } else { /* recast pointer to capture task_struct___old type for compiler */ struct task_struct___old *t_old = (void *)t; /* now use old &#34;state&#34; name of the field */ state = BPF_CORE_READ(t_old, state); } ... 在上面的例子中，有两个最关键的部分。 首先，基于最新的 struct task_struct 定义进行字段存在性检查。如果运行的内核版本较旧，尚未具有 __state 字段， bpf_core_field_exists(t-&gt;__state) 将返回 0，对于 if 语句的第一个分支, BPF 验证器将 跳过并消除这段死代码 ， 因此 t-&gt;__state 将永远不会被尝试读取。 其次，将 struct task_struct * 指针重新转换为 struct task_struct___old * 指针。 这是为了让 C 编译器能够跟踪 struct task_struct 的“替代定义” （即本例中的 struct task_struct___old ）的类型信息。 编译器将按有效的 C 表达式识别并编译 t_old-&gt;state 字段引用（隐藏在 BPF_CORE_READ() 实现内部）， 同时还会记录相应的 CO-RE 重定位信息，以便让 libbpf 知道 BPF 程序预期读取的类型和字段信息。 通过 ___suffix 规则，所有操作都会正确工作。当由 libbpf 预处理一个 BPF 程序以供发送到内核进行验证时， libbpf 会执行 CO-RE 重定位并正确调整偏移量。其中一个 CO-RE 重定位将无法被解析 （因为 __state 或 state 在内核中不能同时存在），这将导致相应的 BPF 指令被“污染（poisoning）” （回想一下之前介绍过的 0xbad2310 ），但该指令将受到字段存在逻辑的保护，并在程序加载期间被验证器所消除。 随着 BPF CO-RE 应用程序数量和复杂性的增长，以及 Linux 内核的演进和不可避免的内部变更和重构， 处理不兼容的内核变更的能力将变得越来越重要，因此请注意这项技术。 上述介绍忽略了一堆实现细节，但仍希望能有助于理解如何在实践中使用这个特性。 从用户态内存中读取内核数据结构 在一些情况下可能会出现的一个（尽管不太常见的）需求是需要从用户态内存中读取内核类型。 这个类型很可能是内核 UAPI 类型之一，或者是作为系统调用的输入参数传递。 为了满足这类需求（以及为了完整性），libbpf 提供了其 BPF_CORE_READ() 宏系列的用户态等效版本： bpf_core_read_user(); bpf_core_read_user_str(); BPF_CORE_READ_USER_STR_INTO(); BPF_CORE_READ_USER_INTO(); BPF_CORE_READ_USER(). 它们的功能和行为与它们的非“user”变体完全相同，唯一的区别在于所有的内存读取都是通过 bpf_probe_read_user() 和 bpf_probe_read_user_str() BPF 辅助函数完成的， 因此需要传递用户态指针。 捕获 BTF 类型 ID 如果你熟悉 BTF ，你就会知道 BTF 中的任何类型定义都有对应的 BTF 类型 ID。无论是用于调试和日志记录，还是作为某些 BPF API 的一部分， 了解 BPF 程序正在处理的类型/字段/枚举的 BTF 类型 ID 可能是重要的。 BPF CO-RE 提供了一种从 BPF 程序代码内部捕获这些 BTF 类型 ID 作的整数值的方法。 实际上，它提供了一个捕获两种不同 BTF 类型 ID 的方法。 一种是目标内核 BTF（ 内核类型 ID ），另一种是 BPF 程序自身的 BTF（ 本地类型 ID ）： bpf_core_type_id_kernel() 函数从运行内核的 BTF 中返回已解析的类型 ID； bpf_core_type_id_local() 函数捕获在 BPF 程序编译期间由编译器捕获的类型 ID。 请注意，使用 BPF CO-RE 重定位时，总是涉及到两种 BTF 类型。其中一种是 BPF 程序对 类型定义的本地期望 （比如， vmlinux.h 中的类型或使用 preserve_access_index 属性 手动定义 的类型）。这种本地 BTF 类型为 libbpf 提供了在内核 BTF 中搜索什么的指导。 因此，它可以是类型/字段/枚举的最小定义，可以只包含必要的字段和枚举值。 然后 Libbpf 可以使用本地 BTF 类型定义来找到匹配的实际完整的内核 BTF 类型。 上述辅助函数允许捕获参与 CO-RE 重定位的两种类型的 BTF 类型 ID。 它们可能用于在运行时区分不同的内核或本地类型，用于调试和日志记录， 或者潜在地用于未来的 BPF API，这些 API 将接受 BTF 类型 ID 作为输入参数。 目前还没有这样的 API，但它们肯定会在不久的将来出现。 结语 希望这篇文章在高效地使用 BPF CO-RE 技术方面提供了足够的信息和实用指导。 欢迎在您的 BPF 需求中创造性地使用它们。 如果有任何不对或无法正常工作的地方，请通过 BPF 邮件列表 报告问题。",
+        "mainEntityOfPage": {
+             "@type": "WebPage",
+             "@id": "https://mozillazg.com/2024/07/bpf-core-reference-guide-zh.html"
+        },
+        "datePublished": "2024-07-13"
+    }
+    </script>
+
+</head>
+<body>
+
+<div class="navbar" role="navigation">
+	<div class="container">
+        <div class="navbar-header">
+            <button type="button" class="navbar-toggle" data-toggle="collapse" data-target=".navbar-ex1-collapse">
+                <span class="sr-only">Toggle navigation</span>
+                <span class="icon-bar"></span>
+                <span class="icon-bar"></span>
+                <span class="icon-bar"></span>
+            </button>
+            <a href="https://mozillazg.com/" class="navbar-brand">
+mozillazg's Blog            </a>
+        </div>
+        <div class="collapse navbar-collapse navbar-ex1-collapse">
+            <ul class="nav navbar-nav">
+                    <li><a href="https://mozillazg.com/feeds/all.atom.xml">Feed</a></li>
+                    <li><a href="/2014/10/pages/about-me.html">About</a></li>
+            </ul>
+            <ul class="nav navbar-nav navbar-right">
+              <li><a href="https://mozillazg.com/archives.html"><i class="fa fa-th-list"></i><span class="icon-label">Archives</span></a></li>
+            </ul>
+        </div>
+        <!-- /.navbar-collapse -->
+    </div>
+</div> <!-- /.navbar -->
+<!-- Banner -->
+<!-- End Banner -->
+<div class="container">
+    <div class="row">
+        <div class="col-lg-12">
+    <section id="content" class="yue">
+        <article>
+            <header class="text-center">
+                <h1>
+                    <a href="https://mozillazg.com/2024/07/bpf-core-reference-guide-zh.html"
+                       rel="bookmark"
+                       title="Permalink to [译] BPF CO-RE 参考指南 (2021)">
+                        [译] BPF CO-RE 参考指南 (2021)
+                    </a>
+                </h1>
+                <p class="published">
+                    <time datetime="2024-07-13T00:00:00+00:00">
+                    2024-07-13
+                    </time>
+                </p>
+            </header>
+            <div class="entry-content">
+                <div class="well-sm article-info">
+<footer class="post-info">
+        <a href="https://mozillazg.com/category/ebpf.html">ebpf</a>
+
+
+<span class="label label-default hide">Tags</span>
+	<a href="https://mozillazg.com/tag/ebpf.html">ebpf</a>
+        /
+	<a href="https://mozillazg.com/tag/bpf.html">bpf</a>
+        /
+	<a href="https://mozillazg.com/tag/co-re.html">CO-RE</a>
+        /
+	<a href="https://mozillazg.com/tag/libbpf.html">libbpf</a>
+    
+</footer><!-- /.post-info -->                </div>
+                <div class="js-toc"></div>
+                <div>
+                <p>本文译自 <a class="reference external" href="https://nakryiko.com/posts/bpf-core-reference-guide/">BPF CO-RE reference guide - Andrii Nakryiko's Blog</a> 。</p>
+<div class="section" id="section-1">
+<span id="the-missing-manual"></span><h2 id="hidsection-1">缺失的手册<a class="headerlink" href="#hidsection-1" title="Permalink to this headline">¶</a></h2>
+<p>BPF CO-RE (Compile Once – Run Everywhere)（一次编译，到处运行）是一种现代的用于编写可移植 BPF 应用程序的方法。
+通过这个方法编写的 BPF 程序无需修改就能在多个内核版本和配置上运行，
+并且还不需要在目标机器上编译源代码。
+这与更传统的 <a class="reference external" href="https://github.com/iovisor/bcc">BCC</a> 框架提供的方法形成鲜明对比，
+后者将 BPF 应用程序源代码编译推迟到目标主机的运行时，这需要携带庞大的编译器工具链才能实现。
+请查看 <a class="reference external" href="https://nakryiko.com/posts/bpf-portability-and-co-re/">这篇博文</a> ，
+它介绍了 BPF CO-RE 的概念，并解释了为什么这对许多真实世界的 BPF 应用程序至关重要和必要，
+以及在没有 <a class="reference external" href="https://nakryiko.com/posts/btf-dedup/">内核 BTF</a> 的情况下，这会变得多么困难。</p>
+<p>随着 BPF CO-RE 成为一种成熟的方法，关于其所有功能以及如何在实践中使用它的一些建议非常缺失。
+在这篇博客文章中，我将尝试填补这一空白，并将介绍 BPF CO-RE
+（以及作为其官方实现的 <a class="reference external" href="https://github.com/libbpf/libbpf">libbpf</a> ）提供的所有不同功能。
+如果您之前编写过 BPF CO-RE 应用程序，您很可能已经使用了本文描述的一些功能。
+但遗憾的是，其中一些功能仍然鲜为人知。然而，正是这些鲜为人知的 BPF CO-RE 秘密有时
+使真实世界的 BPF 应用程序变得可行，简单且易于实现和支持，避免了在主机上编译或预编译同一 BPF 应用程序的
+多个变体（flavors），每个变体针对不同的内核。</p>
+<p>这篇文章很长，但因为它的目标是作为一个参考指南，因此将其保持为一个整体而不是将其分成几个部分分几周发布会更好。
+它分为三个部分，从最常用的功能开始，逐渐向更高级和不太常用的功能发展，
+希望能够自然地引导刚开始使用 BPF CO-RE 范式编写 BPF 应用程序的人。</p>
+<p>在本文中，我将假设您正在使用 <tt class="docutils literal">vmlinux.h</tt> ，它为内核提供了 CO-RE 可重定位类型定义（CO-RE-relocatable type definitions），
+这个文件可以通过 <tt class="docutils literal">bpftool</tt> 工具生成。如果您对 <tt class="docutils literal">vmlinux.h</tt> 不熟悉，请参阅
+<a class="reference external" href="https://nakryiko.com/posts/libbpf-bootstrap/#includes-vmlinux-h-libbpf-and-app-headers">libbpf-bootstrap 博文</a>
+。在接近文章末尾的更高级用法部分，我还将详细介绍如何在没有 <tt class="docutils literal">vmlinux.h</tt> 的情况下使用 BPF CO-RE。</p>
+<p>在讨论过程中，我会尽量保持高层次的描述，除非绝对必要我将避免深入到细节的实现部分。
+如果您想进一步了解，建议查看 <a class="reference external" href="https://github.com/libbpf/libbpf/tree/master/src/bpf_core_read.h">bpf_core_read.h</a>
+头文件，以及在 <a class="reference external" href="http://vger.kernel.org/vger-lists.html#bpf">BPF 邮件列表</a> 中提问。</p>
+</div>
+<div class="section" id="section-2">
+<span id="reading-kernel-data"></span><h2 id="hidsection-2">读取内核数据<a class="headerlink" href="#hidsection-2" title="Permalink to this headline">¶</a></h2>
+<p>目前，BPF CO-RE 操作中最常见的操作是从内核结构中读取字段的值。
+libbpf 提供了一整套辅助函数，使得读取字段变得简单且 CO-RE 可重定位（CO-RE-relocatable）。
+<strong>CO-RE 可重定位</strong> 意味着无论结构体的实际内存布局如何（这取决于实际使用的 <em>内核版本</em> 和 <em>内核配置</em> ），
+BPF 程序将被调整以在结构体的开始处相对正确的偏移处读取字段。</p>
+<div class="section" id="bpf-core-read-1">
+<span id="bpf-core-read"></span><h3 id="hidbpf-core-read-1">bpf_core_read()<a class="headerlink" href="#hidbpf-core-read-1" title="Permalink to this headline">¶</a></h3>
+<p>最基本的以 CO-RE 可重定位方式读取字段的辅助函数是 <tt class="docutils literal">bpf_core_read(dst, sz, src)</tt> ，
+它将从 <tt class="docutils literal">src</tt> 引用的字段中读取 <tt class="docutils literal">sz</tt> 字节，然后将其读入 <tt class="docutils literal">dst</tt> 指向的内存中：</p>
+<div class="highlight"><pre><span></span><span class="k">struct</span><span class="w"> </span><span class="nc">task_struct</span><span class="w"> </span><span class="o">*</span><span class="n">task</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">(</span><span class="kt">void</span><span class="w"> </span><span class="o">*</span><span class="p">)</span><span class="n">bpf_get_current_task</span><span class="p">();</span>
+<span class="k">struct</span><span class="w"> </span><span class="nc">task_struct</span><span class="w"> </span><span class="o">*</span><span class="n">parent_task</span><span class="p">;</span>
+<span class="kt">int</span><span class="w"> </span><span class="n">err</span><span class="p">;</span>
+
+<span class="n">err</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">bpf_core_read</span><span class="p">(</span><span class="o">&amp;</span><span class="n">parent_task</span><span class="p">,</span><span class="w"> </span><span class="k">sizeof</span><span class="p">(</span><span class="kt">void</span><span class="w"> </span><span class="o">*</span><span class="p">),</span><span class="w"> </span><span class="o">&amp;</span><span class="n">task</span><span class="o">-&gt;</span><span class="n">parent</span><span class="p">);</span>
+<span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">err</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="cm">/* handle error */</span>
+<span class="p">}</span>
+
+<span class="cm">/* parent_task contains the value of task-&gt;parent pointer */</span>
+</pre></div>
+<p><tt class="docutils literal">bpf_core_read()</tt> 与 <tt class="docutils literal">bpf_probe_read_kernel()</tt> BPF 辅助函数类似，
+不同之处在于它记录的是应该在目标内核上重新定位的字段的信息。
+比如，如果由于在 <tt class="docutils literal">struct task_struct</tt> 前面添加了新字段而导致其中的 <tt class="docutils literal">parent</tt> 字段被移动到了不同的偏移量，
+libbpf 将自动调整实际偏移量到正确的值。</p>
+<p>有一个重要的一点需要记住，字段的 <strong>大小</strong> <em>并不会自动重定位</em> ，
+只有其偏移量会自动重定位。所以，如果你正在读取的字段是一个 <tt class="docutils literal">struct</tt> ， 并且其大小发生了变化，你可能会遇到问题。
+请参阅 <a class="reference external" href="#sizing-kernel-types-and-fields">&quot;计算内核类型和字段的大小&quot;</a>
+部分以了解处理这种情况的方法。一般的建议是尽可能不要将整个结构体字段一次性读取，最好只读取你最感兴趣的基本字段。</p>
+</div>
+<div class="section" id="bpf-core-read-str-1">
+<span id="bpf-core-read-str"></span><h3 id="hidbpf-core-read-str-1">bpf_core_read_str()<a class="headerlink" href="#hidbpf-core-read-str-1" title="Permalink to this headline">¶</a></h3>
+<p>就像有 <tt class="docutils literal">bpf_probe_read_kernel()</tt> 和 <tt class="docutils literal">bpf_probe_read_kernel_str()</tt> 这一对 BPF 助手函数一样，
+前者读取指定数量的字节，而后者读取一个变长的以零结尾的 C 字符串，
+<tt class="docutils literal">bpf_core_read()</tt> 也有个对应的函数 <tt class="docutils literal">bpf_core_read_str()</tt> 。
+它的工作方式类似于 <tt class="docutils literal">bpf_probe_read_kernel_str()</tt> ，不同之处在于它记录了包含以零结尾的 C 字符串的源字符数组字段
+的 CO-RE 重定位信息。因此，<tt class="docutils literal">bpf_core_read_str()</tt> 是 <tt class="docutils literal">bpf_probe_read_kernel_str()</tt> 的可 CO-RE 重定位版本。</p>
+<p>注意 <strong>字符数组</strong> 字段和 <strong>字符指针</strong> 字段之间的重要但微妙区别。在 C 语言中，当读取字符串值时，它们可以互换使用，
+因为编译器会自动将数组视为指针。然而，在 CO-RE 的上下文中，这种区别 <em>非常重要</em> 。</p>
+<p>让我们来看看我们希望读取的假想内核类型：</p>
+<div class="highlight"><pre><span></span><span class="k">struct</span><span class="w"> </span><span class="nc">my_kernel_type</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="k">const</span><span class="w"> </span><span class="kt">char</span><span class="w"> </span><span class="o">*</span><span class="n">name</span><span class="p">;</span>
+<span class="w">    </span><span class="kt">char</span><span class="w"> </span><span class="n">type</span><span class="p">[</span><span class="mi">32</span><span class="p">];</span>
+<span class="p">};</span>
+</pre></div>
+<p><tt class="docutils literal">name</tt> 字段指向存储字符串的位置，但 <tt class="docutils literal">type</tt> 字段实际上 <strong>就是</strong> 包含字符串的内存。
+如果您需要使用 CO-RE 读取 <tt class="docutils literal">name</tt> 指向的字符串，正确的处理方式是首先以 CO-RE 可重定位的方式读取指针的值，
+然后进行普通的（非 CO-RE） <tt class="docutils literal">bpf_probe_read_kernel_str()</tt>  读取（为简洁起见，下面的示例忽略了错误处理）：</p>
+<div class="highlight"><pre><span></span><span class="k">struct</span><span class="w"> </span><span class="nc">my_kernel_type</span><span class="w"> </span><span class="o">*</span><span class="n">t</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">...;</span>
+<span class="k">const</span><span class="w"> </span><span class="kt">char</span><span class="w"> </span><span class="o">*</span><span class="n">p</span><span class="p">;</span>
+<span class="kt">char</span><span class="w"> </span><span class="n">str</span><span class="p">[</span><span class="mi">32</span><span class="p">];</span>
+
+<span class="cm">/* get string pointer, CO-RE-relocatable */</span>
+<span class="n">bpf_core_read</span><span class="p">(</span><span class="o">&amp;</span><span class="n">p</span><span class="p">,</span><span class="w"> </span><span class="k">sizeof</span><span class="p">(</span><span class="n">p</span><span class="p">),</span><span class="w"> </span><span class="o">&amp;</span><span class="n">t</span><span class="o">-&gt;</span><span class="n">name</span><span class="p">);</span>
+<span class="cm">/* read the string, non-CO-RE-relocatable, pointer is valid regardless */</span>
+<span class="n">bpf_probe_read_kernel_str</span><span class="p">(</span><span class="n">str</span><span class="p">,</span><span class="w"> </span><span class="k">sizeof</span><span class="p">(</span><span class="n">str</span><span class="p">),</span><span class="w"> </span><span class="n">p</span><span class="p">);</span>
+</pre></div>
+<p>如果我们需要读取 <tt class="docutils literal">type</tt> 字符串，相应的示例将是：</p>
+<div class="highlight"><pre><span></span><span class="k">struct</span><span class="w"> </span><span class="nc">my_kernel_type</span><span class="w"> </span><span class="o">*</span><span class="n">t</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">...;</span>
+<span class="kt">char</span><span class="w"> </span><span class="n">str</span><span class="p">[</span><span class="mi">32</span><span class="p">];</span>
+
+<span class="cm">/* read string as CO-RE-relocatable */</span>
+<span class="n">bpf_core_read_str</span><span class="p">(</span><span class="n">str</span><span class="p">,</span><span class="w"> </span><span class="k">sizeof</span><span class="p">(</span><span class="n">str</span><span class="p">),</span><span class="w"> </span><span class="o">&amp;</span><span class="n">t</span><span class="o">-&gt;</span><span class="n">type</span><span class="p">);</span>
+</pre></div>
+<p>请花点时间思考为什么第一个示例不能使用 <tt class="docutils literal">bpf_core_read_str()</tt>
+（_提示_ ：您可能会将 <strong>指针值</strong> 解释为 C 字符串本身），
+以及为什么第二个示例不能作为指针读取然后在进行字符串读取
+（_提示_ ：字符串本身是结构体的一部分，所以没有专用指针，它位于相对于 <tt class="docutils literal">t</tt> 指针指向位置的
+<strong>偏移量</strong> ）。这种情况很微妙，幸运的是很少遇到，但如果您不清楚这种差异，在实践中可能会感到非常困惑。</p>
+</div>
+<div class="section" id="bpf-core-read-2">
+<span id="bpf-core-read-1-1"></span><h3 id="hidbpf-core-read-2">BPF_CORE_READ()<a class="headerlink" href="#hidbpf-core-read-2" title="Permalink to this headline">¶</a></h3>
+<p><tt class="docutils literal">bpf_core_read()</tt> 函数虽然允许进行大量的控制和精细的错误处理，但直接使用起来确实有些繁琐，
+特别是在读取需要通过较长指针解引用链访问的字段时。</p>
+<p>让我们来看一个读取运行中进程的可执行文件名称的例子。
+如果你正在用 C 语言编写简单的内核代码，并想要实现这个功能，你需要像下面这样做：</p>
+<div class="highlight"><pre><span></span><span class="k">struct</span><span class="w"> </span><span class="nc">task_struct</span><span class="w"> </span><span class="o">*</span><span class="n">t</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">...;</span>
+<span class="k">const</span><span class="w"> </span><span class="kt">char</span><span class="w"> </span><span class="o">*</span><span class="n">name</span><span class="p">;</span>
+
+<span class="n">name</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">t</span><span class="o">-&gt;</span><span class="n">mm</span><span class="o">-&gt;</span><span class="n">exe_file</span><span class="o">-&gt;</span><span class="n">fpath</span><span class="p">.</span><span class="n">dentry</span><span class="o">-&gt;</span><span class="n">d_name</span><span class="p">.</span><span class="n">name</span><span class="p">;</span>
+
+<span class="cm">/* now read string contents with bpf_probe_read_kernel_str() */</span>
+</pre></div>
+<p>请注意指针解引用的顺序，其中夹杂了一些子结构的访问（即 <tt class="docutils literal">fpath.dentry</tt> 和 <tt class="docutils literal">d_name.name</tt> ）。
+使用 <tt class="docutils literal">bpf_core_read()</tt> 做这样的事情很快就会变得一团糟：</p>
+<div class="highlight"><pre><span></span><span class="k">struct</span><span class="w"> </span><span class="nc">task_struct</span><span class="w"> </span><span class="o">*</span><span class="n">t</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">...;</span>
+<span class="k">struct</span><span class="w"> </span><span class="nc">mm_struct</span><span class="w"> </span><span class="o">*</span><span class="n">mm</span><span class="p">;</span>
+<span class="k">struct</span><span class="w"> </span><span class="nc">file</span><span class="w"> </span><span class="o">*</span><span class="n">exe_file</span><span class="p">;</span>
+<span class="k">struct</span><span class="w"> </span><span class="nc">dentry</span><span class="w"> </span><span class="o">*</span><span class="n">dentry</span><span class="p">;</span>
+<span class="k">const</span><span class="w"> </span><span class="kt">char</span><span class="w"> </span><span class="o">*</span><span class="n">name</span><span class="p">;</span>
+
+<span class="n">bpf_core_read</span><span class="p">(</span><span class="o">&amp;</span><span class="n">mm</span><span class="p">,</span><span class="w"> </span><span class="mi">8</span><span class="p">,</span><span class="w"> </span><span class="o">&amp;</span><span class="n">t</span><span class="o">-&gt;</span><span class="n">mm</span><span class="p">);</span>
+<span class="n">bpf_core_read</span><span class="p">(</span><span class="o">&amp;</span><span class="n">exe_file</span><span class="p">,</span><span class="w"> </span><span class="mi">8</span><span class="p">,</span><span class="w"> </span><span class="o">&amp;</span><span class="n">mm</span><span class="o">-&gt;</span><span class="n">exe_file</span><span class="p">);</span>
+<span class="n">bpf_core_read</span><span class="p">(</span><span class="o">&amp;</span><span class="n">dentry</span><span class="p">,</span><span class="w"> </span><span class="mi">8</span><span class="p">,</span><span class="w"> </span><span class="o">&amp;</span><span class="n">exe_file</span><span class="o">-&gt;</span><span class="n">path</span><span class="p">.</span><span class="n">dentry</span><span class="p">);</span>
+<span class="n">bpf_core_read</span><span class="p">(</span><span class="o">&amp;</span><span class="n">name</span><span class="p">,</span><span class="w"> </span><span class="mi">8</span><span class="p">,</span><span class="w"> </span><span class="o">&amp;</span><span class="n">dentry</span><span class="o">-&gt;</span><span class="n">d_name</span><span class="p">.</span><span class="n">name</span><span class="p">);</span>
+
+<span class="cm">/* now read string contents with bpf_probe_read_kernel_str() */</span>
+</pre></div>
+<p>诚然，这是一个相当极端的例子，通常指针解引用链不会那么长，但观点依然存在：
+使用这种方法是很痛苦的。尽管上面的例子完全忽略了错误处理，但这一切仍然存在。</p>
+<p>为了更容易编写这样的多步读取操作，libbpf 提供了 <tt class="docutils literal">BPF_CORE_READ()</tt> 宏。
+让我们看看如何通过使用 <tt class="docutils literal">BPF_CORE_READ()</tt> 简化上述代码：</p>
+<div class="highlight"><pre><span></span><span class="k">struct</span><span class="w"> </span><span class="nc">task_struct</span><span class="w"> </span><span class="o">*</span><span class="n">t</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">...;</span>
+<span class="k">const</span><span class="w"> </span><span class="kt">char</span><span class="w"> </span><span class="o">*</span><span class="n">name</span><span class="p">;</span>
+
+<span class="n">name</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">BPF_CORE_READ</span><span class="p">(</span><span class="n">t</span><span class="p">,</span><span class="w"> </span><span class="n">mm</span><span class="p">,</span><span class="w"> </span><span class="n">exe_file</span><span class="p">,</span><span class="w"> </span><span class="n">fpath</span><span class="p">.</span><span class="n">dentry</span><span class="p">,</span><span class="w"> </span><span class="n">d_name</span><span class="p">.</span><span class="n">name</span><span class="p">);</span>
+
+<span class="cm">/* now read string contents with bpf_probe_read_kernel_str() */</span>
+</pre></div>
+<p>对比一下 &quot;原生 C&quot; 示例和使用 <tt class="docutils literal">BPF_CORE_READ()</tt> 的示例：</p>
+<div class="highlight"><pre><span></span><span class="cm">/* direct pointer dereference */</span>
+<span class="n">name</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">t</span><span class="o">-&gt;</span><span class="n">mm</span><span class="o">-&gt;</span><span class="n">exe_file</span><span class="o">-&gt;</span><span class="n">fpath</span><span class="p">.</span><span class="n">dentry</span><span class="o">-&gt;</span><span class="n">d_name</span><span class="p">.</span><span class="n">name</span><span class="p">;</span>
+
+<span class="cm">/* using BPF_CORE_READ() helper */</span>
+<span class="n">name</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">BPF_CORE_READ</span><span class="p">(</span><span class="n">t</span><span class="p">,</span><span class="w"> </span><span class="n">mm</span><span class="p">,</span><span class="w"> </span><span class="n">exe_file</span><span class="p">,</span><span class="w"> </span><span class="n">fpath</span><span class="p">.</span><span class="n">dentry</span><span class="p">,</span><span class="w"> </span><span class="n">d_name</span><span class="p">.</span><span class="n">name</span><span class="p">);</span>
+</pre></div>
+<p>基本上，每个指针解引用在宏调用中都会被转换成逗号，而每个子结构访问则保持原样。非常简单明了。</p>
+<p>你可能已经注意到 <tt class="docutils literal">BPF_CORE_READ()</tt> 直接返回读取的值，不会传播错误。
+如果任何指针为 NULL 或指向无效内存，你将会得到 <tt class="docutils literal">0</tt> （或 <tt class="docutils literal">NULL</tt> ）作为返回值。
+但如果你需要错误传播和处理，你就必须使用低级的 <tt class="docutils literal">bpf_core_read()</tt> 原语并显式地处理错误。
+在实践中，这通常不是问题或必要的。</p>
+</div>
+<div class="section" id="bpf-core-read-into-1">
+<span id="bpf-core-read-into"></span><h3 id="hidbpf-core-read-into-1">BPF_CORE_READ_INTO()<a class="headerlink" href="#hidbpf-core-read-into-1" title="Permalink to this headline">¶</a></h3>
+<p>在某些情况下，将结果读入目标内存而不是直接返回结果可能必要的或更方便的，
+比如当你从 C 数组中读取值时（比如，从套接字结构中读取 IPv4 地址），因为 C 语言不允许直接从表达式中返回数组。
+对于这种情况，libbpf 提供了 <tt class="docutils literal">BPF_CORE_READ_INTO()</tt> 宏，它的行为类似于 <tt class="docutils literal">BPF_CORE_READ()</tt> ，
+除了会将最终字段的值读入目标内存。将上述示例转换为 <tt class="docutils literal">BPF_CORE_READ_INTO()</tt> ，我们将得到：</p>
+<div class="highlight"><pre><span></span><span class="k">struct</span><span class="w"> </span><span class="nc">task_struct</span><span class="w"> </span><span class="o">*</span><span class="n">t</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">...;</span>
+<span class="k">const</span><span class="w"> </span><span class="kt">char</span><span class="w"> </span><span class="o">*</span><span class="n">name</span><span class="p">;</span>
+<span class="kt">int</span><span class="w"> </span><span class="n">err</span><span class="p">;</span>
+
+<span class="n">err</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">BPF_CORE_READ_INTO</span><span class="p">(</span><span class="o">&amp;</span><span class="n">name</span><span class="p">,</span><span class="w"> </span><span class="n">t</span><span class="p">,</span><span class="w"> </span><span class="n">mm</span><span class="p">,</span><span class="w"> </span><span class="n">binfmt</span><span class="p">,</span><span class="w"> </span><span class="n">executable</span><span class="p">,</span><span class="w"> </span><span class="n">fpath</span><span class="p">.</span><span class="n">dentry</span><span class="p">,</span><span class="w"> </span><span class="n">d_name</span><span class="p">.</span><span class="n">name</span><span class="p">);</span>
+<span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">err</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="cm">/* handle errors */</span><span class="w"> </span><span class="p">}</span>
+<span class="cm">/* now `name` contains the pointer to the string */</span>
+</pre></div>
+<p>请注意在 <tt class="docutils literal">BPF_CORE_READ_INTO()</tt> 中添加了额外的 <tt class="docutils literal">&amp;name</tt> ，以及可以获取上次操作的错误代码
+（比如，读取 <tt class="docutils literal">d_name.name</tt> ）。总的来说， <tt class="docutils literal">BPF_CORE_READ()</tt> 在实践中更加方便，更易于阅读。</p>
+</div>
+<div class="section" id="bpf-core-read-str-into-1">
+<span id="bpf-core-read-str-into"></span><h3 id="hidbpf-core-read-str-into-1">BPF_CORE_READ_STR_INTO()<a class="headerlink" href="#hidbpf-core-read-str-into-1" title="Permalink to this headline">¶</a></h3>
+<p>对于最后一个字段是字符数组字段的情况（就像上面的假设示例中的 <tt class="docutils literal">name</tt> vs <tt class="docutils literal">type</tt> 一样），
+有一个对应的 <tt class="docutils literal">BPF_CORE_READ_STR_INTO()</tt> 宏，你现在应该对它的工作原理有一个很好的猜测了。
+如果没有，请重新查看 <a class="reference external" href="#bpf-core-read-str">bpf_core_read_str()</a> 部分。</p>
+</div>
+<div class="section" id="btf-enabled-bpf">
+<span id="btf-enabled-bpf-program-types-with-direct-memory-reads"></span><h3 id="hidbtf-enabled-bpf">可以直接读取内存的 BTF-enabled 的 BPF 程序类型<a class="headerlink" href="#hidbtf-enabled-bpf" title="Permalink to this headline">¶</a></h3>
+<p>在上面讨论了 <tt class="docutils literal">BPF_CORE_READ()</tt> 系列宏之后，有个非常重要一点需要注意，
+那就是您并不总是需要使用它们来进行 CO-RE 可重定位读取。
+或者说，并不总是需要通过 <em>&quot;probe read&quot;</em> 的方式（比如，使用 BPF 辅助函数来读取）来读取内存。
+有时候你可以 <em>直接访问</em> 内核内存。</p>
+<p>一些 BPF 程序类型是 &quot;BTF-enabled&quot;，这意味着内核中的 BPF 验证器知道与传递给 BPF 程序的输入参数相关联的类型信息。
+这使得 BPF 验证器能够知道哪些内存可以在不调用 <tt class="docutils literal">bpf_core_read()</tt> 或 <tt class="docutils literal">bpf_probe_read_kernel()</tt> 的情况下直接
+从内核中安全读取。其中一些 BTF-enabled BPF 程序类型包括：</p>
+<ul class="simple">
+<li>BTF-enabled raw tracepoint (libbpf 术语中的 <tt class="docutils literal"><span class="pre">SEC(&quot;tp_btf/...&quot;)</span></tt> );</li>
+<li><tt class="docutils literal">fentry</tt>/<tt class="docutils literal">fexit</tt>/<tt class="docutils literal">fmod_ret</tt> BPF 程序;</li>
+<li>BPF LSM 程序;</li>
+<li>可能还有一些，但是我懒得去确认了。</li>
+</ul>
+<p>在这些程序中，如果它们获取到某种内核类型的指针（例如， <tt class="docutils literal">struct task_struct *</tt> ），
+BPF 程序代码可以直接访问内存进行解引用，甚至可以跟踪指针。
+因此，在我们上面用来演示 <tt class="docutils literal">BPF_CORE_READ()</tt> 使用的详细示例中，
+当使用 <tt class="docutils literal">fentry</tt> BPF 程序时，你所需要做的只是：</p>
+<div class="highlight"><pre><span></span><span class="k">struct</span><span class="w"> </span><span class="nc">task_struct</span><span class="w"> </span><span class="o">*</span><span class="n">t</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">...;</span>
+<span class="k">const</span><span class="w"> </span><span class="kt">char</span><span class="w"> </span><span class="o">*</span><span class="n">name</span><span class="p">;</span>
+
+<span class="n">name</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">t</span><span class="o">-&gt;</span><span class="n">mm</span><span class="o">-&gt;</span><span class="n">binfmt</span><span class="o">-&gt;</span><span class="n">executable</span><span class="o">-&gt;</span><span class="n">fpath</span><span class="p">.</span><span class="n">dentry</span><span class="o">-&gt;</span><span class="n">d_name</span><span class="p">.</span><span class="n">name</span><span class="p">;</span>
+</pre></div>
+<p>是的，这与 “原生 C” 的假设示例完全相同。但请记住，要获取字符串的内容本身，
+您仍然需要使用 <tt class="docutils literal">bpf_probe_read_kernel_str()</tt> 。</p>
+<p>这种直接访问内存的方法快速、方便且简单，您应当在可能的情况下尽量使用这种方法。
+不幸的是，在许多真实世界的场景下，您仍然必须明确依赖于 “probe reading”，
+因此 <tt class="docutils literal">BPF_CORE_READ()</tt> 将在可预见的未来成为您的朋友，因此一定要熟悉它。</p>
+</div>
+<div class="section" id="section-3">
+<span id="reading-bitfields-and-integers-of-varying-sizes"></span><h3 id="hidsection-3">读取不同大小的位域和整数<a class="headerlink" href="#hidsection-3" title="Permalink to this headline">¶</a></h3>
+<p>从 BPF 中读取位域（bitfields）一直是一个挑战。BPF 应用程序开发人员必须费尽心思地编写非常难维护和极其痛苦的的代码，
+才能从内核类型中提取位域值。以 <tt class="docutils literal">struct tcp_sock</tt> 为例。
+它包含了很多编码为位字域的有用信息。即便使用 BCC 及其源代码编译方法，
+提取这些位域仍然是一个主要的麻烦和维护负担。</p>
+<p>幸运的是，libbpf 提供了两个易于使用的宏，用于以 CO-RE 可重定位的方式读取位域：
+<tt class="docutils literal">BPF_CORE_READ_BITFIELD()</tt> 和 <tt class="docutils literal">BPF_CORE_READ_BITFIELD_PROBED()</tt> 。
+当要读取的数据需要进行 &quot;probe read&quot; 时，必须使用 <tt class="docutils literal">_PROBED</tt> 变体，
+就像使用 <tt class="docutils literal">BPF_CORE_READ()</tt> 一样。只有在可以直接访问内存时
+（例如，来自 <tt class="docutils literal">fentry/</tt> BPF 程序，参见上文
+<a class="reference external" href="#btf-enabled-bpf-program-types-with-direct-memory-reads">&quot;可以直接读取内存的 BTF-enabled 的 BPF 程序类型&quot;</a> 部分），
+才应该使用 <tt class="docutils literal">BPF_CORE_READ_BITFIELD()</tt> 。
+这两个宏都以 <tt class="docutils literal">u64</tt> 整数的形式返回位域的值。
+下面是从 <tt class="docutils literal">struct tcp_sock</tt> 中读取位字段的示例：</p>
+<div class="highlight"><pre><span></span><span class="k">static</span><span class="w"> </span><span class="n">u64</span><span class="w"> </span><span class="nf">sk_get_syn_data</span><span class="p">(</span><span class="k">const</span><span class="w"> </span><span class="k">struct</span><span class="w"> </span><span class="nc">tcp_sock</span><span class="o">*</span><span class="w"> </span><span class="n">tp</span><span class="p">)</span>
+<span class="p">{</span>
+<span class="w">    </span><span class="cm">/* extract tp-&gt;syn_data bitfield value */</span>
+<span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="n">BPF_CORE_READ_BITFIELD_PROBED</span><span class="p">(</span><span class="n">tp</span><span class="p">,</span><span class="w"> </span><span class="n">syn_data</span><span class="p">);</span>
+<span class="p">}</span>
+</pre></div>
+<p>就是这么简单。使用 BCC，实现相同效果可能会导致如下结果
+（作为练习，读者可以自行思考为什么这样可以工作以及何时会出现问题）：</p>
+<div class="highlight"><pre><span></span><span class="k">static</span><span class="w"> </span><span class="n">u64</span><span class="w"> </span><span class="nf">sk_get_syn_data</span><span class="p">(</span><span class="k">const</span><span class="w"> </span><span class="k">struct</span><span class="w"> </span><span class="nc">tcp_sock</span><span class="o">*</span><span class="w"> </span><span class="n">tp</span><span class="p">)</span>
+<span class="p">{</span>
+<span class="w">    </span><span class="n">u8</span><span class="w"> </span><span class="n">s</span><span class="p">;</span>
+<span class="w">    </span><span class="cm">/* get byte before tlp_high_seq */</span>
+<span class="w">    </span><span class="n">bpf_probe_read</span><span class="p">(</span><span class="o">&amp;</span><span class="n">s</span><span class="p">,</span><span class="w"> </span><span class="mi">1</span><span class="p">,</span><span class="w"> </span><span class="o">&amp;</span><span class="p">(</span><span class="n">tp</span><span class="o">-&gt;</span><span class="n">tlp_high_seq</span><span class="p">)</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="mi">1</span><span class="p">);</span>
+<span class="w">    </span><span class="cm">/* syn_data is the third bit of that byte in little-endian */</span>
+<span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="p">(</span><span class="n">s</span><span class="w"> </span><span class="o">&gt;&gt;</span><span class="w"> </span><span class="mi">2</span><span class="p">)</span><span class="w"> </span><span class="o">&amp;</span><span class="w"> </span><span class="mh">0x1</span><span class="p">;</span>
+<span class="p">}</span>
+</pre></div>
+<p>随着内核版本的变化，编写、阅读和维护 <tt class="docutils literal">struct tcp_sock</tt> 变得越来越困难，令人感到头痛。
+但有了 <tt class="docutils literal">BPF_CORE_READ_BITFIELD_PROBED()</tt> 后，这些问题就都迎刃而解了，变得轻而易举。</p>
+<p>值得注意的是 <tt class="docutils literal">BPF_CORE_READ_BITFIELD()</tt> 和 <tt class="docutils literal">BPF_CORE_READ_BITFIELD_PROBED()</tt> 还有一个重要特性。
+它们不仅可以读取位域，还可以读取 <strong>任意整数</strong> 字段。无论字段的实际类型是什么（位域或最多 8 字节大小的整数），
+这些宏都会正确地返回符号扩展的 8 字节整数。即使字段从整数变为位域，或者反之，它们仍然能正常工作。
+即使字段从 <tt class="docutils literal">int</tt> 变为 <tt class="docutils literal">u8</tt> ，它们也可以继续工作。
+因此， <tt class="docutils literal">BPF_CORE_READ_BITFIELD()</tt> 宏是 <strong>一种通用的读取任何整数字段</strong> 的方法，不受字段性质或大小的限制。</p>
+</div>
+<div class="section" id="section-4">
+<span id="sizing-kernel-types-and-fields"></span><h3 id="hidsection-4">计算内核类型和字段的大小<a class="headerlink" href="#hidsection-4" title="Permalink to this headline">¶</a></h3>
+<p>正如在前面某个小节中提到的， <tt class="docutils literal">BPF_CORE_READ()</tt> 并不会自动让读取大小不固定的字段（例如整个结构体或数组）的操作变得
+CO-RE 可重定位，因为在内核中预先分配足够的目标内存以适应任何的大小变化通常相当的困难。</p>
+<p>然而，在某些情况下，了解字段或类型的大小是很重要的。为了满足这种需求，
+BPF CO-RE 提供了两个辅助函数： <tt class="docutils literal">bpf_core_type_size()</tt> 和 <tt class="docutils literal">bpf_core_field_size()</tt> 。
+它们的使用方式类似于 <tt class="docutils literal">bpf_core_type_exists()</tt> 和 <tt class="docutils literal">bpf_core_field_exists()</tt> （将在下一节中介绍），
+不同的是，它们不返回 0 或 1，而是以字节为单位返回字段或类型的大小。</p>
+<p>您可以根据需要自行处理这个值：您可以将其作为第二个参数传递给 <tt class="docutils literal">bpf_core_read()</tt> ，
+让读取变得完全 CO-RE 可重定位。如果您处理的是结构体数组，并且需要跳过前几个实例，
+您可以使用 <tt class="docutils literal">bpf_core_type_size()</tt> 来计算正确的字节偏移量，以便找到第 N 个元素的起始位置。
+或者您可以仅将其用于调试和报告用途，这完全取决于您，BPF CO-RE 并没有限制您如何使用它的特性。</p>
+</div>
+</div>
+<div class="section" id="section-5">
+<span id="dealing-with-kernel-changes-and-feature-detection"></span><h2 id="hidsection-5">处理内核变更和特性检测<a class="headerlink" href="#hidsection-5" title="Permalink to this headline">¶</a></h2>
+<p><tt class="docutils literal">BPF_CORE_READ()</tt> 系列宏是 BPF CO-RE 的主力军，然而使用 BPF CO-RE 构建实用的 BPF 应用程序还需要更多的技巧。</p>
+<p>BPF 应用程序经常需要处理的一个常见问题是进行特性检测。也就是说，检测特定主机内核是否支持某种新的可选特性，
+BPF 应用程序可以利用这些特性来获取更多信息或提高效率。如果不支持，
+BPF 应用程序会选择回退到支持旧版内核的代码，而不是简单地直接失败。</p>
+<p>BPF CO-RE 提供了多种不同的机制来满足这类需求。当然，除了特性检测外，您也可以在其他场景下使用下面介绍的机制，
+但是，我将以特性检测为主要场景来介绍所有的内容。</p>
+<div class="section" id="bpf-core-field-exists-1">
+<span id="bpf-core-field-exists"></span><h3 id="hidbpf-core-field-exists-1">bpf_core_field_exists()<a class="headerlink" href="#hidbpf-core-field-exists-1" title="Permalink to this headline">¶</a></h3>
+<p><tt class="docutils literal">bpf_core_field_exists()</tt> 函数允许检查给定的内核类型是否包含特定的字段。
+在内核特性检测的场景下中，如果某个期望的内核特性在被引入的时候，还引入了一些特定字段到其中一个内核类型，
+那么就可以简单的通过直接使用 <tt class="docutils literal">bpf_core_field_exists()</tt> 函数来检测这类特性。</p>
+<p>举个具体的例子，一种检测内核是否支持 BPF cookie for perf-based BPF program types（tracepoints、kprobes、uprobes）
+（由 <a class="reference external" href="https://github.com/torvalds/linux/commit/82e6b1eee6a8875ef4eacfd60711cce6965c6b04">这个提交</a> 引入）
+特性的方法是：</p>
+<div class="highlight"><pre><span></span><span class="k">union</span><span class="w"> </span><span class="nc">bpf_attr</span><span class="w"> </span><span class="o">*</span><span class="n">attr</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">...</span><span class="w"> </span><span class="cm">/* could be NULL */</span><span class="p">;</span>
+
+<span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">bpf_core_field_exists</span><span class="p">(</span><span class="n">attr</span><span class="o">-&gt;</span><span class="n">link_create</span><span class="p">.</span><span class="n">perf_event</span><span class="p">.</span><span class="n">bpf_cookie</span><span class="p">))</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="cm">/* bpf_cookie is supported */</span>
+<span class="p">}</span><span class="w"> </span><span class="k">else</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="cm">/* bpf_cookie is NOT supported */</span>
+<span class="p">}</span>
+</pre></div>
+<p>上面的示例假设 BPF 程序中有一个 <tt class="docutils literal">union bpf_attr *</tt> 类型的变量。
+这个变量可以是 <tt class="docutils literal">NULL</tt> ，这实际上并不重要，因为指针本身从未被读取，
+它只是为了向编译器传递类型信息而存在。
+对于没有所需类型的现成变量可用的场景，您可以编写如下等效的检查代码（利用 C 语言的类型系统特性）：</p>
+<div class="highlight"><pre><span></span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">bpf_core_field_exists</span><span class="p">(</span>
+<span class="w">        </span><span class="p">((</span><span class="k">union</span><span class="w"> </span><span class="nc">bpf_attr</span><span class="w"> </span><span class="o">*</span><span class="p">)</span><span class="mi">0</span><span class="p">)</span><span class="o">-&gt;</span><span class="n">link_create</span><span class="p">.</span><span class="n">perf_event</span><span class="p">.</span><span class="n">bpf_cookie</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="cm">/* bpf_cookie is supported */</span>
+<span class="p">}</span><span class="w"> </span><span class="k">else</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="cm">/* bpf_cookie is NOT supported */</span>
+<span class="p">}</span>
+</pre></div>
+<p>在这段代码中，如果主机内核的 <tt class="docutils literal">union bpf_attr</tt> 中没有 <tt class="docutils literal">link_create.perf_event.bpf_cookie</tt> ，
+那么 <tt class="docutils literal">if</tt>/<tt class="docutils literal">else</tt> 结构中的第一个分支中的代码将 <em>永远不会被执行</em> （也 <em>不会被验证</em> ）。</p>
+<p>值得重申的是 BPF 验证器会正确地将这样的代码识别为 <strong>死代码（dead code）</strong> ，
+因此这些代码 <strong>不会被验证</strong> 。这意味着这样的代码可以使用主机内核上不存在的
+内核和 BPF 功能（比如，新的 BPF 辅助函数），并且不需要担心 BPF 验证失败的问题。
+比如，如果上述第一个分支要使用 <tt class="docutils literal">bpf_get_attach_cookie()</tt> 辅助函数来使用 BPF cookie 特性，
+那么该程序将能够在尚未具有该辅助函数的旧内核上被正确的验证。</p>
+</div>
+<div class="section" id="bpf-core-type-exists-1">
+<span id="bpf-core-type-exists"></span><h3 id="hidbpf-core-type-exists-1">bpf_core_type_exists()<a class="headerlink" href="#hidbpf-core-type-exists-1" title="Permalink to this headline">¶</a></h3>
+<p>在一些场景下，类型的存在本身就很重要，BPF CO-RE 提供了一种检查类型存在性的方式，
+即 <tt class="docutils literal">bpf_core_type_exists()</tt> 辅助函数。
+以下是一个检测内核是否支持 BPF 环形缓冲区（ring buffer）的示例：</p>
+<div class="highlight"><pre><span></span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">bpf_core_type_exists</span><span class="p">(</span><span class="k">struct</span><span class="w"> </span><span class="nc">bpf_ringbuf</span><span class="p">))</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="cm">/* BPF ringbuf helpers (e.g., bpf_ringbuf_reserve()) exist */</span>
+<span class="p">}</span>
+</pre></div>
+<p>请务必确保你在某处定义了 <tt class="docutils literal">struct bpf_ringbuf</tt> （即使是空的），
+否则你将会检查 <tt class="docutils literal">bpf_ringbuf</tt> 的 <strong>前向声明（forward declaration）</strong> 是否存在，
+这几乎肯定不是你想要的结果。在足够新的 <tt class="docutils literal">vmlinux.h</tt> 中，这应该不会成为问题，但是仍然需要注意这一点。</p>
+</div>
+<div class="section" id="bpf-core-enum-value-exists-1">
+<span id="bpf-core-enum-value-exists"></span><h3 id="hidbpf-core-enum-value-exists-1">bpf_core_enum_value_exists()<a class="headerlink" href="#hidbpf-core-enum-value-exists-1" title="Permalink to this headline">¶</a></h3>
+<p>能够检测特定枚举值是否存在是非常有用的。这种检查的一个重要的实际应用是 <strong>检测是否支持某个 BPF 辅助函数</strong> 。</p>
+<p>每个 BPF 辅助函数都对应着 <tt class="docutils literal">enum bpf_func_id</tt> 中的一个枚举值：</p>
+<div class="highlight"><pre><span></span><span class="k">enum</span><span class="w"> </span><span class="n">bpf_func_id</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="p">...</span>
+<span class="w">    </span><span class="n">BPF_FUNC_ringbuf_output</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">130</span><span class="p">,</span>
+<span class="w">    </span><span class="n">BPF_FUNC_ringbuf_reserve</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">131</span><span class="p">,</span>
+<span class="w">    </span><span class="p">...</span>
+<span class="p">};</span>
+</pre></div>
+<p>因此，检查 BPF 助手函数 <tt class="docutils literal">bpf_xxx()</tt> 是否存在的最简单方法是检查 <tt class="docutils literal">enum bpf_func_id</tt> 中是否存在 <tt class="docutils literal">BPF_FUNC_xxx</tt> 。
+因此，与在之前的示例中使用 <tt class="docutils literal">bpf_core_type_exists(struct bpf_ringbuf)</tt> 进行类型检查不同，我们可以更明确地表达我们的意图：</p>
+<div class="highlight"><pre><span></span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">bpf_core_enum_value_exists</span><span class="p">(</span><span class="k">enum</span><span class="w"> </span><span class="n">bpf_func_id</span><span class="p">,</span><span class="w"> </span><span class="n">BPF_FUNC_ringbuf_reserve</span><span class="p">))</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="cm">/* use bpf_ringbuf_reserve() safely */</span>
+<span class="p">}</span><span class="w"> </span><span class="k">else</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="cm">/* fall back to using bpf_perf_event_output() */</span>
+<span class="p">}</span>
+</pre></div>
+<p>许多其他 BPF 功能也可以类似地被检测到。BPF 程序类型和 BPF map 类型的支持只是另一个例子。</p>
+<p>当然，这种功能并不仅限于与 BPF 相关的功能。任何可以通过字段、类型或枚举值的存在
+来检测的内核特性都可以轻松地通过 BPF CO-RE 进行处理。</p>
+<p>特性检测也不仅仅局限于基于类型系统的检查。在接下来的几节中，我们将看一些其他可以用于执行内核特性检测的 BPF CO-RE 机制。而且不仅仅是特性检测，它们还允许在运行时提取内核特定信息（如 Kconfig 值），这通常无法被事先知道。</p>
+</div>
+<div class="section" id="linux-kernel-version-1">
+<span id="linux-kernel-version"></span><h3 id="hidlinux-kernel-version-1">LINUX_KERNEL_VERSION<a class="headerlink" href="#hidlinux-kernel-version-1" title="Permalink to this headline">¶</a></h3>
+<p>有时候检测必要功能存在的唯一方法是通过检查 Linux 内核版本。
+Libbpf 允许在 BPF 程序代码中使用特殊的 <tt class="docutils literal">extern</tt> 变量来实现这一点。</p>
+<div class="highlight"><pre><span></span><span class="k">extern</span><span class="w"> </span><span class="kt">int</span><span class="w"> </span><span class="n">LINUX_KERNEL_VERSION</span><span class="w"> </span><span class="n">__kconfig</span><span class="p">;</span>
+</pre></div>
+<p>一旦声明了 <tt class="docutils literal">LINUX_KERNEL_VERSION</tt> ，它会以与内核本身相同的方式编码当前运行的内核版本。
+这样的变量可以像任何其他变量一样使用：可以与之进行比较，打印它，记录并发送到用户态（user-space）等。
+在所有的这些情况下，BPF 验证器都知道它的确切值，因此它可以检测死代码，就像上面描述的基于类型系统的检查一样。</p>
+<p>Libbpf 还提供了一个方便的 <tt class="docutils literal">KERNEL_VERSION(major, minor, patch)</tt> 宏，用于与 <tt class="docutils literal">LINUX_KERNEL_VERSION</tt> 进行比较：</p>
+<div class="highlight"><pre><span></span><span class="cp">#include</span><span class="w"> </span><span class="cpf">&lt;bpf/bpf_helpers.h&gt;</span>
+
+<span class="k">extern</span><span class="w"> </span><span class="kt">int</span><span class="w"> </span><span class="n">LINUX_KERNEL_VERSION</span><span class="w"> </span><span class="n">__kconfig</span><span class="p">;</span>
+
+<span class="p">...</span>
+
+<span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">LINUX_KERNEL_VERSION</span><span class="w"> </span><span class="o">&gt;</span><span class="w"> </span><span class="n">KERNEL_VERSION</span><span class="p">(</span><span class="mi">5</span><span class="p">,</span><span class="w"> </span><span class="mi">15</span><span class="p">,</span><span class="w"> </span><span class="mi">0</span><span class="p">))</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="cm">/* we are on v5.15+ */</span>
+<span class="p">}</span>
+</pre></div>
+</div>
+<div class="section" id="kconfig-extern">
+<span id="kconfig-extern-variables"></span><h3 id="hidkconfig-extern">Kconfig extern 变量<a class="headerlink" href="#hidkconfig-extern" title="Permalink to this headline">¶</a></h3>
+<p>事实上，libbpf 允许为任何内核配置（Kconfig）值声明特殊的 <tt class="docutils literal">extern</tt> 变量。
+请记住，这 <em>仅在内核通过 /proc/config.gz 公开其内核配置时</em> 才被支持，
+幸运的是，这在现代 Linux 发行版中是非常普遍的情况。
+libbpf 支持几种不同类型的变量。它们的使用取决于实际的 Kconfig 值类型：</p>
+<ul class="simple">
+<li>对于 <tt class="docutils literal">y</tt>/<tt class="docutils literal">n</tt>/<tt class="docutils literal">m</tt> 三态（tri-state） Kconfig 值，您可以使用 <tt class="docutils literal">extern enum libbpf_tristate</tt> 变量，
+它定义了三个可能的值： <tt class="docutils literal">TRI_YES</tt> 、 <tt class="docutils literal">TRI_NO</tt> 、 <tt class="docutils literal">TRI_MODULE</tt> 。
+或者，声明一个 <tt class="docutils literal">extern char</tt> 变量，它将直接捕获字符值
+（比如，您将确实拥有一个具有 <tt class="docutils literal">'y'</tt> 、 <tt class="docutils literal">'n'</tt> 、 <tt class="docutils literal">'m'</tt> 字符值之一的变量）。</li>
+<li>对于 <tt class="docutils literal">y</tt>/<tt class="docutils literal">n</tt> 两状态（two-state）（布尔值）的 Kconfig 值，您还可以使用 <tt class="docutils literal">bool</tt> 类型
+（除了已经介绍过的 <tt class="docutils literal">char</tt> 和 <tt class="docutils literal">enum libbpf_tristate</tt> 类型）。
+在这种情况下， <tt class="docutils literal">y</tt> 对应 <tt class="docutils literal">true</tt> ，而 <tt class="docutils literal">n</tt> 则被转换为 <tt class="docutils literal">false</tt> 。</li>
+<li>对于整数 Kconfig 值，请使用 C 语言中的整型数据类型：支持所有 1、2、4 和 8 字节的有符号和无符号整数。
+如果实际的 Kconfig 值超出了已声明的整数类型范围，libbpf 将会报错而不是截断数值。</li>
+<li>对于字符串 Kconfig 值，使用 <tt class="docutils literal">const char[N]</tt> 数组变量。如果实际值太长了，它将被截断并在末尾添加零终止符，
+但是 libbpf 将会发出一个警告而不是报错。</li>
+</ul>
+<p>请记住，如果从 <tt class="docutils literal">/proc/config.gz</tt> 中请求的 Kconfig 值缺失，libbpf 将会因为错误而中止程序加载。
+为了更好地处理这种情况，可以将这样的 Kconfig extern 变量声明为弱（weak）变量，并加上 <tt class="docutils literal">__weak</tt> 属性。
+在这种情况下，如果值缺失，将会被假定为 <tt class="docutils literal">false</tt> 、 <tt class="docutils literal">TRI_NO</tt> 、 <tt class="docutils literal">'\0'</tt> （零字符）、
+<tt class="docutils literal">0</tt> 或 <tt class="docutils literal">&quot;&quot;</tt> （空字符串），具体取决于所使用的类型。</p>
+<p>以下是一个快速示例，展示如何声明和使用不同类型的 Kconfig extern 变量:</p>
+<div class="highlight"><pre><span></span><span class="k">extern</span><span class="w"> </span><span class="kt">int</span><span class="w"> </span><span class="n">LINUX_KERNEL_VERSION</span><span class="w"> </span><span class="n">__kconfig</span><span class="p">;</span>
+
+<span class="k">extern</span><span class="w"> </span><span class="k">enum</span><span class="w"> </span><span class="n">libbpf_tristate</span><span class="w"> </span><span class="n">CONFIG_BPF_PRELOAD</span><span class="w"> </span><span class="n">__kconfig</span><span class="w"> </span><span class="n">__weak</span><span class="p">;</span>
+<span class="k">extern</span><span class="w"> </span><span class="kt">bool</span><span class="w"> </span><span class="n">CONFIG_BPF_JIT_ALWAYS_ON</span><span class="w"> </span><span class="n">__kconfig</span><span class="w"> </span><span class="n">__weak</span><span class="p">;</span>
+<span class="k">extern</span><span class="w"> </span><span class="kt">char</span><span class="w"> </span><span class="n">CONFIG_BPF_JIT_DEFAULT_ON</span><span class="w"> </span><span class="n">__kconfig</span><span class="w"> </span><span class="n">__weak</span><span class="p">;</span>
+<span class="k">extern</span><span class="w"> </span><span class="kt">int</span><span class="w"> </span><span class="n">CONFIG_HZ</span><span class="w"> </span><span class="n">__kconfig</span><span class="p">;</span>
+<span class="k">extern</span><span class="w"> </span><span class="k">const</span><span class="w"> </span><span class="kt">char</span><span class="w"> </span><span class="n">CONFIG_MODPROBE_PATH</span><span class="p">[</span><span class="mi">256</span><span class="p">]</span><span class="w"> </span><span class="n">__kconfig</span><span class="w"> </span><span class="n">__weak</span><span class="p">;</span>
+
+<span class="p">...</span>
+
+<span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">LINUX_KERNEL_VERSION</span><span class="w"> </span><span class="o">&gt;</span><span class="w"> </span><span class="n">KERNEL_VERSION</span><span class="p">(</span><span class="mi">5</span><span class="p">,</span><span class="w"> </span><span class="mi">15</span><span class="p">,</span><span class="w"> </span><span class="mi">0</span><span class="p">))</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="p">...</span><span class="w"> </span><span class="p">}</span>
+
+<span class="k">switch</span><span class="w"> </span><span class="p">(</span><span class="n">CONFIG_BPF_PRELOAD</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="k">case</span><span class="w"> </span><span class="no">TRI_NO</span><span class="p">:</span><span class="w"> </span><span class="p">...;</span><span class="w"> </span><span class="k">break</span><span class="p">;</span>
+<span class="w">    </span><span class="k">case</span><span class="w"> </span><span class="no">TRI_YES</span><span class="p">:</span><span class="w"> </span><span class="p">...;</span><span class="w"> </span><span class="k">break</span><span class="p">;</span>
+<span class="w">    </span><span class="k">case</span><span class="w"> </span><span class="no">TRI_MODULE</span><span class="p">:</span><span class="w"> </span><span class="p">...;</span><span class="w"> </span><span class="k">break</span><span class="p">;</span>
+<span class="p">}</span>
+
+<span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="o">!</span><span class="n">CONFIG_BPF_JIT_ALWAYS_ON</span><span class="p">)</span>
+<span class="w">    </span><span class="n">bpf_printk</span><span class="p">(</span><span class="s">&quot;BPF_JIT_DEFAULT_ON: %c</span><span class="se">\n</span><span class="s">&quot;</span><span class="p">,</span><span class="w"> </span><span class="n">CONFIG_BPF_JIT_DEFAULT_ON</span><span class="w"> </span><span class="o">?:</span><span class="w"> </span><span class="sc">&#39;n&#39;</span><span class="p">);</span>
+
+<span class="n">bpf_printk</span><span class="p">(</span><span class="s">&quot;HZ is %d, MODPROBE_PATH: %s</span><span class="se">\n</span><span class="s">&quot;</span><span class="p">,</span><span class="w"> </span><span class="n">CONFIG_HZ</span><span class="p">,</span><span class="w"> </span><span class="n">CONFIG_MODPROBE_PATH</span><span class="p">);</span>
+</pre></div>
+</div>
+<div class="section" id="section-6">
+<span id="relocatable-enums"></span><h3 id="hidsection-6">可重定位枚举<a class="headerlink" href="#hidsection-6" title="Permalink to this headline">¶</a></h3>
+<p>一个有趣的挑战是，一些 BPF 应用程序需要处理“不稳定”的内核枚举。也就是说，这些枚举没有固定的常量集或整数值分配给它们。
+一个很好的例子是 <tt class="docutils literal">enum cgroup_subsys_id</tt> ，
+在 <a class="reference external" href="https://github.com/torvalds/linux/blob/87066fdd2e30fe9dd531125d95257c118a74617e/include/linux/cgroup-defs.h#L43-L47">include/linux/cgroup-defs.h</a> 中被定义，
+其定义可能会根据内核编译时启用的 cgroup 特性而异（详情请参阅 <a class="reference external" href="https://github.com/torvalds/linux/blob/87066fdd2e30fe9dd531125d95257c118a74617e/include/linux/cgroup_subsys.h">include/linux/cgroup_subsys.h</a> ）。
+因此，如果您需要知道，比如 <tt class="docutils literal"><span class="pre">cgroup_subsys_id::cpu_cgrp_id</span></tt> 的实际整数值，
+这可能是一个大问题，因为这个枚举是内核内部的，并且是动态生成的。</p>
+<p>再次，BPF CO-RE 发挥了作用。它允许使用 <tt class="docutils literal">bpf_core_enum_value()</tt> 宏来捕获实际的值：</p>
+<div class="highlight"><pre><span></span><span class="kt">int</span><span class="w"> </span><span class="n">id</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">bpf_core_enum_value</span><span class="p">(</span><span class="k">enum</span><span class="w"> </span><span class="n">cgroup_subsys_id</span><span class="p">,</span><span class="w"> </span><span class="n">cpu_cgrp_id</span><span class="p">);</span>
+
+<span class="cm">/* id will contain the actual integer value in the host kernel */</span>
+</pre></div>
+</div>
+<div class="section" id="section-7">
+<span id="guarding-potentially-failing-relocations"></span><h3 id="hidsection-7">防护可能会失败的重定位操作<a class="headerlink" href="#hidsection-7" title="Permalink to this headline">¶</a></h3>
+<p>在某些内核上缺少某些字段并不罕见。如果一个 BPF 程序尝试使用 <tt class="docutils literal">BPF_CORE_READ()</tt> 读取一个缺失的字段，
+这将在 BPF 验证过程中导致错误。同样，当获取在主机内核中不存在的枚举值（或类型大小）时，CO-RE 重定位将失败。</p>
+<p>不幸的是，目前这个错误相当晦涩（但将由 libbpf <a class="reference external" href="https://github.com/libbpf/libbpf/issues/371">很快</a> 改进。译注：最新版的 libbpf 已改进这个错误），
+所以最好意识到这一点，以防您意外遇到它。如果您遇到类似下面的错误，
+要知道这是因为 CO-RE 重定位未能找到相应的字段/类型/枚举：</p>
+<div class="highlight"><pre><span></span><span class="mi">1</span><span class="o">:</span><span class="w"> </span><span class="p">(</span><span class="mi">85</span><span class="p">)</span><span class="w"> </span><span class="n">call</span><span class="w"> </span><span class="n">unknown</span><span class="err">#</span><span class="mi">195896080</span>
+<span class="n">invalid</span><span class="w"> </span><span class="n">func</span><span class="w"> </span><span class="n">unknown</span><span class="err">#</span><span class="mi">195896080</span>
+</pre></div>
+<p><tt class="docutils literal">195896080</tt> 的十六进制表示是 <tt class="docutils literal">0xbad2310</tt> （代表&quot;bad relo&quot;），它是 libbpf 使用的一个常量，
+用于标记失败的 CO-RE 重定位指令。libbpf 不立即报告此类错误的原因是，如果需要，
+BPF 应用程序可以优雅地处理缺少的字段/类型/枚举以及相应的 CO-RE 重定位失败。
+这使得仅通过一个 BPF 应用程序就能适应内核类型的极端变化成为可能（这是 &quot;Compile Once – Run Everywhere&quot; 哲学的关键目标）。</p>
+<p>当某个字段/类型/枚举可能缺失时，您可以使用在处理内核变更部分中描述的检查之一来保护这样的代码路径。
+如果被正确保护，BPF 验证器将知道在该特定内核中不可能触发该代码路径，因此会将其排除为死代码。</p>
+<p>这种方法允许在必要时灵活地捕获内核信息的片段，如果实际运行的内核确实包含这些片段的话。
+否则，BPF 应用程序可以优雅地退回到另一种替代逻辑，并妥善处理缺失的功能或数据。
+只要适当保护潜在失败的 CO-RE 重定位，一切都能正常运作。这里所说的 CO-RE 重定位指的是任何使用
+<tt class="docutils literal">BPF_CORE_READ()</tt> 系列宏、类型/字段大小重定位或枚举值捕获的操作。
+如果目标字段/类型/枚举不存在或定义不兼容的话，这些操作就毫无意义。</p>
+<p>继续前面关于 <tt class="docutils literal">cpu_cgrp_id</tt> 枚举值的例子，为了处理那些可能没有定义这种枚举值的内核
+（例如，由于未设置 <tt class="docutils literal">CONFIG_CGROUP_PIDS</tt> Kconfig 开关），
+可以使用 <tt class="docutils literal">bpf_core_enum_value_exists()</tt> 进行检查（ <strong>存在性检查永远不会失败！</strong> ），
+该检查返回 <tt class="docutils literal">true</tt>/<tt class="docutils literal">false</tt> （严格来说，在 C 中是 <tt class="docutils literal">0</tt> 或 <tt class="docutils literal">1</tt> ）：</p>
+<div class="highlight"><pre><span></span><span class="kt">int</span><span class="w"> </span><span class="n">id</span><span class="p">;</span>
+
+<span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">bpf_core_enum_value_exists</span><span class="p">(</span><span class="k">enum</span><span class="w"> </span><span class="n">cgroup_subsys_id</span><span class="p">,</span><span class="w"> </span><span class="n">cpu_cgrp_id</span><span class="p">))</span>
+<span class="w">    </span><span class="n">id</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">bpf_core_enum_value</span><span class="p">(</span><span class="k">enum</span><span class="w"> </span><span class="n">cgroup_subsys_id</span><span class="p">,</span><span class="w"> </span><span class="n">cpu_cgrp_id</span><span class="p">);</span>
+<span class="k">else</span>
+<span class="w">    </span><span class="n">id</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">-1</span><span class="p">;</span><span class="w"> </span><span class="cm">/* fallback value */</span>
+
+<span class="cm">/* use id even if cpu_cgrp_id isn&#39;t defined */</span>
+</pre></div>
+<p>上面的示例在任何内核上都能正常运行，无论是否存在 <tt class="docutils literal">cpu_cgrp_id</tt> 枚举，
+即使 <tt class="docutils literal">bpf_core_enum_value()</tt> 操作在没有 <tt class="docutils literal">cpu_cgrp_id</tt> 枚举的内核上失败也不会由影响。
+这一切都是因为代码路径得到了适当的保护。</p>
+</div>
+</div>
+<div class="section" id="section-8">
+<span id="advanced-topics"></span><h2 id="hidsection-8">高级话题<a class="headerlink" href="#hidsection-8" title="Permalink to this headline">¶</a></h2>
+<p>前面的部分介绍了大多数常见的 CO-RE 功能。本节将涵盖一些您可能会需要面对的更高级的话题，
+这取决于您的 BPF 应用程序需要处理多复杂的内核状态以及在不同内核版本中的变化。</p>
+<div class="section" id="co-re">
+<span id="defining-own-co-re-relocatable-type-definitions"></span><h3 id="hidco-re">定义自己的 CO-RE 可重定位类型定义<a class="headerlink" href="#hidco-re" title="Permalink to this headline">¶</a></h3>
+<p>直到现在，我们一直假设上述示例中使用的内核类型来自于 <tt class="docutils literal">vmlinux.h</tt> 头文件，这个头文件是基于最近且足够完整的内核
+BTF 生成的。但是，在 BPF CO-RE 中使用 <tt class="docutils literal">vmlinux.h</tt> 并不是必需的。它主要是为了方便 BPF 应用程序开发者。</p>
+<p>此外，有时候 <tt class="docutils literal">vmlinux.h</tt> 可能不足以解决更高级的情况。这可能是因为所需的类型尚未包含在内核 BTF 中，
+或者因为内核中的某些内容以不兼容的方式发生了变化（例如，字段被重命名），
+现在您需要处理两个不兼容的相同内核类型的定义（我们将在下文讨论如何处理这种令人沮丧的情况）。</p>
+<p>无论是什么原因，您都很容易定义自己对内核类型的期望，并使其 CO-RE 可重定位。
+让我们以 <tt class="docutils literal">struct task_struct</tt> 作为一个典型的例子。
+这是一个庞大而复杂的结构体，但通常你只需要从其完整定义中提取几个简单的字段。
+利用 BPF CO-RE 只需要声明你将需要的字段，跳过所有其余部分，保持类型定义简单而简洁。</p>
+<p>假设你只关心 <tt class="docutils literal">pid</tt> 、 <tt class="docutils literal">group_leader</tt> 和 <tt class="docutils literal">comm</tt>  字段。
+按照以下方式声明 <tt class="docutils literal">struct task_struct</tt> 就足以让一切正常运作：</p>
+<div class="highlight"><pre><span></span><span class="k">struct</span><span class="w"> </span><span class="nc">task_struct</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="kt">int</span><span class="w"> </span><span class="n">pid</span><span class="p">;</span>
+<span class="w">    </span><span class="kt">char</span><span class="w"> </span><span class="n">comm</span><span class="p">[</span><span class="mi">16</span><span class="p">];</span>
+<span class="w">    </span><span class="k">struct</span><span class="w"> </span><span class="nc">task_struct</span><span class="w"> </span><span class="o">*</span><span class="n">group_leader</span><span class="p">;</span>
+<span class="p">}</span><span class="w"> </span><span class="n">__attribute__</span><span class="p">((</span><span class="n">preserve_access_index</span><span class="p">));</span>
+</pre></div>
+<p>首先，<em>字段的顺序不重要</em> 。完全不重要。</p>
+<p>其次，对于允许直接内存读取的 BPF 程序， <tt class="docutils literal"><span class="pre">__attribute__((preserve_access_index))</span></tt> 是必需的。
+例如，BTF-enabled raw tracepoints（ <tt class="docutils literal">SEC(tp_btf)</tt> ）和
+<tt class="docutils literal">fentry</tt>/<tt class="docutils literal">fexit</tt> BPF 程序。
+有了这个属性，任何 <em>使用此结构体定义进行直接内存读取的操作都将自动变得 CO-RE 可重定位</em> 。</p>
+<p>当使用显式的 <tt class="docutils literal">BPF_CORE_READ()</tt> 宏系列时，不需要使用 <tt class="docutils literal"><span class="pre">__attribute__((preserve_access_index))</span></tt> ，
+因为这些宏会自动强制执行。但如果直接使用旧的 <tt class="docutils literal">bpf_probe_read_kernel()</tt> 辅助函数，
+如果结构体具有 <tt class="docutils literal">preserve_access_index</tt> 属性，这种 probe read 操作也会变得 CO-RE 可重定位。
+因此，简单来说， <em>指定这个属性总是一个好主意</em> 。</p>
+<p>基本就是这样。您可以将此类型用于任何 CO-RE 读取或检查操作。正如您所看到的，它并不需要完全匹配真正的 <tt class="docutils literal">struct task_struct</tt> 定义。
+只需要存在并且兼容的必要字段子集即可。您的 BPF 程序不需要的 <tt class="docutils literal">struct task_struct</tt> 中定义的其他所有内容对
+于 BPF CO-RE 来说都是无关紧要的。</p>
+</div>
+<div class="section" id="section-9">
+<span id="handling-incompatible-field-and-type-changes"></span><h3 id="hidsection-9">处理不兼容的字段和类型变更<a class="headerlink" href="#hidsection-9" title="Permalink to this headline">¶</a></h3>
+<p>正如前面所提到的，有些情况下，内核类型和字段的变更会导致两个不同内核中的类型定义不兼容。
+比如，考虑在一个结构体中对字段进行重命名。
+作为一个非常真实和具体的例子，让我们看一个最近将 <tt class="docutils literal">task_struct</tt> 的 <tt class="docutils literal">state</tt> 字段重命名为
+<tt class="docutils literal">__state</tt> 的 <a class="reference external" href="https://github.com/torvalds/linux/commit/2f064a59a11ff9bc22e52e9678bc601404c7cb34">提交</a> 。
+如果您要编写一个需要读取任务状态的 BPF 应用程序，那么根据内核版本的不同，
+您可能需要通过 <strong>两个不同的名称</strong> 来获取 <strong>相同的字段</strong> 。让我们看看 BPF CO-RE 如何处理这种情况。</p>
+<p>BPF CO-RE 有一个重要的命名约定（我将其称为 <strong>&quot;忽略后缀规则&quot;</strong> ）。
+这是一个相对不太知名的特性，但它是处理上述情况的关键机制。
+对于任何类型、字段、枚举或枚举器，如果实体的名称包含形式为 <tt class="docutils literal">___something</tt> （三个下划线加上一些文本）的后缀，
+那么这类名称后缀在 CO-RE 重定位的过程中会被忽略，就好像它们从未存在过一样。</p>
+<p>这意味着，如果您在 BPF 应用程序中定义并使用了一个名为 <tt class="docutils literal">struct task_struct___my_own_copy</tt> 的结构体，
+对于 BPF CO-RE 来说，该结构体就等同于内核中的 <tt class="docutils literal">struct task_struct</tt> ，将被匹配和重定位。
+字段名称也适用相同的规则（因此 <tt class="docutils literal">state</tt> 或 <tt class="docutils literal">state___custom</tt> 实际上是相同的），
+枚举类型也是如此（包括枚举类型名称本身以及其中的枚举值名称）。实际上，这种匹配是双向的，
+所以如果内核中有 <tt class="docutils literal">struct task_struct</tt> 和 <tt class="docutils literal">struct task_struct___2</tt> 这样的结构体
+（有时由于 C 类型系统和内核源代码中的头文件包含相互作用），
+那么这两个结构体都将成为与在 BPF 程序源代码中定义的 <tt class="docutils literal">struct task_struct___my</tt> 匹配的候选对象。</p>
+<p>这在实践中意味着，您现在可以拥有多个独立且相互冲突的相同内核类型/字段/枚举的定义，
+并且可以将代码编译为有效的 C 代码，同时您可以根据您使用的任何
+<a class="reference external" href="#dealing-with-kernel-changes-and-feature-detection">特性检测</a>
+方法在运行时选择正确的定义。</p>
+<p>让我们来看一个例子，说明如何处理前面提到的将 <tt class="docutils literal"><span class="pre">task_struct-&gt;state</span></tt> 重命名为 <tt class="docutils literal"><span class="pre">task_struct-&gt;__state</span></tt> 的场景：</p>
+<div class="highlight"><pre><span></span><span class="cm">/* latest kernel task_struct definition, which can also come from vmlinux.h */</span>
+<span class="k">struct</span><span class="w"> </span><span class="nc">task_struct</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="kt">int</span><span class="w"> </span><span class="n">__state</span><span class="p">;</span>
+<span class="p">}</span><span class="w"> </span><span class="n">__attribute__</span><span class="p">((</span><span class="n">preserve_access_index</span><span class="p">));</span>
+
+<span class="k">struct</span><span class="w"> </span><span class="nc">task_struct___old</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="kt">long</span><span class="w"> </span><span class="n">state</span><span class="p">;</span>
+<span class="p">}</span><span class="w"> </span><span class="n">__attribute__</span><span class="p">((</span><span class="n">preserve_access_index</span><span class="p">));</span>
+
+<span class="p">...</span>
+
+<span class="k">struct</span><span class="w"> </span><span class="nc">task_struct</span><span class="w"> </span><span class="o">*</span><span class="n">t</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">(</span><span class="kt">void</span><span class="w"> </span><span class="o">*</span><span class="p">)</span><span class="n">bpf_get_current_task</span><span class="p">();</span>
+<span class="kt">int</span><span class="w"> </span><span class="n">state</span><span class="p">;</span>
+
+<span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">bpf_core_field_exists</span><span class="p">(</span><span class="n">t</span><span class="o">-&gt;</span><span class="n">__state</span><span class="p">))</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="n">state</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">BPF_CORE_READ</span><span class="p">(</span><span class="n">t</span><span class="p">,</span><span class="w"> </span><span class="n">__state</span><span class="p">);</span>
+<span class="p">}</span><span class="w"> </span><span class="k">else</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="cm">/* recast pointer to capture task_struct___old type for compiler */</span>
+<span class="w">    </span><span class="k">struct</span><span class="w"> </span><span class="nc">task_struct___old</span><span class="w"> </span><span class="o">*</span><span class="n">t_old</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">(</span><span class="kt">void</span><span class="w"> </span><span class="o">*</span><span class="p">)</span><span class="n">t</span><span class="p">;</span>
+
+<span class="w">    </span><span class="cm">/* now use old &quot;state&quot; name of the field */</span>
+<span class="w">    </span><span class="n">state</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">BPF_CORE_READ</span><span class="p">(</span><span class="n">t_old</span><span class="p">,</span><span class="w"> </span><span class="n">state</span><span class="p">);</span>
+<span class="p">}</span>
+
+<span class="p">...</span>
+</pre></div>
+<p>在上面的例子中，有两个最关键的部分。</p>
+<p>首先，基于最新的 <tt class="docutils literal">struct task_struct</tt> 定义进行字段存在性检查。如果运行的内核版本较旧，尚未具有 <tt class="docutils literal">__state</tt> 字段，
+<tt class="docutils literal"><span class="pre">bpf_core_field_exists(t-&gt;__state)</span></tt> 将返回 0，对于 <tt class="docutils literal">if</tt> 语句的第一个分支, BPF 验证器将
+<a class="reference external" href="#guarding-potentially-failing-relocations">跳过并消除这段死代码</a> ，
+因此 <tt class="docutils literal"><span class="pre">t-&gt;__state</span></tt> 将永远不会被尝试读取。</p>
+<p>其次，将 <tt class="docutils literal">struct task_struct *</tt> 指针重新转换为 <tt class="docutils literal">struct task_struct___old *</tt> 指针。
+这是为了让 C 编译器能够跟踪 <tt class="docutils literal">struct task_struct</tt> 的“替代定义”
+（即本例中的 <tt class="docutils literal">struct task_struct___old</tt> ）的类型信息。
+编译器将按有效的 C 表达式识别并编译 <tt class="docutils literal"><span class="pre">t_old-&gt;state</span></tt> 字段引用（隐藏在 <tt class="docutils literal">BPF_CORE_READ()</tt> 实现内部），
+同时还会记录相应的 CO-RE 重定位信息，以便让 libbpf 知道 BPF 程序预期读取的类型和字段信息。</p>
+<p>通过 <tt class="docutils literal">___suffix</tt> 规则，所有操作都会正确工作。当由 libbpf 预处理一个 BPF 程序以供发送到内核进行验证时，
+libbpf 会执行 CO-RE 重定位并正确调整偏移量。其中一个 CO-RE 重定位将无法被解析
+（因为 <tt class="docutils literal">__state</tt> 或 <tt class="docutils literal">state</tt> 在内核中不能同时存在），这将导致相应的 BPF 指令被“污染（poisoning）”
+（回想一下之前介绍过的 <tt class="docutils literal">0xbad2310</tt> ），但该指令将受到字段存在逻辑的保护，并在程序加载期间被验证器所消除。</p>
+<p>随着 BPF CO-RE 应用程序数量和复杂性的增长，以及 Linux 内核的演进和不可避免的内部变更和重构，
+处理不兼容的内核变更的能力将变得越来越重要，因此请注意这项技术。
+上述介绍忽略了一堆实现细节，但仍希望能有助于理解如何在实践中使用这个特性。</p>
+</div>
+<div class="section" id="section-10">
+<span id="reading-kernel-data-structures-from-user-space-memory"></span><h3 id="hidsection-10">从用户态内存中读取内核数据结构<a class="headerlink" href="#hidsection-10" title="Permalink to this headline">¶</a></h3>
+<p>在一些情况下可能会出现的一个（尽管不太常见的）需求是需要从用户态内存中读取内核类型。
+这个类型很可能是内核 UAPI 类型之一，或者是作为系统调用的输入参数传递。
+为了满足这类需求（以及为了完整性），libbpf 提供了其 <tt class="docutils literal">BPF_CORE_READ()</tt> 宏系列的用户态等效版本：</p>
+<ul class="simple">
+<li><tt class="docutils literal">bpf_core_read_user()</tt>;</li>
+<li><tt class="docutils literal">bpf_core_read_user_str()</tt>;</li>
+<li><tt class="docutils literal">BPF_CORE_READ_USER_STR_INTO()</tt>;</li>
+<li><tt class="docutils literal">BPF_CORE_READ_USER_INTO()</tt>;</li>
+<li><tt class="docutils literal">BPF_CORE_READ_USER()</tt>.</li>
+</ul>
+<p>它们的功能和行为与它们的非“user”变体完全相同，唯一的区别在于所有的内存读取都是通过
+<tt class="docutils literal">bpf_probe_read_user()</tt> 和 <tt class="docutils literal">bpf_probe_read_user_str()</tt> BPF 辅助函数完成的，
+因此需要传递用户态指针。</p>
+</div>
+<div class="section" id="btf-id">
+<span id="capturing-btf-type-ids"></span><h3 id="hidbtf-id">捕获 BTF 类型 ID<a class="headerlink" href="#hidbtf-id" title="Permalink to this headline">¶</a></h3>
+<p>如果你熟悉 <a class="reference external" href="https://nakryiko.com/posts/btf-dedup">BTF</a> ，你就会知道 BTF 中的任何类型定义都有对应的
+BTF 类型 ID。无论是用于调试和日志记录，还是作为某些 BPF API 的一部分，
+了解 BPF 程序正在处理的类型/字段/枚举的 BTF 类型 ID 可能是重要的。
+BPF CO-RE 提供了一种从 BPF 程序代码内部捕获这些 BTF 类型 ID 作的整数值的方法。
+实际上，它提供了一个捕获两种不同 BTF 类型 ID 的方法。
+一种是目标内核 BTF（ <em>内核类型 ID</em> ），另一种是 BPF 程序自身的 BTF（ <em>本地类型 ID</em> ）：</p>
+<ul class="simple">
+<li><tt class="docutils literal">bpf_core_type_id_kernel()</tt> 函数从运行内核的 BTF 中返回已解析的类型 ID；</li>
+<li><tt class="docutils literal">bpf_core_type_id_local()</tt> 函数捕获在 BPF 程序编译期间由编译器捕获的类型 ID。</li>
+</ul>
+<p>请注意，使用 BPF CO-RE 重定位时，总是涉及到两种 BTF 类型。其中一种是 BPF 程序对 <strong>类型定义的本地期望</strong>
+（比如， <tt class="docutils literal">vmlinux.h</tt> 中的类型或使用 <tt class="docutils literal">preserve_access_index</tt> 属性
+<a class="reference external" href="#defining-own-co-re-relocatable-type-definitions">手动定义</a>
+的类型）。这种本地 BTF 类型为 libbpf 提供了在内核 BTF 中搜索什么的指导。
+因此，它可以是类型/字段/枚举的最小定义，可以只包含必要的字段和枚举值。</p>
+<p>然后 Libbpf 可以使用本地 BTF 类型定义来找到匹配的实际完整的内核 BTF 类型。
+上述辅助函数允许捕获参与 CO-RE 重定位的两种类型的 BTF 类型 ID。
+它们可能用于在运行时区分不同的内核或本地类型，用于调试和日志记录，
+或者潜在地用于未来的 BPF API，这些 API 将接受 BTF 类型 ID 作为输入参数。
+目前还没有这样的 API，但它们肯定会在不久的将来出现。</p>
+</div>
+</div>
+<div class="section" id="section-11">
+<span id="conclusion"></span><h2 id="hidsection-11">结语<a class="headerlink" href="#hidsection-11" title="Permalink to this headline">¶</a></h2>
+<p>希望这篇文章在高效地使用 BPF CO-RE 技术方面提供了足够的信息和实用指导。
+欢迎在您的 BPF 需求中创造性地使用它们。
+如果有任何不对或无法正常工作的地方，请通过 <a class="reference external" href="http://vger.kernel.org/vger-lists.html#bpf">BPF 邮件列表</a> 报告问题。</p>
+</div>
+
+                </div>
+            </div>
+            <!-- /.entry-content -->
+<section class="text-center">
+  
+<div id="donate"></div>
+
+<div class="social-share"></div>
+<div class="social-comment-note">
+<p class="text-center">有任何建议和想法欢迎在下方评论区留言或者加我<a href="/static/wechat.png">微信</a>交流</p>
+</div>
+
+</section>
+<section class="well" id="related-posts">
+    <p>Related Posts:</p>
+    <ul>
+        <li><a href="https://mozillazg.com/2022/07/ebpf-libbpf-what-is-load_byte-load_half-load_word-en.html">Introduction of load_byte/load_half/load_word functions commonly used in ebpf programs</a></li>
+        <li><a href="https://mozillazg.com/2022/07/ebpf-libbpf-what-is-load_byte-load_half-load_word.html">ebpf 程序中常用的 load_byte/load_half/load_word 功能介绍</a></li>
+        <li><a href="https://mozillazg.com/2024/07/ebpf-ptcpdump-capturing-the-network-traffic-of-a-process-or-container-or-pod-en.html">ptcpdump: Capturing the Network Traffic of any Process, Container, or Pod</a></li>
+        <li><a href="https://mozillazg.com/2024/07/ebpf-ptcpdump-capturing-the-network-traffic-of-a-process-or-container-or-pod.html">ptcpdump: 抓包时显示进程信息以及对任意进程、容器或 Pod 进行抓包</a></li>
+        <li><a href="https://mozillazg.com/2021/05/ebpf-gobpf-how-to-find-system-call-kernel-function-for-kprobe-elf-section.html">gobpf 使用示例：如何找到一个系统调用对应的可用于 kprobe SEC 的内核函数</a></li>
+    </ul>
+</section>
+<hr/>
+<section class="comments" id="comments">
+    <h2>Comments</h2>
+    <script src="https://giscus.app/client.js"
+            data-repo="mozillazg/mozillazg.github.com"
+            data-repo-id="MDEwOlJlcG9zaXRvcnk3Njc4MTA2"
+            data-category="Announcements"
+            data-category-id="DIC_kwDOAHUoms4CckZl"
+            data-mapping="pathname"
+            data-strict="0"
+            data-reactions-enabled="1"
+            data-emit-metadata="0"
+            data-input-position="bottom"
+            data-theme="preferred_color_scheme"
+            data-description="<description>"
+            data-lang="en"
+            data-loading="lazy"
+            crossorigin="anonymous"
+            async>
+    </script>
+</section>
+        </article>
+    </section>
+
+        </div>
+    </div>
+</div>
+<footer>
+   <div class="container">
+      <hr>
+      <div class="row">
+         <div class="col-xs-10">&copy; 2024 mozillazg
+            &middot; Powered by <a href="https://github.com/DandyDev/pelican-bootstrap3" target="_blank">pelican-bootstrap3</a>,
+            <a href="http://docs.getpelican.com/" target="_blank">Pelican</a>,
+            <a href="http://getbootstrap.com" target="_blank">Bootstrap</a>
+            &middot; <a href="/privacy-policy.html" target="_blank">Privacy</a>              <p><small>  <a rel="license" href="http://creativecommons.org/licenses/by-sa/4.0/"><img alt="Creative Commons License" style="border-width:0" src="/static/images/by-sa-80x15.png" /></a>
+    &quot;<span xmlns:dct="http://purl.org/dc/terms/" property="dct:title">mozillazg's Blog</span>&quot; by <a xmlns:cc="http://creativecommons.org/ns#" href="https://mozillazg.com" property="cc:attributionName" rel="cc:attributionURL">mozillazg</a> is
+  licensed under a <a rel="license" href="http://creativecommons.org/licenses/by-sa/4.0/">Creative Commons Attribution-ShareAlike 4.0 International License</a>, except where indicated otherwise.
+</small></p>
+         </div>
+         <div class="col-xs-2"><p class="pull-right"><i class="fa fa-arrow-up"></i> <a href="#">Back to top</a></p></div>
+      </div>
+   </div>
+</footer>
+<script src="/theme/cdn.jsdelivr.net/npm/jquery@2.1.1/dist/jquery.min.js"></script>
+
+<!-- Include all compiled plugins (below), or include individual files as needed -->
+<script src="/theme/cdn.jsdelivr.net/npm/bootstrap@3.3.4/dist/js/bootstrap.min.js"></script>
+
+<!-- Enable responsive features in IE8 with Respond.js (https://github.com/scottjehl/Respond) -->
+
+
+<!-- share.js -->
+<script src="/theme/cdn.jsdelivr.net/npm/social-share.js@1.0.16/dist/js/social-share.min.js"></script>
+
+
+
+<script src="/theme/cdn.jsdelivr.net/npm/tocbot@3.0.2/dist/tocbot.min.js"></script>
+<script>
+$(document).ready(function(){
+  tocbot.init({
+    // Where to render the table of contents.
+    tocSelector: '.js-toc',
+    // Where to grab the headings to build the table of contents.
+    contentSelector: '.entry-content',
+    // Which headings to grab inside of the contentSelector element.
+    headingSelector: 'h2, h3, h4,h5',
+    // Headings that match the ignoreSelector will be skipped.
+    ignoreSelector: '.js-toc-ignore',
+    // Main class to add to links.
+    linkClass: 'toc-link',
+    // Extra classes to add to links.
+    extraLinkClasses: '',
+    // Class to add to active links,
+    // the link corresponding to the top most heading on the page.
+    activeLinkClass: 'is-active-link',
+    // Main class to add to lists.
+    listClass: 'toc-list',
+    // Extra classes to add to lists.
+    extraListClasses: '',
+    // Class that gets added when a list should be collapsed.
+    isCollapsedClass: 'is-collapsed',
+    // Class that gets added when a list should be able
+    // to be collapsed but isn't necessarily collpased.
+    collapsibleClass: 'is-collapsible',
+    // Class to add to list items.
+    listItemClass: 'toc-list-item',
+    // How many heading levels should not be collpased.
+    // For example, number 6 will show everything since
+    // there are only 6 heading levels and number 0 will collpase them all.
+    // The sections that are hidden will open
+    // and close as you scroll to headings within them.
+    collapseDepth: 6,
+    // Smooth scrolling enabled.
+    smoothScroll: true,
+    // Smooth scroll duration.
+    smoothScrollDuration: 420,
+    // Callback for scroll end (requires: smoothScroll).
+    scrollEndCallback: function (e) {},
+    // Headings offset between the headings and the top of the document (this is meant for minor adjustments).
+    headingsOffset: 0,
+    // Timeout between events firing to make sure it's
+    // not too rapid (for performance reasons).
+    throttleTimeout: 50,
+    // Element to add the positionFixedClass to.
+    positionFixedSelector: null,
+    // Fixed position class to add to make sidebar fixed after scrolling
+    // down past the fixedSidebarOffset.
+    positionFixedClass: 'is-position-fixed',
+    // fixedSidebarOffset can be any number but by default is set
+    // to auto which sets the fixedSidebarOffset to the sidebar
+    // element's offsetTop from the top of the document on init.
+    fixedSidebarOffset: 'auto',
+    // includeHtml can be set to true to include the HTML markup from the
+    // heading node instead of just including the textContent.
+    includeHtml: false
+  });
+});
+</script>
+</body>
+</html>
