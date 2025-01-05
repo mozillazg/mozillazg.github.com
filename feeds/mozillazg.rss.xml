@@ -1,5 +1,537 @@
 <?xml version="1.0" encoding="utf-8"?>
-<rss version="2.0"><channel><title>mozillazg's Blog</title><link>https://mozillazg.com/</link><description></description><lastBuildDate>Sat, 02 Nov 2024 00:00:00 +0000</lastBuildDate><item><title>Major Changes in ptcpdump versions 1.16 to 1.26</title><link>https://mozillazg.com/2024/11/whats-new-ptcpdump-v1.16-v1.26-en.html</link><description>&lt;div class="section" id="preface"&gt;
+<rss version="2.0"><channel><title>mozillazg's Blog</title><link>https://mozillazg.com/</link><description></description><lastBuildDate>Sun, 05 Jan 2025 00:00:00 +0000</lastBuildDate><item><title>Workload Identity Federation for GKE 特性探索</title><link>https://mozillazg.com/2025/01/security-deep-dive-into-gcp-workload-identity-federation-for-gke-feature.html</link><description>&lt;p&gt;本文将简单探索一下前段时间 GKE 官宣的名为 &lt;a class="reference external" href="https://cloud.google.com/blog/products/identity-security/make-iam-for-gke-easier-to-use-with-workload-identity-federation"&gt;Workload Identity Federation for GKE&lt;/a&gt; 的特性。&lt;/p&gt;
+&lt;div class="section" id="section-1"&gt;
+&lt;h2 id="hidsection-1"&gt;功能介绍&lt;a class="headerlink" href="#hidsection-1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;Workload Identity Federation for GKE 是原有的 GKE Workload Identity 特性的改进版本,
+核心的改进是减少了需要配置的信息，提升了用户体验。&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class="section" id="section-2"&gt;
+&lt;h2 id="hidsection-2"&gt;使用方法&lt;a class="headerlink" href="#hidsection-2" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;可以通过下面几个步骤体验该特性：&lt;/p&gt;
+&lt;ol class="arabic"&gt;
+&lt;li&gt;&lt;p class="first"&gt;创建一个启用 Workload Identity Federation for GKE 特性的 GKE 集群。具体启用位置是：创建集群 - 安全 - 启用 Workload Identity。&lt;/p&gt;
+&lt;/li&gt;
+&lt;li&gt;&lt;p class="first"&gt;为测试应用使用的 service account 关联 iam 角色，一个 service account 可以关联多个角色。比如:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+gcloud projects add-iam-policy-binding projects/test-gke-XXX \
+    --role=roles/container.clusterViewer \
+    --member=principal://iam.googleapis.com/projects/23182XXXXXXX/locations/global/workloadIdentityPools/test-gke-XXXXXX.svc.id.goog/subject/ns/&amp;lt;namespace-name&amp;gt;/sa/&amp;lt;service-account-name&amp;gt; \
+    --condition=None
+
+gcloud storage buckets add-iam-policy-binding gs://&amp;lt;bucket-name&amp;gt; \
+--role=roles/storage.objectViewer \
+--member=principal://iam.googleapis.com/projects/23182XXXXXXX/locations/global/workloadIdentityPools/test-gke-XXXXXX.svc.id.goog/subject/ns/&amp;lt;namespace-name&amp;gt;/sa/&amp;lt;service-account-name&amp;gt; \
+--condition=None
+&lt;/pre&gt;
+&lt;/li&gt;
+&lt;li&gt;&lt;p class="first"&gt;部署测试应用，测试应用的 pod 需要使用第 2 步对应的 namespace 和 service account 以及增加 nodeSelector 确保调度到启用了 Workload Identity Federation for GKE 特性的节点上:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+apiVersion: v1
+kind: Pod
+metadata:
+  name: test-pod
+  namespace: demo-ns
+spec:
+  nodeSelector:
+    iam.gke.io/gke-metadata-server-enabled: &amp;quot;true&amp;quot;
+  serviceAccountName: demo-sa
+  containers:
+  - name: test-pod
+    image: google/cloud-sdk:slim
+    command: [&amp;quot;sleep&amp;quot;,&amp;quot;infinity&amp;quot;]
+&lt;/pre&gt;
+&lt;/li&gt;
+&lt;li&gt;&lt;p class="first"&gt;待 pod running 后, 进入 test-pod 容器内，访问实例元数据服务获取 sts token，实际的业务应用使用的官方 SDK 也将使用类似的方式访问实例元数据服务获取用于请求云产品 API 的 sts token。&lt;/p&gt;
+&lt;/li&gt;
+&lt;/ol&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;$&lt;span class="w"&gt; &lt;/span&gt;gcloud&lt;span class="w"&gt; &lt;/span&gt;auth&lt;span class="w"&gt; &lt;/span&gt;print-access-token
+&lt;span class="w"&gt; &lt;/span&gt;ya29.d.XXX
+$&lt;span class="w"&gt; &lt;/span&gt;curl&lt;span class="w"&gt; &lt;/span&gt;-H&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="s2"&gt;&amp;quot;Metadata-Flavor: Google&amp;quot;&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token
+&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;{&lt;/span&gt;&lt;span class="s2"&gt;&amp;quot;access_token&amp;quot;&lt;/span&gt;:&lt;span class="s2"&gt;&amp;quot;ya29.d.XXX&amp;quot;&lt;/span&gt;,&lt;span class="s2"&gt;&amp;quot;expires_in&amp;quot;&lt;/span&gt;:3423,&lt;span class="s2"&gt;&amp;quot;token_type&amp;quot;&lt;/span&gt;:&lt;span class="s2"&gt;&amp;quot;Bearer&amp;quot;&lt;/span&gt;&lt;span class="o"&gt;}&lt;/span&gt;
+&lt;/pre&gt;&lt;/div&gt;
+&lt;ol class="arabic simple" start="5"&gt;
+&lt;li&gt;获取的 sts token 将具有前面第 2 步所关联的角色权限.&lt;/li&gt;
+&lt;/ol&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;$&lt;span class="w"&gt; &lt;/span&gt;gcloud&lt;span class="w"&gt; &lt;/span&gt;container&lt;span class="w"&gt; &lt;/span&gt;node-pools&lt;span class="w"&gt; &lt;/span&gt;list&lt;span class="w"&gt; &lt;/span&gt;--zone&lt;span class="w"&gt; &lt;/span&gt;us-central1&lt;span class="w"&gt; &lt;/span&gt;--cluster&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nb"&gt;test&lt;/span&gt;
+&lt;span class="w"&gt; &lt;/span&gt;NAME&lt;span class="w"&gt;          &lt;/span&gt;MACHINE_TYPE&lt;span class="w"&gt;  &lt;/span&gt;DISK_SIZE_GB&lt;span class="w"&gt;  &lt;/span&gt;NODE_VERSION
+&lt;span class="w"&gt; &lt;/span&gt;default-pool&lt;span class="w"&gt;  &lt;/span&gt;e2-medium&lt;span class="w"&gt;     &lt;/span&gt;&lt;span class="m"&gt;100&lt;/span&gt;&lt;span class="w"&gt;           &lt;/span&gt;&lt;span class="m"&gt;1&lt;/span&gt;.30.6-gke.1125000
+
+$&lt;span class="w"&gt; &lt;/span&gt;curl&lt;span class="w"&gt; &lt;/span&gt;-X&lt;span class="w"&gt; &lt;/span&gt;GET&lt;span class="w"&gt; &lt;/span&gt;-H&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="s2"&gt;&amp;quot;Authorization: Bearer &lt;/span&gt;&lt;span class="k"&gt;$(&lt;/span&gt;gcloud&lt;span class="w"&gt; &lt;/span&gt;auth&lt;span class="w"&gt; &lt;/span&gt;print-access-token&lt;span class="k"&gt;)&lt;/span&gt;&lt;span class="s2"&gt;&amp;quot;&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="se"&gt;\&lt;/span&gt;
+&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="s2"&gt;&amp;quot;https://storage.googleapis.com/storage/v1/b/demo-gke-workload-identity-federation/o&amp;quot;&lt;/span&gt;
+&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;{&lt;/span&gt;
+&lt;span class="w"&gt;   &lt;/span&gt;&lt;span class="s2"&gt;&amp;quot;kind&amp;quot;&lt;/span&gt;:&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="s2"&gt;&amp;quot;storage#objects&amp;quot;&lt;/span&gt;
+&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;}&lt;/span&gt;
+&lt;/pre&gt;&lt;/div&gt;
+&lt;/div&gt;
+&lt;div class="section" id="section-3"&gt;
+&lt;h2 id="hidsection-3"&gt;工作流程&lt;a class="headerlink" href="#hidsection-3" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;Workload Identity Federation for GKE 特性的工作流程如下：&lt;/p&gt;
+&lt;p&gt;&lt;img alt="image" src="/static/images/security/gke-workload-identity-federation-for-gke.png" /&gt;&lt;/p&gt;
+&lt;ol class="arabic simple"&gt;
+&lt;li&gt;当应用 Pod 容器内的程序请求实例元数据服务（访问 &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;http://metadata.google.internal&lt;/span&gt;&lt;/tt&gt; ，实际是访问 &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;http://169.254.169.254:80&lt;/span&gt;&lt;/tt&gt; ）
+获取 sts token 时, 该请求将被重定向到 169.254.169.252:988。
+169.254.169.252:988 是节点上部署的 gke-metadata-server 服务所监听的端口。&lt;/li&gt;
+&lt;li&gt;gke-metadata-server 服务在收到请求后，将根据请求的 client ip 确定请求来自哪个 Pod，
+然后再请求 apiserver 生成一个该 Pod 所使用的 service account 对应的 token。&lt;/li&gt;
+&lt;li&gt;gke-metadata-server 将使用获取的 service account token 访问 GCP 的
+&lt;a class="reference external" href="https://cloud.google.com/iam/docs/reference/sts/rest/v1/TopLevel/token"&gt;STS API&lt;/a&gt; 获取一个 sts token，
+最后 gke-metadata-server 将获取到的 sts token 返回给客户端。&lt;/li&gt;
+&lt;/ol&gt;
+&lt;p&gt;这个流程中有几个关键的组件和信息需要重点关注，下面将逐个说明。&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class="section" id="gke-metadata-server"&gt;
+&lt;h2 id="hidgke-metadata-server"&gt;gke-metadata-server&lt;a class="headerlink" href="#hidgke-metadata-server" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;当在集群维度或节点池维度启用 Workload Identity Federation for GKE 特性时，集群内将自动部署一个名为 gke-metadata-server 的组件。
+该组件的工作负载 YAML 如下:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  annotations:
+    deprecated.daemonset.template.generation: &amp;quot;1&amp;quot;
+  labels:
+    addonmanager.kubernetes.io/mode: Reconcile
+    k8s-app: gke-metadata-server
+  name: gke-metadata-server
+  namespace: kube-system
+spec:
+  minReadySeconds: 90
+  revisionHistoryLimit: 10
+  selector:
+    matchLabels:
+      k8s-app: gke-metadata-server
+  template:
+    metadata:
+      annotations:
+        components.gke.io/component-name: gke-metadata-server
+        components.gke.io/component-version: 0.4.301
+        monitoring.gke.io/path: /metricz
+      creationTimestamp: null
+      labels:
+        addonmanager.kubernetes.io/mode: Reconcile
+        k8s-app: gke-metadata-server
+    spec:
+      containers:
+      - command:
+        - /gke-metadata-server
+        - --logtostderr
+        - --token-exchange-endpoint=https://securetoken.googleapis.com/v1/identitybindingtoken
+        - --workload-pool=test-gke-XXXXXX.svc.id.goog
+        - --alts-service-suffixes-using-node-identity=storage.googleapis.com,bigtable.googleapis.com,bigtable2.googleapis.com,bigtablerls.googleapis.com,spanner.googleapis.com,spanner2.googleapis.com,spanner-rls.googleapis.com,grpclb.directpath.google.internal,grpclb-dualstack.directpath.google.internal,staging-wrenchworks.sandbox.googleapis.com,preprod-spanner.sandbox.googleapis.com,wrenchworks-loadtest.googleapis.com,wrenchworks-nonprod.googleapis.com
+        - --identity-provider=https://container.googleapis.com/v1/projects/test-gke-XXXXXX/locations/us-central1/clusters/test
+        - --passthrough-ksa-list=anthos-identity-service:gke-oidc-envoy-sa,anthos-identity-service:gke-oidc-service-sa,gke-managed-dpv2-observability:hubble-relay,kube-system:antrea-controller,kube-system:container-watcher-pod-reader,kube-system:coredns,kube-system:egress-nat-controller,kube-system:event-exporter-sa,kube-system:fluentd-gcp-scaler,kube-system:gke-metrics-agent,kube-system:gke-spiffe-node-agent,kube-system:heapster,kube-system:konnectivity-agent,kube-system:kube-dns,kube-system:maintenance-handler,kube-system:metadata-agent,kube-system:network-metering-agent,kube-system:node-local-dns,kube-system:pkgextract-service,kube-system:pkgextract-cleanup-service,kube-system:securityprofile-controller,istio-system:istio-ingressgateway-service-account,istio-system:cluster-local-gateway-service-account,csm:csm-sync-agent,knative-serving:controller,kube-system:pdcsi-node-sa,kube-system:gcsfusecsi-node-sa,gmp-system:collector,gke-gmp-system:collector,gke-managed-cim:kube-state-metrics
+        - --attributes=cluster-name=test,cluster-uid=392f63049deXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX,cluster-location=us-central1
+        - --cluster-uid=392f63049ded410XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+        - --sts-endpoint=https://sts.googleapis.com
+        - --token-exchange-mode=sts
+        - --cloud-monitoring-endpoint=monitoring.googleapis.com:443
+        - --iam-cred-service-endpoint=https://iamcredentials.googleapis.com
+        - --cluster-project-number=2318XXXXXXXX
+        - --cluster-location=us-central1
+        - --cluster-name=test
+        - --component-version=0.4.301
+        - --ksa-cache-mode=watchchecker
+        - --kcp-allow-watch-checker=true
+        - --enable-mds-csi-driver=true
+        - --csi-socket=/csi/csi.sock
+        - --volumes-db=/var/run/gkemds.gke.io/csi/volumes.boltdb
+        env:
+        - name: GOMEMLIMIT
+          value: &amp;quot;94371840&amp;quot;
+        image: us-central1-artifactregistry.gcr.io/gke-release/gke-release/gke-metadata-server:gke_metadata_server_20240702.00_p0&amp;#64;sha256:aea9cc887c91b9a05e5bb4bb604180772594a01f0828bbfacf30c77562ac7205
+        imagePullPolicy: IfNotPresent
+        livenessProbe:
+          failureThreshold: 3
+          httpGet:
+            host: 127.0.0.1
+            path: /healthz
+            port: 989
+            scheme: HTTP
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          successThreshold: 1
+          timeoutSeconds: 3
+        name: gke-metadata-server
+        ports:
+        - containerPort: 987
+          name: alts
+          protocol: TCP
+        - containerPort: 988
+          name: metadata-server
+          protocol: TCP
+        - containerPort: 989
+          name: debug-port
+          protocol: TCP
+        readinessProbe:
+          failureThreshold: 3
+          httpGet:
+            host: 127.0.0.1
+            path: /healthz
+            port: 989
+            scheme: HTTP
+          periodSeconds: 10
+          successThreshold: 1
+          timeoutSeconds: 1
+        resources:
+          limits:
+            memory: 100Mi
+          requests:
+            cpu: 100m
+            memory: 100Mi
+        securityContext:
+          privileged: true
+          readOnlyRootFilesystem: true
+        terminationMessagePath: /dev/termination-log
+        terminationMessagePolicy: File
+        volumeMounts:
+        - mountPath: /var/lib/kubelet/kubeconfig
+          name: kubelet-credentials
+          readOnly: true
+        - mountPath: /var/lib/kubelet/pki/
+          name: kubelet-certs
+          readOnly: true
+        - mountPath: /var/run/
+          name: container-runtime-interface
+        - mountPath: /etc/srv/kubernetes/pki
+          name: kubelet-pki
+          readOnly: true
+        - mountPath: /etc/ssl/certs/
+          name: ca-certificates
+          readOnly: true
+        - mountPath: /home/kubernetes/bin/gke-exec-auth-plugin
+          name: gke-exec-auth-plugin
+          readOnly: true
+        - mountPath: /sys/firmware/efi/efivars/
+          name: efivars
+          readOnly: true
+        - mountPath: /dev/tpm0
+          name: vtpm
+          readOnly: true
+        - mountPath: /csi
+          name: csi-socket-dir
+        - mountPath: /var/run/gkemds.gke.io/csi
+          name: state-dir
+        - mountPath: /var/lib/kubelet/pods
+          mountPropagation: Bidirectional
+          name: pods-dir
+        - mountPath: /registration
+          name: kubelet-registration-dir
+      dnsPolicy: Default
+      hostNetwork: true
+      nodeSelector:
+        iam.gke.io/gke-metadata-server-enabled: &amp;quot;true&amp;quot;
+        kubernetes.io/os: linux
+      priorityClassName: system-node-critical
+      restartPolicy: Always
+      schedulerName: default-scheduler
+      securityContext: {}
+      serviceAccount: gke-metadata-server
+      serviceAccountName: gke-metadata-server
+      terminationGracePeriodSeconds: 30
+      tolerations:
+      - effect: NoExecute
+        operator: Exists
+      - effect: NoSchedule
+        operator: Exists
+      - key: components.gke.io/gke-managed-components
+        operator: Exists
+      volumes:
+      - hostPath:
+          path: /var/lib/kubelet/pki/
+          type: Directory
+        name: kubelet-certs
+      - hostPath:
+          path: /var/lib/kubelet/kubeconfig
+          type: File
+        name: kubelet-credentials
+      - hostPath:
+          path: /var/run/
+          type: Directory
+        name: container-runtime-interface
+      - hostPath:
+          path: /etc/srv/kubernetes/pki/
+          type: Directory
+        name: kubelet-pki
+      - hostPath:
+          path: /etc/ssl/certs/
+          type: Directory
+        name: ca-certificates
+      - hostPath:
+          path: /home/kubernetes/bin/gke-exec-auth-plugin
+          type: File
+        name: gke-exec-auth-plugin
+      - hostPath:
+          path: /sys/firmware/efi/efivars/
+          type: Directory
+        name: efivars
+      - hostPath:
+          path: /dev/tpm0
+          type: CharDevice
+        name: vtpm
+      - hostPath:
+          path: /var/lib/kubelet/plugins/gkemds.gke.io
+          type: DirectoryOrCreate
+        name: csi-socket-dir
+      - hostPath:
+          path: /var/lib/kubelet/pods
+          type: Directory
+        name: pods-dir
+      - hostPath:
+          path: /var/lib/kubelet/plugins_registry
+          type: Directory
+        name: kubelet-registration-dir
+      - hostPath:
+          path: /var/lib/kubelet/plugins
+          type: Directory
+        name: kubelet-plugins-dir
+      - hostPath:
+          path: /var/run/gkemds.gke.io/csi
+          type: DirectoryOrCreate
+        name: state-dir
+&lt;/pre&gt;
+&lt;p&gt;gke-metadata-server 组件具有如下特点：&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;p class="first"&gt;组件的工作负载是一个 DaemonSet。&lt;/p&gt;
+&lt;/li&gt;
+&lt;li&gt;&lt;p class="first"&gt;组件 Pod 使用 &lt;tt class="docutils literal"&gt;hostNetwork: true&lt;/tt&gt; 以及 &lt;tt class="docutils literal"&gt;privileged: true&lt;/tt&gt; 。&lt;/p&gt;
+&lt;/li&gt;
+&lt;li&gt;&lt;p class="first"&gt;组件内的服务将监听 987, 988 以及 989 端口, 其中 988 端口将用于接收重定向过来的访问实例元数据服务的请求:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+$ ss -atnlp |grep gke
+LISTEN 0      1024               *:987              *:*    users:((&amp;quot;gke-metadata-se&amp;quot;,pid=183706,fd=10))
+LISTEN 0      1024               *:989              *:*    users:((&amp;quot;gke-metadata-se&amp;quot;,pid=183706,fd=12))
+LISTEN 0      1024               *:988              *:*    users:((&amp;quot;gke-metadata-se&amp;quot;,pid=183706,fd=15))
+&lt;/pre&gt;
+&lt;/li&gt;
+&lt;li&gt;&lt;p class="first"&gt;前面所说的 169.254.169.252 这个 IP 是本机 lo 的 IP 地址，所以 gke-metadata-server 监听的 988 端口
+就包含了前面所说的 &lt;tt class="docutils literal"&gt;169.254.169.252:988&lt;/tt&gt; 端口:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+1: lo: &amp;lt;LOOPBACK,UP,LOWER_UP&amp;gt; mtu 65536 qdisc noqueue state UNKNOWN group default qlen 1000
+    link/loopback 00:00:00:00:00:00 brd 00:00:00:00:00:00
+    inet 127.0.0.1/8 scope host lo
+       valid_lft forever preferred_lft forever
+    inet 169.254.169.252/32 scope host lo
+       valid_lft forever preferred_lft forever
+    inet6 ::1/128 scope host
+       valid_lft forever preferred_lft forever
+&lt;/pre&gt;
+&lt;/li&gt;
+&lt;li&gt;&lt;p class="first"&gt;所有启用了 Workload Identity Federation for GKE 特性的节点在初始化的时候都会配置如下 nftables 规则，
+确保从业务容器内发起的请求元数据服务 (&lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;http://metadata.google.internal&lt;/span&gt;&lt;/tt&gt; , 169.254.169.254:80)
+的流量都会被重定向到组件所监听的 &lt;tt class="docutils literal"&gt;169.254.169.252:988&lt;/tt&gt; 端口:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+table ip nat {
+        chain PREROUTING {
+                type nat hook prerouting priority dstnat; policy accept;
+                 counter packets 2143 bytes 169432 jump KUBE-SERVICES
+                iifname != &amp;quot;eth0&amp;quot; meta l4proto tcp ip daddr 169.254.169.254 tcp dport 8080  counter packets 0 bytes 0 dnat to 169.254.169.252:987
+                iifname != &amp;quot;eth0&amp;quot; meta l4proto tcp ip daddr 169.254.169.254 tcp dport 80  counter packets 181 bytes 10860 dnat to 169.254.169.252:988
+        }
+}
+&lt;/pre&gt;
+&lt;/li&gt;
+&lt;li&gt;&lt;p class="first"&gt;前面说到组件将通过 client ip 确定请求的来源 pod 以及会请求 apiserver 获取 service account，这里就涉及到组件是使用的什么凭证来访问 apiserver。
+组件使用的是节点上 kubelet 的凭证来访问的 apiserver（前面的组件 YAML 中包含了挂载 kubelet kubeconfig 的配置）。
+同时在部署组件时，将额外为 kubelet 的凭证授予 pods 和 serviceaccounts 的 get/list/watch RBAC 权限，
+用于获取当前节点的 pod 以及 service account 信息:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  annotations:
+    components.gke.io/component-name: gke-metadata-server
+    components.gke.io/component-version: 0.4.301
+  labels:
+    addonmanager.kubernetes.io/mode: Reconcile
+  name: gce:gke-metadata-server-reader
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: gce:gke-metadata-server-reader
+subjects:
+- apiGroup: rbac.authorization.k8s.io
+  kind: Group
+  name: system:nodes
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  annotations:
+    components.gke.io/component-name: gke-metadata-server
+    components.gke.io/component-version: 0.4.301
+  labels:
+    addonmanager.kubernetes.io/mode: Reconcile
+  name: gce:gke-metadata-server-reader
+rules:
+- apiGroups:
+  - &amp;quot;&amp;quot;
+  resources:
+  - pods
+  - serviceaccounts
+  verbs:
+  - get
+  - watch
+  - list
+&lt;/pre&gt;
+&lt;/li&gt;
+&lt;li&gt;&lt;p class="first"&gt;如果 pod 使用的 service account 没有绑定 IAM 角色，pod 内应用访问元数据服务获取的 sts token 将会是节点默认的 google serivce account 的 sts token。&lt;/p&gt;
+&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/div&gt;
+&lt;div class="section" id="service-account-token"&gt;
+&lt;h2 id="hidservice-account-token"&gt;service account token&lt;a class="headerlink" href="#hidservice-account-token" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;对于每个 pod 内程序发起的请求，gke-metadata-server 组件不是直接使用 pod 容器所挂载 service account token，
+而是请求 apiserver 生成了一份新的 service account token。&lt;/p&gt;
+&lt;p&gt;容器所挂载的 service account token 的 payload 示例如下:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+{
+  &amp;quot;aud&amp;quot;: [
+    &amp;quot;https://container.googleapis.com/v1/projects/test-gke-XXXXXX/locations/us-central1/clusters/test&amp;quot;
+  ],
+  &amp;quot;exp&amp;quot;: ...,
+  &amp;quot;iat&amp;quot;: ...,
+  &amp;quot;iss&amp;quot;: &amp;quot;https://container.googleapis.com/v1/projects/test-gke-XXXXXX/locations/us-central1/clusters/test&amp;quot;,
+  &amp;quot;jti&amp;quot;: &amp;quot;...&amp;quot;,
+  &amp;quot;kubernetes.io&amp;quot;: {...},
+  &amp;quot;nbf&amp;quot;: ...,
+  &amp;quot;sub&amp;quot;: &amp;quot;system:serviceaccount:demo-ns:demo-sa&amp;quot;
+}
+&lt;/pre&gt;
+&lt;p&gt;组件请求 apiserver 所生成的 service account token 的 payload 示例如下:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+{
+  &amp;quot;aud&amp;quot;: [
+    &amp;quot;test-gke-XXXXXX.svc.id.goog&amp;quot;
+  ],
+  &amp;quot;exp&amp;quot;: ...,
+  &amp;quot;iat&amp;quot;: ...,
+  &amp;quot;iss&amp;quot;: &amp;quot;https://container.googleapis.com/v1/projects/test-gke-XXXXXX/locations/us-central1/clusters/test&amp;quot;,
+  &amp;quot;jti&amp;quot;: &amp;quot;...&amp;quot;,
+  &amp;quot;kubernetes.io&amp;quot;: {...},
+  &amp;quot;nbf&amp;quot;: ...,
+  &amp;quot;sub&amp;quot;: &amp;quot;system:serviceaccount:demo-ns:demo-sa&amp;quot;
+}
+&lt;/pre&gt;
+&lt;p&gt;可以看到，主要的区别是 aud 的内容不一样。&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class="section" id="sts-token"&gt;
+&lt;h2 id="hidsts-token"&gt;sts token&lt;a class="headerlink" href="#hidsts-token" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;gke-metadata-server 组件将使用获取到的 service account token 访问 STS 的
+&lt;a class="reference external" href="https://cloud.google.com/iam/docs/reference/sts/rest/v1/TopLevel/token"&gt;token API&lt;/a&gt; 获取一份 sts token。&lt;/p&gt;
+&lt;p&gt;对应的请求示例如下:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+:authority: sts.googleapis.com
+:method: POST
+:path: /v1/token?alt=json&amp;amp;prettyPrint=false
+:scheme: https
+x-goog-api-client: gl-go/1.23.0--20240626-RC01 cl/646990413 +5a18e79687 X:fieldtrack,boringcrypto gdcl/0.177.0
+user-agent: google-api-go-client/0.5 gke-metadata-server
+content-type: application/json
+content-length: 1673
+accept-encoding: gzip
+
+{&amp;quot;audience&amp;quot;:&amp;quot;identitynamespace:test-gke-XXXXXX.svc.id.goog:https://container.googleapis.com/v1/projects/test-gke-XXXXXX/locations/us-central1/clusters/test&amp;quot;,&amp;quot;grantType&amp;quot;:&amp;quot;urn:ietf:params:oauth:grant-type:token-exchange&amp;quot;,&amp;quot;requestedTokenType&amp;quot;:&amp;quot;urn:ietf:params:oauth:token-type:access_token&amp;quot;,&amp;quot;scope&amp;quot;:&amp;quot;https://www.googleapis.com/auth/cloud-platform https://www.googleapis.com/auth/userinfo.email&amp;quot;,&amp;quot;subjectToken&amp;quot;:&amp;quot;XXX.XXX.XXX&amp;quot;,&amp;quot;subjectTokenType&amp;quot;:&amp;quot;urn:ietf:params:oauth:token-type:jwt&amp;quot;}
+
+:status: 200
+content-type: application/json; charset=UTF-8
+vary: Origin
+vary: X-Origin
+vary: Referer
+content-encoding: gzip
+date: ...
+server: scaffolding on HTTPServer2
+content-length: 1061
+x-xss-protection: 0
+x-frame-options: SAMEORIGIN
+x-content-type-options: nosniff
+
+{&amp;quot;access_token&amp;quot;:&amp;quot;ya29.d.XXX&amp;quot;,&amp;quot;issued_token_type&amp;quot;:&amp;quot;urn:ietf:params:oauth:token-type:access_token&amp;quot;,&amp;quot;token_type&amp;quot;:&amp;quot;Bearer&amp;quot;,&amp;quot;expires_in&amp;quot;:3599}
+&lt;/pre&gt;
+&lt;p&gt;其中请求 body 格式化后的内容如下:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+{
+  &amp;quot;audience&amp;quot;: &amp;quot;identitynamespace:test-gke-XXXXXX.svc.id.goog:https://container.googleapis.com/v1/projects/test-gke-XXXXXX/locations/us-central1/clusters/test&amp;quot;,
+  &amp;quot;grantType&amp;quot;: &amp;quot;urn:ietf:params:oauth:grant-type:token-exchange&amp;quot;,
+  &amp;quot;requestedTokenType&amp;quot;: &amp;quot;urn:ietf:params:oauth:token-type:access_token&amp;quot;,
+  &amp;quot;scope&amp;quot;: &amp;quot;https://www.googleapis.com/auth/cloud-platform https://www.googleapis.com/auth/userinfo.email&amp;quot;,
+  &amp;quot;subjectToken&amp;quot;: &amp;quot;XXX.XXX.XXX&amp;quot;,
+  &amp;quot;subjectTokenType&amp;quot;: &amp;quot;urn:ietf:params:oauth:token-type:jwt&amp;quot;
+}
+&lt;/pre&gt;
+&lt;p&gt;响应 body 格式化后的内容如下:&lt;/p&gt;
+&lt;pre class="literal-block"&gt;
+{
+  &amp;quot;access_token&amp;quot;: &amp;quot;ya29.d.XXX&amp;quot;,
+  &amp;quot;issued_token_type&amp;quot;: &amp;quot;urn:ietf:params:oauth:token-type:access_token&amp;quot;,
+  &amp;quot;token_type&amp;quot;: &amp;quot;Bearer&amp;quot;,
+  &amp;quot;expires_in&amp;quot;: 3599
+}
+&lt;/pre&gt;
+&lt;/div&gt;
+&lt;div class="section" id="gke-workload-identity"&gt;
+&lt;h2 id="hidgke-workload-identity"&gt;与 GKE Workload Identity 的区别&lt;a class="headerlink" href="#hidgke-workload-identity" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;Workload Identity Federation for GKE 与 GKE Workload Identity 特性（又叫 link Kubernetes ServiceAccounts to IAM）的区别如下：&lt;/p&gt;
+&lt;table border="1" class="docutils"&gt;
+&lt;colgroup&gt;
+&lt;col width="29%" /&gt;
+&lt;col width="26%" /&gt;
+&lt;col width="45%" /&gt;
+&lt;/colgroup&gt;
+&lt;thead valign="bottom"&gt;
+&lt;tr&gt;&lt;th class="head"&gt;比较项&lt;/th&gt;
+&lt;th class="head"&gt;GKE Workload Identity&lt;/th&gt;
+&lt;th class="head"&gt;Workload Identity Federation for GKE&lt;/th&gt;
+&lt;/tr&gt;
+&lt;/thead&gt;
+&lt;tbody valign="top"&gt;
+&lt;tr&gt;&lt;td&gt;需要创建 Google service account (GSA)&lt;/td&gt;
+&lt;td&gt;需要&lt;/td&gt;
+&lt;td&gt;&lt;strong&gt;不需要&lt;/strong&gt;&lt;/td&gt;
+&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;需要配置 GSA 绑定的 IAM 角色&lt;/td&gt;
+&lt;td&gt;需要&lt;/td&gt;
+&lt;td&gt;需要配置 k8s service account (KSA) 绑定的角色&lt;/td&gt;
+&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;需要配置允许使用 KSA 扮演 GSA&lt;/td&gt;
+&lt;td&gt;需要&lt;/td&gt;
+&lt;td&gt;&lt;strong&gt;不需要&lt;/strong&gt;&lt;/td&gt;
+&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;需要在集群内配置 KSA 的 GSA 信息&lt;/td&gt;
+&lt;td&gt;需要&lt;/td&gt;
+&lt;td&gt;&lt;strong&gt;不需要&lt;/strong&gt;&lt;/td&gt;
+&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;绑定角色时支持指定多个 KSA/GSA&lt;/td&gt;
+&lt;td&gt;不支持&lt;/td&gt;
+&lt;td&gt;&lt;strong&gt;支持&lt;/strong&gt; 指定多个，比如某个命名空间下的所有SA, 某个集群内的所有SA&lt;/td&gt;
+&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;不支持使用 hostNetwork 的应用&lt;/td&gt;
+&lt;td&gt;不支持&lt;/td&gt;
+&lt;td&gt;不支持&lt;/td&gt;
+&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;依赖部署 gke-metadata-server 组件&lt;/td&gt;
+&lt;td&gt;依赖&lt;/td&gt;
+&lt;td&gt;依赖&lt;/td&gt;
+&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;云产品API对获取的 sts token 的支持情况&lt;/td&gt;
+&lt;td&gt;几乎所有云产品 API 都支持&lt;/td&gt;
+&lt;td&gt;大部分云产品API都支持，部分云产品有限支持，少量云产品不支持&lt;/td&gt;
+&lt;/tr&gt;
+&lt;/tbody&gt;
+&lt;/table&gt;
+&lt;/div&gt;
+&lt;div class="section" id="section-4"&gt;
+&lt;h2 id="hidsection-4"&gt;参考资料&lt;a class="headerlink" href="#hidsection-4" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
+&lt;ul class="simple"&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://cloud.google.com/blog/products/identity-security/make-iam-for-gke-easier-to-use-with-workload-identity-federation"&gt;Make IAM for GKE easier to use with Workload Identity Federation | Google Cloud Blog&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://cloud.google.com/kubernetes-engine/docs/how-to/workload-identity"&gt;Authenticate to Google Cloud APIs from GKE workloads &amp;nbsp;|&amp;nbsp; Google Kubernetes Engine (GKE)&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://cloud.google.com/kubernetes-engine/docs/concepts/workload-identity"&gt;About Workload Identity Federation for GKE &amp;nbsp;|&amp;nbsp; Google Kubernetes Engine (GKE) &amp;nbsp;|&amp;nbsp; Google Cloud&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://cloud.google.com/iam/docs/federated-identity-supported-services"&gt;Identity federation: products and limitations &amp;nbsp;|&amp;nbsp; IAM Documentation &amp;nbsp;|&amp;nbsp; Google Cloud&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://cloud.google.com/iam/docs/reference/sts/rest/v1/TopLevel/token"&gt;Method: token &amp;nbsp;|&amp;nbsp; IAM Documentation &amp;nbsp;|&amp;nbsp; Google Cloud&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a class="reference external" href="https://cloud.google.com/compute/docs/metadata/overview"&gt;About VM metadata &amp;nbsp;|&amp;nbsp; Compute Engine Documentation &amp;nbsp;|&amp;nbsp; Google Cloud&lt;/a&gt;&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/div&gt;
+</description><dc:creator xmlns:dc="http://purl.org/dc/elements/1.1/">mozillazg</dc:creator><pubDate>Sun, 05 Jan 2025 00:00:00 +0000</pubDate><guid isPermaLink="false">tag:mozillazg.com,2025-01-05:2025/01/security-deep-dive-into-gcp-workload-identity-federation-for-gke-feature.html</guid><category>kubernetes</category><category>k8s</category><category>gcp</category><category>gke</category><category>Workload Identity Federation for GKE</category><category>cloud-security</category></item><item><title>Major Changes in ptcpdump versions 1.16 to 1.26</title><link>https://mozillazg.com/2024/11/whats-new-ptcpdump-v1.16-v1.26-en.html</link><description>&lt;div class="section" id="preface"&gt;
 &lt;h2 id="hidpreface"&gt;Preface&lt;a class="headerlink" href="#hidpreface" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
 &lt;p&gt;It has been several months since the
 &lt;a class="reference external" href="https://mozillazg.com/2024/07/ebpf-ptcpdump-capturing-the-network-traffic-of-a-process-or-container-or-pod.html"&gt;last introduction&lt;/a&gt;
@@ -164,7 +696,7 @@ generating the corresponding TLS Key Log file when capturing Go program's networ
 &lt;p&gt;The TLS Key Log file, also known as &lt;a class="reference external" href="https://tlswg.org/sslkeylogfile/draft-ietf-tls-keylogfile.html"&gt;SSLKEYLOGFILE&lt;/a&gt; ,
 corresponds to the pre-master secret configuration in Wireshark.
 Third-party programs can decrypt captured TLS traffic using the information recorded in this file.&lt;/p&gt;
-&lt;p&gt;Please note: This feature is experimental and is only supported by Go programs compiled with version 1.18 or above.
+&lt;p&gt;Please note: This feature is experimental and is only supported by Go programs compiled with version 1.18 or above (supports stripped binary).
 It also requires running the target Go program via ptcpdump.&lt;/p&gt;
 &lt;p&gt;You can try out this feature using the following two methods:&lt;/p&gt;
 &lt;ul&gt;
@@ -417,7 +949,7 @@ docker run --privileged --rm -t --net=host --pid=host \
 &lt;p&gt;TLS Key Log 文件又叫 &lt;a class="reference external" href="https://tlswg.org/sslkeylogfile/draft-ietf-tls-keylogfile.html"&gt;SSLKEYLOGFILE&lt;/a&gt; ，
 在 Wireshark 中对应的是 pre-master secret 配置，
 第三方程序可以通过这个文件中记录的信息解密抓取的 TLS 流量。&lt;/p&gt;
-&lt;p&gt;注意：该功能是一个实验性的功能，只支持 1.18+ 版本的 Go 编译的程序，
+&lt;p&gt;注意：该功能是一个实验性的功能，只支持 1.18+ 版本的 Go 编译的程序（支持 stripped 的二进制），
 并且只支持通过 ptcpdump 运行目标 Go 程序。&lt;/p&gt;
 &lt;p&gt;可以通过下面两种方法试用这个功能：&lt;/p&gt;
 &lt;ul&gt;
@@ -2226,403 +2758,4 @@ tracepoint:sched:sched_process_exec {
 &lt;li&gt;&lt;a class="reference external" href="https://lists.iovisor.org/g/iovisor-dev/topic/accessing_user_memory_and/21386221"&gt;iovisor-dev&amp;#64;lists.iovisor.org | Accessing user memory and minor page faults&lt;/a&gt;&lt;/li&gt;
 &lt;/ul&gt;
 &lt;/div&gt;
-</description><dc:creator xmlns:dc="http://purl.org/dc/elements/1.1/">mozillazg</dc:creator><pubDate>Sun, 31 Mar 2024 00:00:00 +0000</pubDate><guid isPermaLink="false">tag:mozillazg.com,2024-03-31:2024/03/ebpf-tracepoint-syscalls-sys-enter-execve-can-not-get-filename-argv-values-case-en.html</guid><category>tracepoint</category><category>libbpf</category><category>bpftrace</category><category>ELF</category><category>en-version</category></item><item><title>一个使用 tracepoint 追踪 execve 系统调用时无法正确获取系统调用参数的场景</title><link>https://mozillazg.com/2024/03/ebpf-tracepoint-syscalls-sys-enter-execve-can-not-get-filename-argv-values-case.html</link><description>&lt;div class="section" id="section-1"&gt;
-&lt;h2 id="hidsection-1"&gt;背景&lt;a class="headerlink" href="#hidsection-1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
-&lt;p&gt;前段时间有网友在 slack 上的 &lt;a class="reference external" href="https://ebpf.io/slack"&gt;ebpf 频道&lt;/a&gt;
-中咨询一个他遇到的问题：&lt;/p&gt;
-&lt;!-- `问题 &lt;https://cilium.slack.com/archives/C4XCTGYEM/p1710380136906129?thread_ts=1710284853.310149&amp;cid=C4XCTGYEM&gt;`__ ： --&gt;
-&lt;p&gt;在编写使用 &lt;tt class="docutils literal"&gt;tracepoint/syscalls/sys_enter_execve&lt;/tt&gt; 追踪 execve 系统调用的 ebpf 程序时，
-遇到了记录的部分事件中存在使用 &lt;tt class="docutils literal"&gt;bpf_probe_read_user_str&lt;/tt&gt; 读取
-&lt;tt class="docutils literal"&gt;execve&lt;/tt&gt; 的 &lt;tt class="docutils literal"&gt;filename&lt;/tt&gt; 参数失败的现象，错误码为 -14/EFAULT。
-尤其是在执行 tmux 命令的时候，必定会伴随一个读取失败的事件:&lt;/p&gt;
-&lt;pre class="literal-block"&gt;
-ret = bpf_probe_read_user_str(event-&amp;gt;args, ARGSIZE, (const char*)ctx-&amp;gt;args[0]);
-if (ret &amp;lt; 0) {
-        bpf_printk(&amp;quot;comm=%s XXX cannot read file name&amp;quot;, tgid, pid, event-&amp;gt;comm);
-        return 0;
-}
-
-utempter-4031732 [027] d...1 3878624.643948: bpf_trace_printk: comm=tmux: server XXX cannot read file name
-   &amp;lt;...&amp;gt;-4035723 [077] d...1 3878668.047954: bpf_trace_printk: comm=tmux: server XXX cannot read file name
-&lt;/pre&gt;
-&lt;p&gt;本文将探讨一下该问题出现的原因以及针对该场景的一种解决方法。&lt;/p&gt;
-&lt;/div&gt;
-&lt;div class="section" id="section-2"&gt;
-&lt;h2 id="hidsection-2"&gt;复现问题的代码&lt;a class="headerlink" href="#hidsection-2" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
-&lt;p&gt;因为问题中提到只要执行 tmux 命令就必定会复现该问题，并且我们在 &lt;tt class="docutils literal"&gt;bpf_printk&lt;/tt&gt; 的输出中看到对应事件的进程名称为 &lt;tt class="docutils literal"&gt;utempter&lt;/tt&gt; ，
-因此，我们可以基于这两点信息来尝试编写一个简单的复现问题的程序。&lt;/p&gt;
-&lt;p&gt;通过在网络上查找 tmux 与 utempter 的关联关系，以及阅读了相关的 tmux 源代码后，我了解到了如下信息：&lt;/p&gt;
-&lt;ol class="arabic"&gt;
-&lt;li&gt;&lt;p class="first"&gt;tmux 会调用 &lt;tt class="docutils literal"&gt;utempter.h&lt;/tt&gt; 提供的
-&lt;a class="reference external" href="https://github.com/tmux/tmux/blob/b79e28b2c30e7ef9b1f7ec6233eeb70a1a177231/spawn.c#L473"&gt;utempter_add_record&lt;/a&gt;
-函数创建所需的伪终端（pseudo-terminal）:&lt;/p&gt;
-&lt;pre class="literal-block"&gt;
-xasprintf(&amp;amp;cp, &amp;quot;tmux(%lu).%%%u&amp;quot;, (long)getpid(), new_wp-&amp;gt;id);
-utempter_add_record(new_wp-&amp;gt;fd, cp);
-&lt;/pre&gt;
-&lt;/li&gt;
-&lt;li&gt;&lt;p class="first"&gt;&lt;tt class="docutils literal"&gt;utempter_add_record&lt;/tt&gt; 函数中会首先使用传入的参数构造一个 &lt;tt class="docutils literal"&gt;args&lt;/tt&gt; 然后调用
-&lt;a class="reference external" href="https://github.com/altlinux/libutempter/blob/9f291816a746292547ac8aaea0c88e16fc2fb29a/libutempter/iface.c#L121"&gt;execute_helper&lt;/a&gt;
-函数:&lt;/p&gt;
-&lt;pre class="literal-block"&gt;
-#define UTEMPTER_DEFAULT_PATHNAME     LIBEXECDIR &amp;quot;/utempter/utempter&amp;quot;
-static const char *utempter_pathname;
-
-int utempter_add_record(int master_fd, const char *hostname)
-  {
-      const char *const args[] = {
-          utempter_pathname ? : UTEMPTER_DEFAULT_PATHNAME,
-          &amp;quot;add&amp;quot;,
-          hostname,
-          0
-      };
-      int status = execute_helper(master_fd, args);
-      // ...
-  }
-&lt;/pre&gt;
-&lt;/li&gt;
-&lt;li&gt;&lt;p class="first"&gt;&lt;tt class="docutils literal"&gt;execute_helper&lt;/tt&gt; 函数中最终会使用传入的 &lt;tt class="docutils literal"&gt;args&lt;/tt&gt; 调用 &lt;tt class="docutils literal"&gt;fork()&lt;/tt&gt; 和 &lt;tt class="docutils literal"&gt;execv()&lt;/tt&gt; 函数启动一个新的进程
-（ &lt;a class="reference external" href="https://github.com/altlinux/libutempter/blob/9f291816a746292547ac8aaea0c88e16fc2fb29a/libutempter/iface.c#L84"&gt;源代码&lt;/a&gt; ）:&lt;/p&gt;
-&lt;pre class="literal-block"&gt;
-static int execute_helper(int master_fd, const char *const argv[])
-{
-    // ...
-    child = fork();
-    if (!child) {
-        do_child(master_fd, argv[0], (char *const *) argv);
-    } else if (child &amp;lt; 0) {
-    // ...
-}
-static void __attribute__((__noreturn__))
-do_child(int master_fd, const char *path, char *const *argv)
-{
-    // ...
-    execv(path, argv);
-    print_dbg(&amp;quot;execv: %s&amp;quot;, strerror(errno));
-    //...
-}
-&lt;/pre&gt;
-&lt;/li&gt;
-&lt;/ol&gt;
-&lt;p&gt;根据上面这些信息，我们可以编写如下这个可复现该问题的程序
-&lt;a class="reference external" href="https://github.com/mozillazg/ebpf-tracepoint-execve-argv-issue/blob/master/reproduce.c"&gt;reproduce.c&lt;/a&gt;:&lt;/p&gt;
-&lt;pre class="literal-block"&gt;
-#define PATHNAME &amp;quot;/usr/bin/echo&amp;quot;
-
-int main(int argc, char **argv) {
-    const char *hostname = argv[0];
-    const char *const args[] = {
-        PATHNAME,
-        &amp;quot;add&amp;quot;,
-        hostname,
-        0
-    };
-    if (!fork()) {
-        execv(args[0], (char *const *) args);
-    }
-}
-&lt;/pre&gt;
-&lt;p&gt;下面测试一下这个程序的效果:&lt;/p&gt;
-&lt;ol class="arabic"&gt;
-&lt;li&gt;&lt;p class="first"&gt;使用 gcc 编译:&lt;/p&gt;
-&lt;pre class="literal-block"&gt;
-gcc -o reproduce reproduce.c
-&lt;/pre&gt;
-&lt;/li&gt;
-&lt;li&gt;&lt;p class="first"&gt;在另一个终端使用 &lt;a class="reference external" href="https://github.com/bpftrace/bpftrace"&gt;bpftrace&lt;/a&gt; 追踪 tracepoint/syscalls/sys_enter_execve 事件:&lt;/p&gt;
-&lt;pre class="literal-block"&gt;
-sudo bpftrace -e 'tracepoint:syscalls:sys_enter_execve{printf(&amp;quot;%s[%d]: %s\n&amp;quot;, comm, pid, str(args-&amp;gt;filename));}'
-&lt;/pre&gt;
-&lt;/li&gt;
-&lt;li&gt;&lt;p class="first"&gt;运行示例程序:&lt;/p&gt;
-&lt;pre class="literal-block"&gt;
-./reproduce
-&lt;/pre&gt;
-&lt;/li&gt;
-&lt;/ol&gt;
-&lt;p&gt;此时，运行 bpftrace 的终端将输出类似下面这样的结果:&lt;/p&gt;
-&lt;pre class="literal-block"&gt;
-bash[34882]: ./reproduce
-reproduce[34883]:
-&lt;/pre&gt;
-&lt;p&gt;在上面结果中，我们没有获取到 reproduce 进程执行 &lt;tt class="docutils literal"&gt;execve()&lt;/tt&gt; 系统调用时使用的 &lt;tt class="docutils literal"&gt;filename&lt;/tt&gt; 参数的值。
-由此可见，我们的这个程序复现了最初的问题。&lt;/p&gt;
-&lt;/div&gt;
-&lt;div class="section" id="section-3"&gt;
-&lt;h2 id="hidsection-3"&gt;原因&lt;a class="headerlink" href="#hidsection-3" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
-&lt;p&gt;经 &lt;a class="reference external" href="https://github.com/ssfdust"&gt;&amp;#64;ssfdust&lt;/a&gt; 提醒，bpftrace 社区之前已经有人提过类似的问题：
-&lt;a class="reference external" href="https://github.com/bpftrace/bpftrace/issues/2523"&gt;#2523&lt;/a&gt; 。
-在这个 issue 中 &lt;a class="reference external" href="https://github.com/fbs"&gt;&amp;#64;fbs&lt;/a&gt;
-给出的 &lt;a class="reference external" href="https://github.com/bpftrace/bpftrace/issues/2523#issuecomment-1466936511"&gt;解释&lt;/a&gt; 是：&lt;/p&gt;
-&lt;blockquote&gt;
-&lt;p&gt;Like I said earlier, the data you're using isn't in memory yet. These static strings are compiled in and are not actually faulted into memory until they're accessed. The access won't happen until its read, which is after your bpftrace probe ran. BPF won't pull the data in so you get an EFAULT/-14.&lt;/p&gt;
-&lt;p&gt;By printing the values or just a random print of a constant string you pull the small amount of data into memory (as it goes by page, not by var) and then it works&lt;/p&gt;
-&lt;/blockquote&gt;
-&lt;p&gt;即：&lt;/p&gt;
-&lt;ol class="arabic simple"&gt;
-&lt;li&gt;示例程序中，执行 &lt;tt class="docutils literal"&gt;execve()&lt;/tt&gt; 时传入的 &lt;tt class="docutils literal"&gt;argv[0]&lt;/tt&gt; 指向的文件名称字符串是一个静态字符串
-（这些静态字符串在程序被编译后存储在 ELF（Executable and Linkable Format） 文件的 &lt;tt class="docutils literal"&gt;.rodata&lt;/tt&gt; section），
-这些字符串只会在程序真正去访问他们的时候（访问 &lt;tt class="docutils literal"&gt;.rodata&lt;/tt&gt; section 存储的数据时）才会被加载到内存中。&lt;/li&gt;
-&lt;li&gt;由1可知，示例程序中 &lt;tt class="docutils literal"&gt;argv[0]&lt;/tt&gt; 指向的静态字符串只会在执行 &lt;tt class="docutils literal"&gt;execve()&lt;/tt&gt; 系统调用的时候被读取到内存中，
-但是我们的 ebpf 程序其实是在执行 &lt;tt class="docutils literal"&gt;execve()&lt;/tt&gt; 系统调用之前被执行的，因此 ebpf 程序里使用 &lt;tt class="docutils literal"&gt;bpf_probe_read_user_str&lt;/tt&gt;
-读取 &lt;tt class="docutils literal"&gt;argv[0]&lt;/tt&gt; 会失败并返回 &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;EFAULT/-14&lt;/span&gt;&lt;/tt&gt; 。&lt;/li&gt;
-&lt;li&gt;通过 &lt;tt class="docutils literal"&gt;printf&lt;/tt&gt; 等方式主动将字符串加载到内存中可以让该问题消失。&lt;/li&gt;
-&lt;/ol&gt;
-&lt;p&gt;来自 &lt;a class="reference external" href="https://github.com/jschwinger233"&gt;&amp;#64;jschwinger233&lt;/a&gt; 的总结：&lt;/p&gt;
-&lt;blockquote&gt;
-bpf_probe_read_user 只能读到已经载入内存 (page-faulted into memory) 的数据，
-而上面代码直到 execve(2) 之时都还未读过 .rodata，未曾触发 page fault。
-这可以用 tracepoint:exceptions:page_fault* 来验证。&lt;/blockquote&gt;
-&lt;/div&gt;
-&lt;div class="section" id="section-4"&gt;
-&lt;h2 id="hidsection-4"&gt;验证&lt;a class="headerlink" href="#hidsection-4" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
-&lt;div class="section" id="printf"&gt;
-&lt;h3 id="hidprintf"&gt;增加 printf&lt;a class="headerlink" href="#hidprintf" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
-&lt;p&gt;由上面可知，其实我们只需要修改程序在执行 &lt;tt class="docutils literal"&gt;execve()&lt;/tt&gt; 之前主动将 &lt;tt class="docutils literal"&gt;.rodata&lt;/tt&gt; 中的数据加载到内存中即可避免该问题，
-比如使用 &lt;tt class="docutils literal"&gt;printf&lt;/tt&gt; 函数。&lt;/p&gt;
-&lt;p&gt;既可以使用 &lt;tt class="docutils literal"&gt;printf&lt;/tt&gt; 函数打印 &lt;tt class="docutils literal"&gt;argv[0]&lt;/tt&gt; ，也可以直接打印一个静态字符串:&lt;/p&gt;
-&lt;pre class="literal-block"&gt;
-if (!fork()) {
-    printf(&amp;quot;test\n&amp;quot;);
-    // or
-    // printf(&amp;quot;argv[0]: %s\n&amp;quot;, args[0]);
-    execv(args[0], (char *const *) args);
-}
-&lt;/pre&gt;
-&lt;p&gt;经验证，修改后的程序
-&lt;a class="reference external" href="https://github.com/mozillazg/ebpf-tracepoint-execve-argv-issue/blob/master/reproduce_printf1.c"&gt;reproduce_printf1.c&lt;/a&gt;
-确实可以让 ebpf 程序正确读取到 filename 的值。&lt;/p&gt;
-&lt;/div&gt;
-&lt;div class="section" id="section-5"&gt;
-&lt;h3 id="hidsection-5"&gt;不使用静态字符串&lt;a class="headerlink" href="#hidsection-5" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
-&lt;p&gt;既然是因为 &lt;tt class="docutils literal"&gt;argv[0]&lt;/tt&gt; 是静态字符串导致的问题，那么可以尝试将 &lt;tt class="docutils literal"&gt;argv[0]&lt;/tt&gt; 改为使用非静态字符串，看看问题是否还存在。
-修改的内容如下:&lt;/p&gt;
-&lt;pre class="literal-block"&gt;
-const char *const args[] = {
-    argv[1],
-    &amp;quot;add&amp;quot;,
-    hostname,
-    0
-};
-&lt;/pre&gt;
-&lt;p&gt;经验证，修改后的程序
-&lt;a class="reference external" href="https://github.com/mozillazg/ebpf-tracepoint-execve-argv-issue/blob/master/reproduce_non_static.c"&gt;reproduce_non_static.c&lt;/a&gt;
-也可以让 ebpf 程序正确读取到 filename 的值。&lt;/p&gt;
-&lt;p&gt;不知道大家有没有注意到，我们的复现问题的程序里 &lt;tt class="docutils literal"&gt;argv[2]&lt;/tt&gt; 的值其实是一个非静态字符串，
-所以也可以通过在 ebpf 程序中读取这个数据的内容来验证，
-预期是不做任何修改就可以读取到 &lt;tt class="docutils literal"&gt;argv[2]&lt;/tt&gt; 这个非静态字符串的内容：&lt;/p&gt;
-&lt;ol class="arabic"&gt;
-&lt;li&gt;&lt;p class="first"&gt;执行新的 bpftrace 命令:&lt;/p&gt;
-&lt;pre class="literal-block"&gt;
-sudo bpftrace -e 'tracepoint:syscalls:sys_enter_execve{
-    printf(&amp;quot;%s[%d]: filename: %s, argv[1]: %s, argv[2]: %s\n&amp;quot;, comm, pid, str(args-&amp;gt;filename), str(args-&amp;gt;argv[1]), str(args-&amp;gt;argv[2]));
-}'
-&lt;/pre&gt;
-&lt;/li&gt;
-&lt;li&gt;&lt;p class="first"&gt;执行 &lt;tt class="docutils literal"&gt;./reproduce&lt;/tt&gt;&lt;/p&gt;
-&lt;/li&gt;
-&lt;li&gt;&lt;p class="first"&gt;bpftrace 命令的输出示例如下:&lt;/p&gt;
-&lt;pre class="literal-block"&gt;
-bash[36523]: filename: ./reproduce, argv[1]: , argv[2]:
-reproduce[36524]: filename: , argv[1]: , argv[2]: ./reproduce
-&lt;/pre&gt;
-&lt;/li&gt;
-&lt;/ol&gt;
-&lt;/div&gt;
-&lt;div class="section" id="page-fault"&gt;
-&lt;h3 id="hidpage-fault"&gt;page fault&lt;a class="headerlink" href="#hidpage-fault" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h3&gt;
-&lt;p&gt;在现代 Linux 系统中，当我们运行二进制可执行文件的时候，程序加载器（ELF executable loader）
-会根据 ELF 文件中定义的信息使用 &lt;tt class="docutils literal"&gt;mmap&lt;/tt&gt; 进行懒加载（lazy loading），延迟加载一些数据。
-当程序真正去读取这些数据的时候，如果被读取的数据还没有被加载到内存里，就会触发 page fault。&lt;/p&gt;
-&lt;!-- CPU 就会生成一个缺页异常（page fault exception）。此时，内核中的缺页处理程序（page fault handler） --&gt;
-&lt;!-- 会负责处理该异常，将缺失的页面加载到内存中，然后 CPU 重新执行引起缺页异常的指令。 --&gt;
-&lt;p&gt;ELF 文件的 .rodata section 中存储的数据恰好就是会被延迟加载的数据。&lt;/p&gt;
-&lt;div class="section" id="rodata"&gt;
-&lt;h4 id="hidrodata"&gt;.rodata&lt;a class="headerlink" href="#hidrodata" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h4&gt;
-&lt;p&gt;ELF 文件中的 .rodata section 存储了一些只读数据，比如静态字符串。
-我们首先来看一下编译后的示例程序二进制 ELF 文件中的 .rodata section 的数据。&lt;/p&gt;
-&lt;ul&gt;
-&lt;li&gt;&lt;p class="first"&gt;可以使用 &lt;tt class="docutils literal"&gt;objdump&lt;/tt&gt; 命令进行查看:&lt;/p&gt;
-&lt;pre class="literal-block"&gt;
-$ objdump -s -j .rodata ./reproduce
-
-./reproduce:     file format elf64-x86-64
-
-Contents of section .rodata:
-2000 01000200 2f757372 2f62696e 2f656368  ..../usr/bin/ech
-2010 6f006164 6400                        o.add.
-&lt;/pre&gt;
-&lt;/li&gt;
-&lt;li&gt;&lt;p class="first"&gt;也可以使用 python 社区的 &lt;a class="reference external" href="https://docs.pwntools.com/en/stable/"&gt;pwntools&lt;/a&gt; 库进行读取:&lt;/p&gt;
-&lt;pre class="literal-block"&gt;
-&amp;gt;&amp;gt;&amp;gt; from pwn import ELF
-&amp;gt;&amp;gt;&amp;gt; elf = ELF('reproduce')
-&amp;gt;&amp;gt;&amp;gt; elf.section('.rodata')
-b'\x01\x00\x02\x00/usr/bin/echo\x00add\x00'
-&lt;/pre&gt;
-&lt;/li&gt;
-&lt;/ul&gt;
-&lt;p&gt;从上面的输出中可以看到其中包含了源码中使用的两个静态字符串。&lt;/p&gt;
-&lt;/div&gt;
-&lt;div class="section" id="page-fault-1"&gt;
-&lt;h4 id="hidpage-fault-1"&gt;观测 page fault&lt;a class="headerlink" href="#hidpage-fault-1" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h4&gt;
-&lt;p&gt;在 Linux 系统中，当内核执行 &lt;tt class="docutils literal"&gt;execve()&lt;/tt&gt; 系统调用时，
-会调用内核函数 &lt;tt class="docutils literal"&gt;strncpy_from_user&lt;/tt&gt; （
-&lt;a class="reference external" href="https://elixir.bootlin.com/linux/v5.13/source/fs/exec.c#L2063"&gt;execve()&lt;/a&gt; -&amp;gt;
-&lt;a class="reference external" href="https://elixir.bootlin.com/linux/v5.13/source/fs/namei.c#L207"&gt;getname()&lt;/a&gt; -&amp;gt;
-&lt;a class="reference external" href="https://elixir.bootlin.com/linux/v5.15/source/fs/namei.c#L149"&gt;getname_flags(),strncpy_from_user()&lt;/a&gt; ）
-将 &lt;tt class="docutils literal"&gt;argv&lt;/tt&gt; 中包含的字符串数据从用户态复制到内核态，
-这个过程涉及读取用户态数据的操作。
-如果被读取的用户态数据还未被加载到内存中，就会触发 page fault。&lt;/p&gt;
-&lt;p&gt;我们可以通过观测 &lt;tt class="docutils literal"&gt;exceptions/page_fault_kernel&lt;/tt&gt; 和 &lt;tt class="docutils literal"&gt;exceptions/page_fault_user&lt;/tt&gt; 感知到这个事件:&lt;/p&gt;
-&lt;ol class="arabic"&gt;
-&lt;li&gt;&lt;p class="first"&gt;为了方便验证，我们需要先修改一下示例代码，在执行 &lt;tt class="docutils literal"&gt;execv()&lt;/tt&gt; 函数前增加一行 &lt;tt class="docutils literal"&gt;sleep(15)&lt;/tt&gt; ，避免程序太快结束
-（&lt;a class="reference external" href="https://github.com/mozillazg/ebpf-tracepoint-execve-argv-issue/blob/master/reproduce_sleep.c"&gt;reproduce_sleep.c&lt;/a&gt; ）&lt;/p&gt;
-&lt;pre class="literal-block"&gt;
-if (!fork()) {
-     sleep(15);
-     execv(args[0], (char *const *) args);
-}
-&lt;/pre&gt;
-&lt;/li&gt;
-&lt;li&gt;&lt;p class="first"&gt;在一个终端中运行下面这个 bpftrace 脚本，观测 page fault:&lt;/p&gt;
-&lt;pre class="literal-block"&gt;
-cat &amp;lt;&amp;lt;EOF | sudo bpftrace -
-tracepoint:exceptions:page_fault_kernel /comm == &amp;quot;reproduce_sleep&amp;quot;/ {
-    printf(&amp;quot;[%s] page_fault_kernel: %s[%d] addr=%llx ip=%llx err=%lld\n&amp;quot;,
-            strftime(&amp;quot;%M:%S&amp;quot;, nsecs), comm, pid, args-&amp;gt;address, args-&amp;gt;ip, args-&amp;gt;error_code);
-}
-
-tracepoint:exceptions:page_fault_user /comm == &amp;quot;reproduce_sleep&amp;quot;/ {
-    printf(&amp;quot;[%s] page_fault_user:   %s[%d] addr=%llx ip=%llx err=%lld\n&amp;quot;,
-            strftime(&amp;quot;%M:%S&amp;quot;, nsecs), comm, pid, args-&amp;gt;address, args-&amp;gt;ip, args-&amp;gt;error_code);
-}
-EOF
-&lt;/pre&gt;
-&lt;/li&gt;
-&lt;li&gt;&lt;p class="first"&gt;然后在另一个终端中运行 &lt;tt class="docutils literal"&gt;./reproduce_sleep&lt;/tt&gt;&lt;/p&gt;
-&lt;/li&gt;
-&lt;li&gt;&lt;p class="first"&gt;在第3个终端中查看运行中的 reproduce_sleep 进程的内存映射关系（memory mapping）:&lt;/p&gt;
-&lt;pre class="literal-block"&gt;
-$ sudo cat /proc/41291/maps | grep reproduce_sleep
-55b4d9e31000-55b4d9e32000 r--p 00000000 08:01 1634479                    /XXX/reproduce_sleep
-55b4d9e32000-55b4d9e33000 r-xp 00001000 08:01 1634479                    /XXX/reproduce_sleep
-55b4d9e33000-55b4d9e34000 r--p 00002000 08:01 1634479                    /XXX/reproduce_sleep
-55b4d9e34000-55b4d9e35000 r--p 00002000 08:01 1634479                    /XXX/reproduce_sleep
-55b4d9e35000-55b4d9e36000 rw-p 00003000 08:01 1634479                    /XXX/reproduce_sleep
-&lt;/pre&gt;
-&lt;p&gt;由上面可知，该进程的内存映射起始地址是 &lt;tt class="docutils literal"&gt;55b4d9e31000&lt;/tt&gt; ，即 &lt;tt class="docutils literal"&gt;0x55b4d9e31000&lt;/tt&gt;&lt;/p&gt;
-&lt;/li&gt;
-&lt;li&gt;&lt;p class="first"&gt;待示例程序运行结束后，bpftrace 命令的输出中的最后两条数据将类似下面这样:&lt;/p&gt;
-&lt;pre class="literal-block"&gt;
-[47:40] page_fault_user:   reproduce_sleep[41290] addr=7f669db86a50 ip=7f669d9f8940 err=7
-[47:55] page_fault_kernel: reproduce_sleep[41291] addr=55b4d9e33004 ip=ffffffff8e092a40 err=0
-&lt;/pre&gt;
-&lt;p&gt;这两个输出间隔了 15 秒，由此可以确定最后那个 page fault 事件是执行 &lt;tt class="docutils literal"&gt;execv()&lt;/tt&gt; 函数的时候触发的。
-下面来通过事件中的 &lt;tt class="docutils literal"&gt;addr&lt;/tt&gt; 结果定位对应的数据。&lt;/p&gt;
-&lt;/li&gt;
-&lt;li&gt;&lt;p class="first"&gt;上面最后那条 &lt;tt class="docutils literal"&gt;page_fault_kernel&lt;/tt&gt; 事件输出的 addr 的值是 &lt;tt class="docutils literal"&gt;55b4d9e33004&lt;/tt&gt; ，
-即触发这个 page fault 事件的虚拟内存地址是 &lt;tt class="docutils literal"&gt;0x55b4d9e33004&lt;/tt&gt; 。&lt;/p&gt;
-&lt;/li&gt;
-&lt;li&gt;&lt;p class="first"&gt;基于 &lt;a class="reference external" href="https://github.com/jschwinger233"&gt;&amp;#64;jschwinger233&lt;/a&gt;  分享的秘籍：
-&lt;tt class="docutils literal"&gt;real_addr = start_addr + (elf_address - section.Address + section.Offset)&lt;/tt&gt; 可知:&lt;/p&gt;
-&lt;pre class="literal-block"&gt;
-0x55b4d9e33004 = 0x55b4d9e31000 + (elf_address - section.Address + section.Offset)
-(elf_address - section.Address + section.Offset) = 0x55b4d9e33004 - 0x55b4d9e31000 = 8196 = 0x2004
-&lt;/pre&gt;
-&lt;/li&gt;
-&lt;li&gt;&lt;p class="first"&gt;使用 readelf 命令读取二进制文件 reproduce_sleep 中 ELF .rodata section 的虚拟地址、偏移量以及数据大小:&lt;/p&gt;
-&lt;pre class="literal-block"&gt;
-$ readelf -S -W reproduce_sleep  | egrep '.rodata|Address'
-  [Nr] Name              Type            Address          Off    Size   ES Flg Lk Inf Al
-  [18] .rodata           PROGBITS        0000000000002000 002000 000016 00   A  0   0  4
-&lt;/pre&gt;
-&lt;p&gt;由上面的输出可知，该 ELF 文件中 .rodata section 的虚拟地址是 &lt;tt class="docutils literal"&gt;0000000000002000&lt;/tt&gt; 即 &lt;tt class="docutils literal"&gt;0x2000&lt;/tt&gt; ，
-偏移量是 &lt;tt class="docutils literal"&gt;002000&lt;/tt&gt; 即 &lt;tt class="docutils literal"&gt;0x2000&lt;/tt&gt; ， 数据大小是 &lt;tt class="docutils literal"&gt;0x16&lt;/tt&gt; ，即地址范围是 &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;0x2000-0x2016&lt;/span&gt;&lt;/tt&gt; 。&lt;/p&gt;
-&lt;/li&gt;
-&lt;li&gt;&lt;p class="first"&gt;通过 7 和 8 可知，执行 &lt;tt class="docutils literal"&gt;execv()&lt;/tt&gt; 函数时触发的 page fault 事件的虚拟内存地址
-&lt;tt class="docutils literal"&gt;0x55b4d9e33004&lt;/tt&gt; 对应的 ELF 地址是 &lt;tt class="docutils literal"&gt;0x2004&lt;/tt&gt;&lt;/p&gt;
-&lt;pre class="literal-block"&gt;
-0x55b4d9e33004 = 0x55b4d9e31000 + (elf_address - section.Address + section.Offset)
-(elf_address - section.Address + section.Offset) = 0x55b4d9e33004 - 0x55b4d9e31000 = 8196 = 0x2004
-(elf_address - 0x2000 + 0x2000) = 0x2004
-elf_address = 0x2004
-&lt;/pre&gt;
-&lt;p&gt;这个地址在 ELF 文件的 .rodata 地址范围（ &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;0x2000-0x2016&lt;/span&gt;&lt;/tt&gt; ）内，
-对应的是 &lt;tt class="docutils literal"&gt;argv[0]&lt;/tt&gt; 中使用的静态字符串 &lt;tt class="docutils literal"&gt;/usr/bin/echo&lt;/tt&gt;:&lt;/p&gt;
-&lt;pre class="literal-block"&gt;
-$ objdump -s -j .rodata ./reproduce_sleep
-
-./reproduce_sleep:     file format elf64-x86-64
-
-Contents of section .rodata:
- 2000 01000200 2f757372 2f62696e 2f656368  ..../usr/bin/ech
- 2010 6f006164 6400                        o.add.
-
-&amp;gt;&amp;gt;&amp;gt; elf = ELF('reproduce_sleep')
-&amp;gt;&amp;gt;&amp;gt; elf.read(0x2004, 14)
-b'/usr/bin/echo\x00'
-
-$ gdb -ex 'disas/m main' -ex q reproduce_sleep | grep 'args\[\]' -A 13
-9       const char *const args[] = {
-   0x00000000000011d6 &amp;lt;+45&amp;gt;:        lea    0xe27(%rip),%rax        # 0x2004
-   0x00000000000011dd &amp;lt;+52&amp;gt;:        mov    %rax,-0x30(%rbp)
-   0x00000000000011e1 &amp;lt;+56&amp;gt;:        lea    0xe2a(%rip),%rax        # 0x2012
-   0x00000000000011e8 &amp;lt;+63&amp;gt;:        mov    %rax,-0x28(%rbp)
-   0x00000000000011ec &amp;lt;+67&amp;gt;:        mov    -0x38(%rbp),%rax
-   0x00000000000011f0 &amp;lt;+71&amp;gt;:        mov    %rax,-0x20(%rbp)
-   0x00000000000011f4 &amp;lt;+75&amp;gt;:        movq   $0x0,-0x18(%rbp)
-
-10          PATHNAME,
-11          &amp;quot;add&amp;quot;,
-12          hostname,
-13          0
-14      };
-&lt;/pre&gt;
-&lt;/li&gt;
-&lt;li&gt;&lt;p class="first"&gt;也可以通过在 ebpf 程序或 bpftrace 脚本中打印 &lt;tt class="docutils literal"&gt;&lt;span class="pre"&gt;args-&amp;gt;filename&lt;/span&gt;&lt;/tt&gt; 的指针地址来确认，
-这个地址的值会跟前面 page fault 事件中 addr 的值一致，都是 &lt;tt class="docutils literal"&gt;0x55b4d9e33004&lt;/tt&gt;&lt;/p&gt;
-&lt;pre class="literal-block"&gt;
-tracepoint:syscalls:sys_enter_execve {
-    printf(&amp;quot;%s[%d]: %p\n&amp;quot;, comm, pid, args-&amp;gt;filename);
-}
-&lt;/pre&gt;
-&lt;/li&gt;
-&lt;/ol&gt;
-&lt;p&gt;BTW，可以通过 &lt;tt class="docutils literal"&gt;perf trace &lt;span class="pre"&gt;-F&lt;/span&gt; all&lt;/tt&gt; 命令追踪触发 page fault 事件的函数信息。&lt;/p&gt;
-&lt;/div&gt;
-&lt;/div&gt;
-&lt;/div&gt;
-&lt;div class="section" id="section-6"&gt;
-&lt;h2 id="hidsection-6"&gt;解决方法&lt;a class="headerlink" href="#hidsection-6" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
-&lt;p&gt;解决这个问题的方法有很多，其中一种解决方法是改为通过追踪 &lt;tt class="docutils literal"&gt;tracepoint/sched/sched_process_exec&lt;/tt&gt;
-事件来获取 &lt;tt class="docutils literal"&gt;execve()&lt;/tt&gt; 系统调用中 &lt;tt class="docutils literal"&gt;filename&lt;/tt&gt; 和 &lt;tt class="docutils literal"&gt;argv&lt;/tt&gt; 参数的值。下面是对应实现的示例程序：&lt;/p&gt;
-&lt;ul&gt;
-&lt;li&gt;&lt;p class="first"&gt;通过 bpftrace 追踪 &lt;tt class="docutils literal"&gt;tracepoint/sched/sched_process_exec&lt;/tt&gt; 事件的示例脚本（来自 &lt;a class="reference external" href="https://github.com/jschwinger233"&gt;&amp;#64;jschwinger233&lt;/a&gt; ）:&lt;/p&gt;
-&lt;pre class="literal-block"&gt;
-tracepoint:sched:sched_process_exec {
-  $task=curtask;
-  $arg_start=$task-&amp;gt;mm-&amp;gt;arg_start;
-  $arg_end=$task-&amp;gt;mm-&amp;gt;arg_end;
-  printf(&amp;quot;%s[%d]: filename: %s, argv: %r\n&amp;quot;, comm, pid, str(args-&amp;gt;filename), buf(uptr($arg_start), $arg_end-$arg_start));
-}
-&lt;/pre&gt;
-&lt;/li&gt;
-&lt;li&gt;&lt;p class="first"&gt;通过 ebpf c 代码追踪 &lt;tt class="docutils literal"&gt;tracepoint/sched/sched_process_exec&lt;/tt&gt; 事件的示例程序：
-&lt;a class="reference external" href="https://github.com/mozillazg/hello-libbpfgo/blob/master/37-tracepoint-sched_process_exec/main.bpf.c"&gt;main.bpf.c&lt;/a&gt;&lt;/p&gt;
-&lt;/li&gt;
-&lt;/ul&gt;
-&lt;/div&gt;
-&lt;div class="section" id="section-7"&gt;
-&lt;h2 id="hidsection-7"&gt;参考资料&lt;a class="headerlink" href="#hidsection-7" title="Permalink to this headline"&gt;¶&lt;/a&gt;&lt;/h2&gt;
-&lt;ul class="simple"&gt;
-&lt;li&gt;&lt;a class="reference external" href="https://github.com/tmux/tmux/tree/master"&gt;tmux/tmux: tmux source code&lt;/a&gt;&lt;/li&gt;
-&lt;li&gt;&lt;a class="reference external" href="https://github.com/bpftrace/bpftrace/issues/2523"&gt;Can't trace sys_execve inside a c program · Issue #2523 · bpftrace/bpftrace&lt;/a&gt;&lt;/li&gt;
-&lt;li&gt;&lt;a class="reference external" href="https://wiki.osdev.org/ELF"&gt;ELF - OSDev Wiki&lt;/a&gt;&lt;/li&gt;
-&lt;li&gt;&lt;a class="reference external" href="https://stackoverflow.com/questions/57761007/why-an-elf-executable-could-have-4-load-segments"&gt;unix - Why an ELF executable could have 4 LOAD segments? - Stack Overflow&lt;/a&gt;&lt;/li&gt;
-&lt;li&gt;&lt;a class="reference external" href="https://www.cs.bham.ac.uk/~exr/lectures/opsys/13_14/docs/kernelAPI/r4206.html"&gt;strncpy_from_user&lt;/a&gt;&lt;/li&gt;
-&lt;li&gt;&lt;a class="reference external" href="https://github.com/jschwinger233"&gt;&amp;#64;jschwinger233&lt;/a&gt; 的谆谆教诲&lt;/li&gt;
-&lt;li&gt;&lt;a class="reference external" href="https://lists.iovisor.org/g/iovisor-dev/topic/accessing_user_memory_and/21386221"&gt;iovisor-dev&amp;#64;lists.iovisor.org | Accessing user memory and minor page faults&lt;/a&gt;&lt;/li&gt;
-&lt;/ul&gt;
-&lt;/div&gt;
-</description><dc:creator xmlns:dc="http://purl.org/dc/elements/1.1/">mozillazg</dc:creator><pubDate>Sun, 31 Mar 2024 00:00:00 +0000</pubDate><guid isPermaLink="false">tag:mozillazg.com,2024-03-31:2024/03/ebpf-tracepoint-syscalls-sys-enter-execve-can-not-get-filename-argv-values-case.html</guid><category>tracepoint</category><category>libbpf</category><category>bpftrace</category><category>ELF</category></item></channel></rss>
+</description><dc:creator xmlns:dc="http://purl.org/dc/elements/1.1/">mozillazg</dc:creator><pubDate>Sun, 31 Mar 2024 00:00:00 +0000</pubDate><guid isPermaLink="false">tag:mozillazg.com,2024-03-31:2024/03/ebpf-tracepoint-syscalls-sys-enter-execve-can-not-get-filename-argv-values-case-en.html</guid><category>tracepoint</category><category>libbpf</category><category>bpftrace</category><category>ELF</category><category>en-version</category></item></channel></rss>
