@@ -1,0 +1,885 @@
+<!DOCTYPE html>
+<html lang="en"  prefix="og: http://ogp.me/ns# fb: https://www.facebook.com/2008/fbml" class="han-init">
+<head>
+    <title>Exploring Workload Identity Federation in GKE - mozillazg's Blog</title>
+    <!-- Using the latest rendering mode for IE -->
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <!-- share.css -->
+    <link rel="stylesheet" href="/theme/cdn.jsdelivr.net/npm/social-share.js@1.0.16/dist/css/share.min.css">
+
+
+    <link href="https://mozillazg.com/favicon.ico" rel="icon">
+
+<link rel="canonical" href="https://mozillazg.com/2025/01/security-deep-dive-into-gcp-workload-identity-federation-for-gke-feature-en.html">
+
+        <meta name="author" content="mozillazg" />
+        <meta name="keywords" content="security,kubernetes,k8s,gcp,gke,Workload Identity Federation for GKE,cloud-security,en-version" />
+    <meta name="description" content="Exploring Workload Identity Federation in GKE - In this article, we will briefly explore a feature called &#34;Workload Identity Federation for GKE&#34; that was recently announced by GKE in their official blog. Features Overview Workload Identity Federation for GKE is an improved version of the original GKE Workload Identity feature. The main improvement is that it needs less configuration and offers better user experience. How to Use Follow these steps to try this feature: Create a GKE cluster with Workload Identity Federation for GKE enabled. You can find this option at: Create Cluster - Security - Enable Workload Identity. Link IAM roles to the service account used by your test application. One service account can have multiple roles. For example: $ kubectl create ns demo-ns $ kubectl -n demo-ns create serviceaccount demo-sa $ gcloud projects add-iam-policy-binding projects/test-gke-XXX \ --role=roles/container.clusterViewer \ --member=principal://iam.googleapis.com/projects/23182XXXXXXX/locations/global/workloadIdentityPools/test-gke-XXXXXX.svc.id.goog/subject/ns/&lt;namespace-name&gt;/sa/&lt;service-account-name&gt; \ --condition=None $ gcloud storage buckets add-iam-policy-binding gs://&lt;bucket-name&gt; \ --role=roles/storage.objectViewer \ --member=principal://iam.googleapis.com/projects/23182XXXXXXX/locations/global/workloadIdentityPools/test-gke-XXXXXX.svc.id.goog/subject/ns/&lt;namespace-name&gt;/sa/&lt;service-account-name&gt; \ --condition=None Deploy the test application. The application pod needs to use the namespace and service account ..." />
+
+    <style>
+      .js-toc {
+        margin-bottom: 20px;
+      }
+      .donate-modal {
+        text-align: center;
+      }
+      #donate-modal-container .donate-image {
+        max-height: 300px !important;
+        min-height: inherit !important;
+      }
+    </style>
+
+        <meta property="og:site_name" content="mozillazg's Blog" />
+        <meta property="og:type" content="article"/>
+        <meta property="og:title" content="Exploring Workload Identity Federation in GKE"/>
+        <meta property="og:url" content="https://mozillazg.com/2025/01/security-deep-dive-into-gcp-workload-identity-federation-for-gke-feature-en.html"/>
+        <meta property="og:description" content="In this article, we will briefly explore a feature called &#34;Workload Identity Federation for GKE&#34; that was recently announced by GKE in their official blog. Features Overview Workload Identity Federation for GKE is an improved version of the original GKE Workload Identity feature. The main improvement is that it needs less configuration and offers better user experience. How to Use Follow these steps to try this feature: Create a GKE cluster with Workload Identity Federation for GKE enabled. You can find this option at: Create Cluster - Security - Enable Workload Identity. Link IAM roles to the service account used by your test application. One service account can have multiple roles. For example: $ kubectl create ns demo-ns $ kubectl -n demo-ns create serviceaccount demo-sa $ gcloud projects add-iam-policy-binding projects/test-gke-XXX \ --role=roles/container.clusterViewer \ --member=principal://iam.googleapis.com/projects/23182XXXXXXX/locations/global/workloadIdentityPools/test-gke-XXXXXX.svc.id.goog/subject/ns/&lt;namespace-name&gt;/sa/&lt;service-account-name&gt; \ --condition=None $ gcloud storage buckets add-iam-policy-binding gs://&lt;bucket-name&gt; \ --role=roles/storage.objectViewer \ --member=principal://iam.googleapis.com/projects/23182XXXXXXX/locations/global/workloadIdentityPools/test-gke-XXXXXX.svc.id.goog/subject/ns/&lt;namespace-name&gt;/sa/&lt;service-account-name&gt; \ --condition=None Deploy the test application. The application pod needs to use the namespace and service account from step 2, and add nodeSelector to ensure scheduling on nodes with the Workload Identity Federation for GKE feature enabled apiVersion: v1 kind: Pod metadata: name: test-pod namespace: demo-ns spec: nodeSelector: iam.gke.io/gke-metadata-server-enabled: &#34;true&#34; serviceAccountName: demo-sa containers: - name: test-pod image: google/cloud-sdk:slim command: [&#34;sleep&#34;,&#34;infinity&#34;] After the pod is running, enter the test-pod container and access the instance metadata service to obtain the STS token. The official SDK used by actual business applications will use a similar method to access the instance metadata service to obtain STS tokens for requesting cloud product APIs. $ gcloud auth print-access-token ya29.d.XXX $ curl -H &#34;Metadata-Flavor: Google&#34; http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token {&#34;access_token&#34;:&#34;ya29.d.XXX&#34;,&#34;expires_in&#34;:3423,&#34;token_type&#34;:&#34;Bearer&#34;} The obtained STS token will have all the permissions of the roles associated in step 2. $ gcloud container node-pools list --zone us-central1 --cluster test NAME MACHINE_TYPE DISK_SIZE_GB NODE_VERSION default-pool e2-medium 100 1.30.6-gke.1125000 $ curl -X GET -H &#34;Authorization: Bearer $(gcloud auth print-access-token)&#34; \ &#34;https://storage.googleapis.com/storage/v1/b/demo-gke-workload-identity-federation/o&#34; { &#34;kind&#34;: &#34;storage#objects&#34; } Workflow Explained The workflow of Workload Identity Federation for GKE feature is as follows: When a program in the application Pod container requests the instance metadata service (accessing http://metadata.google.internal, which actually accesses http://169.254.169.254:80) to get an STS token, the request will be redirected to 169.254.169.252:988. 169.254.169.252:988 is the port listened to by the gke-metadata-server service deployed on the node. When the gke-metadata-server service receives the request, it will determine which Pod the request came from based on the client IP, then request the apiserver to generate a token corresponding to the service account used by that Pod. gke-metadata-server will use the obtained service account token to access GCP&#39;s STS API to get an STS token, finally gke-metadata-server returns the obtained STS token to the client. There are several key components and information that need special attention in this workflow, which will be explained one by one below. gke-metadata-server When enabling the Workload Identity Federation for GKE feature at the cluster or node pool level, a component named gke-metadata-server will be automatically deployed in the cluster. The workload YAML for this component is as follows: apiVersion: apps/v1 kind: DaemonSet metadata: annotations: deprecated.daemonset.template.generation: &#34;1&#34; labels: addonmanager.kubernetes.io/mode: Reconcile k8s-app: gke-metadata-server name: gke-metadata-server namespace: kube-system spec: minReadySeconds: 90 revisionHistoryLimit: 10 selector: matchLabels: k8s-app: gke-metadata-server template: metadata: annotations: components.gke.io/component-name: gke-metadata-server components.gke.io/component-version: 0.4.301 monitoring.gke.io/path: /metricz creationTimestamp: null labels: addonmanager.kubernetes.io/mode: Reconcile k8s-app: gke-metadata-server spec: containers: - command: - /gke-metadata-server - --logtostderr - --token-exchange-endpoint=https://securetoken.googleapis.com/v1/identitybindingtoken - --workload-pool=test-gke-XXXXXX.svc.id.goog - --alts-service-suffixes-using-node-identity=storage.googleapis.com,bigtable.googleapis.com,bigtable2.googleapis.com,bigtablerls.googleapis.com,spanner.googleapis.com,spanner2.googleapis.com,spanner-rls.googleapis.com,grpclb.directpath.google.internal,grpclb-dualstack.directpath.google.internal,staging-wrenchworks.sandbox.googleapis.com,preprod-spanner.sandbox.googleapis.com,wrenchworks-loadtest.googleapis.com,wrenchworks-nonprod.googleapis.com - --identity-provider=https://container.googleapis.com/v1/projects/test-gke-XXXXXX/locations/us-central1/clusters/test - --passthrough-ksa-list=anthos-identity-service:gke-oidc-envoy-sa,anthos-identity-service:gke-oidc-service-sa,gke-managed-dpv2-observability:hubble-relay,kube-system:antrea-controller,kube-system:container-watcher-pod-reader,kube-system:coredns,kube-system:egress-nat-controller,kube-system:event-exporter-sa,kube-system:fluentd-gcp-scaler,kube-system:gke-metrics-agent,kube-system:gke-spiffe-node-agent,kube-system:heapster,kube-system:konnectivity-agent,kube-system:kube-dns,kube-system:maintenance-handler,kube-system:metadata-agent,kube-system:network-metering-agent,kube-system:node-local-dns,kube-system:pkgextract-service,kube-system:pkgextract-cleanup-service,kube-system:securityprofile-controller,istio-system:istio-ingressgateway-service-account,istio-system:cluster-local-gateway-service-account,csm:csm-sync-agent,knative-serving:controller,kube-system:pdcsi-node-sa,kube-system:gcsfusecsi-node-sa,gmp-system:collector,gke-gmp-system:collector,gke-managed-cim:kube-state-metrics - --attributes=cluster-name=test,cluster-uid=392f63049deXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX,cluster-location=us-central1 - --cluster-uid=392f63049ded410XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX - --sts-endpoint=https://sts.googleapis.com - --token-exchange-mode=sts - --cloud-monitoring-endpoint=monitoring.googleapis.com:443 - --iam-cred-service-endpoint=https://iamcredentials.googleapis.com - --cluster-project-number=2318XXXXXXXX - --cluster-location=us-central1 - --cluster-name=test - --component-version=0.4.301 - --ksa-cache-mode=watchchecker - --kcp-allow-watch-checker=true - --enable-mds-csi-driver=true - --csi-socket=/csi/csi.sock - --volumes-db=/var/run/gkemds.gke.io/csi/volumes.boltdb env: - name: GOMEMLIMIT value: &#34;94371840&#34; image: us-central1-artifactregistry.gcr.io/gke-release/gke-release/gke-metadata-server:gke_metadata_server_20240702.00_p0@sha256:aea9cc887c91b9a05e5bb4bb604180772594a01f0828bbfacf30c77562ac7205 imagePullPolicy: IfNotPresent livenessProbe: failureThreshold: 3 httpGet: host: 127.0.0.1 path: /healthz port: 989 scheme: HTTP initialDelaySeconds: 30 periodSeconds: 10 successThreshold: 1 timeoutSeconds: 3 name: gke-metadata-server ports: - containerPort: 987 name: alts protocol: TCP - containerPort: 988 name: metadata-server protocol: TCP - containerPort: 989 name: debug-port protocol: TCP readinessProbe: failureThreshold: 3 httpGet: host: 127.0.0.1 path: /healthz port: 989 scheme: HTTP periodSeconds: 10 successThreshold: 1 timeoutSeconds: 1 resources: limits: memory: 100Mi requests: cpu: 100m memory: 100Mi securityContext: privileged: true readOnlyRootFilesystem: true terminationMessagePath: /dev/termination-log terminationMessagePolicy: File volumeMounts: - mountPath: /var/lib/kubelet/kubeconfig name: kubelet-credentials readOnly: true - mountPath: /var/lib/kubelet/pki/ name: kubelet-certs readOnly: true - mountPath: /var/run/ name: container-runtime-interface - mountPath: /etc/srv/kubernetes/pki name: kubelet-pki readOnly: true - mountPath: /etc/ssl/certs/ name: ca-certificates readOnly: true - mountPath: /home/kubernetes/bin/gke-exec-auth-plugin name: gke-exec-auth-plugin readOnly: true - mountPath: /sys/firmware/efi/efivars/ name: efivars readOnly: true - mountPath: /dev/tpm0 name: vtpm readOnly: true - mountPath: /csi name: csi-socket-dir - mountPath: /var/run/gkemds.gke.io/csi name: state-dir - mountPath: /var/lib/kubelet/pods mountPropagation: Bidirectional name: pods-dir - mountPath: /registration name: kubelet-registration-dir dnsPolicy: Default hostNetwork: true nodeSelector: iam.gke.io/gke-metadata-server-enabled: &#34;true&#34; kubernetes.io/os: linux priorityClassName: system-node-critical restartPolicy: Always schedulerName: default-scheduler securityContext: {} serviceAccount: gke-metadata-server serviceAccountName: gke-metadata-server terminationGracePeriodSeconds: 30 tolerations: - effect: NoExecute operator: Exists - effect: NoSchedule operator: Exists - key: components.gke.io/gke-managed-components operator: Exists volumes: - hostPath: path: /var/lib/kubelet/pki/ type: Directory name: kubelet-certs - hostPath: path: /var/lib/kubelet/kubeconfig type: File name: kubelet-credentials - hostPath: path: /var/run/ type: Directory name: container-runtime-interface - hostPath: path: /etc/srv/kubernetes/pki/ type: Directory name: kubelet-pki - hostPath: path: /etc/ssl/certs/ type: Directory name: ca-certificates - hostPath: path: /home/kubernetes/bin/gke-exec-auth-plugin type: File name: gke-exec-auth-plugin - hostPath: path: /sys/firmware/efi/efivars/ type: Directory name: efivars - hostPath: path: /dev/tpm0 type: CharDevice name: vtpm - hostPath: path: /var/lib/kubelet/plugins/gkemds.gke.io type: DirectoryOrCreate name: csi-socket-dir - hostPath: path: /var/lib/kubelet/pods type: Directory name: pods-dir - hostPath: path: /var/lib/kubelet/plugins_registry type: Directory name: kubelet-registration-dir - hostPath: path: /var/lib/kubelet/plugins type: Directory name: kubelet-plugins-dir - hostPath: path: /var/run/gkemds.gke.io/csi type: DirectoryOrCreate name: state-dir The gke-metadata-server component has the following characteristics: The component&#39;s workload is a DaemonSet. The component Pod uses hostNetwork: true and privileged: true. The service inside the component will listen on ports 987, 988, and 989, where port 988 will be used to receive redirected requests for accessing the instance metadata service: $ ss -atnlp |grep gke LISTEN 0 1024 *:987 *:* users:((&#34;gke-metadata-se&#34;,pid=183706,fd=10)) LISTEN 0 1024 *:989 *:* users:((&#34;gke-metadata-se&#34;,pid=183706,fd=12)) LISTEN 0 1024 *:988 *:* users:((&#34;gke-metadata-se&#34;,pid=183706,fd=15)) The previously mentioned IP 169.254.169.252 is the local loopback (lo) IP address, so the port 988 listened to by gke-metadata-server includes the previously mentioned 169.254.169.252:988 port: 1: lo: &lt;LOOPBACK,UP,LOWER_UP&gt; mtu 65536 qdisc noqueue state UNKNOWN group default qlen 1000 link/loopback 00:00:00:00:00:00 brd 00:00:00:00:00:00 inet 127.0.0.1/8 scope host lo valid_lft forever preferred_lft forever inet 169.254.169.252/32 scope host lo valid_lft forever preferred_lft forever inet6 ::1/128 scope host valid_lft forever preferred_lft forever All nodes with the Workload Identity Federation for GKE feature enabled will be configured with the following nftables rules during initialization, ensuring that traffic from business containers requesting the metadata service (http://metadata.google.internal, 169.254.169.254:80) will be redirected to the 169.254.169.252:988 port listened to by the component: table ip nat { chain PREROUTING { type nat hook prerouting priority dstnat; policy accept; counter packets 2143 bytes 169432 jump KUBE-SERVICES iifname != &#34;eth0&#34; meta l4proto tcp ip daddr 169.254.169.254 tcp dport 8080 counter packets 0 bytes 0 dnat to 169.254.169.252:987 iifname != &#34;eth0&#34; meta l4proto tcp ip daddr 169.254.169.254 tcp dport 80 counter packets 181 bytes 10860 dnat to 169.254.169.252:988 } } As mentioned earlier, the component will determine the source pod through the client IP and request the apiserver to get the service account. This involves what credentials the component uses to access the apiserver. The component uses the kubelet&#39;s credentials on the node to access the apiserver (the component YAML shown earlier includes the configuration for mounting kubelet kubeconfig). Additionally, when deploying the component, extra RBAC permissions for get/list/watch on pods and serviceaccounts will be granted to the kubelet&#39;s credentials, used for obtaining information about pods and service accounts on the current node: --- apiVersion: rbac.authorization.k8s.io/v1 kind: ClusterRoleBinding metadata: annotations: components.gke.io/component-name: gke-metadata-server components.gke.io/component-version: 0.4.301 labels: addonmanager.kubernetes.io/mode: Reconcile name: gce:gke-metadata-server-reader roleRef: apiGroup: rbac.authorization.k8s.io kind: ClusterRole name: gce:gke-metadata-server-reader subjects: - apiGroup: rbac.authorization.k8s.io kind: Group name: system:nodes --- apiVersion: rbac.authorization.k8s.io/v1 kind: ClusterRole metadata: annotations: components.gke.io/component-name: gke-metadata-server components.gke.io/component-version: 0.4.301 labels: addonmanager.kubernetes.io/mode: Reconcile name: gce:gke-metadata-server-reader rules: - apiGroups: - &#34;&#34; resources: - pods - serviceaccounts verbs: - get - watch - list If the service account used by the pod is not bound to any IAM role, the STS token obtained by the application in the pod when accessing the metadata service will be the STS token of the node&#39;s default Google service account. service account token For requests initiated by programs within each pod, the gke-metadata-server component doesn&#39;t directly use the service account token mounted in the pod container, but instead requests the apiserver to generate a new service account token. Here&#39;s an example of the payload for a service account token mounted in the container: { &#34;aud&#34;: [ &#34;https://container.googleapis.com/v1/projects/test-gke-XXXXXX/locations/us-central1/clusters/test&#34; ], &#34;exp&#34;: ..., &#34;iat&#34;: ..., &#34;iss&#34;: &#34;https://container.googleapis.com/v1/projects/test-gke-XXXXXX/locations/us-central1/clusters/test&#34;, &#34;jti&#34;: &#34;...&#34;, &#34;kubernetes.io&#34;: {...}, &#34;nbf&#34;: ..., &#34;sub&#34;: &#34;system:serviceaccount:demo-ns:demo-sa&#34; } Here&#39;s an example of the payload for a service account token generated by the apiserver when requested by the component: { &#34;aud&#34;: [ &#34;test-gke-XXXXXX.svc.id.goog&#34; ], &#34;exp&#34;: ..., &#34;iat&#34;: ..., &#34;iss&#34;: &#34;https://container.googleapis.com/v1/projects/test-gke-XXXXXX/locations/us-central1/clusters/test&#34;, &#34;jti&#34;: &#34;...&#34;, &#34;kubernetes.io&#34;: {...}, &#34;nbf&#34;: ..., &#34;sub&#34;: &#34;system:serviceaccount:demo-ns:demo-sa&#34; } As we can see, the main difference is in the content of the aud field. sts token The gke-metadata-server component will use the obtained service account token to access the STS token API to get an STS token. Here&#39;s an example of the corresponding request: :authority: sts.googleapis.com :method: POST :path: /v1/token?alt=json&amp;prettyPrint=false :scheme: https x-goog-api-client: gl-go/1.23.0--20240626-RC01 cl/646990413 +5a18e79687 X:fieldtrack,boringcrypto gdcl/0.177.0 user-agent: google-api-go-client/0.5 gke-metadata-server content-type: application/json content-length: 1673 accept-encoding: gzip {&#34;audience&#34;:&#34;identitynamespace:test-gke-XXXXXX.svc.id.goog:https://container.googleapis.com/v1/projects/test-gke-XXXXXX/locations/us-central1/clusters/test&#34;,&#34;grantType&#34;:&#34;urn:ietf:params:oauth:grant-type:token-exchange&#34;,&#34;requestedTokenType&#34;:&#34;urn:ietf:params:oauth:token-type:access_token&#34;,&#34;scope&#34;:&#34;https://www.googleapis.com/auth/cloud-platform https://www.googleapis.com/auth/userinfo.email&#34;,&#34;subjectToken&#34;:&#34;XXX.XXX.XXX&#34;,&#34;subjectTokenType&#34;:&#34;urn:ietf:params:oauth:token-type:jwt&#34;} :status: 200 content-type: application/json; charset=UTF-8 vary: Origin vary: X-Origin vary: Referer content-encoding: gzip date: ... server: scaffolding on HTTPServer2 content-length: 1061 x-xss-protection: 0 x-frame-options: SAMEORIGIN x-content-type-options: nosniff {&#34;access_token&#34;:&#34;ya29.d.XXX&#34;,&#34;issued_token_type&#34;:&#34;urn:ietf:params:oauth:token-type:access_token&#34;,&#34;token_type&#34;:&#34;Bearer&#34;,&#34;expires_in&#34;:3599} The formatted content of the request body is as follows: { &#34;audience&#34;: &#34;identitynamespace:test-gke-XXXXXX.svc.id.goog:https://container.googleapis.com/v1/projects/test-gke-XXXXXX/locations/us-central1/clusters/test&#34;, &#34;grantType&#34;: &#34;urn:ietf:params:oauth:grant-type:token-exchange&#34;, &#34;requestedTokenType&#34;: &#34;urn:ietf:params:oauth:token-type:access_token&#34;, &#34;scope&#34;: &#34;https://www.googleapis.com/auth/cloud-platform https://www.googleapis.com/auth/userinfo.email&#34;, &#34;subjectToken&#34;: &#34;XXX.XXX.XXX&#34;, &#34;subjectTokenType&#34;: &#34;urn:ietf:params:oauth:token-type:jwt&#34; } The formatted content of the response body is as follows: { &#34;access_token&#34;: &#34;ya29.d.XXX&#34;, &#34;issued_token_type&#34;: &#34;urn:ietf:params:oauth:token-type:access_token&#34;, &#34;token_type&#34;: &#34;Bearer&#34;, &#34;expires_in&#34;: 3599 } Differences from GKE Workload Identity Here are the differences between Workload Identity Federation for GKE and GKE Workload Identity feature (also known as linking Kubernetes ServiceAccounts to IAM): Comparison Item GKE Workload Identity Workload Identity Federation for GKE Requires Google service account (GSA) Required Not Required IAM role binding configuration Requires GSA role binding Requires k8s service account (KSA) role binding KSA impersonating GSA configuration Required Not Required GSA info configuration for KSA in cluster Required Not Required Multiple KSA/GSA binding support Not supported Supported (e.g., all SAs in namespace, all SAs in cluster) Support for hostNetwork applications Not supported Not supported Depends on gke-metadata-server component Required Required Cloud API support for obtained STS token Almost all cloud product APIs Most cloud APIs supported, some limited support, few unsupported References Make IAM for GKE easier to use with Workload Identity Federation | Google Cloud Blog Authenticate to Google Cloud APIs from GKE workloads  |  Google Kubernetes Engine (GKE) About Workload Identity Federation for GKE  |  Google Kubernetes Engine (GKE)  |  Google Cloud Identity federation: products and limitations  |  IAM Documentation  |  Google Cloud Method: token  |  IAM Documentation  |  Google Cloud About VM metadata  |  Compute Engine Documentation  |  Google Cloud"/>
+        <meta property="article:published_time" content="2025-01-05" />
+            <meta property="article:section" content="security" />
+            <meta property="article:tag" content="security" />
+            <meta property="article:tag" content="kubernetes" />
+            <meta property="article:tag" content="k8s" />
+            <meta property="article:tag" content="gcp" />
+            <meta property="article:tag" content="gke" />
+            <meta property="article:tag" content="Workload Identity Federation for GKE" />
+            <meta property="article:tag" content="cloud-security" />
+            <meta property="article:tag" content="en-version" />
+            <meta property="article:author" content="mozillazg" />
+            <meta property="og:image"
+                  content="https://mozillazg.com/static/avatar.jpeg"/>
+
+
+    <meta name="twitter:card" content="summary">
+        <meta name="twitter:site" content="@mozillazg">
+        <meta name="twitter:creator" content="@mozillazg">
+    <meta name="twitter:domain" content="https://mozillazg.com">
+            <meta property="twitter:image"
+                  content="https://mozillazg.com/static/avatar.jpeg"/>
+
+    <!-- Bootstrap -->
+        <link rel="stylesheet" href="/theme/cdn.jsdelivr.net/npm/bootstrap@3.3.4/dist/css/bootstrap.min.css" type="text/css"/>
+    <link href="/theme/cdn.jsdelivr.net/npm/font-awesome@4.3.0/css/font-awesome.min.css" rel="stylesheet">
+
+    <link href="/theme/cdn.jsdelivr.net/npm/pygments-css@1.0.0/github.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://mozillazg.com/theme/css/style.css" type="text/css"/>
+            <link href="/static/han.min.css" rel="stylesheet">
+            <link href="/static/yue.css" rel="stylesheet">
+            <link href="/static/custom.css" rel="stylesheet">
+
+        <link href="https://mozillazg.com/feeds/all.atom.xml" type="application/atom+xml" rel="alternate"
+              title="mozillazg's Blog ATOM Feed"/>
+
+        <link href="https://mozillazg.com/feeds/all.rss.xml" type="application/rss+xml" rel="alternate"
+              title="mozillazg's Blog RSS Feed"/>
+
+
+        <link href="https://mozillazg.com/feeds/security.atom.xml" type="application/atom+xml" rel="alternate"
+              title="mozillazg's Blog security ATOM Feed"/>
+
+
+    <script type="application/ld+json">
+    {
+        "@context": "https://schema.org",
+        "@type": "BlogPosting",
+        "publisher": {
+            "@type": "Person",
+            "name": "mozillazg",
+            "logo": "https://mozillazg.com/static/avatar.jpeg"
+        },
+        "author": {
+            "@type": "Person",
+            "name": "mozillazg",
+            "image": "https://mozillazg.com/static/avatar.jpeg",
+            "url": "https://mozillazg.com",
+            "sameAs": []
+        },
+        "headline": "Exploring Workload Identity Federation in GKE",
+        "url": "https://mozillazg.com/2025/01/security-deep-dive-into-gcp-workload-identity-federation-for-gke-feature-en.html",
+        "image": [
+            "https://mozillazg.com/static/avatar.jpeg"
+         ],
+        "keywords": "security, kubernetes, k8s, gcp, gke, Workload Identity Federation for GKE, cloud-security, en-version",
+        "description": "In this article, we will briefly explore a feature called &#34;Workload Identity Federation for GKE&#34; that was recently announced by GKE in their official blog. Features Overview Workload Identity Federation for GKE is an improved version of the original GKE Workload Identity feature. The main improvement is that it needs less configuration and offers better user experience. How to Use Follow these steps to try this feature: Create a GKE cluster with Workload Identity Federation for GKE enabled. You can find this option at: Create Cluster - Security - Enable Workload Identity. Link IAM roles to the service account used by your test application. One service account can have multiple roles. For example: $ kubectl create ns demo-ns $ kubectl -n demo-ns create serviceaccount demo-sa $ gcloud projects add-iam-policy-binding projects/test-gke-XXX \\ --role=roles/container.clusterViewer \\ --member=principal://iam.googleapis.com/projects/23182XXXXXXX/locations/global/workloadIdentityPools/test-gke-XXXXXX.svc.id.goog/subject/ns/&lt;namespace-name&gt;/sa/&lt;service-account-name&gt; \\ --condition=None $ gcloud storage buckets add-iam-policy-binding gs://&lt;bucket-name&gt; \\ --role=roles/storage.objectViewer \\ --member=principal://iam.googleapis.com/projects/23182XXXXXXX/locations/global/workloadIdentityPools/test-gke-XXXXXX.svc.id.goog/subject/ns/&lt;namespace-name&gt;/sa/&lt;service-account-name&gt; \\ --condition=None Deploy the test application. The application pod needs to use the namespace and service account from step 2, and add nodeSelector to ensure scheduling on nodes with the Workload Identity Federation for GKE feature enabled apiVersion: v1 kind: Pod metadata: name: test-pod namespace: demo-ns spec: nodeSelector: iam.gke.io/gke-metadata-server-enabled: &#34;true&#34; serviceAccountName: demo-sa containers: - name: test-pod image: google/cloud-sdk:slim command: [&#34;sleep&#34;,&#34;infinity&#34;] After the pod is running, enter the test-pod container and access the instance metadata service to obtain the STS token. The official SDK used by actual business applications will use a similar method to access the instance metadata service to obtain STS tokens for requesting cloud product APIs. $ gcloud auth print-access-token ya29.d.XXX $ curl -H &#34;Metadata-Flavor: Google&#34; http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token {&#34;access_token&#34;:&#34;ya29.d.XXX&#34;,&#34;expires_in&#34;:3423,&#34;token_type&#34;:&#34;Bearer&#34;} The obtained STS token will have all the permissions of the roles associated in step 2. $ gcloud container node-pools list --zone us-central1 --cluster test NAME MACHINE_TYPE DISK_SIZE_GB NODE_VERSION default-pool e2-medium 100 1.30.6-gke.1125000 $ curl -X GET -H &#34;Authorization: Bearer $(gcloud auth print-access-token)&#34; \\ &#34;https://storage.googleapis.com/storage/v1/b/demo-gke-workload-identity-federation/o&#34; { &#34;kind&#34;: &#34;storage#objects&#34; } Workflow Explained The workflow of Workload Identity Federation for GKE feature is as follows: When a program in the application Pod container requests the instance metadata service (accessing http://metadata.google.internal, which actually accesses http://169.254.169.254:80) to get an STS token, the request will be redirected to 169.254.169.252:988. 169.254.169.252:988 is the port listened to by the gke-metadata-server service deployed on the node. When the gke-metadata-server service receives the request, it will determine which Pod the request came from based on the client IP, then request the apiserver to generate a token corresponding to the service account used by that Pod. gke-metadata-server will use the obtained service account token to access GCP&#39;s STS API to get an STS token, finally gke-metadata-server returns the obtained STS token to the client. There are several key components and information that need special attention in this workflow, which will be explained one by one below. gke-metadata-server When enabling the Workload Identity Federation for GKE feature at the cluster or node pool level, a component named gke-metadata-server will be automatically deployed in the cluster. The workload YAML for this component is as follows: apiVersion: apps/v1 kind: DaemonSet metadata: annotations: deprecated.daemonset.template.generation: &#34;1&#34; labels: addonmanager.kubernetes.io/mode: Reconcile k8s-app: gke-metadata-server name: gke-metadata-server namespace: kube-system spec: minReadySeconds: 90 revisionHistoryLimit: 10 selector: matchLabels: k8s-app: gke-metadata-server template: metadata: annotations: components.gke.io/component-name: gke-metadata-server components.gke.io/component-version: 0.4.301 monitoring.gke.io/path: /metricz creationTimestamp: null labels: addonmanager.kubernetes.io/mode: Reconcile k8s-app: gke-metadata-server spec: containers: - command: - /gke-metadata-server - --logtostderr - --token-exchange-endpoint=https://securetoken.googleapis.com/v1/identitybindingtoken - --workload-pool=test-gke-XXXXXX.svc.id.goog - --alts-service-suffixes-using-node-identity=storage.googleapis.com,bigtable.googleapis.com,bigtable2.googleapis.com,bigtablerls.googleapis.com,spanner.googleapis.com,spanner2.googleapis.com,spanner-rls.googleapis.com,grpclb.directpath.google.internal,grpclb-dualstack.directpath.google.internal,staging-wrenchworks.sandbox.googleapis.com,preprod-spanner.sandbox.googleapis.com,wrenchworks-loadtest.googleapis.com,wrenchworks-nonprod.googleapis.com - --identity-provider=https://container.googleapis.com/v1/projects/test-gke-XXXXXX/locations/us-central1/clusters/test - --passthrough-ksa-list=anthos-identity-service:gke-oidc-envoy-sa,anthos-identity-service:gke-oidc-service-sa,gke-managed-dpv2-observability:hubble-relay,kube-system:antrea-controller,kube-system:container-watcher-pod-reader,kube-system:coredns,kube-system:egress-nat-controller,kube-system:event-exporter-sa,kube-system:fluentd-gcp-scaler,kube-system:gke-metrics-agent,kube-system:gke-spiffe-node-agent,kube-system:heapster,kube-system:konnectivity-agent,kube-system:kube-dns,kube-system:maintenance-handler,kube-system:metadata-agent,kube-system:network-metering-agent,kube-system:node-local-dns,kube-system:pkgextract-service,kube-system:pkgextract-cleanup-service,kube-system:securityprofile-controller,istio-system:istio-ingressgateway-service-account,istio-system:cluster-local-gateway-service-account,csm:csm-sync-agent,knative-serving:controller,kube-system:pdcsi-node-sa,kube-system:gcsfusecsi-node-sa,gmp-system:collector,gke-gmp-system:collector,gke-managed-cim:kube-state-metrics - --attributes=cluster-name=test,cluster-uid=392f63049deXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX,cluster-location=us-central1 - --cluster-uid=392f63049ded410XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX - --sts-endpoint=https://sts.googleapis.com - --token-exchange-mode=sts - --cloud-monitoring-endpoint=monitoring.googleapis.com:443 - --iam-cred-service-endpoint=https://iamcredentials.googleapis.com - --cluster-project-number=2318XXXXXXXX - --cluster-location=us-central1 - --cluster-name=test - --component-version=0.4.301 - --ksa-cache-mode=watchchecker - --kcp-allow-watch-checker=true - --enable-mds-csi-driver=true - --csi-socket=/csi/csi.sock - --volumes-db=/var/run/gkemds.gke.io/csi/volumes.boltdb env: - name: GOMEMLIMIT value: &#34;94371840&#34; image: us-central1-artifactregistry.gcr.io/gke-release/gke-release/gke-metadata-server:gke_metadata_server_20240702.00_p0@sha256:aea9cc887c91b9a05e5bb4bb604180772594a01f0828bbfacf30c77562ac7205 imagePullPolicy: IfNotPresent livenessProbe: failureThreshold: 3 httpGet: host: 127.0.0.1 path: /healthz port: 989 scheme: HTTP initialDelaySeconds: 30 periodSeconds: 10 successThreshold: 1 timeoutSeconds: 3 name: gke-metadata-server ports: - containerPort: 987 name: alts protocol: TCP - containerPort: 988 name: metadata-server protocol: TCP - containerPort: 989 name: debug-port protocol: TCP readinessProbe: failureThreshold: 3 httpGet: host: 127.0.0.1 path: /healthz port: 989 scheme: HTTP periodSeconds: 10 successThreshold: 1 timeoutSeconds: 1 resources: limits: memory: 100Mi requests: cpu: 100m memory: 100Mi securityContext: privileged: true readOnlyRootFilesystem: true terminationMessagePath: /dev/termination-log terminationMessagePolicy: File volumeMounts: - mountPath: /var/lib/kubelet/kubeconfig name: kubelet-credentials readOnly: true - mountPath: /var/lib/kubelet/pki/ name: kubelet-certs readOnly: true - mountPath: /var/run/ name: container-runtime-interface - mountPath: /etc/srv/kubernetes/pki name: kubelet-pki readOnly: true - mountPath: /etc/ssl/certs/ name: ca-certificates readOnly: true - mountPath: /home/kubernetes/bin/gke-exec-auth-plugin name: gke-exec-auth-plugin readOnly: true - mountPath: /sys/firmware/efi/efivars/ name: efivars readOnly: true - mountPath: /dev/tpm0 name: vtpm readOnly: true - mountPath: /csi name: csi-socket-dir - mountPath: /var/run/gkemds.gke.io/csi name: state-dir - mountPath: /var/lib/kubelet/pods mountPropagation: Bidirectional name: pods-dir - mountPath: /registration name: kubelet-registration-dir dnsPolicy: Default hostNetwork: true nodeSelector: iam.gke.io/gke-metadata-server-enabled: &#34;true&#34; kubernetes.io/os: linux priorityClassName: system-node-critical restartPolicy: Always schedulerName: default-scheduler securityContext: {} serviceAccount: gke-metadata-server serviceAccountName: gke-metadata-server terminationGracePeriodSeconds: 30 tolerations: - effect: NoExecute operator: Exists - effect: NoSchedule operator: Exists - key: components.gke.io/gke-managed-components operator: Exists volumes: - hostPath: path: /var/lib/kubelet/pki/ type: Directory name: kubelet-certs - hostPath: path: /var/lib/kubelet/kubeconfig type: File name: kubelet-credentials - hostPath: path: /var/run/ type: Directory name: container-runtime-interface - hostPath: path: /etc/srv/kubernetes/pki/ type: Directory name: kubelet-pki - hostPath: path: /etc/ssl/certs/ type: Directory name: ca-certificates - hostPath: path: /home/kubernetes/bin/gke-exec-auth-plugin type: File name: gke-exec-auth-plugin - hostPath: path: /sys/firmware/efi/efivars/ type: Directory name: efivars - hostPath: path: /dev/tpm0 type: CharDevice name: vtpm - hostPath: path: /var/lib/kubelet/plugins/gkemds.gke.io type: DirectoryOrCreate name: csi-socket-dir - hostPath: path: /var/lib/kubelet/pods type: Directory name: pods-dir - hostPath: path: /var/lib/kubelet/plugins_registry type: Directory name: kubelet-registration-dir - hostPath: path: /var/lib/kubelet/plugins type: Directory name: kubelet-plugins-dir - hostPath: path: /var/run/gkemds.gke.io/csi type: DirectoryOrCreate name: state-dir The gke-metadata-server component has the following characteristics: The component&#39;s workload is a DaemonSet. The component Pod uses hostNetwork: true and privileged: true. The service inside the component will listen on ports 987, 988, and 989, where port 988 will be used to receive redirected requests for accessing the instance metadata service: $ ss -atnlp |grep gke LISTEN 0 1024 *:987 *:* users:((&#34;gke-metadata-se&#34;,pid=183706,fd=10)) LISTEN 0 1024 *:989 *:* users:((&#34;gke-metadata-se&#34;,pid=183706,fd=12)) LISTEN 0 1024 *:988 *:* users:((&#34;gke-metadata-se&#34;,pid=183706,fd=15)) The previously mentioned IP 169.254.169.252 is the local loopback (lo) IP address, so the port 988 listened to by gke-metadata-server includes the previously mentioned 169.254.169.252:988 port: 1: lo: &lt;LOOPBACK,UP,LOWER_UP&gt; mtu 65536 qdisc noqueue state UNKNOWN group default qlen 1000 link/loopback 00:00:00:00:00:00 brd 00:00:00:00:00:00 inet 127.0.0.1/8 scope host lo valid_lft forever preferred_lft forever inet 169.254.169.252/32 scope host lo valid_lft forever preferred_lft forever inet6 ::1/128 scope host valid_lft forever preferred_lft forever All nodes with the Workload Identity Federation for GKE feature enabled will be configured with the following nftables rules during initialization, ensuring that traffic from business containers requesting the metadata service (http://metadata.google.internal, 169.254.169.254:80) will be redirected to the 169.254.169.252:988 port listened to by the component: table ip nat { chain PREROUTING { type nat hook prerouting priority dstnat; policy accept; counter packets 2143 bytes 169432 jump KUBE-SERVICES iifname != &#34;eth0&#34; meta l4proto tcp ip daddr 169.254.169.254 tcp dport 8080 counter packets 0 bytes 0 dnat to 169.254.169.252:987 iifname != &#34;eth0&#34; meta l4proto tcp ip daddr 169.254.169.254 tcp dport 80 counter packets 181 bytes 10860 dnat to 169.254.169.252:988 } } As mentioned earlier, the component will determine the source pod through the client IP and request the apiserver to get the service account. This involves what credentials the component uses to access the apiserver. The component uses the kubelet&#39;s credentials on the node to access the apiserver (the component YAML shown earlier includes the configuration for mounting kubelet kubeconfig). Additionally, when deploying the component, extra RBAC permissions for get/list/watch on pods and serviceaccounts will be granted to the kubelet&#39;s credentials, used for obtaining information about pods and service accounts on the current node: --- apiVersion: rbac.authorization.k8s.io/v1 kind: ClusterRoleBinding metadata: annotations: components.gke.io/component-name: gke-metadata-server components.gke.io/component-version: 0.4.301 labels: addonmanager.kubernetes.io/mode: Reconcile name: gce:gke-metadata-server-reader roleRef: apiGroup: rbac.authorization.k8s.io kind: ClusterRole name: gce:gke-metadata-server-reader subjects: - apiGroup: rbac.authorization.k8s.io kind: Group name: system:nodes --- apiVersion: rbac.authorization.k8s.io/v1 kind: ClusterRole metadata: annotations: components.gke.io/component-name: gke-metadata-server components.gke.io/component-version: 0.4.301 labels: addonmanager.kubernetes.io/mode: Reconcile name: gce:gke-metadata-server-reader rules: - apiGroups: - &#34;&#34; resources: - pods - serviceaccounts verbs: - get - watch - list If the service account used by the pod is not bound to any IAM role, the STS token obtained by the application in the pod when accessing the metadata service will be the STS token of the node&#39;s default Google service account. service account token For requests initiated by programs within each pod, the gke-metadata-server component doesn&#39;t directly use the service account token mounted in the pod container, but instead requests the apiserver to generate a new service account token. Here&#39;s an example of the payload for a service account token mounted in the container: { &#34;aud&#34;: [ &#34;https://container.googleapis.com/v1/projects/test-gke-XXXXXX/locations/us-central1/clusters/test&#34; ], &#34;exp&#34;: ..., &#34;iat&#34;: ..., &#34;iss&#34;: &#34;https://container.googleapis.com/v1/projects/test-gke-XXXXXX/locations/us-central1/clusters/test&#34;, &#34;jti&#34;: &#34;...&#34;, &#34;kubernetes.io&#34;: {...}, &#34;nbf&#34;: ..., &#34;sub&#34;: &#34;system:serviceaccount:demo-ns:demo-sa&#34; } Here&#39;s an example of the payload for a service account token generated by the apiserver when requested by the component: { &#34;aud&#34;: [ &#34;test-gke-XXXXXX.svc.id.goog&#34; ], &#34;exp&#34;: ..., &#34;iat&#34;: ..., &#34;iss&#34;: &#34;https://container.googleapis.com/v1/projects/test-gke-XXXXXX/locations/us-central1/clusters/test&#34;, &#34;jti&#34;: &#34;...&#34;, &#34;kubernetes.io&#34;: {...}, &#34;nbf&#34;: ..., &#34;sub&#34;: &#34;system:serviceaccount:demo-ns:demo-sa&#34; } As we can see, the main difference is in the content of the aud field. sts token The gke-metadata-server component will use the obtained service account token to access the STS token API to get an STS token. Here&#39;s an example of the corresponding request: :authority: sts.googleapis.com :method: POST :path: /v1/token?alt=json&amp;prettyPrint=false :scheme: https x-goog-api-client: gl-go/1.23.0--20240626-RC01 cl/646990413 +5a18e79687 X:fieldtrack,boringcrypto gdcl/0.177.0 user-agent: google-api-go-client/0.5 gke-metadata-server content-type: application/json content-length: 1673 accept-encoding: gzip {&#34;audience&#34;:&#34;identitynamespace:test-gke-XXXXXX.svc.id.goog:https://container.googleapis.com/v1/projects/test-gke-XXXXXX/locations/us-central1/clusters/test&#34;,&#34;grantType&#34;:&#34;urn:ietf:params:oauth:grant-type:token-exchange&#34;,&#34;requestedTokenType&#34;:&#34;urn:ietf:params:oauth:token-type:access_token&#34;,&#34;scope&#34;:&#34;https://www.googleapis.com/auth/cloud-platform https://www.googleapis.com/auth/userinfo.email&#34;,&#34;subjectToken&#34;:&#34;XXX.XXX.XXX&#34;,&#34;subjectTokenType&#34;:&#34;urn:ietf:params:oauth:token-type:jwt&#34;} :status: 200 content-type: application/json; charset=UTF-8 vary: Origin vary: X-Origin vary: Referer content-encoding: gzip date: ... server: scaffolding on HTTPServer2 content-length: 1061 x-xss-protection: 0 x-frame-options: SAMEORIGIN x-content-type-options: nosniff {&#34;access_token&#34;:&#34;ya29.d.XXX&#34;,&#34;issued_token_type&#34;:&#34;urn:ietf:params:oauth:token-type:access_token&#34;,&#34;token_type&#34;:&#34;Bearer&#34;,&#34;expires_in&#34;:3599} The formatted content of the request body is as follows: { &#34;audience&#34;: &#34;identitynamespace:test-gke-XXXXXX.svc.id.goog:https://container.googleapis.com/v1/projects/test-gke-XXXXXX/locations/us-central1/clusters/test&#34;, &#34;grantType&#34;: &#34;urn:ietf:params:oauth:grant-type:token-exchange&#34;, &#34;requestedTokenType&#34;: &#34;urn:ietf:params:oauth:token-type:access_token&#34;, &#34;scope&#34;: &#34;https://www.googleapis.com/auth/cloud-platform https://www.googleapis.com/auth/userinfo.email&#34;, &#34;subjectToken&#34;: &#34;XXX.XXX.XXX&#34;, &#34;subjectTokenType&#34;: &#34;urn:ietf:params:oauth:token-type:jwt&#34; } The formatted content of the response body is as follows: { &#34;access_token&#34;: &#34;ya29.d.XXX&#34;, &#34;issued_token_type&#34;: &#34;urn:ietf:params:oauth:token-type:access_token&#34;, &#34;token_type&#34;: &#34;Bearer&#34;, &#34;expires_in&#34;: 3599 } Differences from GKE Workload Identity Here are the differences between Workload Identity Federation for GKE and GKE Workload Identity feature (also known as linking Kubernetes ServiceAccounts to IAM): Comparison Item GKE Workload Identity Workload Identity Federation for GKE Requires Google service account (GSA) Required Not Required IAM role binding configuration Requires GSA role binding Requires k8s service account (KSA) role binding KSA impersonating GSA configuration Required Not Required GSA info configuration for KSA in cluster Required Not Required Multiple KSA/GSA binding support Not supported Supported (e.g., all SAs in namespace, all SAs in cluster) Support for hostNetwork applications Not supported Not supported Depends on gke-metadata-server component Required Required Cloud API support for obtained STS token Almost all cloud product APIs Most cloud APIs supported, some limited support, few unsupported References Make IAM for GKE easier to use with Workload Identity Federation | Google Cloud Blog Authenticate to Google Cloud APIs from GKE workloads  |  Google Kubernetes Engine (GKE) About Workload Identity Federation for GKE  |  Google Kubernetes Engine (GKE)  |  Google Cloud Identity federation: products and limitations  |  IAM Documentation  |  Google Cloud Method: token  |  IAM Documentation  |  Google Cloud About VM metadata  |  Compute Engine Documentation  |  Google Cloud",
+        "mainEntityOfPage": {
+             "@type": "WebPage",
+             "@id": "https://mozillazg.com/2025/01/security-deep-dive-into-gcp-workload-identity-federation-for-gke-feature-en.html"
+        },
+        "datePublished": "2025-01-05"
+    }
+    </script>
+
+</head>
+<body>
+
+<div class="navbar" role="navigation">
+	<div class="container">
+        <div class="navbar-header">
+            <button type="button" class="navbar-toggle" data-toggle="collapse" data-target=".navbar-ex1-collapse">
+                <span class="sr-only">Toggle navigation</span>
+                <span class="icon-bar"></span>
+                <span class="icon-bar"></span>
+                <span class="icon-bar"></span>
+            </button>
+            <a href="https://mozillazg.com/" class="navbar-brand">
+mozillazg's Blog            </a>
+        </div>
+        <div class="collapse navbar-collapse navbar-ex1-collapse">
+            <ul class="nav navbar-nav">
+                    <li><a href="https://mozillazg.com/feeds/all.atom.xml">Feed</a></li>
+                    <li><a href="/2014/10/pages/about-me.html">About</a></li>
+            </ul>
+            <ul class="nav navbar-nav navbar-right">
+              <li><a href="https://mozillazg.com/archives.html"><i class="fa fa-th-list"></i><span class="icon-label">Archives</span></a></li>
+            </ul>
+        </div>
+        <!-- /.navbar-collapse -->
+    </div>
+</div> <!-- /.navbar -->
+<!-- Banner -->
+<!-- End Banner -->
+<div class="container">
+    <div class="row">
+        <div class="col-lg-12">
+    <section id="content" class="yue">
+        <article>
+            <header class="text-center">
+                <h1>
+                    <a href="https://mozillazg.com/2025/01/security-deep-dive-into-gcp-workload-identity-federation-for-gke-feature-en.html"
+                       rel="bookmark"
+                       title="Permalink to Exploring Workload Identity Federation in GKE">
+                        Exploring Workload Identity Federation in GKE
+                    </a>
+                </h1>
+                <p class="published">
+                    <time datetime="2025-01-05T00:00:00+00:00">
+                    2025-01-05
+                    </time>
+                </p>
+            </header>
+            <div class="entry-content">
+                <div class="well-sm article-info">
+<footer class="post-info">
+        <a href="https://mozillazg.com/category/security.html">security</a>
+
+
+<span class="label label-default hide">Tags</span>
+	<a href="https://mozillazg.com/tag/kubernetes.html">kubernetes</a>
+        /
+	<a href="https://mozillazg.com/tag/k8s.html">k8s</a>
+        /
+	<a href="https://mozillazg.com/tag/gcp.html">gcp</a>
+        /
+	<a href="https://mozillazg.com/tag/gke.html">gke</a>
+        /
+	<a href="https://mozillazg.com/tag/workload-identity-federation-for-gke.html">Workload Identity Federation for GKE</a>
+        /
+	<a href="https://mozillazg.com/tag/cloud-security.html">cloud-security</a>
+        /
+	<a href="https://mozillazg.com/tag/en-version.html">en-version</a>
+    <span class="label label-default">Lang</span>
+	<a href="https://mozillazg.com/2025/01/security-deep-dive-into-gcp-workload-identity-federation-for-gke-feature.html">zh</a>
+
+</footer><!-- /.post-info -->                </div>
+                <div class="js-toc"></div>
+                <div>
+                <p>In this article, we will briefly explore a feature called &quot;<a class="reference external" href="https://cloud.google.com/blog/products/identity-security/make-iam-for-gke-easier-to-use-with-workload-identity-federation">Workload Identity Federation for GKE</a>&quot;
+that was recently announced by GKE in their official blog.</p>
+<div class="section" id="features-overview">
+<h2 id="hidfeatures-overview">Features Overview<a class="headerlink" href="#hidfeatures-overview" title="Permalink to this headline">¶</a></h2>
+<p>Workload Identity Federation for GKE is an improved version of the original GKE Workload Identity feature.
+The main improvement is that it needs less configuration and offers better user experience.</p>
+</div>
+<div class="section" id="how-to-use">
+<h2 id="hidhow-to-use">How to Use<a class="headerlink" href="#hidhow-to-use" title="Permalink to this headline">¶</a></h2>
+<p>Follow these steps to try this feature:</p>
+<ol class="arabic">
+<li><p class="first">Create a GKE cluster with Workload Identity Federation for GKE enabled. You can find this option at:
+Create Cluster - Security - Enable Workload Identity.</p>
+</li>
+<li><p class="first">Link IAM roles to the service account used by your test application. One service account can have multiple roles.
+For example:</p>
+<pre class="literal-block">
+$ kubectl create ns demo-ns
+$ kubectl -n demo-ns create serviceaccount demo-sa
+
+$ gcloud projects add-iam-policy-binding projects/test-gke-XXX \
+    --role=roles/container.clusterViewer \
+    --member=principal://iam.googleapis.com/projects/23182XXXXXXX/locations/global/workloadIdentityPools/test-gke-XXXXXX.svc.id.goog/subject/ns/&lt;namespace-name&gt;/sa/&lt;service-account-name&gt; \
+    --condition=None
+
+$ gcloud storage buckets add-iam-policy-binding gs://&lt;bucket-name&gt; \
+--role=roles/storage.objectViewer \
+--member=principal://iam.googleapis.com/projects/23182XXXXXXX/locations/global/workloadIdentityPools/test-gke-XXXXXX.svc.id.goog/subject/ns/&lt;namespace-name&gt;/sa/&lt;service-account-name&gt; \
+--condition=None
+</pre>
+</li>
+<li><p class="first">Deploy the test application. The application pod needs to use the namespace and service account from step 2,
+and add nodeSelector to ensure scheduling on nodes with the Workload Identity Federation for GKE feature enabled</p>
+<pre class="literal-block">
+apiVersion: v1
+kind: Pod
+metadata:
+  name: test-pod
+  namespace: demo-ns
+spec:
+  nodeSelector:
+    iam.gke.io/gke-metadata-server-enabled: &quot;true&quot;
+  serviceAccountName: demo-sa
+  containers:
+  - name: test-pod
+    image: google/cloud-sdk:slim
+    command: [&quot;sleep&quot;,&quot;infinity&quot;]
+</pre>
+</li>
+<li><p class="first">After the pod is running, enter the test-pod container and access the instance metadata service to obtain the STS token.
+The official SDK used by actual business applications will use a similar method to access the instance metadata service to
+obtain STS tokens for requesting cloud product APIs.</p>
+</li>
+</ol>
+<div class="highlight"><pre><span></span>$<span class="w"> </span>gcloud<span class="w"> </span>auth<span class="w"> </span>print-access-token
+<span class="w"> </span>ya29.d.XXX
+$<span class="w"> </span>curl<span class="w"> </span>-H<span class="w"> </span><span class="s2">&quot;Metadata-Flavor: Google&quot;</span><span class="w"> </span>http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token
+<span class="w"> </span><span class="o">{</span><span class="s2">&quot;access_token&quot;</span>:<span class="s2">&quot;ya29.d.XXX&quot;</span>,<span class="s2">&quot;expires_in&quot;</span>:3423,<span class="s2">&quot;token_type&quot;</span>:<span class="s2">&quot;Bearer&quot;</span><span class="o">}</span>
+</pre></div>
+<ol class="arabic simple" start="5">
+<li>The obtained STS token will have all the permissions of the roles associated in step 2.</li>
+</ol>
+<div class="highlight"><pre><span></span>$<span class="w"> </span>gcloud<span class="w"> </span>container<span class="w"> </span>node-pools<span class="w"> </span>list<span class="w"> </span>--zone<span class="w"> </span>us-central1<span class="w"> </span>--cluster<span class="w"> </span><span class="nb">test</span>
+<span class="w"> </span>NAME<span class="w">          </span>MACHINE_TYPE<span class="w">  </span>DISK_SIZE_GB<span class="w">  </span>NODE_VERSION
+<span class="w"> </span>default-pool<span class="w">  </span>e2-medium<span class="w">     </span><span class="m">100</span><span class="w">           </span><span class="m">1</span>.30.6-gke.1125000
+
+$<span class="w"> </span>curl<span class="w"> </span>-X<span class="w"> </span>GET<span class="w"> </span>-H<span class="w"> </span><span class="s2">&quot;Authorization: Bearer </span><span class="k">$(</span>gcloud<span class="w"> </span>auth<span class="w"> </span>print-access-token<span class="k">)</span><span class="s2">&quot;</span><span class="w"> </span><span class="se">\</span>
+<span class="w"> </span><span class="s2">&quot;https://storage.googleapis.com/storage/v1/b/demo-gke-workload-identity-federation/o&quot;</span>
+<span class="w"> </span><span class="o">{</span>
+<span class="w">   </span><span class="s2">&quot;kind&quot;</span>:<span class="w"> </span><span class="s2">&quot;storage#objects&quot;</span>
+<span class="w"> </span><span class="o">}</span>
+</pre></div>
+</div>
+<div class="section" id="workflow-explained">
+<h2 id="hidworkflow-explained">Workflow Explained<a class="headerlink" href="#hidworkflow-explained" title="Permalink to this headline">¶</a></h2>
+<p>The workflow of Workload Identity Federation for GKE feature is as follows:</p>
+<p><img alt="image" src="/static/images/security/gke-workload-identity-federation-for-gke-en.png" /></p>
+<ol class="arabic simple">
+<li>When a program in the application Pod container requests the instance metadata service
+(accessing <tt class="docutils literal"><span class="pre">http://metadata.google.internal</span></tt>, which actually accesses <tt class="docutils literal"><span class="pre">http://169.254.169.254:80</span></tt>)
+to get an STS token, the request will be redirected to 169.254.169.252:988.
+169.254.169.252:988 is the port listened to by the gke-metadata-server service deployed on the node.</li>
+<li>When the gke-metadata-server service receives the request, it will determine which Pod the request came from based on the client IP,
+then request the apiserver to generate a token corresponding to the service account used by that Pod.</li>
+<li>gke-metadata-server will use the obtained service account token to access GCP's
+<a class="reference external" href="https://cloud.google.com/iam/docs/reference/sts/rest/v1/TopLevel/token">STS API</a> to get an STS token,
+finally gke-metadata-server returns the obtained STS token to the client.</li>
+</ol>
+<p>There are several key components and information that need special attention in this workflow, which will be explained one by one below.</p>
+</div>
+<div class="section" id="gke-metadata-server">
+<h2 id="hidgke-metadata-server">gke-metadata-server<a class="headerlink" href="#hidgke-metadata-server" title="Permalink to this headline">¶</a></h2>
+<p>When enabling the Workload Identity Federation for GKE feature at the cluster or node pool level,
+a component named gke-metadata-server will be automatically deployed in the cluster.
+The workload YAML for this component is as follows:</p>
+<pre class="literal-block">
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  annotations:
+    deprecated.daemonset.template.generation: &quot;1&quot;
+  labels:
+    addonmanager.kubernetes.io/mode: Reconcile
+    k8s-app: gke-metadata-server
+  name: gke-metadata-server
+  namespace: kube-system
+spec:
+  minReadySeconds: 90
+  revisionHistoryLimit: 10
+  selector:
+    matchLabels:
+      k8s-app: gke-metadata-server
+  template:
+    metadata:
+      annotations:
+        components.gke.io/component-name: gke-metadata-server
+        components.gke.io/component-version: 0.4.301
+        monitoring.gke.io/path: /metricz
+      creationTimestamp: null
+      labels:
+        addonmanager.kubernetes.io/mode: Reconcile
+        k8s-app: gke-metadata-server
+    spec:
+      containers:
+      - command:
+        - /gke-metadata-server
+        - --logtostderr
+        - --token-exchange-endpoint=https://securetoken.googleapis.com/v1/identitybindingtoken
+        - --workload-pool=test-gke-XXXXXX.svc.id.goog
+        - --alts-service-suffixes-using-node-identity=storage.googleapis.com,bigtable.googleapis.com,bigtable2.googleapis.com,bigtablerls.googleapis.com,spanner.googleapis.com,spanner2.googleapis.com,spanner-rls.googleapis.com,grpclb.directpath.google.internal,grpclb-dualstack.directpath.google.internal,staging-wrenchworks.sandbox.googleapis.com,preprod-spanner.sandbox.googleapis.com,wrenchworks-loadtest.googleapis.com,wrenchworks-nonprod.googleapis.com
+        - --identity-provider=https://container.googleapis.com/v1/projects/test-gke-XXXXXX/locations/us-central1/clusters/test
+        - --passthrough-ksa-list=anthos-identity-service:gke-oidc-envoy-sa,anthos-identity-service:gke-oidc-service-sa,gke-managed-dpv2-observability:hubble-relay,kube-system:antrea-controller,kube-system:container-watcher-pod-reader,kube-system:coredns,kube-system:egress-nat-controller,kube-system:event-exporter-sa,kube-system:fluentd-gcp-scaler,kube-system:gke-metrics-agent,kube-system:gke-spiffe-node-agent,kube-system:heapster,kube-system:konnectivity-agent,kube-system:kube-dns,kube-system:maintenance-handler,kube-system:metadata-agent,kube-system:network-metering-agent,kube-system:node-local-dns,kube-system:pkgextract-service,kube-system:pkgextract-cleanup-service,kube-system:securityprofile-controller,istio-system:istio-ingressgateway-service-account,istio-system:cluster-local-gateway-service-account,csm:csm-sync-agent,knative-serving:controller,kube-system:pdcsi-node-sa,kube-system:gcsfusecsi-node-sa,gmp-system:collector,gke-gmp-system:collector,gke-managed-cim:kube-state-metrics
+        - --attributes=cluster-name=test,cluster-uid=392f63049deXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX,cluster-location=us-central1
+        - --cluster-uid=392f63049ded410XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+        - --sts-endpoint=https://sts.googleapis.com
+        - --token-exchange-mode=sts
+        - --cloud-monitoring-endpoint=monitoring.googleapis.com:443
+        - --iam-cred-service-endpoint=https://iamcredentials.googleapis.com
+        - --cluster-project-number=2318XXXXXXXX
+        - --cluster-location=us-central1
+        - --cluster-name=test
+        - --component-version=0.4.301
+        - --ksa-cache-mode=watchchecker
+        - --kcp-allow-watch-checker=true
+        - --enable-mds-csi-driver=true
+        - --csi-socket=/csi/csi.sock
+        - --volumes-db=/var/run/gkemds.gke.io/csi/volumes.boltdb
+        env:
+        - name: GOMEMLIMIT
+          value: &quot;94371840&quot;
+        image: us-central1-artifactregistry.gcr.io/gke-release/gke-release/gke-metadata-server:gke_metadata_server_20240702.00_p0&#64;sha256:aea9cc887c91b9a05e5bb4bb604180772594a01f0828bbfacf30c77562ac7205
+        imagePullPolicy: IfNotPresent
+        livenessProbe:
+          failureThreshold: 3
+          httpGet:
+            host: 127.0.0.1
+            path: /healthz
+            port: 989
+            scheme: HTTP
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          successThreshold: 1
+          timeoutSeconds: 3
+        name: gke-metadata-server
+        ports:
+        - containerPort: 987
+          name: alts
+          protocol: TCP
+        - containerPort: 988
+          name: metadata-server
+          protocol: TCP
+        - containerPort: 989
+          name: debug-port
+          protocol: TCP
+        readinessProbe:
+          failureThreshold: 3
+          httpGet:
+            host: 127.0.0.1
+            path: /healthz
+            port: 989
+            scheme: HTTP
+          periodSeconds: 10
+          successThreshold: 1
+          timeoutSeconds: 1
+        resources:
+          limits:
+            memory: 100Mi
+          requests:
+            cpu: 100m
+            memory: 100Mi
+        securityContext:
+          privileged: true
+          readOnlyRootFilesystem: true
+        terminationMessagePath: /dev/termination-log
+        terminationMessagePolicy: File
+        volumeMounts:
+        - mountPath: /var/lib/kubelet/kubeconfig
+          name: kubelet-credentials
+          readOnly: true
+        - mountPath: /var/lib/kubelet/pki/
+          name: kubelet-certs
+          readOnly: true
+        - mountPath: /var/run/
+          name: container-runtime-interface
+        - mountPath: /etc/srv/kubernetes/pki
+          name: kubelet-pki
+          readOnly: true
+        - mountPath: /etc/ssl/certs/
+          name: ca-certificates
+          readOnly: true
+        - mountPath: /home/kubernetes/bin/gke-exec-auth-plugin
+          name: gke-exec-auth-plugin
+          readOnly: true
+        - mountPath: /sys/firmware/efi/efivars/
+          name: efivars
+          readOnly: true
+        - mountPath: /dev/tpm0
+          name: vtpm
+          readOnly: true
+        - mountPath: /csi
+          name: csi-socket-dir
+        - mountPath: /var/run/gkemds.gke.io/csi
+          name: state-dir
+        - mountPath: /var/lib/kubelet/pods
+          mountPropagation: Bidirectional
+          name: pods-dir
+        - mountPath: /registration
+          name: kubelet-registration-dir
+      dnsPolicy: Default
+      hostNetwork: true
+      nodeSelector:
+        iam.gke.io/gke-metadata-server-enabled: &quot;true&quot;
+        kubernetes.io/os: linux
+      priorityClassName: system-node-critical
+      restartPolicy: Always
+      schedulerName: default-scheduler
+      securityContext: {}
+      serviceAccount: gke-metadata-server
+      serviceAccountName: gke-metadata-server
+      terminationGracePeriodSeconds: 30
+      tolerations:
+      - effect: NoExecute
+        operator: Exists
+      - effect: NoSchedule
+        operator: Exists
+      - key: components.gke.io/gke-managed-components
+        operator: Exists
+      volumes:
+      - hostPath:
+          path: /var/lib/kubelet/pki/
+          type: Directory
+        name: kubelet-certs
+      - hostPath:
+          path: /var/lib/kubelet/kubeconfig
+          type: File
+        name: kubelet-credentials
+      - hostPath:
+          path: /var/run/
+          type: Directory
+        name: container-runtime-interface
+      - hostPath:
+          path: /etc/srv/kubernetes/pki/
+          type: Directory
+        name: kubelet-pki
+      - hostPath:
+          path: /etc/ssl/certs/
+          type: Directory
+        name: ca-certificates
+      - hostPath:
+          path: /home/kubernetes/bin/gke-exec-auth-plugin
+          type: File
+        name: gke-exec-auth-plugin
+      - hostPath:
+          path: /sys/firmware/efi/efivars/
+          type: Directory
+        name: efivars
+      - hostPath:
+          path: /dev/tpm0
+          type: CharDevice
+        name: vtpm
+      - hostPath:
+          path: /var/lib/kubelet/plugins/gkemds.gke.io
+          type: DirectoryOrCreate
+        name: csi-socket-dir
+      - hostPath:
+          path: /var/lib/kubelet/pods
+          type: Directory
+        name: pods-dir
+      - hostPath:
+          path: /var/lib/kubelet/plugins_registry
+          type: Directory
+        name: kubelet-registration-dir
+      - hostPath:
+          path: /var/lib/kubelet/plugins
+          type: Directory
+        name: kubelet-plugins-dir
+      - hostPath:
+          path: /var/run/gkemds.gke.io/csi
+          type: DirectoryOrCreate
+        name: state-dir
+</pre>
+<p>The gke-metadata-server component has the following characteristics:</p>
+<ul>
+<li><p class="first">The component's workload is a DaemonSet.</p>
+</li>
+<li><p class="first">The component Pod uses <tt class="docutils literal">hostNetwork: true</tt> and <tt class="docutils literal">privileged: true</tt>.</p>
+</li>
+<li><p class="first">The service inside the component will listen on ports 987, 988, and 989, where port 988 will be used to
+receive redirected requests for accessing the instance metadata service:</p>
+<pre class="literal-block">
+$ ss -atnlp |grep gke
+LISTEN 0      1024               *:987              *:*    users:((&quot;gke-metadata-se&quot;,pid=183706,fd=10))
+LISTEN 0      1024               *:989              *:*    users:((&quot;gke-metadata-se&quot;,pid=183706,fd=12))
+LISTEN 0      1024               *:988              *:*    users:((&quot;gke-metadata-se&quot;,pid=183706,fd=15))
+</pre>
+</li>
+<li><p class="first">The previously mentioned IP 169.254.169.252 is the local loopback (lo) IP address,
+so the port 988 listened to by gke-metadata-server
+includes the previously mentioned <tt class="docutils literal">169.254.169.252:988</tt> port:</p>
+<pre class="literal-block">
+1: lo: &lt;LOOPBACK,UP,LOWER_UP&gt; mtu 65536 qdisc noqueue state UNKNOWN group default qlen 1000
+    link/loopback 00:00:00:00:00:00 brd 00:00:00:00:00:00
+    inet 127.0.0.1/8 scope host lo
+       valid_lft forever preferred_lft forever
+    inet 169.254.169.252/32 scope host lo
+       valid_lft forever preferred_lft forever
+    inet6 ::1/128 scope host
+       valid_lft forever preferred_lft forever
+</pre>
+</li>
+<li><p class="first">All nodes with the Workload Identity Federation for GKE feature enabled will be configured with the following
+nftables rules during initialization, ensuring that traffic from business containers requesting
+the metadata service (<tt class="docutils literal"><span class="pre">http://metadata.google.internal</span></tt>, 169.254.169.254:80)
+will be redirected to the <tt class="docutils literal">169.254.169.252:988</tt> port listened to by the component:</p>
+<pre class="literal-block">
+table ip nat {
+        chain PREROUTING {
+                type nat hook prerouting priority dstnat; policy accept;
+                 counter packets 2143 bytes 169432 jump KUBE-SERVICES
+                iifname != &quot;eth0&quot; meta l4proto tcp ip daddr 169.254.169.254 tcp dport 8080  counter packets 0 bytes 0 dnat to 169.254.169.252:987
+                iifname != &quot;eth0&quot; meta l4proto tcp ip daddr 169.254.169.254 tcp dport 80  counter packets 181 bytes 10860 dnat to 169.254.169.252:988
+        }
+}
+</pre>
+</li>
+<li><p class="first">As mentioned earlier, the component will determine the source pod through the client IP
+and request the apiserver to get the service account. This involves what credentials the component uses to access the apiserver.
+The component uses the kubelet's credentials on the node to access the apiserver
+(the component YAML shown earlier includes the configuration for mounting kubelet kubeconfig).
+Additionally, when deploying the component, extra RBAC permissions for get/list/watch on pods
+and serviceaccounts will be granted to the kubelet's credentials,
+used for obtaining information about pods and service accounts on the current node:</p>
+<pre class="literal-block">
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  annotations:
+    components.gke.io/component-name: gke-metadata-server
+    components.gke.io/component-version: 0.4.301
+  labels:
+    addonmanager.kubernetes.io/mode: Reconcile
+  name: gce:gke-metadata-server-reader
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: gce:gke-metadata-server-reader
+subjects:
+- apiGroup: rbac.authorization.k8s.io
+  kind: Group
+  name: system:nodes
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  annotations:
+    components.gke.io/component-name: gke-metadata-server
+    components.gke.io/component-version: 0.4.301
+  labels:
+    addonmanager.kubernetes.io/mode: Reconcile
+  name: gce:gke-metadata-server-reader
+rules:
+- apiGroups:
+  - &quot;&quot;
+  resources:
+  - pods
+  - serviceaccounts
+  verbs:
+  - get
+  - watch
+  - list
+</pre>
+</li>
+<li><p class="first">If the service account used by the pod is not bound to any IAM role,
+the STS token obtained by the application in the pod when accessing the metadata service will
+be the STS token of the node's default Google service account.</p>
+</li>
+</ul>
+</div>
+<div class="section" id="service-account-token">
+<h2 id="hidservice-account-token">service account token<a class="headerlink" href="#hidservice-account-token" title="Permalink to this headline">¶</a></h2>
+<p>For requests initiated by programs within each pod, the gke-metadata-server component
+doesn't directly use the service account token mounted in the pod container,
+but instead requests the apiserver to generate a new service account token.</p>
+<p>Here's an example of the payload for a service account token mounted in the container:</p>
+<pre class="literal-block">
+{
+  &quot;aud&quot;: [
+    &quot;https://container.googleapis.com/v1/projects/test-gke-XXXXXX/locations/us-central1/clusters/test&quot;
+  ],
+  &quot;exp&quot;: ...,
+  &quot;iat&quot;: ...,
+  &quot;iss&quot;: &quot;https://container.googleapis.com/v1/projects/test-gke-XXXXXX/locations/us-central1/clusters/test&quot;,
+  &quot;jti&quot;: &quot;...&quot;,
+  &quot;kubernetes.io&quot;: {...},
+  &quot;nbf&quot;: ...,
+  &quot;sub&quot;: &quot;system:serviceaccount:demo-ns:demo-sa&quot;
+}
+</pre>
+<p>Here's an example of the payload for a service account token generated by the apiserver when requested by the component:</p>
+<pre class="literal-block">
+{
+  &quot;aud&quot;: [
+    &quot;test-gke-XXXXXX.svc.id.goog&quot;
+  ],
+  &quot;exp&quot;: ...,
+  &quot;iat&quot;: ...,
+  &quot;iss&quot;: &quot;https://container.googleapis.com/v1/projects/test-gke-XXXXXX/locations/us-central1/clusters/test&quot;,
+  &quot;jti&quot;: &quot;...&quot;,
+  &quot;kubernetes.io&quot;: {...},
+  &quot;nbf&quot;: ...,
+  &quot;sub&quot;: &quot;system:serviceaccount:demo-ns:demo-sa&quot;
+}
+</pre>
+<p>As we can see, the main difference is in the content of the <tt class="docutils literal">aud</tt> field.</p>
+</div>
+<div class="section" id="sts-token">
+<h2 id="hidsts-token">sts token<a class="headerlink" href="#hidsts-token" title="Permalink to this headline">¶</a></h2>
+<p>The gke-metadata-server component will use the obtained service account token to access the STS
+<a class="reference external" href="https://cloud.google.com/iam/docs/reference/sts/rest/v1/TopLevel/token">token API</a> to get an STS token.</p>
+<p>Here's an example of the corresponding request:</p>
+<pre class="literal-block">
+:authority: sts.googleapis.com
+:method: POST
+:path: /v1/token?alt=json&amp;prettyPrint=false
+:scheme: https
+x-goog-api-client: gl-go/1.23.0--20240626-RC01 cl/646990413 +5a18e79687 X:fieldtrack,boringcrypto gdcl/0.177.0
+user-agent: google-api-go-client/0.5 gke-metadata-server
+content-type: application/json
+content-length: 1673
+accept-encoding: gzip
+
+{&quot;audience&quot;:&quot;identitynamespace:test-gke-XXXXXX.svc.id.goog:https://container.googleapis.com/v1/projects/test-gke-XXXXXX/locations/us-central1/clusters/test&quot;,&quot;grantType&quot;:&quot;urn:ietf:params:oauth:grant-type:token-exchange&quot;,&quot;requestedTokenType&quot;:&quot;urn:ietf:params:oauth:token-type:access_token&quot;,&quot;scope&quot;:&quot;https://www.googleapis.com/auth/cloud-platform https://www.googleapis.com/auth/userinfo.email&quot;,&quot;subjectToken&quot;:&quot;XXX.XXX.XXX&quot;,&quot;subjectTokenType&quot;:&quot;urn:ietf:params:oauth:token-type:jwt&quot;}
+
+:status: 200
+content-type: application/json; charset=UTF-8
+vary: Origin
+vary: X-Origin
+vary: Referer
+content-encoding: gzip
+date: ...
+server: scaffolding on HTTPServer2
+content-length: 1061
+x-xss-protection: 0
+x-frame-options: SAMEORIGIN
+x-content-type-options: nosniff
+
+{&quot;access_token&quot;:&quot;ya29.d.XXX&quot;,&quot;issued_token_type&quot;:&quot;urn:ietf:params:oauth:token-type:access_token&quot;,&quot;token_type&quot;:&quot;Bearer&quot;,&quot;expires_in&quot;:3599}
+</pre>
+<p>The formatted content of the request body is as follows:</p>
+<pre class="literal-block">
+{
+  &quot;audience&quot;: &quot;identitynamespace:test-gke-XXXXXX.svc.id.goog:https://container.googleapis.com/v1/projects/test-gke-XXXXXX/locations/us-central1/clusters/test&quot;,
+  &quot;grantType&quot;: &quot;urn:ietf:params:oauth:grant-type:token-exchange&quot;,
+  &quot;requestedTokenType&quot;: &quot;urn:ietf:params:oauth:token-type:access_token&quot;,
+  &quot;scope&quot;: &quot;https://www.googleapis.com/auth/cloud-platform https://www.googleapis.com/auth/userinfo.email&quot;,
+  &quot;subjectToken&quot;: &quot;XXX.XXX.XXX&quot;,
+  &quot;subjectTokenType&quot;: &quot;urn:ietf:params:oauth:token-type:jwt&quot;
+}
+</pre>
+<p>The formatted content of the response body is as follows:</p>
+<pre class="literal-block">
+{
+  &quot;access_token&quot;: &quot;ya29.d.XXX&quot;,
+  &quot;issued_token_type&quot;: &quot;urn:ietf:params:oauth:token-type:access_token&quot;,
+  &quot;token_type&quot;: &quot;Bearer&quot;,
+  &quot;expires_in&quot;: 3599
+}
+</pre>
+</div>
+<div class="section" id="differences-from-gke-workload-identity">
+<h2 id="hiddifferences-from-gke-workload-identity">Differences from GKE Workload Identity<a class="headerlink" href="#hiddifferences-from-gke-workload-identity" title="Permalink to this headline">¶</a></h2>
+<p>Here are the differences between Workload Identity Federation for GKE and GKE Workload Identity feature
+(also known as linking Kubernetes ServiceAccounts to IAM):</p>
+<table border="1" class="docutils">
+<colgroup>
+<col width="29%" />
+<col width="26%" />
+<col width="45%" />
+</colgroup>
+<thead valign="bottom">
+<tr><th class="head">Comparison Item</th>
+<th class="head">GKE Workload Identity</th>
+<th class="head">Workload Identity Federation for GKE</th>
+</tr>
+</thead>
+<tbody valign="top">
+<tr><td>Requires Google service account (GSA)</td>
+<td>Required</td>
+<td><strong>Not Required</strong></td>
+</tr>
+<tr><td>IAM role binding configuration</td>
+<td>Requires GSA role binding</td>
+<td>Requires k8s service account (KSA) role binding</td>
+</tr>
+<tr><td>KSA impersonating GSA configuration</td>
+<td>Required</td>
+<td><strong>Not Required</strong></td>
+</tr>
+<tr><td>GSA info configuration for KSA in cluster</td>
+<td>Required</td>
+<td><strong>Not Required</strong></td>
+</tr>
+<tr><td>Multiple KSA/GSA binding support</td>
+<td>Not supported</td>
+<td><strong>Supported</strong> (e.g., all SAs in namespace, all SAs in cluster)</td>
+</tr>
+<tr><td>Support for hostNetwork applications</td>
+<td>Not supported</td>
+<td>Not supported</td>
+</tr>
+<tr><td>Depends on gke-metadata-server component</td>
+<td>Required</td>
+<td>Required</td>
+</tr>
+<tr><td>Cloud API support for obtained STS token</td>
+<td>Almost all cloud product APIs</td>
+<td>Most cloud APIs supported, some limited support, few unsupported</td>
+</tr>
+</tbody>
+</table>
+</div>
+<div class="section" id="references">
+<h2 id="hidreferences">References<a class="headerlink" href="#hidreferences" title="Permalink to this headline">¶</a></h2>
+<ul class="simple">
+<li><a class="reference external" href="https://cloud.google.com/blog/products/identity-security/make-iam-for-gke-easier-to-use-with-workload-identity-federation">Make IAM for GKE easier to use with Workload Identity Federation | Google Cloud Blog</a></li>
+<li><a class="reference external" href="https://cloud.google.com/kubernetes-engine/docs/how-to/workload-identity">Authenticate to Google Cloud APIs from GKE workloads &nbsp;|&nbsp; Google Kubernetes Engine (GKE)</a></li>
+<li><a class="reference external" href="https://cloud.google.com/kubernetes-engine/docs/concepts/workload-identity">About Workload Identity Federation for GKE &nbsp;|&nbsp; Google Kubernetes Engine (GKE) &nbsp;|&nbsp; Google Cloud</a></li>
+<li><a class="reference external" href="https://cloud.google.com/iam/docs/federated-identity-supported-services">Identity federation: products and limitations &nbsp;|&nbsp; IAM Documentation &nbsp;|&nbsp; Google Cloud</a></li>
+<li><a class="reference external" href="https://cloud.google.com/iam/docs/reference/sts/rest/v1/TopLevel/token">Method: token &nbsp;|&nbsp; IAM Documentation &nbsp;|&nbsp; Google Cloud</a></li>
+<li><a class="reference external" href="https://cloud.google.com/compute/docs/metadata/overview">About VM metadata &nbsp;|&nbsp; Compute Engine Documentation &nbsp;|&nbsp; Google Cloud</a></li>
+</ul>
+</div>
+
+                </div>
+            </div>
+            <!-- /.entry-content -->
+<section class="text-center">
+  
+<div id="donate"></div>
+
+<div class="social-share"></div>
+<div class="social-comment-note">
+<p class="text-center">有任何建议和想法欢迎在下方评论区留言或者加我<a href="/static/wechat.png">微信</a>交流</p>
+</div>
+
+</section>
+<section class="well" id="related-posts">
+    <p>Related Posts:</p>
+    <ul>
+        <li><a href="https://mozillazg.com/2025/01/security-deep-dive-into-gcp-workload-identity-federation-for-gke-feature.html">Workload Identity Federation for GKE 特性探索</a></li>
+        <li><a href="https://mozillazg.com/2023/12/security-deep-dive-into-aws-eks-pod-identity-feature-en.html">Exploring the New Features of Amazon EKS Pod Identity</a></li>
+        <li><a href="https://mozillazg.com/2023/12/security-deep-dive-into-aws-eks-pod-identity-feature.html">Amazon EKS Pod Identity 新特性探索</a></li>
+        <li><a href="https://mozillazg.com/2020/07/k8s-kubernetes-client-go-list-get-create-update-patch-delete-crd-resource-without-generate-client-code-update-or-create-via-yaml.html">在不生成 crd client 代码的情况下通过 client-go 增删改查 k8s crd 资源</a></li>
+        <li><a href="https://mozillazg.com/2020/06/k8s-kubernetes-kubectl-syntax-of-impersonate-as-user-or-serviceaccount-or-group.html">kubernetes 用户扮演 API</a></li>
+    </ul>
+</section>
+<hr/>
+<section class="comments" id="comments">
+    <h2>Comments</h2>
+    <script src="https://giscus.app/client.js"
+            data-repo="mozillazg/mozillazg.github.com"
+            data-repo-id="MDEwOlJlcG9zaXRvcnk3Njc4MTA2"
+            data-category="Announcements"
+            data-category-id="DIC_kwDOAHUoms4CckZl"
+            data-mapping="pathname"
+            data-strict="0"
+            data-reactions-enabled="1"
+            data-emit-metadata="0"
+            data-input-position="bottom"
+            data-theme="preferred_color_scheme"
+            data-description="<description>"
+            data-lang="en"
+            data-loading="lazy"
+            crossorigin="anonymous"
+            async>
+    </script>
+</section>
+        </article>
+    </section>
+
+        </div>
+    </div>
+</div>
+<footer>
+   <div class="container">
+      <hr>
+      <div class="row">
+         <div class="col-xs-10">&copy; 2025 mozillazg
+            &middot; Powered by <a href="https://github.com/DandyDev/pelican-bootstrap3" target="_blank">pelican-bootstrap3</a>,
+            <a href="http://docs.getpelican.com/" target="_blank">Pelican</a>,
+            <a href="http://getbootstrap.com" target="_blank">Bootstrap</a>
+            &middot; <a href="/privacy-policy.html" target="_blank">Privacy</a>              <p><small>  <a rel="license" href="http://creativecommons.org/licenses/by-sa/4.0/"><img alt="Creative Commons License" style="border-width:0" src="/static/images/by-sa-80x15.png" /></a>
+    &quot;<span xmlns:dct="http://purl.org/dc/terms/" property="dct:title">mozillazg's Blog</span>&quot; by <a xmlns:cc="http://creativecommons.org/ns#" href="https://mozillazg.com" property="cc:attributionName" rel="cc:attributionURL">mozillazg</a> is
+  licensed under a <a rel="license" href="http://creativecommons.org/licenses/by-sa/4.0/">Creative Commons Attribution-ShareAlike 4.0 International License</a>, except where indicated otherwise.
+</small></p>
+         </div>
+         <div class="col-xs-2"><p class="pull-right"><i class="fa fa-arrow-up"></i> <a href="#">Back to top</a></p></div>
+      </div>
+   </div>
+</footer>
+<script src="/theme/cdn.jsdelivr.net/npm/jquery@2.1.1/dist/jquery.min.js"></script>
+
+<!-- Include all compiled plugins (below), or include individual files as needed -->
+<script src="/theme/cdn.jsdelivr.net/npm/bootstrap@3.3.4/dist/js/bootstrap.min.js"></script>
+
+<!-- Enable responsive features in IE8 with Respond.js (https://github.com/scottjehl/Respond) -->
+
+
+<!-- share.js -->
+<script src="/theme/cdn.jsdelivr.net/npm/social-share.js@1.0.16/dist/js/social-share.min.js"></script>
+
+
+
+<script src="/theme/cdn.jsdelivr.net/npm/tocbot@3.0.2/dist/tocbot.min.js"></script>
+<script>
+$(document).ready(function(){
+  tocbot.init({
+    // Where to render the table of contents.
+    tocSelector: '.js-toc',
+    // Where to grab the headings to build the table of contents.
+    contentSelector: '.entry-content',
+    // Which headings to grab inside of the contentSelector element.
+    headingSelector: 'h2, h3, h4,h5',
+    // Headings that match the ignoreSelector will be skipped.
+    ignoreSelector: '.js-toc-ignore',
+    // Main class to add to links.
+    linkClass: 'toc-link',
+    // Extra classes to add to links.
+    extraLinkClasses: '',
+    // Class to add to active links,
+    // the link corresponding to the top most heading on the page.
+    activeLinkClass: 'is-active-link',
+    // Main class to add to lists.
+    listClass: 'toc-list',
+    // Extra classes to add to lists.
+    extraListClasses: '',
+    // Class that gets added when a list should be collapsed.
+    isCollapsedClass: 'is-collapsed',
+    // Class that gets added when a list should be able
+    // to be collapsed but isn't necessarily collpased.
+    collapsibleClass: 'is-collapsible',
+    // Class to add to list items.
+    listItemClass: 'toc-list-item',
+    // How many heading levels should not be collpased.
+    // For example, number 6 will show everything since
+    // there are only 6 heading levels and number 0 will collpase them all.
+    // The sections that are hidden will open
+    // and close as you scroll to headings within them.
+    collapseDepth: 6,
+    // Smooth scrolling enabled.
+    smoothScroll: true,
+    // Smooth scroll duration.
+    smoothScrollDuration: 420,
+    // Callback for scroll end (requires: smoothScroll).
+    scrollEndCallback: function (e) {},
+    // Headings offset between the headings and the top of the document (this is meant for minor adjustments).
+    headingsOffset: 0,
+    // Timeout between events firing to make sure it's
+    // not too rapid (for performance reasons).
+    throttleTimeout: 50,
+    // Element to add the positionFixedClass to.
+    positionFixedSelector: null,
+    // Fixed position class to add to make sidebar fixed after scrolling
+    // down past the fixedSidebarOffset.
+    positionFixedClass: 'is-position-fixed',
+    // fixedSidebarOffset can be any number but by default is set
+    // to auto which sets the fixedSidebarOffset to the sidebar
+    // element's offsetTop from the top of the document on init.
+    fixedSidebarOffset: 'auto',
+    // includeHtml can be set to true to include the HTML markup from the
+    // heading node instead of just including the textContent.
+    includeHtml: false
+  });
+});
+</script>
+</body>
+</html>
