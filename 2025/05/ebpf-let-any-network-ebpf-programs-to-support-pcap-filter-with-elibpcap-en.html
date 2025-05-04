@@ -1,0 +1,620 @@
+<!DOCTYPE html>
+<html lang="en"  prefix="og: http://ogp.me/ns# fb: https://www.facebook.com/2008/fbml" class="han-init">
+<head>
+    <title>Implement pcap-filter syntax support for network eBPF programs using elibpcap - mozillazg's Blog</title>
+    <!-- Using the latest rendering mode for IE -->
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <!-- share.css -->
+    <link rel="stylesheet" href="/theme/cdn.jsdelivr.net/npm/social-share.js@1.0.16/dist/css/share.min.css">
+
+
+    <link href="https://mozillazg.com/favicon.ico" rel="icon">
+
+<link rel="canonical" href="https://mozillazg.com/2025/05/ebpf-let-any-network-ebpf-programs-to-support-pcap-filter-with-elibpcap-en.html">
+
+        <meta name="author" content="mozillazg" />
+        <meta name="keywords" content="ebpf,elibpcap,cilium/ebpf,pcap-filter,en-version" />
+    <meta name="description" content="Implement pcap-filter syntax support for network eBPF programs using elibpcap - Preface A core feature of the common tcpdump packet capture tool is its support for the pcap-filter syntax. This lets it filter traffic and capture only specific packets matching the filter. When developing network-related tools with eBPF, supporting the pcap-filter syntax would greatly improve user experience. That&#39;s why the ptcpdump tool I developed includes built-in support for the pcap-filter syntax. Adding pcap-filter support to eBPF programs the usual way involves complex logic. However, if your project uses cilium/ebpf as its eBPF loader, you can use the elibpcap Go package introduced in this article. This lets you add built-in pcap-filter syntax support to your project with just a few lines of code. Project Introduction As mentioned before, using elibpcap allows you to add pcap-filter support to an eBPF project with just a few lines of code. Here is a project introduction summarized by AI: elibpcap is a Go package that provides functionality for compiling pcap filter expressions into eBPF bytecode and injecting these filters into existing eBPF programs. It bridges the world of human-readable pcap filter expressions (like those used in tools such as tcpdump) with the power and efficiency of eBPF programs running in the Linux kernel. Project Repository https://github.com/jschwinger233/elibpcap Usage Example Usage Pattern To use elibpcap, we need to make changes in three areas: First, modify the eBPF program. Add placeholder logic like the following where packet ..." />
+
+    <style>
+      .js-toc {
+        margin-bottom: 20px;
+      }
+      .donate-modal {
+        text-align: center;
+      }
+      #donate-modal-container .donate-image {
+        max-height: 300px !important;
+        min-height: inherit !important;
+      }
+    </style>
+
+        <meta property="og:site_name" content="mozillazg's Blog" />
+        <meta property="og:type" content="article"/>
+        <meta property="og:title" content="Implement pcap-filter syntax support for network eBPF programs using elibpcap"/>
+        <meta property="og:url" content="https://mozillazg.com/2025/05/ebpf-let-any-network-ebpf-programs-to-support-pcap-filter-with-elibpcap-en.html"/>
+        <meta property="og:description" content="Preface A core feature of the common tcpdump packet capture tool is its support for the pcap-filter syntax. This lets it filter traffic and capture only specific packets matching the filter. When developing network-related tools with eBPF, supporting the pcap-filter syntax would greatly improve user experience. That&#39;s why the ptcpdump tool I developed includes built-in support for the pcap-filter syntax. Adding pcap-filter support to eBPF programs the usual way involves complex logic. However, if your project uses cilium/ebpf as its eBPF loader, you can use the elibpcap Go package introduced in this article. This lets you add built-in pcap-filter syntax support to your project with just a few lines of code. Project Introduction As mentioned before, using elibpcap allows you to add pcap-filter support to an eBPF project with just a few lines of code. Here is a project introduction summarized by AI: elibpcap is a Go package that provides functionality for compiling pcap filter expressions into eBPF bytecode and injecting these filters into existing eBPF programs. It bridges the world of human-readable pcap filter expressions (like those used in tools such as tcpdump) with the power and efficiency of eBPF programs running in the Linux kernel. Project Repository https://github.com/jschwinger233/elibpcap Usage Example Usage Pattern To use elibpcap, we need to make changes in three areas: First, modify the eBPF program. Add placeholder logic like the following where packet filtering is needed: // add this static __noinline bool pcap_filter(void *_skb, void *__skb, void *___skb, void *data, void *data_end) { return data != data_end &amp;&amp; _skb == __skb &amp;&amp; __skb == ___skb; } SEC(&#34;tc&#34;) int sample_prog(struct __sk_buff *skb){ // ... // add this if (!pcap_filter((void *)skb, (void *)skb, (void *)skb, data, data_end)) { bpf_printk(&#34;pcap_filter not match&#34;); goto out; } // ... } Second, modify the Go program. Call the elibpcap package to add the logic for integrating pcap-filter capability: oldInsts := spec.Programs[&#34;sample_prog&#34;].Instructions newInsts, err := elibpcap.Inject(expr, oldInsts, elibpcap.Options{ AtBpf2Bpf: &#34;pcap_filter&#34;, DirectRead: true, L2Skb: true, }) if err != nil { return err } spec.Programs[&#34;sample_prog&#34;].Instructions = newInsts Where: AtBpf2Bpf specifies the name of the static __noinline bool pcap_filter(...) function defined in our eBPF program. DirectRead specifies if the skb data passed to the pcap_filter function in our eBPF program supports direct access reading. L2Skb specifies if the skb data passed to the pcap_filter function in our eBPF program includes L2 (link layer) related data. Finally, because elibpcap depends on libpcap, you need to enable CGO during compilation: Static linking example: CGO_CFLAGS=&#34;-I/path/to/libpcap/include&#34; \ CGO_LDFLAGS=&#34;-L/path/to/libpcap/lib -lpcap /path/to/libpcap.a&#34; \ CGO_ENABLED=1 go build -o main \ -tags static -ldflags &#34;-linkmode &#39;external&#39; -extldflags &#39;-static&#39;&#34; Dynamic linking example: CGO_ENABLED=1 go build -o main -tags dynamic The following sections will show how to integrate elibpcap with examples for different common eBPF program types. tc/tcx Below are the changes required in the tc eBPF program: // add this static __noinline bool pcap_filter(void *_skb, void *__skb, void *___skb, void *data, void *data_end) { return data != data_end &amp;&amp; _skb == __skb &amp;&amp; __skb == ___skb; } SEC(&#34;tc&#34;) int sample_prog(struct __sk_buff *skb){ bpf_skb_pull_data(skb, 0); void *data = (void *)(long)skb-&gt;data; void *data_end = (void *)(long)skb-&gt;data_end; // add this if (!pcap_filter((void *)skb, (void *)skb, (void *)skb, data, data_end)) { bpf_printk(&#34;pcap_filter not match&#34;); goto out; } bpf_printk(&#34;Hello from tc after pcap filter&#34;); out: return TC_ACT_UNSPEC; } The main changes are: Added a pcap_filter function. Added an if (!pcap_filter((void *)skb, (void *)skb, (void *)skb, data, data_end)) check. Below are the corresponding changes required in the Go program: func injectFilter(spec *ebpf.CollectionSpec, expr string) error { if expr == &#34;&#34; { return nil } log.Printf(&#34;inject pcap filter: %s&#34;, expr) // add this oldInsts := spec.Programs[&#34;sample_prog&#34;].Instructions newInsts, err := elibpcap.Inject(expr, oldInsts, elibpcap.Options{ AtBpf2Bpf: &#34;pcap_filter&#34;, DirectRead: true, L2Skb: true, }) if err != nil { return err } spec.Programs[&#34;sample_prog&#34;].Instructions = newInsts // end return nil } // add this if err := injectFilter(spec, expr); err != nil { log.Fatal(err) } if err := spec.LoadAndAssign(&amp;objs, nil); err != nil { // ... } See the complete example program: tc xdp The modifications needed to integrate pcap-filter capability into XDP programs are basically the same as for tc/tcx programs. c program: SEC(&#34;xdp&#34;) int sample_prog(struct xdp_md *ctx){ // ... void *data = (void *)(long)ctx-&gt;data; void *data_end = (void *)(long)ctx-&gt;data_end; if (!pcap_filter((void *)ctx, (void *)ctx, (void *)ctx, data, data_end)) { bpf_printk(&#34;pcap_filter not match&#34;); goto out; } // ... } go program: func injectFilter(spec *ebpf.CollectionSpec, expr string) error { // ... oldInsts := spec.Programs[&#34;sample_prog&#34;].Instructions newInsts, err := elibpcap.Inject(expr, oldInsts, elibpcap.Options{ AtBpf2Bpf: &#34;pcap_filter&#34;, DirectRead: true, L2Skb: true, }) if err != nil { return err } spec.Programs[&#34;sample_prog&#34;].Instructions = newInsts return nil } // ... See the complete example program: xdp cgroup-skb The modifications needed for cgroup-skb programs are also basically the same as those for the previous tc/tcx/xdp programs. c program: SEC(&#34;cgroup_skb/egress&#34;) int sample_prog(struct __sk_buff *skb){ void *data = (void *)(long)skb-&gt;data; void *data_end = (void *)(long)skb-&gt;data_end; if (!pcap_filter((void *)skb, (void *)skb, (void *)skb, data, data_end)) { goto out; } // ... } go program: func injectFilter(spec *ebpf.CollectionSpec, expr string) error { // ... oldInsts := spec.Programs[&#34;sample_prog&#34;].Instructions newInsts, err := elibpcap.Inject(expr, oldInsts, elibpcap.Options{ AtBpf2Bpf: &#34;pcap_filter&#34;, DirectRead: true, L2Skb: false, }) if err != nil { return err } spec.Programs[&#34;sample_prog&#34;].Instructions = newInsts return nil } One point to note: Because the skb data in cgroup-skb programs does not contain L2 data, set L2Skb: false here. See the complete example program: cgroup-skb kprobe/fentry/tracepoint elibpcap hides the data reading differences between kprobe/fentry/tracepoint programs and the tc/tcx/xdp programs mentioned earlier. This allows us to integrate them in a mostly consistent way. c program: SEC(&#34;kprobe/__dev_queue_xmit&#34;) int BPF_KPROBE(sample_prog, struct sk_buff *skb){ void *skb_head = BPF_CORE_READ(skb, head); void *data = skb_head + BPF_CORE_READ(skb, network_header); void *data_end = skb_head + BPF_CORE_READ(skb, tail); if (!pcap_filter((void *)skb, (void *)skb, (void *)skb, data, data_end)) { goto out; } // ... } go program: func injectFilter(spec *ebpf.CollectionSpec, expr string) error { // ... oldInsts := spec.Programs[&#34;sample_prog&#34;].Instructions newInsts, err := elibpcap.Inject(expr, oldInsts, elibpcap.Options{ AtBpf2Bpf: &#34;pcap_filter&#34;, DirectRead: false, L2Skb: false, }) if err != nil { return err } spec.Programs[&#34;sample_prog&#34;].Instructions = newInsts return nil } // ... Here are two things to note: Because kprobe programs cannot read packet data from skb using &#34;direct packet access&#34;, we need to set DirectRead: false. Because our kprobe program checks L3 data, we need to set L2Skb: false here. See the complete example program: kprobe , fentry , tracepoint Conclusion If you want to add pcap-filter support to your Go and eBPF network project but don&#39;t know where to start, try integrating the clever and powerful elibpcap project. References jschwinger233/elibpcap mozillazg/ptcpdump: Process-aware, eBPF-based tcpdump mozillazg/elibpcap-examples: usage of github.com/jschwinger233/elibpcap jschwinger233/ktcpdump"/>
+        <meta property="article:published_time" content="2025-05-03" />
+            <meta property="article:section" content="ebpf" />
+            <meta property="article:tag" content="ebpf" />
+            <meta property="article:tag" content="elibpcap" />
+            <meta property="article:tag" content="cilium/ebpf" />
+            <meta property="article:tag" content="pcap-filter" />
+            <meta property="article:tag" content="en-version" />
+            <meta property="article:author" content="mozillazg" />
+            <meta property="og:image"
+                  content="https://mozillazg.com/static/avatar.jpeg"/>
+
+
+    <meta name="twitter:card" content="summary">
+        <meta name="twitter:site" content="@mozillazg">
+        <meta name="twitter:creator" content="@mozillazg">
+    <meta name="twitter:domain" content="https://mozillazg.com">
+            <meta property="twitter:image"
+                  content="https://mozillazg.com/static/avatar.jpeg"/>
+
+    <!-- Bootstrap -->
+        <link rel="stylesheet" href="/theme/cdn.jsdelivr.net/npm/bootstrap@3.3.4/dist/css/bootstrap.min.css" type="text/css"/>
+    <link href="/theme/cdn.jsdelivr.net/npm/font-awesome@4.3.0/css/font-awesome.min.css" rel="stylesheet">
+
+    <link href="/theme/cdn.jsdelivr.net/npm/pygments-css@1.0.0/github.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://mozillazg.com/theme/css/style.css" type="text/css"/>
+            <link href="/static/han.min.css" rel="stylesheet">
+            <link href="/static/yue.css" rel="stylesheet">
+            <link href="/static/custom.css" rel="stylesheet">
+
+        <link href="https://mozillazg.com/feeds/all.atom.xml" type="application/atom+xml" rel="alternate"
+              title="mozillazg's Blog ATOM Feed"/>
+
+        <link href="https://mozillazg.com/feeds/all.rss.xml" type="application/rss+xml" rel="alternate"
+              title="mozillazg's Blog RSS Feed"/>
+
+
+        <link href="https://mozillazg.com/feeds/ebpf.atom.xml" type="application/atom+xml" rel="alternate"
+              title="mozillazg's Blog ebpf ATOM Feed"/>
+
+
+    <script type="application/ld+json">
+    {
+        "@context": "https://schema.org",
+        "@type": "BlogPosting",
+        "publisher": {
+            "@type": "Person",
+            "name": "mozillazg",
+            "logo": "https://mozillazg.com/static/avatar.jpeg"
+        },
+        "author": {
+            "@type": "Person",
+            "name": "mozillazg",
+            "image": "https://mozillazg.com/static/avatar.jpeg",
+            "url": "https://mozillazg.com",
+            "sameAs": []
+        },
+        "headline": "Implement pcap-filter syntax support for network eBPF programs using elibpcap",
+        "url": "https://mozillazg.com/2025/05/ebpf-let-any-network-ebpf-programs-to-support-pcap-filter-with-elibpcap-en.html",
+        "image": [
+            "https://mozillazg.com/static/avatar.jpeg"
+         ],
+        "keywords": "ebpf, elibpcap, cilium/ebpf, pcap-filter, en-version",
+        "description": "Preface A core feature of the common tcpdump packet capture tool is its support for the pcap-filter syntax. This lets it filter traffic and capture only specific packets matching the filter. When developing network-related tools with eBPF, supporting the pcap-filter syntax would greatly improve user experience. That&#39;s why the ptcpdump tool I developed includes built-in support for the pcap-filter syntax. Adding pcap-filter support to eBPF programs the usual way involves complex logic. However, if your project uses cilium/ebpf as its eBPF loader, you can use the elibpcap Go package introduced in this article. This lets you add built-in pcap-filter syntax support to your project with just a few lines of code. Project Introduction As mentioned before, using elibpcap allows you to add pcap-filter support to an eBPF project with just a few lines of code. Here is a project introduction summarized by AI: elibpcap is a Go package that provides functionality for compiling pcap filter expressions into eBPF bytecode and injecting these filters into existing eBPF programs. It bridges the world of human-readable pcap filter expressions (like those used in tools such as tcpdump) with the power and efficiency of eBPF programs running in the Linux kernel. Project Repository https://github.com/jschwinger233/elibpcap Usage Example Usage Pattern To use elibpcap, we need to make changes in three areas: First, modify the eBPF program. Add placeholder logic like the following where packet filtering is needed: // add this static __noinline bool pcap_filter(void *_skb, void *__skb, void *___skb, void *data, void *data_end) { return data != data_end &amp;&amp; _skb == __skb &amp;&amp; __skb == ___skb; } SEC(&#34;tc&#34;) int sample_prog(struct __sk_buff *skb){ // ... // add this if (!pcap_filter((void *)skb, (void *)skb, (void *)skb, data, data_end)) { bpf_printk(&#34;pcap_filter not match&#34;); goto out; } // ... } Second, modify the Go program. Call the elibpcap package to add the logic for integrating pcap-filter capability: oldInsts := spec.Programs[&#34;sample_prog&#34;].Instructions newInsts, err := elibpcap.Inject(expr, oldInsts, elibpcap.Options{ AtBpf2Bpf: &#34;pcap_filter&#34;, DirectRead: true, L2Skb: true, }) if err != nil { return err } spec.Programs[&#34;sample_prog&#34;].Instructions = newInsts Where: AtBpf2Bpf specifies the name of the static __noinline bool pcap_filter(...) function defined in our eBPF program. DirectRead specifies if the skb data passed to the pcap_filter function in our eBPF program supports direct access reading. L2Skb specifies if the skb data passed to the pcap_filter function in our eBPF program includes L2 (link layer) related data. Finally, because elibpcap depends on libpcap, you need to enable CGO during compilation: Static linking example: CGO_CFLAGS=&#34;-I/path/to/libpcap/include&#34; \\ CGO_LDFLAGS=&#34;-L/path/to/libpcap/lib -lpcap /path/to/libpcap.a&#34; \\ CGO_ENABLED=1 go build -o main \\ -tags static -ldflags &#34;-linkmode &#39;external&#39; -extldflags &#39;-static&#39;&#34; Dynamic linking example: CGO_ENABLED=1 go build -o main -tags dynamic The following sections will show how to integrate elibpcap with examples for different common eBPF program types. tc/tcx Below are the changes required in the tc eBPF program: // add this static __noinline bool pcap_filter(void *_skb, void *__skb, void *___skb, void *data, void *data_end) { return data != data_end &amp;&amp; _skb == __skb &amp;&amp; __skb == ___skb; } SEC(&#34;tc&#34;) int sample_prog(struct __sk_buff *skb){ bpf_skb_pull_data(skb, 0); void *data = (void *)(long)skb-&gt;data; void *data_end = (void *)(long)skb-&gt;data_end; // add this if (!pcap_filter((void *)skb, (void *)skb, (void *)skb, data, data_end)) { bpf_printk(&#34;pcap_filter not match&#34;); goto out; } bpf_printk(&#34;Hello from tc after pcap filter&#34;); out: return TC_ACT_UNSPEC; } The main changes are: Added a pcap_filter function. Added an if (!pcap_filter((void *)skb, (void *)skb, (void *)skb, data, data_end)) check. Below are the corresponding changes required in the Go program: func injectFilter(spec *ebpf.CollectionSpec, expr string) error { if expr == &#34;&#34; { return nil } log.Printf(&#34;inject pcap filter: %s&#34;, expr) // add this oldInsts := spec.Programs[&#34;sample_prog&#34;].Instructions newInsts, err := elibpcap.Inject(expr, oldInsts, elibpcap.Options{ AtBpf2Bpf: &#34;pcap_filter&#34;, DirectRead: true, L2Skb: true, }) if err != nil { return err } spec.Programs[&#34;sample_prog&#34;].Instructions = newInsts // end return nil } // add this if err := injectFilter(spec, expr); err != nil { log.Fatal(err) } if err := spec.LoadAndAssign(&amp;objs, nil); err != nil { // ... } See the complete example program: tc xdp The modifications needed to integrate pcap-filter capability into XDP programs are basically the same as for tc/tcx programs. c program: SEC(&#34;xdp&#34;) int sample_prog(struct xdp_md *ctx){ // ... void *data = (void *)(long)ctx-&gt;data; void *data_end = (void *)(long)ctx-&gt;data_end; if (!pcap_filter((void *)ctx, (void *)ctx, (void *)ctx, data, data_end)) { bpf_printk(&#34;pcap_filter not match&#34;); goto out; } // ... } go program: func injectFilter(spec *ebpf.CollectionSpec, expr string) error { // ... oldInsts := spec.Programs[&#34;sample_prog&#34;].Instructions newInsts, err := elibpcap.Inject(expr, oldInsts, elibpcap.Options{ AtBpf2Bpf: &#34;pcap_filter&#34;, DirectRead: true, L2Skb: true, }) if err != nil { return err } spec.Programs[&#34;sample_prog&#34;].Instructions = newInsts return nil } // ... See the complete example program: xdp cgroup-skb The modifications needed for cgroup-skb programs are also basically the same as those for the previous tc/tcx/xdp programs. c program: SEC(&#34;cgroup_skb/egress&#34;) int sample_prog(struct __sk_buff *skb){ void *data = (void *)(long)skb-&gt;data; void *data_end = (void *)(long)skb-&gt;data_end; if (!pcap_filter((void *)skb, (void *)skb, (void *)skb, data, data_end)) { goto out; } // ... } go program: func injectFilter(spec *ebpf.CollectionSpec, expr string) error { // ... oldInsts := spec.Programs[&#34;sample_prog&#34;].Instructions newInsts, err := elibpcap.Inject(expr, oldInsts, elibpcap.Options{ AtBpf2Bpf: &#34;pcap_filter&#34;, DirectRead: true, L2Skb: false, }) if err != nil { return err } spec.Programs[&#34;sample_prog&#34;].Instructions = newInsts return nil } One point to note: Because the skb data in cgroup-skb programs does not contain L2 data, set L2Skb: false here. See the complete example program: cgroup-skb kprobe/fentry/tracepoint elibpcap hides the data reading differences between kprobe/fentry/tracepoint programs and the tc/tcx/xdp programs mentioned earlier. This allows us to integrate them in a mostly consistent way. c program: SEC(&#34;kprobe/__dev_queue_xmit&#34;) int BPF_KPROBE(sample_prog, struct sk_buff *skb){ void *skb_head = BPF_CORE_READ(skb, head); void *data = skb_head + BPF_CORE_READ(skb, network_header); void *data_end = skb_head + BPF_CORE_READ(skb, tail); if (!pcap_filter((void *)skb, (void *)skb, (void *)skb, data, data_end)) { goto out; } // ... } go program: func injectFilter(spec *ebpf.CollectionSpec, expr string) error { // ... oldInsts := spec.Programs[&#34;sample_prog&#34;].Instructions newInsts, err := elibpcap.Inject(expr, oldInsts, elibpcap.Options{ AtBpf2Bpf: &#34;pcap_filter&#34;, DirectRead: false, L2Skb: false, }) if err != nil { return err } spec.Programs[&#34;sample_prog&#34;].Instructions = newInsts return nil } // ... Here are two things to note: Because kprobe programs cannot read packet data from skb using &#34;direct packet access&#34;, we need to set DirectRead: false. Because our kprobe program checks L3 data, we need to set L2Skb: false here. See the complete example program: kprobe , fentry , tracepoint Conclusion If you want to add pcap-filter support to your Go and eBPF network project but don&#39;t know where to start, try integrating the clever and powerful elibpcap project. References jschwinger233/elibpcap mozillazg/ptcpdump: Process-aware, eBPF-based tcpdump mozillazg/elibpcap-examples: usage of github.com/jschwinger233/elibpcap jschwinger233/ktcpdump",
+        "mainEntityOfPage": {
+             "@type": "WebPage",
+             "@id": "https://mozillazg.com/2025/05/ebpf-let-any-network-ebpf-programs-to-support-pcap-filter-with-elibpcap-en.html"
+        },
+        "datePublished": "2025-05-03"
+    }
+    </script>
+
+</head>
+<body>
+
+<div class="navbar" role="navigation">
+	<div class="container">
+        <div class="navbar-header">
+            <button type="button" class="navbar-toggle" data-toggle="collapse" data-target=".navbar-ex1-collapse">
+                <span class="sr-only">Toggle navigation</span>
+                <span class="icon-bar"></span>
+                <span class="icon-bar"></span>
+                <span class="icon-bar"></span>
+            </button>
+            <a href="https://mozillazg.com/" class="navbar-brand">
+mozillazg's Blog            </a>
+        </div>
+        <div class="collapse navbar-collapse navbar-ex1-collapse">
+            <ul class="nav navbar-nav">
+                    <li><a href="https://mozillazg.com/feeds/all.atom.xml">Feed</a></li>
+                    <li><a href="/2014/10/pages/about-me.html">About</a></li>
+            </ul>
+            <ul class="nav navbar-nav navbar-right">
+              <li><a href="https://mozillazg.com/archives.html"><i class="fa fa-th-list"></i><span class="icon-label">Archives</span></a></li>
+            </ul>
+        </div>
+        <!-- /.navbar-collapse -->
+    </div>
+</div> <!-- /.navbar -->
+<!-- Banner -->
+<!-- End Banner -->
+<div class="container">
+    <div class="row">
+        <div class="col-lg-12">
+    <section id="content" class="yue">
+        <article>
+            <header class="text-center">
+                <h1>
+                    <a href="https://mozillazg.com/2025/05/ebpf-let-any-network-ebpf-programs-to-support-pcap-filter-with-elibpcap-en.html"
+                       rel="bookmark"
+                       title="Permalink to Implement pcap-filter syntax support for network eBPF programs using elibpcap">
+                        Implement pcap-filter syntax support for network eBPF programs using elibpcap
+                    </a>
+                </h1>
+                <p class="published">
+                    <time datetime="2025-05-03T00:00:00+00:00">
+                    2025-05-03
+                    </time>
+                </p>
+            </header>
+            <div class="entry-content">
+                <div class="well-sm article-info">
+<footer class="post-info">
+        <a href="https://mozillazg.com/category/ebpf.html">ebpf</a>
+
+
+<span class="label label-default hide">Tags</span>
+	<a href="https://mozillazg.com/tag/elibpcap.html">elibpcap</a>
+        /
+	<a href="https://mozillazg.com/tag/ciliumebpf.html">cilium/ebpf</a>
+        /
+	<a href="https://mozillazg.com/tag/pcap-filter.html">pcap-filter</a>
+        /
+	<a href="https://mozillazg.com/tag/en-version.html">en-version</a>
+    <span class="label label-default">Lang</span>
+	<a href="https://mozillazg.com/2025/05/ebpf-let-any-network-ebpf-programs-to-support-pcap-filter-with-elibpcap.html">zh</a>
+
+</footer><!-- /.post-info -->                </div>
+                <div class="js-toc"></div>
+                <div>
+                <div class="section" id="preface">
+<h2 id="hidpreface">Preface<a class="headerlink" href="#hidpreface" title="Permalink to this headline">¶</a></h2>
+<p>A core feature of the common <tt class="docutils literal">tcpdump</tt> packet capture tool is its support for the
+<a class="reference external" href="https://www.tcpdump.org/manpages/pcap-filter.7.html">pcap-filter</a>
+syntax. This lets it filter traffic and capture only specific packets matching the filter.</p>
+<p>When developing network-related tools with eBPF, supporting the pcap-filter syntax
+would greatly improve user experience.
+That's why the <a class="reference external" href="https://github.com/mozillazg/ptcpdump">ptcpdump</a> tool I developed
+includes built-in support for the pcap-filter syntax.</p>
+<p>Adding pcap-filter support to eBPF programs the usual way involves complex logic.
+However, if your project uses <a class="reference external" href="https://github.com/cilium/ebpf">cilium/ebpf</a> as its eBPF loader,
+you can use the elibpcap Go package introduced in this article.
+This lets you add built-in pcap-filter syntax support to your project with just a few lines of code.</p>
+</div>
+<div class="section" id="project-introduction">
+<h2 id="hidproject-introduction">Project Introduction<a class="headerlink" href="#hidproject-introduction" title="Permalink to this headline">¶</a></h2>
+<p>As mentioned before, using elibpcap allows you to add pcap-filter support to an eBPF project with just a few lines of code.</p>
+<p>Here is a project introduction summarized by <a class="reference external" href="https://deepwiki.com/jschwinger233/elibpcap">AI</a>:</p>
+<blockquote>
+elibpcap is a Go package that provides functionality for compiling pcap filter expressions into
+eBPF bytecode and injecting these filters into existing eBPF programs.
+It bridges the world of human-readable pcap filter expressions
+(like those used in tools such as tcpdump) with the power and efficiency
+of eBPF programs running in the Linux kernel.</blockquote>
+</div>
+<div class="section" id="project-repository">
+<h2 id="hidproject-repository">Project Repository<a class="headerlink" href="#hidproject-repository" title="Permalink to this headline">¶</a></h2>
+<p><a class="reference external" href="https://github.com/jschwinger233/elibpcap">https://github.com/jschwinger233/elibpcap</a></p>
+</div>
+<div class="section" id="usage-example">
+<h2 id="hidusage-example">Usage Example<a class="headerlink" href="#hidusage-example" title="Permalink to this headline">¶</a></h2>
+<div class="section" id="usage-pattern">
+<h3 id="hidusage-pattern">Usage Pattern<a class="headerlink" href="#hidusage-pattern" title="Permalink to this headline">¶</a></h3>
+<p>To use elibpcap, we need to make changes in three areas:</p>
+<ol class="arabic simple">
+<li>First, modify the eBPF program. Add placeholder logic like the following where packet filtering is needed:</li>
+</ol>
+<div class="highlight"><pre><span></span><span class="c1">// add this</span>
+<span class="k">static</span><span class="w"> </span><span class="n">__noinline</span><span class="w"> </span><span class="kt">bool</span><span class="w"> </span><span class="n">pcap_filter</span><span class="p">(</span><span class="kt">void</span><span class="w"> </span><span class="o">*</span><span class="n">_skb</span><span class="p">,</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="o">*</span><span class="n">__skb</span><span class="p">,</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="o">*</span><span class="n">___skb</span><span class="p">,</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="o">*</span><span class="n">data</span><span class="p">,</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="o">*</span><span class="n">data_end</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">     </span><span class="k">return</span><span class="w"> </span><span class="n">data</span><span class="w"> </span><span class="o">!=</span><span class="w"> </span><span class="n">data_end</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="n">_skb</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="n">__skb</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="n">__skb</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="n">___skb</span><span class="p">;</span>
+<span class="p">}</span>
+
+<span class="n">SEC</span><span class="p">(</span><span class="s">&quot;tc&quot;</span><span class="p">)</span>
+<span class="kt">int</span><span class="w"> </span><span class="n">sample_prog</span><span class="p">(</span><span class="k">struct</span><span class="w"> </span><span class="nc">__sk_buff</span><span class="w"> </span><span class="o">*</span><span class="n">skb</span><span class="p">){</span>
+<span class="w">    </span><span class="c1">// ...</span>
+
+<span class="w">    </span><span class="c1">// add this</span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="o">!</span><span class="n">pcap_filter</span><span class="p">((</span><span class="kt">void</span><span class="w"> </span><span class="o">*</span><span class="p">)</span><span class="n">skb</span><span class="p">,</span><span class="w"> </span><span class="p">(</span><span class="kt">void</span><span class="w"> </span><span class="o">*</span><span class="p">)</span><span class="n">skb</span><span class="p">,</span><span class="w"> </span><span class="p">(</span><span class="kt">void</span><span class="w"> </span><span class="o">*</span><span class="p">)</span><span class="n">skb</span><span class="p">,</span><span class="w"> </span><span class="n">data</span><span class="p">,</span><span class="w"> </span><span class="n">data_end</span><span class="p">))</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="n">bpf_printk</span><span class="p">(</span><span class="s">&quot;pcap_filter not match&quot;</span><span class="p">);</span>
+<span class="w">        </span><span class="k">goto</span><span class="w"> </span><span class="n">out</span><span class="p">;</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="w">    </span><span class="c1">// ...</span>
+<span class="p">}</span>
+</pre></div>
+<ol class="arabic simple" start="2">
+<li>Second, modify the Go program. Call the elibpcap package to add the logic for integrating pcap-filter capability:</li>
+</ol>
+<div class="highlight"><pre><span></span><span class="nx">oldInsts</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="nx">spec</span><span class="p">.</span><span class="nx">Programs</span><span class="p">[</span><span class="s">&quot;sample_prog&quot;</span><span class="p">].</span><span class="nx">Instructions</span>
+<span class="nx">newInsts</span><span class="p">,</span><span class="w"> </span><span class="nx">err</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="nx">elibpcap</span><span class="p">.</span><span class="nx">Inject</span><span class="p">(</span><span class="nx">expr</span><span class="p">,</span><span class="w"> </span><span class="nx">oldInsts</span><span class="p">,</span><span class="w"> </span><span class="nx">elibpcap</span><span class="p">.</span><span class="nx">Options</span><span class="p">{</span>
+<span class="w">        </span><span class="nx">AtBpf2Bpf</span><span class="p">:</span><span class="w">  </span><span class="s">&quot;pcap_filter&quot;</span><span class="p">,</span>
+<span class="w">        </span><span class="nx">DirectRead</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="p">,</span>
+<span class="w">        </span><span class="nx">L2Skb</span><span class="p">:</span><span class="w">      </span><span class="kc">true</span><span class="p">,</span>
+<span class="p">})</span>
+<span class="k">if</span><span class="w"> </span><span class="nx">err</span><span class="w"> </span><span class="o">!=</span><span class="w"> </span><span class="kc">nil</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="k">return</span><span class="w"> </span><span class="nx">err</span>
+<span class="p">}</span>
+<span class="nx">spec</span><span class="p">.</span><span class="nx">Programs</span><span class="p">[</span><span class="s">&quot;sample_prog&quot;</span><span class="p">].</span><span class="nx">Instructions</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="nx">newInsts</span>
+</pre></div>
+<p>Where:</p>
+<ul class="simple">
+<li><tt class="docutils literal">AtBpf2Bpf</tt> specifies the name of the <tt class="docutils literal">static __noinline bool <span class="pre">pcap_filter(...)</span></tt> function defined in our eBPF program.</li>
+<li><tt class="docutils literal">DirectRead</tt> specifies if the skb data passed to the <tt class="docutils literal">pcap_filter</tt> function in our eBPF program supports direct access reading.</li>
+<li><tt class="docutils literal">L2Skb</tt> specifies if the skb data passed to the <tt class="docutils literal">pcap_filter</tt> function in our eBPF program includes L2 (link layer) related data.</li>
+</ul>
+<ol class="arabic" start="3">
+<li><p class="first">Finally, because elibpcap depends on libpcap, you need to enable CGO during compilation:</p>
+<ul>
+<li><p class="first">Static linking example:</p>
+<pre class="literal-block">
+CGO_CFLAGS=&quot;-I/path/to/libpcap/include&quot; \
+CGO_LDFLAGS=&quot;-L/path/to/libpcap/lib -lpcap /path/to/libpcap.a&quot; \
+CGO_ENABLED=1 go build -o main \
+-tags static -ldflags &quot;-linkmode 'external' -extldflags '-static'&quot;
+</pre>
+</li>
+<li><p class="first">Dynamic linking example:</p>
+<pre class="literal-block">
+CGO_ENABLED=1 go build -o main -tags dynamic
+</pre>
+</li>
+</ul>
+</li>
+</ol>
+<p>The following sections will show how to integrate elibpcap with examples for different common eBPF program types.</p>
+</div>
+<div class="section" id="tc-tcx">
+<h3 id="hidtc-tcx">tc/tcx<a class="headerlink" href="#hidtc-tcx" title="Permalink to this headline">¶</a></h3>
+<p>Below are the changes required in the tc eBPF program:</p>
+<div class="highlight"><pre><span></span><span class="c1">// add this</span>
+<span class="k">static</span><span class="w"> </span><span class="n">__noinline</span><span class="w"> </span><span class="kt">bool</span><span class="w"> </span><span class="n">pcap_filter</span><span class="p">(</span><span class="kt">void</span><span class="w"> </span><span class="o">*</span><span class="n">_skb</span><span class="p">,</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="o">*</span><span class="n">__skb</span><span class="p">,</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="o">*</span><span class="n">___skb</span><span class="p">,</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="o">*</span><span class="n">data</span><span class="p">,</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="o">*</span><span class="n">data_end</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">     </span><span class="k">return</span><span class="w"> </span><span class="n">data</span><span class="w"> </span><span class="o">!=</span><span class="w"> </span><span class="n">data_end</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="n">_skb</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="n">__skb</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="n">__skb</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="n">___skb</span><span class="p">;</span>
+<span class="p">}</span>
+
+<span class="n">SEC</span><span class="p">(</span><span class="s">&quot;tc&quot;</span><span class="p">)</span>
+<span class="kt">int</span><span class="w"> </span><span class="n">sample_prog</span><span class="p">(</span><span class="k">struct</span><span class="w"> </span><span class="nc">__sk_buff</span><span class="w"> </span><span class="o">*</span><span class="n">skb</span><span class="p">){</span>
+<span class="w">    </span><span class="n">bpf_skb_pull_data</span><span class="p">(</span><span class="n">skb</span><span class="p">,</span><span class="w"> </span><span class="mi">0</span><span class="p">);</span>
+
+<span class="w">    </span><span class="kt">void</span><span class="w"> </span><span class="o">*</span><span class="n">data</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">(</span><span class="kt">void</span><span class="w"> </span><span class="o">*</span><span class="p">)(</span><span class="kt">long</span><span class="p">)</span><span class="n">skb</span><span class="o">-&gt;</span><span class="n">data</span><span class="p">;</span>
+<span class="w">    </span><span class="kt">void</span><span class="w"> </span><span class="o">*</span><span class="n">data_end</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">(</span><span class="kt">void</span><span class="w"> </span><span class="o">*</span><span class="p">)(</span><span class="kt">long</span><span class="p">)</span><span class="n">skb</span><span class="o">-&gt;</span><span class="n">data_end</span><span class="p">;</span>
+
+<span class="w">    </span><span class="c1">// add this</span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="o">!</span><span class="n">pcap_filter</span><span class="p">((</span><span class="kt">void</span><span class="w"> </span><span class="o">*</span><span class="p">)</span><span class="n">skb</span><span class="p">,</span><span class="w"> </span><span class="p">(</span><span class="kt">void</span><span class="w"> </span><span class="o">*</span><span class="p">)</span><span class="n">skb</span><span class="p">,</span><span class="w"> </span><span class="p">(</span><span class="kt">void</span><span class="w"> </span><span class="o">*</span><span class="p">)</span><span class="n">skb</span><span class="p">,</span><span class="w"> </span><span class="n">data</span><span class="p">,</span><span class="w"> </span><span class="n">data_end</span><span class="p">))</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="n">bpf_printk</span><span class="p">(</span><span class="s">&quot;pcap_filter not match&quot;</span><span class="p">);</span>
+<span class="w">        </span><span class="k">goto</span><span class="w"> </span><span class="n">out</span><span class="p">;</span>
+<span class="w">    </span><span class="p">}</span>
+
+<span class="w">    </span><span class="n">bpf_printk</span><span class="p">(</span><span class="s">&quot;Hello from tc after pcap filter&quot;</span><span class="p">);</span>
+<span class="nl">out</span><span class="p">:</span>
+<span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="n">TC_ACT_UNSPEC</span><span class="p">;</span>
+<span class="p">}</span>
+</pre></div>
+<p>The main changes are:</p>
+<ol class="arabic simple">
+<li>Added a <tt class="docutils literal">pcap_filter</tt> function.</li>
+<li>Added an <tt class="docutils literal">if <span class="pre">(!pcap_filter((void</span> *)skb, (void *)skb, (void *)skb, data, data_end))</tt> check.</li>
+</ol>
+<p>Below are the corresponding changes required in the Go program:</p>
+<div class="highlight"><pre><span></span><span class="kd">func</span><span class="w"> </span><span class="nx">injectFilter</span><span class="p">(</span><span class="nx">spec</span><span class="w"> </span><span class="o">*</span><span class="nx">ebpf</span><span class="p">.</span><span class="nx">CollectionSpec</span><span class="p">,</span><span class="w"> </span><span class="nx">expr</span><span class="w"> </span><span class="kt">string</span><span class="p">)</span><span class="w"> </span><span class="kt">error</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="nx">expr</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="s">&quot;&quot;</span><span class="w"> </span><span class="p">{</span>
+<span class="w">            </span><span class="k">return</span><span class="w"> </span><span class="kc">nil</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="w">    </span><span class="nx">log</span><span class="p">.</span><span class="nx">Printf</span><span class="p">(</span><span class="s">&quot;inject pcap filter: %s&quot;</span><span class="p">,</span><span class="w"> </span><span class="nx">expr</span><span class="p">)</span>
+<span class="w">  </span><span class="c1">// add this</span>
+<span class="w">    </span><span class="nx">oldInsts</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="nx">spec</span><span class="p">.</span><span class="nx">Programs</span><span class="p">[</span><span class="s">&quot;sample_prog&quot;</span><span class="p">].</span><span class="nx">Instructions</span>
+<span class="w">    </span><span class="nx">newInsts</span><span class="p">,</span><span class="w"> </span><span class="nx">err</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="nx">elibpcap</span><span class="p">.</span><span class="nx">Inject</span><span class="p">(</span><span class="nx">expr</span><span class="p">,</span><span class="w"> </span><span class="nx">oldInsts</span><span class="p">,</span><span class="w"> </span><span class="nx">elibpcap</span><span class="p">.</span><span class="nx">Options</span><span class="p">{</span>
+<span class="w">            </span><span class="nx">AtBpf2Bpf</span><span class="p">:</span><span class="w">  </span><span class="s">&quot;pcap_filter&quot;</span><span class="p">,</span>
+<span class="w">            </span><span class="nx">DirectRead</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="p">,</span>
+<span class="w">            </span><span class="nx">L2Skb</span><span class="p">:</span><span class="w">      </span><span class="kc">true</span><span class="p">,</span>
+<span class="w">    </span><span class="p">})</span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="nx">err</span><span class="w"> </span><span class="o">!=</span><span class="w"> </span><span class="kc">nil</span><span class="w"> </span><span class="p">{</span>
+<span class="w">            </span><span class="k">return</span><span class="w"> </span><span class="nx">err</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="w">    </span><span class="nx">spec</span><span class="p">.</span><span class="nx">Programs</span><span class="p">[</span><span class="s">&quot;sample_prog&quot;</span><span class="p">].</span><span class="nx">Instructions</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="nx">newInsts</span>
+<span class="w">  </span><span class="c1">// end</span>
+<span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="kc">nil</span>
+<span class="p">}</span>
+
+<span class="c1">// add this</span>
+<span class="k">if</span><span class="w"> </span><span class="nx">err</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="nx">injectFilter</span><span class="p">(</span><span class="nx">spec</span><span class="p">,</span><span class="w"> </span><span class="nx">expr</span><span class="p">);</span><span class="w"> </span><span class="nx">err</span><span class="w"> </span><span class="o">!=</span><span class="w"> </span><span class="kc">nil</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="nx">log</span><span class="p">.</span><span class="nx">Fatal</span><span class="p">(</span><span class="nx">err</span><span class="p">)</span>
+<span class="p">}</span>
+<span class="k">if</span><span class="w"> </span><span class="nx">err</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="nx">spec</span><span class="p">.</span><span class="nx">LoadAndAssign</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">objs</span><span class="p">,</span><span class="w"> </span><span class="kc">nil</span><span class="p">);</span><span class="w"> </span><span class="nx">err</span><span class="w"> </span><span class="o">!=</span><span class="w"> </span><span class="kc">nil</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="c1">// ...</span>
+<span class="p">}</span>
+</pre></div>
+<p>See the complete example program: <a class="reference external" href="https://github.com/mozillazg/elibpcap-examples/tree/master/tc">tc</a></p>
+</div>
+<div class="section" id="xdp">
+<h3 id="hidxdp">xdp<a class="headerlink" href="#hidxdp" title="Permalink to this headline">¶</a></h3>
+<p>The modifications needed to integrate pcap-filter capability into XDP programs are basically the same as for tc/tcx programs.</p>
+<ol class="arabic simple">
+<li>c program:</li>
+</ol>
+<div class="highlight"><pre><span></span><span class="n">SEC</span><span class="p">(</span><span class="s">&quot;xdp&quot;</span><span class="p">)</span>
+<span class="kt">int</span><span class="w"> </span><span class="n">sample_prog</span><span class="p">(</span><span class="k">struct</span><span class="w"> </span><span class="nc">xdp_md</span><span class="w"> </span><span class="o">*</span><span class="n">ctx</span><span class="p">){</span>
+<span class="w">    </span><span class="c1">// ...</span>
+<span class="w">    </span><span class="kt">void</span><span class="w"> </span><span class="o">*</span><span class="n">data</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">(</span><span class="kt">void</span><span class="w"> </span><span class="o">*</span><span class="p">)(</span><span class="kt">long</span><span class="p">)</span><span class="n">ctx</span><span class="o">-&gt;</span><span class="n">data</span><span class="p">;</span>
+<span class="w">    </span><span class="kt">void</span><span class="w"> </span><span class="o">*</span><span class="n">data_end</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">(</span><span class="kt">void</span><span class="w"> </span><span class="o">*</span><span class="p">)(</span><span class="kt">long</span><span class="p">)</span><span class="n">ctx</span><span class="o">-&gt;</span><span class="n">data_end</span><span class="p">;</span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="o">!</span><span class="n">pcap_filter</span><span class="p">((</span><span class="kt">void</span><span class="w"> </span><span class="o">*</span><span class="p">)</span><span class="n">ctx</span><span class="p">,</span><span class="w"> </span><span class="p">(</span><span class="kt">void</span><span class="w"> </span><span class="o">*</span><span class="p">)</span><span class="n">ctx</span><span class="p">,</span><span class="w"> </span><span class="p">(</span><span class="kt">void</span><span class="w"> </span><span class="o">*</span><span class="p">)</span><span class="n">ctx</span><span class="p">,</span><span class="w"> </span><span class="n">data</span><span class="p">,</span><span class="w"> </span><span class="n">data_end</span><span class="p">))</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="n">bpf_printk</span><span class="p">(</span><span class="s">&quot;pcap_filter not match&quot;</span><span class="p">);</span>
+<span class="w">        </span><span class="k">goto</span><span class="w"> </span><span class="n">out</span><span class="p">;</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="w">  </span><span class="c1">// ...</span>
+<span class="p">}</span>
+</pre></div>
+<ol class="arabic simple" start="2">
+<li>go program:</li>
+</ol>
+<div class="highlight"><pre><span></span><span class="kd">func</span><span class="w"> </span><span class="nx">injectFilter</span><span class="p">(</span><span class="nx">spec</span><span class="w"> </span><span class="o">*</span><span class="nx">ebpf</span><span class="p">.</span><span class="nx">CollectionSpec</span><span class="p">,</span><span class="w"> </span><span class="nx">expr</span><span class="w"> </span><span class="kt">string</span><span class="p">)</span><span class="w"> </span><span class="kt">error</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="c1">// ...</span>
+<span class="w">    </span><span class="nx">oldInsts</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="nx">spec</span><span class="p">.</span><span class="nx">Programs</span><span class="p">[</span><span class="s">&quot;sample_prog&quot;</span><span class="p">].</span><span class="nx">Instructions</span>
+<span class="w">    </span><span class="nx">newInsts</span><span class="p">,</span><span class="w"> </span><span class="nx">err</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="nx">elibpcap</span><span class="p">.</span><span class="nx">Inject</span><span class="p">(</span><span class="nx">expr</span><span class="p">,</span><span class="w"> </span><span class="nx">oldInsts</span><span class="p">,</span><span class="w"> </span><span class="nx">elibpcap</span><span class="p">.</span><span class="nx">Options</span><span class="p">{</span>
+<span class="w">            </span><span class="nx">AtBpf2Bpf</span><span class="p">:</span><span class="w">  </span><span class="s">&quot;pcap_filter&quot;</span><span class="p">,</span>
+<span class="w">            </span><span class="nx">DirectRead</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="p">,</span>
+<span class="w">            </span><span class="nx">L2Skb</span><span class="p">:</span><span class="w">      </span><span class="kc">true</span><span class="p">,</span>
+<span class="w">    </span><span class="p">})</span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="nx">err</span><span class="w"> </span><span class="o">!=</span><span class="w"> </span><span class="kc">nil</span><span class="w"> </span><span class="p">{</span>
+<span class="w">            </span><span class="k">return</span><span class="w"> </span><span class="nx">err</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="w">    </span><span class="nx">spec</span><span class="p">.</span><span class="nx">Programs</span><span class="p">[</span><span class="s">&quot;sample_prog&quot;</span><span class="p">].</span><span class="nx">Instructions</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="nx">newInsts</span>
+<span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="kc">nil</span>
+<span class="p">}</span>
+<span class="c1">// ...</span>
+</pre></div>
+<p>See the complete example program: <a class="reference external" href="https://github.com/mozillazg/elibpcap-examples/tree/master/xdp">xdp</a></p>
+</div>
+<div class="section" id="cgroup-skb">
+<h3 id="hidcgroup-skb">cgroup-skb<a class="headerlink" href="#hidcgroup-skb" title="Permalink to this headline">¶</a></h3>
+<p>The modifications needed for cgroup-skb programs are also basically the same as those for the previous tc/tcx/xdp programs.</p>
+<ol class="arabic simple">
+<li>c program:</li>
+</ol>
+<div class="highlight"><pre><span></span><span class="n">SEC</span><span class="p">(</span><span class="s">&quot;cgroup_skb/egress&quot;</span><span class="p">)</span>
+<span class="kt">int</span><span class="w"> </span><span class="n">sample_prog</span><span class="p">(</span><span class="k">struct</span><span class="w"> </span><span class="nc">__sk_buff</span><span class="w"> </span><span class="o">*</span><span class="n">skb</span><span class="p">){</span>
+<span class="w">      </span><span class="kt">void</span><span class="w"> </span><span class="o">*</span><span class="n">data</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">(</span><span class="kt">void</span><span class="w"> </span><span class="o">*</span><span class="p">)(</span><span class="kt">long</span><span class="p">)</span><span class="n">skb</span><span class="o">-&gt;</span><span class="n">data</span><span class="p">;</span>
+<span class="w">    </span><span class="kt">void</span><span class="w"> </span><span class="o">*</span><span class="n">data_end</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">(</span><span class="kt">void</span><span class="w"> </span><span class="o">*</span><span class="p">)(</span><span class="kt">long</span><span class="p">)</span><span class="n">skb</span><span class="o">-&gt;</span><span class="n">data_end</span><span class="p">;</span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="o">!</span><span class="n">pcap_filter</span><span class="p">((</span><span class="kt">void</span><span class="w"> </span><span class="o">*</span><span class="p">)</span><span class="n">skb</span><span class="p">,</span><span class="w"> </span><span class="p">(</span><span class="kt">void</span><span class="w"> </span><span class="o">*</span><span class="p">)</span><span class="n">skb</span><span class="p">,</span><span class="w"> </span><span class="p">(</span><span class="kt">void</span><span class="w"> </span><span class="o">*</span><span class="p">)</span><span class="n">skb</span><span class="p">,</span><span class="w"> </span><span class="n">data</span><span class="p">,</span><span class="w"> </span><span class="n">data_end</span><span class="p">))</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="k">goto</span><span class="w"> </span><span class="n">out</span><span class="p">;</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="w">    </span><span class="c1">// ...</span>
+<span class="p">}</span>
+</pre></div>
+<ol class="arabic simple" start="2">
+<li>go program:</li>
+</ol>
+<div class="highlight"><pre><span></span><span class="kd">func</span><span class="w"> </span><span class="nx">injectFilter</span><span class="p">(</span><span class="nx">spec</span><span class="w"> </span><span class="o">*</span><span class="nx">ebpf</span><span class="p">.</span><span class="nx">CollectionSpec</span><span class="p">,</span><span class="w"> </span><span class="nx">expr</span><span class="w"> </span><span class="kt">string</span><span class="p">)</span><span class="w"> </span><span class="kt">error</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="c1">// ...</span>
+<span class="w">    </span><span class="nx">oldInsts</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="nx">spec</span><span class="p">.</span><span class="nx">Programs</span><span class="p">[</span><span class="s">&quot;sample_prog&quot;</span><span class="p">].</span><span class="nx">Instructions</span>
+<span class="w">    </span><span class="nx">newInsts</span><span class="p">,</span><span class="w"> </span><span class="nx">err</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="nx">elibpcap</span><span class="p">.</span><span class="nx">Inject</span><span class="p">(</span><span class="nx">expr</span><span class="p">,</span><span class="w"> </span><span class="nx">oldInsts</span><span class="p">,</span><span class="w"> </span><span class="nx">elibpcap</span><span class="p">.</span><span class="nx">Options</span><span class="p">{</span>
+<span class="w">            </span><span class="nx">AtBpf2Bpf</span><span class="p">:</span><span class="w">  </span><span class="s">&quot;pcap_filter&quot;</span><span class="p">,</span>
+<span class="w">            </span><span class="nx">DirectRead</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="p">,</span>
+<span class="w">            </span><span class="nx">L2Skb</span><span class="p">:</span><span class="w">      </span><span class="kc">false</span><span class="p">,</span>
+<span class="w">    </span><span class="p">})</span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="nx">err</span><span class="w"> </span><span class="o">!=</span><span class="w"> </span><span class="kc">nil</span><span class="w"> </span><span class="p">{</span>
+<span class="w">            </span><span class="k">return</span><span class="w"> </span><span class="nx">err</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="w">    </span><span class="nx">spec</span><span class="p">.</span><span class="nx">Programs</span><span class="p">[</span><span class="s">&quot;sample_prog&quot;</span><span class="p">].</span><span class="nx">Instructions</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="nx">newInsts</span>
+<span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="kc">nil</span>
+<span class="p">}</span>
+</pre></div>
+<p>One point to note: Because the skb data in cgroup-skb programs does not contain L2 data, set <tt class="docutils literal">L2Skb: false</tt> here.</p>
+<p>See the complete example program: <a class="reference external" href="https://github.com/mozillazg/elibpcap-examples/tree/master/cgroup-skb">cgroup-skb</a></p>
+</div>
+<div class="section" id="kprobe-fentry-tracepoint">
+<h3 id="hidkprobe-fentry-tracepoint">kprobe/fentry/tracepoint<a class="headerlink" href="#hidkprobe-fentry-tracepoint" title="Permalink to this headline">¶</a></h3>
+<p>elibpcap hides the data reading differences between kprobe/fentry/tracepoint programs and
+the tc/tcx/xdp programs mentioned earlier. This allows us to integrate them in a mostly consistent way.</p>
+<ol class="arabic simple">
+<li>c program:</li>
+</ol>
+<div class="highlight"><pre><span></span><span class="n">SEC</span><span class="p">(</span><span class="s">&quot;kprobe/__dev_queue_xmit&quot;</span><span class="p">)</span>
+<span class="kt">int</span><span class="w"> </span><span class="n">BPF_KPROBE</span><span class="p">(</span><span class="n">sample_prog</span><span class="p">,</span><span class="w"> </span><span class="k">struct</span><span class="w"> </span><span class="nc">sk_buff</span><span class="w"> </span><span class="o">*</span><span class="n">skb</span><span class="p">){</span>
+<span class="w">    </span><span class="kt">void</span><span class="w"> </span><span class="o">*</span><span class="n">skb_head</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">BPF_CORE_READ</span><span class="p">(</span><span class="n">skb</span><span class="p">,</span><span class="w"> </span><span class="n">head</span><span class="p">);</span>
+<span class="w">      </span><span class="kt">void</span><span class="w"> </span><span class="o">*</span><span class="n">data</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">skb_head</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">BPF_CORE_READ</span><span class="p">(</span><span class="n">skb</span><span class="p">,</span><span class="w"> </span><span class="n">network_header</span><span class="p">);</span>
+<span class="w">      </span><span class="kt">void</span><span class="w"> </span><span class="o">*</span><span class="n">data_end</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">skb_head</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">BPF_CORE_READ</span><span class="p">(</span><span class="n">skb</span><span class="p">,</span><span class="w"> </span><span class="n">tail</span><span class="p">);</span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="o">!</span><span class="n">pcap_filter</span><span class="p">((</span><span class="kt">void</span><span class="w"> </span><span class="o">*</span><span class="p">)</span><span class="n">skb</span><span class="p">,</span><span class="w"> </span><span class="p">(</span><span class="kt">void</span><span class="w"> </span><span class="o">*</span><span class="p">)</span><span class="n">skb</span><span class="p">,</span><span class="w"> </span><span class="p">(</span><span class="kt">void</span><span class="w"> </span><span class="o">*</span><span class="p">)</span><span class="n">skb</span><span class="p">,</span><span class="w"> </span><span class="n">data</span><span class="p">,</span><span class="w"> </span><span class="n">data_end</span><span class="p">))</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="k">goto</span><span class="w"> </span><span class="n">out</span><span class="p">;</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="w">    </span><span class="c1">// ...</span>
+<span class="p">}</span>
+</pre></div>
+<ol class="arabic simple" start="2">
+<li>go program:</li>
+</ol>
+<div class="highlight"><pre><span></span><span class="kd">func</span><span class="w"> </span><span class="nx">injectFilter</span><span class="p">(</span><span class="nx">spec</span><span class="w"> </span><span class="o">*</span><span class="nx">ebpf</span><span class="p">.</span><span class="nx">CollectionSpec</span><span class="p">,</span><span class="w"> </span><span class="nx">expr</span><span class="w"> </span><span class="kt">string</span><span class="p">)</span><span class="w"> </span><span class="kt">error</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="c1">// ...</span>
+<span class="w">    </span><span class="nx">oldInsts</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="nx">spec</span><span class="p">.</span><span class="nx">Programs</span><span class="p">[</span><span class="s">&quot;sample_prog&quot;</span><span class="p">].</span><span class="nx">Instructions</span>
+<span class="w">    </span><span class="nx">newInsts</span><span class="p">,</span><span class="w"> </span><span class="nx">err</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="nx">elibpcap</span><span class="p">.</span><span class="nx">Inject</span><span class="p">(</span><span class="nx">expr</span><span class="p">,</span><span class="w"> </span><span class="nx">oldInsts</span><span class="p">,</span><span class="w"> </span><span class="nx">elibpcap</span><span class="p">.</span><span class="nx">Options</span><span class="p">{</span>
+<span class="w">            </span><span class="nx">AtBpf2Bpf</span><span class="p">:</span><span class="w">  </span><span class="s">&quot;pcap_filter&quot;</span><span class="p">,</span>
+<span class="w">            </span><span class="nx">DirectRead</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span><span class="p">,</span>
+<span class="w">            </span><span class="nx">L2Skb</span><span class="p">:</span><span class="w">      </span><span class="kc">false</span><span class="p">,</span>
+<span class="w">    </span><span class="p">})</span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="nx">err</span><span class="w"> </span><span class="o">!=</span><span class="w"> </span><span class="kc">nil</span><span class="w"> </span><span class="p">{</span>
+<span class="w">            </span><span class="k">return</span><span class="w"> </span><span class="nx">err</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="w">    </span><span class="nx">spec</span><span class="p">.</span><span class="nx">Programs</span><span class="p">[</span><span class="s">&quot;sample_prog&quot;</span><span class="p">].</span><span class="nx">Instructions</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="nx">newInsts</span>
+<span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="kc">nil</span>
+<span class="p">}</span>
+<span class="c1">// ...</span>
+</pre></div>
+<p>Here are two things to note:</p>
+<ol class="arabic simple">
+<li>Because kprobe programs cannot read packet data from <cite>skb</cite> using &quot;direct packet access&quot;,
+we need to set <tt class="docutils literal">DirectRead: false</tt>.</li>
+<li>Because our kprobe program checks L3 data,
+we need to set <tt class="docutils literal">L2Skb: false</tt> here.</li>
+</ol>
+<p>See the complete example program:
+<a class="reference external" href="https://github.com/mozillazg/elibpcap-examples/tree/master/kprobe">kprobe</a> ,
+<a class="reference external" href="https://github.com/mozillazg/elibpcap-examples/tree/master/fentry">fentry</a> ,
+<a class="reference external" href="https://github.com/mozillazg/elibpcap-examples/tree/master/tracepoint">tracepoint</a></p>
+</div>
+</div>
+<div class="section" id="conclusion">
+<h2 id="hidconclusion">Conclusion<a class="headerlink" href="#hidconclusion" title="Permalink to this headline">¶</a></h2>
+<p>If you want to add pcap-filter support to your Go and eBPF network project but don't know where to start,
+try integrating the clever and powerful elibpcap project.</p>
+</div>
+<div class="section" id="references">
+<h2 id="hidreferences">References<a class="headerlink" href="#hidreferences" title="Permalink to this headline">¶</a></h2>
+<ul class="simple">
+<li><a class="reference external" href="https://github.com/jschwinger233/elibpcap">jschwinger233/elibpcap</a></li>
+<li><a class="reference external" href="https://github.com/mozillazg/ptcpdump">mozillazg/ptcpdump: Process-aware, eBPF-based tcpdump</a></li>
+<li><a class="reference external" href="https://github.com/mozillazg/elibpcap-examples">mozillazg/elibpcap-examples: usage of github.com/jschwinger233/elibpcap</a></li>
+<li><a class="reference external" href="https://github.com/jschwinger233/ktcpdump">jschwinger233/ktcpdump</a></li>
+</ul>
+</div>
+
+                </div>
+            </div>
+            <!-- /.entry-content -->
+<section class="text-center">
+  
+<div id="donate"></div>
+
+<div class="social-share"></div>
+<div class="social-comment-note">
+<p class="text-center">有任何建议和想法欢迎在下方评论区留言或者加我<a href="/static/wechat.png">微信</a>交流</p>
+</div>
+
+</section>
+<section class="well" id="related-posts">
+    <p>Related Posts:</p>
+    <ul>
+        <li><a href="https://mozillazg.com/2025/05/ebpf-let-any-network-ebpf-programs-to-support-pcap-filter-with-elibpcap.html">使用 elibpcap 为网络相关 eBPF 程序实现 pcap-filter 包过滤语法支持</a></li>
+        <li><a href="https://mozillazg.com/2021/11/docker-container-difference-between-privileged-mode-and-non-privileged-mode-en.html">The Difference Between Container Privileged Mode and Non-Privileged Mode</a></li>
+        <li><a href="https://mozillazg.com/2022/06/ebpf-libbpf-btf-powered-enabled-raw-tracepoint-common-questions-en.html">Frequently asked questions about using btf raw tracepoint with ebpf/libbpf programs</a></li>
+        <li><a href="https://mozillazg.com/2022/05/ebpf-libbpf-raw-tracepoint-common-questions-en.html">Frequently asked questions about using raw tracepoint with ebpf/libbpf programs</a></li>
+        <li><a href="https://mozillazg.com/2022/05/ebpf-libbpf-tracepoint-common-questions-en.html">Frequently asked questions about using tracepoint with ebpf/libbpf programs</a></li>
+    </ul>
+</section>
+<hr/>
+<section class="comments" id="comments">
+    <h2>Comments</h2>
+    <script src="https://giscus.app/client.js"
+            data-repo="mozillazg/mozillazg.github.com"
+            data-repo-id="MDEwOlJlcG9zaXRvcnk3Njc4MTA2"
+            data-category="Announcements"
+            data-category-id="DIC_kwDOAHUoms4CckZl"
+            data-mapping="pathname"
+            data-strict="0"
+            data-reactions-enabled="1"
+            data-emit-metadata="0"
+            data-input-position="bottom"
+            data-theme="preferred_color_scheme"
+            data-description="<description>"
+            data-lang="en"
+            data-loading="lazy"
+            crossorigin="anonymous"
+            async>
+    </script>
+</section>
+        </article>
+    </section>
+
+        </div>
+    </div>
+</div>
+<footer>
+   <div class="container">
+      <hr>
+      <div class="row">
+         <div class="col-xs-10">&copy; 2025 mozillazg
+            &middot; Powered by <a href="https://github.com/DandyDev/pelican-bootstrap3" target="_blank">pelican-bootstrap3</a>,
+            <a href="http://docs.getpelican.com/" target="_blank">Pelican</a>,
+            <a href="http://getbootstrap.com" target="_blank">Bootstrap</a>
+            &middot; <a href="/privacy-policy.html" target="_blank">Privacy</a>              <p><small>  <a rel="license" href="http://creativecommons.org/licenses/by-sa/4.0/"><img alt="Creative Commons License" style="border-width:0" src="/static/images/by-sa-80x15.png" /></a>
+    &quot;<span xmlns:dct="http://purl.org/dc/terms/" property="dct:title">mozillazg's Blog</span>&quot; by <a xmlns:cc="http://creativecommons.org/ns#" href="https://mozillazg.com" property="cc:attributionName" rel="cc:attributionURL">mozillazg</a> is
+  licensed under a <a rel="license" href="http://creativecommons.org/licenses/by-sa/4.0/">Creative Commons Attribution-ShareAlike 4.0 International License</a>, except where indicated otherwise.
+</small></p>
+         </div>
+         <div class="col-xs-2"><p class="pull-right"><i class="fa fa-arrow-up"></i> <a href="#">Back to top</a></p></div>
+      </div>
+   </div>
+</footer>
+<script src="/theme/cdn.jsdelivr.net/npm/jquery@2.1.1/dist/jquery.min.js"></script>
+
+<!-- Include all compiled plugins (below), or include individual files as needed -->
+<script src="/theme/cdn.jsdelivr.net/npm/bootstrap@3.3.4/dist/js/bootstrap.min.js"></script>
+
+<!-- Enable responsive features in IE8 with Respond.js (https://github.com/scottjehl/Respond) -->
+
+
+<!-- share.js -->
+<script src="/theme/cdn.jsdelivr.net/npm/social-share.js@1.0.16/dist/js/social-share.min.js"></script>
+
+
+
+<script src="/theme/cdn.jsdelivr.net/npm/tocbot@3.0.2/dist/tocbot.min.js"></script>
+<script>
+$(document).ready(function(){
+  tocbot.init({
+    // Where to render the table of contents.
+    tocSelector: '.js-toc',
+    // Where to grab the headings to build the table of contents.
+    contentSelector: '.entry-content',
+    // Which headings to grab inside of the contentSelector element.
+    headingSelector: 'h2, h3, h4,h5',
+    // Headings that match the ignoreSelector will be skipped.
+    ignoreSelector: '.js-toc-ignore',
+    // Main class to add to links.
+    linkClass: 'toc-link',
+    // Extra classes to add to links.
+    extraLinkClasses: '',
+    // Class to add to active links,
+    // the link corresponding to the top most heading on the page.
+    activeLinkClass: 'is-active-link',
+    // Main class to add to lists.
+    listClass: 'toc-list',
+    // Extra classes to add to lists.
+    extraListClasses: '',
+    // Class that gets added when a list should be collapsed.
+    isCollapsedClass: 'is-collapsed',
+    // Class that gets added when a list should be able
+    // to be collapsed but isn't necessarily collpased.
+    collapsibleClass: 'is-collapsible',
+    // Class to add to list items.
+    listItemClass: 'toc-list-item',
+    // How many heading levels should not be collpased.
+    // For example, number 6 will show everything since
+    // there are only 6 heading levels and number 0 will collpase them all.
+    // The sections that are hidden will open
+    // and close as you scroll to headings within them.
+    collapseDepth: 6,
+    // Smooth scrolling enabled.
+    smoothScroll: true,
+    // Smooth scroll duration.
+    smoothScrollDuration: 420,
+    // Callback for scroll end (requires: smoothScroll).
+    scrollEndCallback: function (e) {},
+    // Headings offset between the headings and the top of the document (this is meant for minor adjustments).
+    headingsOffset: 0,
+    // Timeout between events firing to make sure it's
+    // not too rapid (for performance reasons).
+    throttleTimeout: 50,
+    // Element to add the positionFixedClass to.
+    positionFixedSelector: null,
+    // Fixed position class to add to make sidebar fixed after scrolling
+    // down past the fixedSidebarOffset.
+    positionFixedClass: 'is-position-fixed',
+    // fixedSidebarOffset can be any number but by default is set
+    // to auto which sets the fixedSidebarOffset to the sidebar
+    // element's offsetTop from the top of the document on init.
+    fixedSidebarOffset: 'auto',
+    // includeHtml can be set to true to include the HTML markup from the
+    // heading node instead of just including the textContent.
+    includeHtml: false
+  });
+});
+</script>
+</body>
+</html>
