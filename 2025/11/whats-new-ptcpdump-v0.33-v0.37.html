@@ -1,0 +1,496 @@
+<!DOCTYPE html>
+<html lang="zh"  prefix="og: http://ogp.me/ns# fb: https://www.facebook.com/2008/fbml" class="han-init">
+<head>
+    <title>ptcpdump v0.33 ~ v0.37 的主要变更内容 - mozillazg's Blog</title>
+    <!-- Using the latest rendering mode for IE -->
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <!-- share.css -->
+    <link rel="stylesheet" href="/theme/cdn.jsdelivr.net/npm/social-share.js@1.0.16/dist/css/share.min.css">
+
+
+    <link href="https://mozillazg.com/favicon.ico" rel="icon">
+
+<link rel="canonical" href="https://mozillazg.com/2025/11/whats-new-ptcpdump-v0.33-v0.37.html">
+
+        <meta name="author" content="mozillazg" />
+        <meta name="keywords" content="others,ptcpdump" />
+    <meta name="description" content="ptcpdump v0.33 ~ v0.37 的主要变更内容 - 前言 本文将按变更顺序介绍一下 ptcpdump 从上次的 v0.32 之后的 v0.33 版本到最新的 v0.37 版本期间所发布的主要变更内容。 主要变更内容 优先使用 BPF ringbuf 代替 BPF perfbuf 如果当前系统使用的 Linux 内核支持 BPF ringbuf 的话， ptcpdump 将优先使用 BPF ringbuf 技术优化程序性能。 关于 BPF ringbuf 的更多信息，详见 BPF ring buffer 。 修复使用 cgroup-skb 后端时按进程过滤数据包功能失效的问题 修复之前的版本中，通过 --backend=cgroup-skb 参数指定使用 cgroup-skb 后端时， --pid 或 --pname 参数对应的功能失效的问题。 支持从标准输入中读取 PcapNG 格式的数据 现已支持通过 -r - 从标准输入中读取 PcapNG 格式的数据: $ cat data.pcapng | ptcpdump -r - $ ptcpdump -r - &lt; data.pcapng 支持 -C 和 -W 参数实现文件轮转功能 现已支持在使用 -w 保存数据到文件中时，使用 -C 或 -W 参数实现文件轮转功能: sudo ptcpdump -i any -w data.pcapng -C 1mb sudo ptcpdump -i any -w data.pcapng -C 1mb -W 5 其中: -C 指定文件的最大大小，当超过该大小时，将在旧的文件名后面追加数字（比如 data.pcapng1 ），来保存历史数据。 -W 自定保存的文件数量，需要与 -C 一起使用，用于限制文件数量。 支持 -F/--expression-file 参数实现从文件中读取 pcap fitler 表达式 现已支持使用 -F 或者 --expression-file 参数从文件中读取 pcap filter 包过滤表达式: sudo ptcpdump -i any -c 10 -F filter.txt sudo ptcpdump -i any -c 10 --expression-file filter.txt 支持 -tt, -ttt, -tttt, -ttttt 参数实现指定输出的时间格式 现已支持使用 -tt, -ttt, -tttt, -ttttt 指定输出包信息时的时间信息格式。 -tt : 显示时间戳格式，比如 1764417816.346098 ens33 sshd.183127 Out IP xx.xx.xx.xx.22 &gt; xx.xx.xx.xx.64755:... -ttt : 显示两条记录的时间间隔, 比如 00:00:00.000265 ens33 sshd.183127 Out IP xx.xx.xx.xx.22 &gt; xx.xx.xx.xx.64755:... -tttt : 显示日期和时间，比如 2025-11-29 20:03:36.346098 ens33 sshd.183127 Out IP xx.xx.xx.xx.22 &gt; xx.xx.xx.xx.64755:... -ttttt : 显示距离第一条记录的时间间隔，比如 00:00:00.002708 ens33 sshd.183127 Out IP xx.xx.xx.xx.22 &gt; xx.xx.xx.xx.64755:... 支持通过动态链接的方式使用系统安装的 libpcap ..." />
+
+    <style>
+      .js-toc {
+        margin-bottom: 20px;
+      }
+      .donate-modal {
+        text-align: center;
+      }
+      #donate-modal-container .donate-image {
+        max-height: 300px !important;
+        min-height: inherit !important;
+      }
+    </style>
+
+        <meta property="og:site_name" content="mozillazg's Blog" />
+        <meta property="og:type" content="article"/>
+        <meta property="og:title" content="ptcpdump v0.33 ~ v0.37 的主要变更内容"/>
+        <meta property="og:url" content="https://mozillazg.com/2025/11/whats-new-ptcpdump-v0.33-v0.37.html"/>
+        <meta property="og:description" content="前言 本文将按变更顺序介绍一下 ptcpdump 从上次的 v0.32 之后的 v0.33 版本到最新的 v0.37 版本期间所发布的主要变更内容。 主要变更内容 优先使用 BPF ringbuf 代替 BPF perfbuf 如果当前系统使用的 Linux 内核支持 BPF ringbuf 的话， ptcpdump 将优先使用 BPF ringbuf 技术优化程序性能。 关于 BPF ringbuf 的更多信息，详见 BPF ring buffer 。 修复使用 cgroup-skb 后端时按进程过滤数据包功能失效的问题 修复之前的版本中，通过 --backend=cgroup-skb 参数指定使用 cgroup-skb 后端时， --pid 或 --pname 参数对应的功能失效的问题。 支持从标准输入中读取 PcapNG 格式的数据 现已支持通过 -r - 从标准输入中读取 PcapNG 格式的数据: $ cat data.pcapng | ptcpdump -r - $ ptcpdump -r - &lt; data.pcapng 支持 -C 和 -W 参数实现文件轮转功能 现已支持在使用 -w 保存数据到文件中时，使用 -C 或 -W 参数实现文件轮转功能: sudo ptcpdump -i any -w data.pcapng -C 1mb sudo ptcpdump -i any -w data.pcapng -C 1mb -W 5 其中: -C 指定文件的最大大小，当超过该大小时，将在旧的文件名后面追加数字（比如 data.pcapng1 ），来保存历史数据。 -W 自定保存的文件数量，需要与 -C 一起使用，用于限制文件数量。 支持 -F/--expression-file 参数实现从文件中读取 pcap fitler 表达式 现已支持使用 -F 或者 --expression-file 参数从文件中读取 pcap filter 包过滤表达式: sudo ptcpdump -i any -c 10 -F filter.txt sudo ptcpdump -i any -c 10 --expression-file filter.txt 支持 -tt, -ttt, -tttt, -ttttt 参数实现指定输出的时间格式 现已支持使用 -tt, -ttt, -tttt, -ttttt 指定输出包信息时的时间信息格式。 -tt : 显示时间戳格式，比如 1764417816.346098 ens33 sshd.183127 Out IP xx.xx.xx.xx.22 &gt; xx.xx.xx.xx.64755:... -ttt : 显示两条记录的时间间隔, 比如 00:00:00.000265 ens33 sshd.183127 Out IP xx.xx.xx.xx.22 &gt; xx.xx.xx.xx.64755:... -tttt : 显示日期和时间，比如 2025-11-29 20:03:36.346098 ens33 sshd.183127 Out IP xx.xx.xx.xx.22 &gt; xx.xx.xx.xx.64755:... -ttttt : 显示距离第一条记录的时间间隔，比如 00:00:00.002708 ens33 sshd.183127 Out IP xx.xx.xx.xx.22 &gt; xx.xx.xx.xx.64755:... 支持通过动态链接的方式使用系统安装的 libpcap 之前的版本只支持以静态链接的方式编译依赖的 libpcap 库， 现已支持通过动态链接的方式使用系统安装的 libpcap 库，满足简化系统库管理的需求。 可以通过下面任一编译方式使用动态链接库: $ CGO_ENABLED=1 go build -tags dynamic $ make build-dynamic-link 修复 -s 0 参数会导致程序崩溃的问题 在之前的版本中，如果使用 -s 0 参数会导致 ptcpdump 程序崩溃，这个问题现已修复。 修复终端输出中的时间信息不准确的问题 在之前的版本中，终端输出的包信息的时间信息随着时间的推移会与实践的事件时间差距越来越大， 这个问题现已修复。 实验性支持 armv7 CPU 架构 在新版本中已实验性支持 armv7 CPU 架构。 因为缺少支持 armv7 架构的 CI 环境， 因此只能作为实验性支持， 没法保证未来版本的兼容性。如果某个版本不再支持 armv7 了， 欢迎反馈。 新增 tp-btf 后端 新版本增加了一个新的后端 tp-btf ， 当指定使用该后端时，ptcpdump 将使用 BPF_PROG_TYPE_TRACING 类型的 eBPF 程序来捕获数据包。 该后端与 tc 后端的主要区别是：tp-btf 默认将能捕获所有网络命名空间下的数据， 而 tc 后端默认只捕获当前网络命名空间下的数据（可以通过 --netns 命令指定捕获特定网络命名空间下的数据）。 关于该后端与其他后端的区别，详见 Backend 。 可以通过 --backend tp-btf 使用新增的 tp-btf 后端。 新增 socket-filter 后端 新版本增加了另一个新的后端 socket-filter ， 当指定使用该后端时，ptcpdump 将使用 BPF_PROG_TYPE_SOCKET_FILTER 类型的 eBPF 程序来捕获数据包。 使用该后端时，ptcpdump 的输出结果将更接近 tcpdump 的输出结果，因为此时它们两个捕获数据包的时机会更接近。 关于该后端与其他后端的区别，详见 Backend 。 可以通过 --backend socket-filter 使用新增的 socket-filter 后端。 在跨网络命名空间的数据结果中显示 inode ID 信息 从新版本开始，当输出结果中包含非当前网络命名空间的数据时，程序将会尝试在输出网络接口信息时，显示对应网络命名空间的 inode ID 信息: 12:20:31.336316 eth0@4026533097 curl.405939 Out IP 172.17.0.4.38670 &gt; 1.1.1.1.80: Flags [S], seq 3064539219, win 64240, options [mss 1460,sackOK,TS val 1731159046 ecr 0,nop,wscale 7], length 0, ParentProc [bash.405653] 12:20:31.336382 veth1d387b0 curl.405939 In IP 172.17.0.4.38670 &gt; 1.1.1.1.80: Flags [S], seq 3064539219, win 64240, options [mss 1460,sackOK,TS val 1731159046 ecr 0,nop,wscale 7], length 0, ParentProc [bash.405653] -v 的输出中增加 IP Options 信息 新版本在使用 -v 参数输出详情时，将输出 IP Options 信息: 09:48:31.908813 IP (tos 0x0, ttl 64, id 39183, offset 0, flags [none], proto TCP (6), length 80, options (RR 1.2.3.4, 1.0.0.0 0.0.0.0 0.0.0.0 0.0.0.0 0.0.0.0 0.0.0.0 0.0.0.0 0.0.0.0,EOL)) ${IP}.1373 &gt; 1.1.1.1.80: Flags [S], cksum 0xbfb4, seq 122218745, win 512, length 0 新增输出 HTTP 信息 如果某一行的数据包是 HTTP 数据，新版本将默认输出基本的 HTTP 信息: 13:27:02.285015 IP ${IP}.57166 &gt; ${IP}.80: Flags [P.], ..., length 73: HTTP: GET / HTTP/1.1 13:27:02.516911 IP ${IP}.80 &gt; ${IP}.57166: Flags [P.], ..., length 349: HTTP: HTTP/1.1 301 Moved Permanently 如果使用 -v 参数输出详情，则会包含详细的 HTTP 信息: 13:27:02.285015 IP (tos 0x0, ttl 64, id 8683, offset 0, flags [DF], proto TCP (6), length 113) ..., length 73: HTTP: GET / HTTP/1.1 GET / HTTP/1.1 Host: kernel.org User-Agent: curl/8.5.0 Accept: */* 13:27:02.516911 IP (tos 0x0, ttl 128, id 62994, offset 0, flags [none], proto TCP (6), length 389) ..., length 349: HTTP: HTTP/1.1 301 Moved Permanently HTTP/1.1 301 Moved Permanently Server: nginx Date: Sat, 05 Jul 2025 13:27:02 GMT Content-Type: text/html Content-Length: 162 Connection: keep-alive Location: https://kernel.org/ &lt;html&gt; &lt;head&gt;&lt;title&gt;301 Moved Permanently&lt;/title&gt;&lt;/head&gt; &lt;body&gt; &lt;center&gt;&lt;h1&gt;301 Moved Permanently&lt;/h1&gt;&lt;/center&gt; &lt;hr&gt;&lt;center&gt;nginx&lt;/center&gt; &lt;/body&gt; &lt;/html&gt; 新增输出 TLS 信息 如果某一行的数据包是 TLS 数据，新版本将默认输出 TLS Client Hello 或 Server Hello 信息: 13:48:40.371849 IP ${IP}.47812 &gt; ${IP}.443: Flags [P.], ..., length 517: TLSv1.0: Client Hello (SNI=kernel.org) 13:48:40.606677 IP ${IP}.443 &gt; ${IP}.47812: Flags [P.], ..., length 1412: TLSv1.3: Server Hello 新增支持对 L3 网络接口设备抓包 之前的版本只支持对 L2 网络接口设备抓包，新版本已增加对 L3 网络接口（比如 TUN 设备）的支持。 改为默认以相对数字显示 TCP 序列号 在之前的版本中，默认会显示 TCP 序列号的原始数字，比较难阅读: 20:03:36.346098 ens33 sshd.183127 Out IP ${IP}.22 &gt; ${IP}.64755: Flags [P.], seq 1457857145:1457857369, ack 1966040526, win 65535, length 224, ParentProc [sshd.16678] 20:03:36.346909 ens33 sshd.183127 In IP ${IP}.64755 &gt; ${IP}.22: Flags [.], seq 1966040526, ack 1457857369, win 64240, length 0, ParentProc [sshd.16678] 20:03:36.348807 ens33 sshd.183127 Out IP ${IP}.22 &gt; ${IP}.64755: Flags [P.], seq 1457857369:1457857593, ack 1966040526, win 65535, length 224, ParentProc [sshd.16678] 新版本将默认以相对数字的形式显示 TCP 序列号信息: 20:03:36.346098 ens33 sshd.183127 Out IP ${IP}.22 &gt; ${IP}.64755: Flags [P.], seq 1457857145:1457857369, ack 1966040526, win 65535, length 224, ParentProc [sshd.16678] 20:03:36.346909 ens33 sshd.183127 In IP ${IP}.64755 &gt; ${IP}.22: Flags [.], ack 224, win 64240, length 0, ParentProc [sshd.16678] 20:03:36.348807 ens33 sshd.183127 Out IP ${IP}.22 &gt; ${IP}.64755: Flags [P.], seq 224:448, ack 0, win 65535, length 224, ParentProc [sshd.16678] 同时新增 -S 和 --absolute-tcp-sequence-numbers 参数用于控制恢复之前的显示原始数字的模式。 如果你对 ptcpdump 有额外的改进或新功能建议，欢迎在评论区或项目 issues 中留言。"/>
+        <meta property="article:published_time" content="2025-11-29" />
+            <meta property="article:section" content="others" />
+            <meta property="article:tag" content="others" />
+            <meta property="article:tag" content="ptcpdump" />
+            <meta property="article:author" content="mozillazg" />
+            <meta property="og:image"
+                  content="https://mozillazg.com/static/avatar.jpeg"/>
+
+
+    <meta name="twitter:card" content="summary">
+        <meta name="twitter:site" content="@mozillazg">
+        <meta name="twitter:creator" content="@mozillazg">
+    <meta name="twitter:domain" content="https://mozillazg.com">
+            <meta property="twitter:image"
+                  content="https://mozillazg.com/static/avatar.jpeg"/>
+
+    <!-- Bootstrap -->
+        <link rel="stylesheet" href="/theme/cdn.jsdelivr.net/npm/bootstrap@3.3.4/dist/css/bootstrap.min.css" type="text/css"/>
+    <link href="/theme/cdn.jsdelivr.net/npm/font-awesome@4.3.0/css/font-awesome.min.css" rel="stylesheet">
+
+    <link href="/theme/cdn.jsdelivr.net/npm/pygments-css@1.0.0/github.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://mozillazg.com/theme/css/style.css" type="text/css"/>
+            <link href="/static/han.min.css" rel="stylesheet">
+            <link href="/static/yue.css" rel="stylesheet">
+            <link href="/static/custom.css" rel="stylesheet">
+
+        <link href="https://mozillazg.com/feeds/all.atom.xml" type="application/atom+xml" rel="alternate"
+              title="mozillazg's Blog ATOM Feed"/>
+
+        <link href="https://mozillazg.com/feeds/all.rss.xml" type="application/rss+xml" rel="alternate"
+              title="mozillazg's Blog RSS Feed"/>
+
+
+        <link href="https://mozillazg.com/feeds/others.atom.xml" type="application/atom+xml" rel="alternate"
+              title="mozillazg's Blog others ATOM Feed"/>
+
+
+    <script type="application/ld+json">
+    {
+        "@context": "https://schema.org",
+        "@type": "BlogPosting",
+        "publisher": {
+            "@type": "Person",
+            "name": "mozillazg",
+            "logo": "https://mozillazg.com/static/avatar.jpeg"
+        },
+        "author": {
+            "@type": "Person",
+            "name": "mozillazg",
+            "image": "https://mozillazg.com/static/avatar.jpeg",
+            "url": "https://mozillazg.com",
+            "sameAs": []
+        },
+        "headline": "ptcpdump v0.33 ~ v0.37 的主要变更内容",
+        "url": "https://mozillazg.com/2025/11/whats-new-ptcpdump-v0.33-v0.37.html",
+        "image": [
+            "https://mozillazg.com/static/avatar.jpeg"
+         ],
+        "keywords": "others, ptcpdump",
+        "description": "前言 本文将按变更顺序介绍一下 ptcpdump 从上次的 v0.32 之后的 v0.33 版本到最新的 v0.37 版本期间所发布的主要变更内容。 主要变更内容 优先使用 BPF ringbuf 代替 BPF perfbuf 如果当前系统使用的 Linux 内核支持 BPF ringbuf 的话， ptcpdump 将优先使用 BPF ringbuf 技术优化程序性能。 关于 BPF ringbuf 的更多信息，详见 BPF ring buffer 。 修复使用 cgroup-skb 后端时按进程过滤数据包功能失效的问题 修复之前的版本中，通过 --backend=cgroup-skb 参数指定使用 cgroup-skb 后端时， --pid 或 --pname 参数对应的功能失效的问题。 支持从标准输入中读取 PcapNG 格式的数据 现已支持通过 -r - 从标准输入中读取 PcapNG 格式的数据: $ cat data.pcapng | ptcpdump -r - $ ptcpdump -r - &lt; data.pcapng 支持 -C 和 -W 参数实现文件轮转功能 现已支持在使用 -w 保存数据到文件中时，使用 -C 或 -W 参数实现文件轮转功能: sudo ptcpdump -i any -w data.pcapng -C 1mb sudo ptcpdump -i any -w data.pcapng -C 1mb -W 5 其中: -C 指定文件的最大大小，当超过该大小时，将在旧的文件名后面追加数字（比如 data.pcapng1 ），来保存历史数据。 -W 自定保存的文件数量，需要与 -C 一起使用，用于限制文件数量。 支持 -F/--expression-file 参数实现从文件中读取 pcap fitler 表达式 现已支持使用 -F 或者 --expression-file 参数从文件中读取 pcap filter 包过滤表达式: sudo ptcpdump -i any -c 10 -F filter.txt sudo ptcpdump -i any -c 10 --expression-file filter.txt 支持 -tt, -ttt, -tttt, -ttttt 参数实现指定输出的时间格式 现已支持使用 -tt, -ttt, -tttt, -ttttt 指定输出包信息时的时间信息格式。 -tt : 显示时间戳格式，比如 1764417816.346098 ens33 sshd.183127 Out IP xx.xx.xx.xx.22 &gt; xx.xx.xx.xx.64755:... -ttt : 显示两条记录的时间间隔, 比如 00:00:00.000265 ens33 sshd.183127 Out IP xx.xx.xx.xx.22 &gt; xx.xx.xx.xx.64755:... -tttt : 显示日期和时间，比如 2025-11-29 20:03:36.346098 ens33 sshd.183127 Out IP xx.xx.xx.xx.22 &gt; xx.xx.xx.xx.64755:... -ttttt : 显示距离第一条记录的时间间隔，比如 00:00:00.002708 ens33 sshd.183127 Out IP xx.xx.xx.xx.22 &gt; xx.xx.xx.xx.64755:... 支持通过动态链接的方式使用系统安装的 libpcap 之前的版本只支持以静态链接的方式编译依赖的 libpcap 库， 现已支持通过动态链接的方式使用系统安装的 libpcap 库，满足简化系统库管理的需求。 可以通过下面任一编译方式使用动态链接库: $ CGO_ENABLED=1 go build -tags dynamic $ make build-dynamic-link 修复 -s 0 参数会导致程序崩溃的问题 在之前的版本中，如果使用 -s 0 参数会导致 ptcpdump 程序崩溃，这个问题现已修复。 修复终端输出中的时间信息不准确的问题 在之前的版本中，终端输出的包信息的时间信息随着时间的推移会与实践的事件时间差距越来越大， 这个问题现已修复。 实验性支持 armv7 CPU 架构 在新版本中已实验性支持 armv7 CPU 架构。 因为缺少支持 armv7 架构的 CI 环境， 因此只能作为实验性支持， 没法保证未来版本的兼容性。如果某个版本不再支持 armv7 了， 欢迎反馈。 新增 tp-btf 后端 新版本增加了一个新的后端 tp-btf ， 当指定使用该后端时，ptcpdump 将使用 BPF_PROG_TYPE_TRACING 类型的 eBPF 程序来捕获数据包。 该后端与 tc 后端的主要区别是：tp-btf 默认将能捕获所有网络命名空间下的数据， 而 tc 后端默认只捕获当前网络命名空间下的数据（可以通过 --netns 命令指定捕获特定网络命名空间下的数据）。 关于该后端与其他后端的区别，详见 Backend 。 可以通过 --backend tp-btf 使用新增的 tp-btf 后端。 新增 socket-filter 后端 新版本增加了另一个新的后端 socket-filter ， 当指定使用该后端时，ptcpdump 将使用 BPF_PROG_TYPE_SOCKET_FILTER 类型的 eBPF 程序来捕获数据包。 使用该后端时，ptcpdump 的输出结果将更接近 tcpdump 的输出结果，因为此时它们两个捕获数据包的时机会更接近。 关于该后端与其他后端的区别，详见 Backend 。 可以通过 --backend socket-filter 使用新增的 socket-filter 后端。 在跨网络命名空间的数据结果中显示 inode ID 信息 从新版本开始，当输出结果中包含非当前网络命名空间的数据时，程序将会尝试在输出网络接口信息时，显示对应网络命名空间的 inode ID 信息: 12:20:31.336316 eth0@4026533097 curl.405939 Out IP 172.17.0.4.38670 &gt; 1.1.1.1.80: Flags [S], seq 3064539219, win 64240, options [mss 1460,sackOK,TS val 1731159046 ecr 0,nop,wscale 7], length 0, ParentProc [bash.405653] 12:20:31.336382 veth1d387b0 curl.405939 In IP 172.17.0.4.38670 &gt; 1.1.1.1.80: Flags [S], seq 3064539219, win 64240, options [mss 1460,sackOK,TS val 1731159046 ecr 0,nop,wscale 7], length 0, ParentProc [bash.405653] -v 的输出中增加 IP Options 信息 新版本在使用 -v 参数输出详情时，将输出 IP Options 信息: 09:48:31.908813 IP (tos 0x0, ttl 64, id 39183, offset 0, flags [none], proto TCP (6), length 80, options (RR 1.2.3.4, 1.0.0.0 0.0.0.0 0.0.0.0 0.0.0.0 0.0.0.0 0.0.0.0 0.0.0.0 0.0.0.0,EOL)) ${IP}.1373 &gt; 1.1.1.1.80: Flags [S], cksum 0xbfb4, seq 122218745, win 512, length 0 新增输出 HTTP 信息 如果某一行的数据包是 HTTP 数据，新版本将默认输出基本的 HTTP 信息: 13:27:02.285015 IP ${IP}.57166 &gt; ${IP}.80: Flags [P.], ..., length 73: HTTP: GET / HTTP/1.1 13:27:02.516911 IP ${IP}.80 &gt; ${IP}.57166: Flags [P.], ..., length 349: HTTP: HTTP/1.1 301 Moved Permanently 如果使用 -v 参数输出详情，则会包含详细的 HTTP 信息: 13:27:02.285015 IP (tos 0x0, ttl 64, id 8683, offset 0, flags [DF], proto TCP (6), length 113) ..., length 73: HTTP: GET / HTTP/1.1 GET / HTTP/1.1 Host: kernel.org User-Agent: curl/8.5.0 Accept: */* 13:27:02.516911 IP (tos 0x0, ttl 128, id 62994, offset 0, flags [none], proto TCP (6), length 389) ..., length 349: HTTP: HTTP/1.1 301 Moved Permanently HTTP/1.1 301 Moved Permanently Server: nginx Date: Sat, 05 Jul 2025 13:27:02 GMT Content-Type: text/html Content-Length: 162 Connection: keep-alive Location: https://kernel.org/ &lt;html&gt; &lt;head&gt;&lt;title&gt;301 Moved Permanently&lt;/title&gt;&lt;/head&gt; &lt;body&gt; &lt;center&gt;&lt;h1&gt;301 Moved Permanently&lt;/h1&gt;&lt;/center&gt; &lt;hr&gt;&lt;center&gt;nginx&lt;/center&gt; &lt;/body&gt; &lt;/html&gt; 新增输出 TLS 信息 如果某一行的数据包是 TLS 数据，新版本将默认输出 TLS Client Hello 或 Server Hello 信息: 13:48:40.371849 IP ${IP}.47812 &gt; ${IP}.443: Flags [P.], ..., length 517: TLSv1.0: Client Hello (SNI=kernel.org) 13:48:40.606677 IP ${IP}.443 &gt; ${IP}.47812: Flags [P.], ..., length 1412: TLSv1.3: Server Hello 新增支持对 L3 网络接口设备抓包 之前的版本只支持对 L2 网络接口设备抓包，新版本已增加对 L3 网络接口（比如 TUN 设备）的支持。 改为默认以相对数字显示 TCP 序列号 在之前的版本中，默认会显示 TCP 序列号的原始数字，比较难阅读: 20:03:36.346098 ens33 sshd.183127 Out IP ${IP}.22 &gt; ${IP}.64755: Flags [P.], seq 1457857145:1457857369, ack 1966040526, win 65535, length 224, ParentProc [sshd.16678] 20:03:36.346909 ens33 sshd.183127 In IP ${IP}.64755 &gt; ${IP}.22: Flags [.], seq 1966040526, ack 1457857369, win 64240, length 0, ParentProc [sshd.16678] 20:03:36.348807 ens33 sshd.183127 Out IP ${IP}.22 &gt; ${IP}.64755: Flags [P.], seq 1457857369:1457857593, ack 1966040526, win 65535, length 224, ParentProc [sshd.16678] 新版本将默认以相对数字的形式显示 TCP 序列号信息: 20:03:36.346098 ens33 sshd.183127 Out IP ${IP}.22 &gt; ${IP}.64755: Flags [P.], seq 1457857145:1457857369, ack 1966040526, win 65535, length 224, ParentProc [sshd.16678] 20:03:36.346909 ens33 sshd.183127 In IP ${IP}.64755 &gt; ${IP}.22: Flags [.], ack 224, win 64240, length 0, ParentProc [sshd.16678] 20:03:36.348807 ens33 sshd.183127 Out IP ${IP}.22 &gt; ${IP}.64755: Flags [P.], seq 224:448, ack 0, win 65535, length 224, ParentProc [sshd.16678] 同时新增 -S 和 --absolute-tcp-sequence-numbers 参数用于控制恢复之前的显示原始数字的模式。 如果你对 ptcpdump 有额外的改进或新功能建议，欢迎在评论区或项目 issues 中留言。",
+        "mainEntityOfPage": {
+             "@type": "WebPage",
+             "@id": "https://mozillazg.com/2025/11/whats-new-ptcpdump-v0.33-v0.37.html"
+        },
+        "datePublished": "2025-11-29"
+    }
+    </script>
+
+</head>
+<body>
+
+<div class="navbar" role="navigation">
+	<div class="container">
+        <div class="navbar-header">
+            <button type="button" class="navbar-toggle" data-toggle="collapse" data-target=".navbar-ex1-collapse">
+                <span class="sr-only">Toggle navigation</span>
+                <span class="icon-bar"></span>
+                <span class="icon-bar"></span>
+                <span class="icon-bar"></span>
+            </button>
+            <a href="https://mozillazg.com/" class="navbar-brand">
+mozillazg's Blog            </a>
+        </div>
+        <div class="collapse navbar-collapse navbar-ex1-collapse">
+            <ul class="nav navbar-nav">
+                    <li><a href="https://mozillazg.com/feeds/all.atom.xml">Feed</a></li>
+                    <li><a href="/2014/10/pages/about-me.html">About</a></li>
+            </ul>
+            <ul class="nav navbar-nav navbar-right">
+              <li><a href="https://mozillazg.com/archives.html"><i class="fa fa-th-list"></i><span class="icon-label">Archives</span></a></li>
+            </ul>
+        </div>
+        <!-- /.navbar-collapse -->
+    </div>
+</div> <!-- /.navbar -->
+<!-- Banner -->
+<!-- End Banner -->
+<div class="container">
+    <div class="row">
+        <div class="col-lg-12">
+    <section id="content" class="yue">
+        <article>
+            <header class="text-center">
+                <h1>
+                    <a href="https://mozillazg.com/2025/11/whats-new-ptcpdump-v0.33-v0.37.html"
+                       rel="bookmark"
+                       title="Permalink to ptcpdump v0.33 ~ v0.37 的主要变更内容">
+                        ptcpdump v0.33 ~ v0.37 的主要变更内容
+                    </a>
+                </h1>
+                <p class="published">
+                    <time datetime="2025-11-29T00:00:00+00:00">
+                    2025-11-29
+                    </time>
+                </p>
+            </header>
+            <div class="entry-content">
+                <div class="well-sm article-info">
+<footer class="post-info">
+        <a href="https://mozillazg.com/category/others.html">others</a>
+
+
+<span class="label label-default hide">Tags</span>
+	<a href="https://mozillazg.com/tag/ptcpdump.html">ptcpdump</a>
+    <span class="label label-default">Lang</span>
+	<a href="https://mozillazg.com/2025/11/whats-new-ptcpdump-v0.33-v0.37-en.html">en</a>
+
+</footer><!-- /.post-info -->                </div>
+                <div class="js-toc"></div>
+                <div>
+                <div class="section" id="section-1">
+<h2 id="hidsection-1">前言<a class="headerlink" href="#hidsection-1" title="Permalink to this headline">¶</a></h2>
+<p>本文将按变更顺序介绍一下 <a class="reference external" href="https://github.com/mozillazg/ptcpdump">ptcpdump</a>
+从上次的 <a class="reference external" href="https://mozillazg.com/2025/01/whats-new-ptcpdump-v0.27-v0.32.html">v0.32</a>
+之后的 v0.33 版本到最新的 v0.37 版本期间所发布的主要变更内容。</p>
+</div>
+<div class="section" id="section-2">
+<h2 id="hidsection-2">主要变更内容<a class="headerlink" href="#hidsection-2" title="Permalink to this headline">¶</a></h2>
+<div class="section" id="bpf-ringbuf-bpf-perfbuf">
+<h3 id="hidbpf-ringbuf-bpf-perfbuf">优先使用 BPF ringbuf 代替 BPF perfbuf<a class="headerlink" href="#hidbpf-ringbuf-bpf-perfbuf" title="Permalink to this headline">¶</a></h3>
+<p>如果当前系统使用的 Linux 内核支持 BPF ringbuf 的话，
+ptcpdump 将优先使用 BPF ringbuf 技术优化程序性能。
+关于 BPF ringbuf 的更多信息，详见 <a class="reference external" href="https://nakryiko.com/posts/bpf-ringbuf/">BPF ring buffer</a> 。</p>
+</div>
+<div class="section" id="cgroup-skb">
+<h3 id="hidcgroup-skb">修复使用 cgroup-skb 后端时按进程过滤数据包功能失效的问题<a class="headerlink" href="#hidcgroup-skb" title="Permalink to this headline">¶</a></h3>
+<p>修复之前的版本中，通过 <tt class="docutils literal"><span class="pre">--backend=cgroup-skb</span></tt> 参数指定使用 <tt class="docutils literal"><span class="pre">cgroup-skb</span></tt> 后端时，
+<tt class="docutils literal"><span class="pre">--pid</span></tt> 或 <tt class="docutils literal"><span class="pre">--pname</span></tt> 参数对应的功能失效的问题。</p>
+</div>
+<div class="section" id="pcapng">
+<h3 id="hidpcapng">支持从标准输入中读取 PcapNG 格式的数据<a class="headerlink" href="#hidpcapng" title="Permalink to this headline">¶</a></h3>
+<p>现已支持通过 <tt class="docutils literal"><span class="pre">-r</span> -</tt> 从标准输入中读取 PcapNG 格式的数据:</p>
+<pre class="literal-block">
+$ cat data.pcapng | ptcpdump -r -
+$ ptcpdump -r - &lt; data.pcapng
+</pre>
+</div>
+<div class="section" id="c-w">
+<h3 id="hidc-w">支持 -C 和 -W 参数实现文件轮转功能<a class="headerlink" href="#hidc-w" title="Permalink to this headline">¶</a></h3>
+<p>现已支持在使用 <tt class="docutils literal"><span class="pre">-w</span></tt> 保存数据到文件中时，使用 <tt class="docutils literal"><span class="pre">-C</span></tt> 或 <tt class="docutils literal"><span class="pre">-W</span></tt> 参数实现文件轮转功能:</p>
+<pre class="literal-block">
+sudo ptcpdump -i any -w data.pcapng -C 1mb
+sudo ptcpdump -i any -w data.pcapng -C 1mb -W 5
+</pre>
+<p>其中:</p>
+<ul class="simple">
+<li><tt class="docutils literal"><span class="pre">-C</span></tt> 指定文件的最大大小，当超过该大小时，将在旧的文件名后面追加数字（比如 <tt class="docutils literal">data.pcapng1</tt> ），来保存历史数据。</li>
+<li><tt class="docutils literal"><span class="pre">-W</span></tt> 自定保存的文件数量，需要与 <tt class="docutils literal"><span class="pre">-C</span></tt> 一起使用，用于限制文件数量。</li>
+</ul>
+</div>
+<div class="section" id="f-expression-file-pcap-fitler">
+<h3 id="hidf-expression-file-pcap-fitler">支持 -F/--expression-file 参数实现从文件中读取 pcap fitler 表达式<a class="headerlink" href="#hidf-expression-file-pcap-fitler" title="Permalink to this headline">¶</a></h3>
+<p>现已支持使用 <tt class="docutils literal"><span class="pre">-F</span></tt> 或者 <tt class="docutils literal"><span class="pre">--expression-file</span></tt> 参数从文件中读取 pcap filter 包过滤表达式:</p>
+<pre class="literal-block">
+sudo ptcpdump -i any -c 10 -F filter.txt
+sudo ptcpdump -i any -c 10 --expression-file filter.txt
+</pre>
+</div>
+<div class="section" id="tt-ttt-tttt-ttttt">
+<h3 id="hidtt-ttt-tttt-ttttt">支持 -tt, -ttt, -tttt, -ttttt 参数实现指定输出的时间格式<a class="headerlink" href="#hidtt-ttt-tttt-ttttt" title="Permalink to this headline">¶</a></h3>
+<p>现已支持使用 <tt class="docutils literal"><span class="pre">-tt</span></tt>, <tt class="docutils literal"><span class="pre">-ttt</span></tt>, <tt class="docutils literal"><span class="pre">-tttt</span></tt>, <tt class="docutils literal"><span class="pre">-ttttt</span></tt> 指定输出包信息时的时间信息格式。</p>
+<ul class="simple">
+<li><tt class="docutils literal"><span class="pre">-tt</span></tt> : 显示时间戳格式，比如 <tt class="docutils literal">1764417816.346098 ens33 sshd.183127 Out IP xx.xx.xx.xx.22 &gt; <span class="pre">xx.xx.xx.xx.64755:...</span></tt></li>
+<li><tt class="docutils literal"><span class="pre">-ttt</span></tt> : 显示两条记录的时间间隔, 比如 <tt class="docutils literal">00:00:00.000265 ens33 sshd.183127 Out IP xx.xx.xx.xx.22 &gt; <span class="pre">xx.xx.xx.xx.64755:...</span></tt></li>
+<li><tt class="docutils literal"><span class="pre">-tttt</span></tt> : 显示日期和时间，比如 <tt class="docutils literal"><span class="pre">2025-11-29</span> 20:03:36.346098 ens33 sshd.183127 Out IP xx.xx.xx.xx.22 &gt; <span class="pre">xx.xx.xx.xx.64755:...</span></tt></li>
+<li><tt class="docutils literal"><span class="pre">-ttttt</span></tt> : 显示距离第一条记录的时间间隔，比如 <tt class="docutils literal">00:00:00.002708 ens33 sshd.183127 Out IP xx.xx.xx.xx.22 &gt; <span class="pre">xx.xx.xx.xx.64755:...</span></tt></li>
+</ul>
+</div>
+<div class="section" id="libpcap">
+<h3 id="hidlibpcap">支持通过动态链接的方式使用系统安装的 libpcap<a class="headerlink" href="#hidlibpcap" title="Permalink to this headline">¶</a></h3>
+<p>之前的版本只支持以静态链接的方式编译依赖的 libpcap 库，
+现已支持通过动态链接的方式使用系统安装的 libpcap 库，满足简化系统库管理的需求。</p>
+<p>可以通过下面任一编译方式使用动态链接库:</p>
+<pre class="literal-block">
+$ CGO_ENABLED=1 go build -tags dynamic
+$ make build-dynamic-link
+</pre>
+</div>
+<div class="section" id="s-0">
+<h3 id="hids-0">修复 -s 0 参数会导致程序崩溃的问题<a class="headerlink" href="#hids-0" title="Permalink to this headline">¶</a></h3>
+<p>在之前的版本中，如果使用 <tt class="docutils literal"><span class="pre">-s</span> 0</tt> 参数会导致 ptcpdump 程序崩溃，这个问题现已修复。</p>
+</div>
+<div class="section" id="section-3">
+<h3 id="hidsection-3">修复终端输出中的时间信息不准确的问题<a class="headerlink" href="#hidsection-3" title="Permalink to this headline">¶</a></h3>
+<p>在之前的版本中，终端输出的包信息的时间信息随着时间的推移会与实践的事件时间差距越来越大，
+这个问题现已修复。</p>
+</div>
+<div class="section" id="armv7-cpu">
+<h3 id="hidarmv7-cpu">实验性支持 armv7 CPU 架构<a class="headerlink" href="#hidarmv7-cpu" title="Permalink to this headline">¶</a></h3>
+<p>在新版本中已实验性支持 armv7 CPU 架构。
+因为缺少支持 armv7 架构的 CI 环境， 因此只能作为实验性支持，
+没法保证未来版本的兼容性。如果某个版本不再支持 armv7 了，
+欢迎反馈。</p>
+</div>
+<div class="section" id="tp-btf">
+<h3 id="hidtp-btf">新增 tp-btf 后端<a class="headerlink" href="#hidtp-btf" title="Permalink to this headline">¶</a></h3>
+<p>新版本增加了一个新的后端 <tt class="docutils literal"><span class="pre">tp-btf</span></tt> ，
+当指定使用该后端时，ptcpdump 将使用 <tt class="docutils literal">BPF_PROG_TYPE_TRACING</tt> 类型的 eBPF 程序来捕获数据包。
+该后端与 <tt class="docutils literal">tc</tt> 后端的主要区别是：<tt class="docutils literal"><span class="pre">tp-btf</span></tt> 默认将能捕获所有网络命名空间下的数据，
+而 <tt class="docutils literal">tc</tt> 后端默认只捕获当前网络命名空间下的数据（可以通过 <tt class="docutils literal"><span class="pre">--netns</span></tt> 命令指定捕获特定网络命名空间下的数据）。
+关于该后端与其他后端的区别，详见 <a class="reference external" href="https://github.com/mozillazg/ptcpdump?tab=readme-ov-file#backend">Backend</a> 。</p>
+<p>可以通过 <tt class="docutils literal"><span class="pre">--backend</span> <span class="pre">tp-btf</span></tt> 使用新增的 <tt class="docutils literal"><span class="pre">tp-btf</span></tt> 后端。</p>
+</div>
+<div class="section" id="socket-filter">
+<h3 id="hidsocket-filter">新增 socket-filter 后端<a class="headerlink" href="#hidsocket-filter" title="Permalink to this headline">¶</a></h3>
+<p>新版本增加了另一个新的后端 <tt class="docutils literal"><span class="pre">socket-filter</span></tt> ，
+当指定使用该后端时，ptcpdump 将使用 <tt class="docutils literal">BPF_PROG_TYPE_SOCKET_FILTER</tt> 类型的 eBPF 程序来捕获数据包。
+使用该后端时，ptcpdump 的输出结果将更接近 tcpdump 的输出结果，因为此时它们两个捕获数据包的时机会更接近。
+关于该后端与其他后端的区别，详见 <a class="reference external" href="https://github.com/mozillazg/ptcpdump?tab=readme-ov-file#backend">Backend</a> 。</p>
+<p>可以通过 <tt class="docutils literal"><span class="pre">--backend</span> <span class="pre">socket-filter</span></tt> 使用新增的 <tt class="docutils literal"><span class="pre">socket-filter</span></tt> 后端。</p>
+</div>
+<div class="section" id="inode-id">
+<h3 id="hidinode-id">在跨网络命名空间的数据结果中显示 inode ID 信息<a class="headerlink" href="#hidinode-id" title="Permalink to this headline">¶</a></h3>
+<p>从新版本开始，当输出结果中包含非当前网络命名空间的数据时，程序将会尝试在输出网络接口信息时，显示对应网络命名空间的 inode ID 信息:</p>
+<pre class="literal-block">
+12:20:31.336316 eth0&#64;4026533097 curl.405939 Out IP 172.17.0.4.38670 &gt; 1.1.1.1.80: Flags [S], seq 3064539219, win 64240, options [mss 1460,sackOK,TS val 1731159046 ecr 0,nop,wscale 7], length 0, ParentProc [bash.405653]
+12:20:31.336382 veth1d387b0 curl.405939 In IP 172.17.0.4.38670 &gt; 1.1.1.1.80: Flags [S], seq 3064539219, win 64240, options [mss 1460,sackOK,TS val 1731159046 ecr 0,nop,wscale 7], length 0, ParentProc [bash.405653]
+</pre>
+</div>
+<div class="section" id="v-ip-options">
+<h3 id="hidv-ip-options">-v 的输出中增加 IP Options 信息<a class="headerlink" href="#hidv-ip-options" title="Permalink to this headline">¶</a></h3>
+<p>新版本在使用 <tt class="docutils literal"><span class="pre">-v</span></tt> 参数输出详情时，将输出 IP Options 信息:</p>
+<pre class="literal-block">
+09:48:31.908813 IP (tos 0x0, ttl 64, id 39183, offset 0, flags [none], proto TCP (6), length 80, options (RR 1.2.3.4, 1.0.0.0 0.0.0.0 0.0.0.0 0.0.0.0 0.0.0.0 0.0.0.0 0.0.0.0 0.0.0.0,EOL))
+    ${IP}.1373 &gt; 1.1.1.1.80: Flags [S], cksum 0xbfb4, seq 122218745, win 512, length 0
+</pre>
+</div>
+<div class="section" id="http">
+<h3 id="hidhttp">新增输出 HTTP 信息<a class="headerlink" href="#hidhttp" title="Permalink to this headline">¶</a></h3>
+<p>如果某一行的数据包是 HTTP 数据，新版本将默认输出基本的 HTTP 信息:</p>
+<pre class="literal-block">
+13:27:02.285015 IP ${IP}.57166 &gt; ${IP}.80: Flags [P.], ..., length 73: HTTP: GET / HTTP/1.1
+13:27:02.516911 IP ${IP}.80 &gt; ${IP}.57166: Flags [P.], ..., length 349: HTTP: HTTP/1.1 301 Moved Permanently
+</pre>
+<p>如果使用 <tt class="docutils literal"><span class="pre">-v</span></tt> 参数输出详情，则会包含详细的 HTTP 信息:</p>
+<pre class="literal-block">
+13:27:02.285015 IP (tos 0x0, ttl 64, id 8683, offset 0, flags [DF], proto TCP (6), length 113)
+    ..., length 73: HTTP: GET / HTTP/1.1
+        GET / HTTP/1.1
+        Host: kernel.org
+        User-Agent: curl/8.5.0
+        Accept: */*
+
+13:27:02.516911 IP (tos 0x0, ttl 128, id 62994, offset 0, flags [none], proto TCP (6), length 389)
+    ..., length 349: HTTP: HTTP/1.1 301 Moved Permanently
+        HTTP/1.1 301 Moved Permanently
+        Server: nginx
+        Date: Sat, 05 Jul 2025 13:27:02 GMT
+        Content-Type: text/html
+        Content-Length: 162
+        Connection: keep-alive
+        Location: https://kernel.org/
+
+        &lt;html&gt;
+        &lt;head&gt;&lt;title&gt;301 Moved Permanently&lt;/title&gt;&lt;/head&gt;
+        &lt;body&gt;
+        &lt;center&gt;&lt;h1&gt;301 Moved Permanently&lt;/h1&gt;&lt;/center&gt;
+        &lt;hr&gt;&lt;center&gt;nginx&lt;/center&gt;
+        &lt;/body&gt;
+        &lt;/html&gt;
+</pre>
+</div>
+<div class="section" id="tls">
+<h3 id="hidtls">新增输出 TLS 信息<a class="headerlink" href="#hidtls" title="Permalink to this headline">¶</a></h3>
+<p>如果某一行的数据包是 TLS 数据，新版本将默认输出 TLS Client Hello 或 Server Hello 信息:</p>
+<pre class="literal-block">
+13:48:40.371849 IP ${IP}.47812 &gt; ${IP}.443: Flags [P.], ..., length 517: TLSv1.0: Client Hello (SNI=kernel.org)
+13:48:40.606677 IP ${IP}.443 &gt; ${IP}.47812: Flags [P.], ..., length 1412: TLSv1.3: Server Hello
+</pre>
+</div>
+<div class="section" id="l3">
+<h3 id="hidl3">新增支持对 L3 网络接口设备抓包<a class="headerlink" href="#hidl3" title="Permalink to this headline">¶</a></h3>
+<p>之前的版本只支持对 L2 网络接口设备抓包，新版本已增加对 L3 网络接口（比如 TUN 设备）的支持。</p>
+</div>
+<div class="section" id="tcp">
+<h3 id="hidtcp">改为默认以相对数字显示 TCP 序列号<a class="headerlink" href="#hidtcp" title="Permalink to this headline">¶</a></h3>
+<p>在之前的版本中，默认会显示 TCP 序列号的原始数字，比较难阅读:</p>
+<pre class="literal-block">
+20:03:36.346098 ens33 sshd.183127 Out IP ${IP}.22 &gt; ${IP}.64755: Flags [P.], seq 1457857145:1457857369, ack 1966040526, win 65535, length 224, ParentProc [sshd.16678]
+20:03:36.346909 ens33 sshd.183127 In IP ${IP}.64755 &gt; ${IP}.22: Flags [.], seq 1966040526, ack 1457857369, win 64240, length 0, ParentProc [sshd.16678]
+20:03:36.348807 ens33 sshd.183127 Out IP ${IP}.22 &gt; ${IP}.64755: Flags [P.], seq 1457857369:1457857593, ack 1966040526, win 65535, length 224, ParentProc [sshd.16678]
+</pre>
+<p>新版本将默认以相对数字的形式显示 TCP 序列号信息:</p>
+<pre class="literal-block">
+20:03:36.346098 ens33 sshd.183127 Out IP ${IP}.22 &gt; ${IP}.64755: Flags [P.], seq 1457857145:1457857369, ack 1966040526, win 65535, length 224, ParentProc [sshd.16678]
+20:03:36.346909 ens33 sshd.183127 In IP ${IP}.64755 &gt; ${IP}.22: Flags [.], ack 224, win 64240, length 0, ParentProc [sshd.16678]
+20:03:36.348807 ens33 sshd.183127 Out IP ${IP}.22 &gt; ${IP}.64755: Flags [P.], seq 224:448, ack 0, win 65535, length 224, ParentProc [sshd.16678]
+</pre>
+<p>同时新增 <tt class="docutils literal"><span class="pre">-S</span></tt> 和 <tt class="docutils literal"><span class="pre">--absolute-tcp-sequence-numbers</span></tt> 参数用于控制恢复之前的显示原始数字的模式。</p>
+<p>如果你对 ptcpdump 有额外的改进或新功能建议，欢迎在评论区或项目 issues 中留言。</p>
+</div>
+</div>
+
+                </div>
+            </div>
+            <!-- /.entry-content -->
+<section class="text-center">
+  
+<div id="donate"></div>
+
+<div class="social-share"></div>
+<div class="social-comment-note">
+<p class="text-center">有任何建议和想法欢迎在下方评论区留言或者加我<a href="/static/wechat.png">微信</a>交流</p>
+</div>
+
+</section>
+<section class="well" id="related-posts">
+    <p>Related Posts:</p>
+    <ul>
+        <li><a href="https://mozillazg.com/2024/07/ebpf-ptcpdump-capturing-the-network-traffic-of-a-process-or-container-or-pod-en.html">ptcpdump: Capturing the Network Traffic of any Process, Container, or Pod</a></li>
+        <li><a href="https://mozillazg.com/2025/01/whats-new-ptcpdump-v0.27-v0.32-en.html">ptcpdump v0.27 ~ v0.32 的主要变更内容</a></li>
+        <li><a href="https://mozillazg.com/2025/11/whats-new-ptcpdump-v0.33-v0.37-en.html">Major Changes in ptcpdump versions 0.33 to 0.37</a></li>
+        <li><a href="https://mozillazg.com/2024/11/whats-new-ptcpdump-v1.16-v1.26-en.html">Major Changes in ptcpdump versions 0.16 to 0.26</a></li>
+        <li><a href="https://mozillazg.com/2025/01/whats-new-ptcpdump-v0.27-v0.32.html">ptcpdump v0.27 ~ v0.32 的主要变更内容</a></li>
+    </ul>
+</section>
+<hr/>
+<section class="comments" id="comments">
+    <h2>Comments</h2>
+    <script src="https://giscus.app/client.js"
+            data-repo="mozillazg/mozillazg.github.com"
+            data-repo-id="MDEwOlJlcG9zaXRvcnk3Njc4MTA2"
+            data-category="Announcements"
+            data-category-id="DIC_kwDOAHUoms4CckZl"
+            data-mapping="pathname"
+            data-strict="0"
+            data-reactions-enabled="1"
+            data-emit-metadata="0"
+            data-input-position="bottom"
+            data-theme="preferred_color_scheme"
+            data-description="<description>"
+            data-lang="en"
+            data-loading="lazy"
+            crossorigin="anonymous"
+            async>
+    </script>
+</section>
+        </article>
+    </section>
+
+        </div>
+    </div>
+</div>
+<footer>
+   <div class="container">
+      <hr>
+      <div class="row">
+         <div class="col-xs-10">&copy; 2025 mozillazg
+            &middot; Powered by <a href="https://github.com/DandyDev/pelican-bootstrap3" target="_blank">pelican-bootstrap3</a>,
+            <a href="http://docs.getpelican.com/" target="_blank">Pelican</a>,
+            <a href="http://getbootstrap.com" target="_blank">Bootstrap</a>
+            &middot; <a href="/privacy-policy.html" target="_blank">Privacy</a>              <p><small>  <a rel="license" href="http://creativecommons.org/licenses/by-sa/4.0/"><img alt="Creative Commons License" style="border-width:0" src="/static/images/by-sa-80x15.png" /></a>
+    &quot;<span xmlns:dct="http://purl.org/dc/terms/" property="dct:title">mozillazg's Blog</span>&quot; by <a xmlns:cc="http://creativecommons.org/ns#" href="https://mozillazg.com" property="cc:attributionName" rel="cc:attributionURL">mozillazg</a> is
+  licensed under a <a rel="license" href="http://creativecommons.org/licenses/by-sa/4.0/">Creative Commons Attribution-ShareAlike 4.0 International License</a>, except where indicated otherwise.
+</small></p>
+         </div>
+         <div class="col-xs-2"><p class="pull-right"><i class="fa fa-arrow-up"></i> <a href="#">Back to top</a></p></div>
+      </div>
+   </div>
+</footer>
+<script src="/theme/cdn.jsdelivr.net/npm/jquery@2.1.1/dist/jquery.min.js"></script>
+
+<!-- Include all compiled plugins (below), or include individual files as needed -->
+<script src="/theme/cdn.jsdelivr.net/npm/bootstrap@3.3.4/dist/js/bootstrap.min.js"></script>
+
+<!-- Enable responsive features in IE8 with Respond.js (https://github.com/scottjehl/Respond) -->
+
+
+<!-- share.js -->
+<script src="/theme/cdn.jsdelivr.net/npm/social-share.js@1.0.16/dist/js/social-share.min.js"></script>
+
+
+
+<script src="/theme/cdn.jsdelivr.net/npm/tocbot@3.0.2/dist/tocbot.min.js"></script>
+<script>
+$(document).ready(function(){
+  tocbot.init({
+    // Where to render the table of contents.
+    tocSelector: '.js-toc',
+    // Where to grab the headings to build the table of contents.
+    contentSelector: '.entry-content',
+    // Which headings to grab inside of the contentSelector element.
+    headingSelector: 'h2, h3, h4,h5',
+    // Headings that match the ignoreSelector will be skipped.
+    ignoreSelector: '.js-toc-ignore',
+    // Main class to add to links.
+    linkClass: 'toc-link',
+    // Extra classes to add to links.
+    extraLinkClasses: '',
+    // Class to add to active links,
+    // the link corresponding to the top most heading on the page.
+    activeLinkClass: 'is-active-link',
+    // Main class to add to lists.
+    listClass: 'toc-list',
+    // Extra classes to add to lists.
+    extraListClasses: '',
+    // Class that gets added when a list should be collapsed.
+    isCollapsedClass: 'is-collapsed',
+    // Class that gets added when a list should be able
+    // to be collapsed but isn't necessarily collpased.
+    collapsibleClass: 'is-collapsible',
+    // Class to add to list items.
+    listItemClass: 'toc-list-item',
+    // How many heading levels should not be collpased.
+    // For example, number 6 will show everything since
+    // there are only 6 heading levels and number 0 will collpase them all.
+    // The sections that are hidden will open
+    // and close as you scroll to headings within them.
+    collapseDepth: 6,
+    // Smooth scrolling enabled.
+    smoothScroll: true,
+    // Smooth scroll duration.
+    smoothScrollDuration: 420,
+    // Callback for scroll end (requires: smoothScroll).
+    scrollEndCallback: function (e) {},
+    // Headings offset between the headings and the top of the document (this is meant for minor adjustments).
+    headingsOffset: 0,
+    // Timeout between events firing to make sure it's
+    // not too rapid (for performance reasons).
+    throttleTimeout: 50,
+    // Element to add the positionFixedClass to.
+    positionFixedSelector: null,
+    // Fixed position class to add to make sidebar fixed after scrolling
+    // down past the fixedSidebarOffset.
+    positionFixedClass: 'is-position-fixed',
+    // fixedSidebarOffset can be any number but by default is set
+    // to auto which sets the fixedSidebarOffset to the sidebar
+    // element's offsetTop from the top of the document on init.
+    fixedSidebarOffset: 'auto',
+    // includeHtml can be set to true to include the HTML markup from the
+    // heading node instead of just including the textContent.
+    includeHtml: false
+  });
+});
+</script>
+</body>
+</html>
